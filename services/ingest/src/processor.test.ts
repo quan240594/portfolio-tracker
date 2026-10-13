@@ -10,6 +10,7 @@ const HEADER = 'date,type,symbol,quantity,price,fee,currency';
 const stored = (over: Partial<Transaction>): Transaction => ({
   id: 'x',
   userId: 'demo',
+  portfolioId: 'default',
   date: '2025-01-01',
   type: 'BUY',
   symbol: 'MSFT',
@@ -96,7 +97,7 @@ describe('processImportObject', () => {
     const { run, store } = setup(`${HEADER}\n2025-01-02,BUY,MSFT,1,1,0,USD\n2025-01-03,BUY,MSFT,1,1,0,USD\n`);
     store.transactions.push(stored({ id: 'old', date: '2025-06-01', currency: 'EUR' }));
     expect(await run()).toBe('FAILED');
-    expect(store.imp('demo', 'imp1')!.errors).toEqual([{ row: 1, message: 'Mixed currencies for MSFT: USD and EUR' }]);
+    expect(store.imp('demo', 'imp1')!.errors).toEqual([{ row: 1, message: 'Mixed currencies for MSFT: EUR and USD' }]);
   });
 
   it('reports row 0 when the conflict lies entirely in previously stored data', async () => {
@@ -148,7 +149,7 @@ describe('processImportObject', () => {
       { symbol: 'MSFT', currency: 'USD' },
       { symbol: 'ASML.AS', currency: 'EUR' },
     ]);
-    expect(events.published).toEqual([{ userId: 'demo', symbols: ['ASML.AS', 'MSFT'], reason: 'IMPORTED', importId: 'imp1' }]);
+    expect(events.published).toEqual([{ userId: 'demo', portfolioId: 'default', symbols: ['ASML.AS', 'MSFT'], reason: 'IMPORTED', importId: 'imp1' }]);
     expect(store.imp('demo', 'imp1')).toMatchObject({ status: 'COMPLETED', rowCount: 3, importedCount: 3 });
   });
 
@@ -165,5 +166,63 @@ describe('processImportObject', () => {
     expect(await run()).toBe('FAILED');
     expect(store.transactions).toHaveLength(0);
     expect(store.imp('demo', 'imp1')).toMatchObject({ status: 'FAILED', rowCount: 2, errors: [{ row: 2, message: expect.stringMatching(/^fxRate: /) }] });
+  });
+
+  describe('target portfolio', () => {
+    it('fails an import without a target portfolio before reading the file', async () => {
+      const { run, store, reader } = setup(`${HEADER}\n2025-01-02,BUY,AAPL,1,1,0,USD\n`);
+      delete (store.imp('demo', 'imp1') as { portfolioId?: string }).portfolioId;
+      const read = vi.spyOn(reader, 'readText');
+      expect(await run()).toBe('FAILED');
+      expect(store.imp('demo', 'imp1')).toMatchObject({ status: 'FAILED', rowCount: 0, errors: [{ row: 0, message: 'Import has no target portfolio' }] });
+      expect(read).not.toHaveBeenCalled();
+    });
+
+    it('fails when the target portfolio no longer exists', async () => {
+      const { run, store, events } = setup(`${HEADER}\n2025-01-02,BUY,AAPL,1,1,0,USD\n`);
+      store.portfolios.delete('demo/default');
+      expect(await run()).toBe('FAILED');
+      expect(store.imp('demo', 'imp1')).toMatchObject({ status: 'FAILED', errors: [{ row: 0, message: 'Portfolio default not found' }] });
+      expect(store.writes).toBe(0);
+      expect(events.published).toEqual([]);
+    });
+
+    it('writes the rows into the import portfolio and publishes it', async () => {
+      const ctx = fakeIngestDeps();
+      ctx.store.addImport('demo', 'imp9', 'PENDING', 'broker');
+      ctx.reader.objects.set(`${BUCKET}/imports/demo/imp9.csv`, `${HEADER}\n2025-01-02,BUY,AAPL,1,1,0,USD\n`);
+      expect(await processImportObject(ctx.deps, { bucket: BUCKET, key: 'imports/demo/imp9.csv' })).toBe('COMPLETED');
+      expect(ctx.store.transactions).toEqual([expect.objectContaining({ id: 'imp9-1', portfolioId: 'broker', importId: 'imp9' })]);
+      expect(ctx.events.published).toEqual([{ userId: 'demo', portfolioId: 'broker', symbols: ['AAPL'], reason: 'IMPORTED', importId: 'imp9' }]);
+    });
+
+    it('validates overselling against the target portfolio only', async () => {
+      const csv = `${HEADER}\n2025-03-01,SELL,MSFT,3,400,0,USD\n`;
+      const intoDefault = setup(csv);
+      intoDefault.store.transactions.push(stored({ id: 'b', portfolioId: 'broker' }));
+      expect(await intoDefault.run()).toBe('FAILED');
+      expect(intoDefault.store.imp('demo', 'imp1')!.errors).toEqual([{ row: 1, message: 'Cannot sell 3 MSFT on 2025-03-01: only 0 held' }]);
+
+      const intoBroker = fakeIngestDeps();
+      intoBroker.store.addImport('demo', 'imp2', 'PENDING', 'broker');
+      intoBroker.reader.objects.set(`${BUCKET}/imports/demo/imp2.csv`, csv);
+      // A later oversell stored in another portfolio does not block this import.
+      intoBroker.store.transactions.push(stored({ id: 'b' }), stored({ id: 'x', portfolioId: 'broker' }), stored({ id: 's', date: '2025-06-01', type: 'SELL', quantity: 9 }));
+      expect(await processImportObject(intoBroker.deps, { bucket: BUCKET, key: 'imports/demo/imp2.csv' })).toBe('COMPLETED');
+    });
+
+    it('rejects the first row whose currency differs from the symbol currency in any portfolio', async () => {
+      const { run, store } = setup(`${HEADER}\n2025-01-02,BUY,MSFT,1,1,0,USD\n2025-01-03,BUY,AAPL,1,1,0,EUR\n2025-01-04,BUY,AAPL,1,1,0,GBP\n`);
+      store.transactions.push(stored({ id: 'a', portfolioId: 'broker', symbol: 'AAPL', currency: 'USD' }));
+      expect(await run()).toBe('FAILED');
+      expect(store.imp('demo', 'imp1')).toMatchObject({ rowCount: 3, errors: [{ row: 2, message: 'Mixed currencies for AAPL: USD and EUR' }] });
+      expect(store.writes).toBe(0);
+    });
+
+    it('ignores other users when checking currencies', async () => {
+      const { run, store } = setup(`${HEADER}\n2025-01-02,BUY,MSFT,1,1,0,EUR\n`);
+      store.transactions.push(stored({ id: 'o', userId: 'someone-else' }));
+      expect(await run()).toBe('COMPLETED');
+    });
   });
 });

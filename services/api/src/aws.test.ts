@@ -59,9 +59,9 @@ describe('DynamoRepository', () => {
 
   it('writes transactions with single-table keys and a create-only condition', async () => {
     ddbMock.on(PutCommand).resolves({});
-    await repo.putTransaction({ id: 'i', userId: 'u', date: '2025-01-01', type: 'BUY', symbol: 'A', quantity: 1, price: 1, fee: 0, currency: 'EUR', createdAt: 'x' });
+    await repo.putTransaction({ id: 'i', userId: 'u', portfolioId: 'p1', date: '2025-01-01', type: 'BUY', symbol: 'A', quantity: 1, price: 1, fee: 0, currency: 'EUR', createdAt: 'x' });
     expect(ddbMock.commandCalls(PutCommand)[0]!.args[0].input).toMatchObject({
-      Item: { PK: 'USER#u', SK: 'TXN#2025-01-01#i', entityType: 'TRANSACTION', id: 'i' },
+      Item: { PK: 'USER#u', SK: 'TXN#p1#2025-01-01#i', entityType: 'TRANSACTION', id: 'i', portfolioId: 'p1' },
       ConditionExpression: 'attribute_not_exists(PK)',
     });
   });
@@ -80,33 +80,33 @@ describe('EventBridgePublisher', () => {
 
   it('publishes TransactionsChanged from portfolio.api', async () => {
     ebMock.on(PutEventsCommand).resolves({ FailedEntryCount: 0, Entries: [{ EventId: '1' }] });
-    await publisher.transactionsChanged({ userId: 'u', symbols: ['A'], reason: 'CREATED' });
+    await publisher.transactionsChanged({ userId: 'u', portfolioId: 'p1', symbols: ['A'], reason: 'CREATED' });
     const entry = ebMock.commandCalls(PutEventsCommand)[0]!.args[0].input.Entries![0]!;
     expect(entry).toMatchObject({ EventBusName: 'bus', Source: 'portfolio.api', DetailType: 'TransactionsChanged' });
-    expect(JSON.parse(entry.Detail!)).toEqual({ userId: 'u', symbols: ['A'], reason: 'CREATED' });
+    expect(JSON.parse(entry.Detail!)).toEqual({ userId: 'u', portfolioId: 'p1', symbols: ['A'], reason: 'CREATED' });
   });
 
   it('throws when an entry fails', async () => {
     ebMock.on(PutEventsCommand).resolves({ FailedEntryCount: 1, Entries: [{ ErrorCode: 'ThrottlingException', ErrorMessage: 'slow down' }] });
-    await expect(publisher.transactionsChanged({ userId: 'u', symbols: [], reason: 'DELETED' })).rejects.toThrow(
+    await expect(publisher.transactionsChanged({ userId: 'u', portfolioId: 'p1', symbols: [], reason: 'DELETED' })).rejects.toThrow(
       'PutEvents failed: ThrottlingException slow down',
     );
   });
 
   it('reports an unknown failure when no entry carries an error code', async () => {
     ebMock.on(PutEventsCommand).resolves({ FailedEntryCount: 1 });
-    await expect(publisher.transactionsChanged({ userId: 'u', symbols: [], reason: 'DELETED' })).rejects.toThrow(
+    await expect(publisher.transactionsChanged({ userId: 'u', portfolioId: 'p1', symbols: [], reason: 'DELETED' })).rejects.toThrow(
       /^PutEvents failed: unknown$/,
     );
     ebMock.on(PutEventsCommand).resolves({ FailedEntryCount: 1, Entries: [{ EventId: 'ok' }, { ErrorCode: 'InternalFailure' }] });
-    await expect(publisher.transactionsChanged({ userId: 'u', symbols: [], reason: 'DELETED' })).rejects.toThrow(
+    await expect(publisher.transactionsChanged({ userId: 'u', portfolioId: 'p1', symbols: [], reason: 'DELETED' })).rejects.toThrow(
       /^PutEvents failed: InternalFailure$/,
     );
   });
 
   it('propagates transport errors from EventBridge', async () => {
     ebMock.on(PutEventsCommand).rejects(new Error('network down'));
-    await expect(publisher.transactionsChanged({ userId: 'u', symbols: ['A'], reason: 'CREATED' })).rejects.toThrow('network down');
+    await expect(publisher.transactionsChanged({ userId: 'u', portfolioId: 'p1', symbols: ['A'], reason: 'CREATED' })).rejects.toThrow('network down');
   });
 });
 

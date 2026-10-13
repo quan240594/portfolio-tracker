@@ -5,11 +5,15 @@
  *
  * Portfolios:
  * - GET /portfolios creates DEFAULT_PORTFOLIO_ID ("Main portfolio") if the user has none (idempotent).
- * - POST /portfolios: 201; 409 CONFLICT for a duplicate name (case-insensitive); 422 above MAX_PORTFOLIOS.
+ * - POST /portfolios: 201; 409 CONFLICT for a duplicate name (case-insensitive); 422 UNPROCESSABLE above MAX_PORTFOLIOS.
  * - PATCH /portfolios/{id}: rename, same uniqueness rule; 404 if unknown.
- * - DELETE /portfolios/{id}: 204; 409 PORTFOLIO_NOT_EMPTY when it has transactions unless `?force=true`
- *   (cascades and emits TransactionsChanged reason DELETED); 409 LAST_PORTFOLIO for the only portfolio.
+ * - DELETE /portfolios/{id}: 204; 409 LAST_PORTFOLIO for the only portfolio (checked first, even with
+ *   `force=true`); else 409 PORTFOLIO_NOT_EMPTY with `details.transactionCount` when it has transactions
+ *   unless `?force=true` (cascades and emits TransactionsChanged reason DELETED). Imports still pending for a
+ *   deleted portfolio end FAILED (row 0).
  * - Read endpoints: `?portfolioId=<id>` scopes to one portfolio (404 if unknown); omitted or `all` combines all.
+ * - `all` is reserved (ALL_PORTFOLIOS) and is never a portfolio id.
+ * - Writes (POST /transactions, POST /imports) to an unknown portfolio: 404 NOT_FOUND.
  * - Writes (POST /transactions, imports) target exactly one portfolio and validate overselling against that
  *   portfolio only. A symbol must use the same currency in every portfolio of the user (422 otherwise), so
  *   the combined view can always be computed.

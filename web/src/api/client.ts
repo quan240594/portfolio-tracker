@@ -1,18 +1,21 @@
-import type {
-  AllocationDimension,
-  ApiError as ApiErrorBody,
-  CreateImportRequest,
-  CreateImportResponse,
-  CreateTransactionRequest,
-  CreateTransactionResponse,
-  GetAllocationResponse,
-  GetDividendsResponse,
-  GetHistoryResponse,
-  GetHoldingsResponse,
-  GetImportResponse,
-  GetPortfolioResponse,
-  HistoryRange,
-  ListTransactionsResponse,
+import {
+  ALL_PORTFOLIOS,
+  type AllocationDimension,
+  type ApiError as ApiErrorBody,
+  type CreateImportRequest,
+  type CreateImportResponse,
+  type CreateTransactionRequest,
+  type CreateTransactionResponse,
+  type GetAllocationResponse,
+  type GetDividendsResponse,
+  type GetHistoryResponse,
+  type GetHoldingsResponse,
+  type GetImportResponse,
+  type GetPortfolioResponse,
+  type HistoryRange,
+  type ListPortfoliosResponse,
+  type ListTransactionsResponse,
+  type PortfolioResponse,
 } from '@portfolio/shared';
 import { API_BASE_URL } from '../config';
 
@@ -47,7 +50,7 @@ export function apiUrl(path: string, query?: Record<string, string | undefined>)
 }
 
 export async function request<T>(
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   opts: { query?: Record<string, string | undefined>; body?: unknown; signal?: AbortSignal } = {},
 ): Promise<T> {
@@ -87,15 +90,31 @@ function toApiError(res: Response, data: unknown): ApiError {
   return new ApiError(res.status, `HTTP_${res.status}`, res.statusText || `Request failed with status ${res.status}`);
 }
 
+/** 'all' (ALL_PORTFOLIOS) or a portfolio id. */
+export type Scope = string;
+
+/** `?portfolioId=` for one portfolio; omitted for the combined view. */
+const scopeQuery = (scope: Scope) => (scope === ALL_PORTFOLIOS ? {} : { portfolioId: scope });
+
 export const api = {
-  getPortfolio: (signal?: AbortSignal) => request<GetPortfolioResponse>('GET', '/portfolio', { signal }),
-  getHoldings: (signal?: AbortSignal) => request<GetHoldingsResponse>('GET', '/holdings', { signal }),
-  getAllocation: (by: AllocationDimension, signal?: AbortSignal) =>
-    request<GetAllocationResponse>('GET', '/allocation', { query: { by }, signal }),
-  getHistory: (range: HistoryRange, signal?: AbortSignal) =>
-    request<GetHistoryResponse>('GET', '/history', { query: { range }, signal }),
-  getDividends: (signal?: AbortSignal) => request<GetDividendsResponse>('GET', '/dividends', { signal }),
-  listTransactions: (signal?: AbortSignal) => request<ListTransactionsResponse>('GET', '/transactions', { signal }),
+  listPortfolios: (signal?: AbortSignal) => request<ListPortfoliosResponse>('GET', '/portfolios', { signal }),
+  createPortfolio: (name: string) => request<PortfolioResponse>('POST', '/portfolios', { body: { name } }),
+  renamePortfolio: (id: string, name: string) =>
+    request<PortfolioResponse>('PATCH', `/portfolios/${encodeURIComponent(id)}`, { body: { name } }),
+  deletePortfolio: (id: string, force = false) =>
+    request<void>('DELETE', `/portfolios/${encodeURIComponent(id)}`, { query: force ? { force: 'true' } : undefined }),
+  getPortfolio: (scope: Scope, signal?: AbortSignal) =>
+    request<GetPortfolioResponse>('GET', '/portfolio', { query: scopeQuery(scope), signal }),
+  getHoldings: (scope: Scope, signal?: AbortSignal) =>
+    request<GetHoldingsResponse>('GET', '/holdings', { query: scopeQuery(scope), signal }),
+  getAllocation: (scope: Scope, by: AllocationDimension, signal?: AbortSignal) =>
+    request<GetAllocationResponse>('GET', '/allocation', { query: { ...scopeQuery(scope), by }, signal }),
+  getHistory: (scope: Scope, range: HistoryRange, signal?: AbortSignal) =>
+    request<GetHistoryResponse>('GET', '/history', { query: { ...scopeQuery(scope), range }, signal }),
+  getDividends: (scope: Scope, signal?: AbortSignal) =>
+    request<GetDividendsResponse>('GET', '/dividends', { query: scopeQuery(scope), signal }),
+  listTransactions: (scope: Scope, signal?: AbortSignal) =>
+    request<ListTransactionsResponse>('GET', '/transactions', { query: scopeQuery(scope), signal }),
   createTransaction: (body: CreateTransactionRequest) =>
     request<CreateTransactionResponse>('POST', '/transactions', { body }),
   deleteTransaction: (id: string) => request<void>('DELETE', `/transactions/${encodeURIComponent(id)}`),

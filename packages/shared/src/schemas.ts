@@ -15,10 +15,13 @@ const symbol = z
   .max(20)
   .regex(/^[A-Za-z0-9.\-:^=]+$/, 'Invalid symbol')
   .transform((s) => s.toUpperCase());
+/** Reserved scope value meaning "every portfolio combined"; never a real portfolio id. */
+export const ALL_PORTFOLIOS = 'all';
 /** `default` or a lower-case UUID; keeps DynamoDB sort keys free of `#`. */
 export const portfolioIdSchema = z
   .string()
-  .regex(/^[a-z0-9][a-z0-9-]{0,63}$/, 'Invalid portfolio id');
+  .regex(/^[a-z0-9][a-z0-9-]{0,63}$/, 'Invalid portfolio id')
+  .refine((id) => id !== ALL_PORTFOLIOS, `"${ALL_PORTFOLIOS}" is reserved`);
 const portfolioName = z.string().trim().min(1, 'Name is required').max(60);
 
 const currency = z
@@ -57,9 +60,8 @@ export const csvRowSchema = transactionFields.extend({
 });
 
 /** Optional `?portfolioId=` on read endpoints; omitted or `all` = every portfolio combined. */
-export const ALL_PORTFOLIOS = 'all';
 export const portfolioScopeSchema = z.object({
-  portfolioId: portfolioIdSchema.optional(),
+  portfolioId: z.union([z.literal(ALL_PORTFOLIOS), portfolioIdSchema]).optional(),
 });
 
 export const allocationQuerySchema = portfolioScopeSchema.extend({

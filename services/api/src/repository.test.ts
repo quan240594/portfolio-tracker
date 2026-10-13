@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 import {
   BatchGetCommand,
+  BatchWriteCommand,
   DeleteCommand,
   DynamoDBDocumentClient,
   GetCommand,
@@ -10,7 +12,7 @@ import {
   QueryCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
-import type { ImportStatus, Transaction } from '@portfolio/shared';
+import type { ImportStatus, Portfolio, Transaction } from '@portfolio/shared';
 import { DynamoRepository, fromItem } from './repository.js';
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
@@ -19,6 +21,7 @@ const repo = new DynamoRepository(DynamoDBDocumentClient.from(new DynamoDBClient
 const txn: Transaction = {
   id: 'i',
   userId: 'u',
+  portfolioId: 'p1',
   date: '2025-01-01',
   type: 'BUY',
   symbol: 'A',
@@ -56,7 +59,7 @@ describe('DynamoRepository queries', () => {
   });
 
   it('findTransaction filters by id and returns the first match without keys', async () => {
-    ddbMock.on(QueryCommand).resolves({ Items: [{ PK: 'USER#u', SK: 'TXN#2025-01-01#i', entityType: 'TRANSACTION', ...txn }] });
+    ddbMock.on(QueryCommand).resolves({ Items: [{ PK: 'USER#u', SK: 'TXN#p1#2025-01-01#i', entityType: 'TRANSACTION', ...txn }] });
     expect(await repo.findTransaction('u', 'i')).toEqual(txn);
     expect(ddbMock.commandCalls(QueryCommand)[0]!.args[0].input).toMatchObject({
       TableName: 'tbl',
@@ -197,7 +200,7 @@ describe('DynamoRepository single-item operations', () => {
   it('deleteTransaction deletes by the single-table key', async () => {
     ddbMock.on(DeleteCommand).resolves({});
     await repo.deleteTransaction(txn);
-    expect(ddbMock.commandCalls(DeleteCommand)[0]!.args[0].input).toEqual({ TableName: 'tbl', Key: { PK: 'USER#u', SK: 'TXN#2025-01-01#i' } });
+    expect(ddbMock.commandCalls(DeleteCommand)[0]!.args[0].input).toEqual({ TableName: 'tbl', Key: { PK: 'USER#u', SK: 'TXN#p1#2025-01-01#i' } });
   });
 
   it('putTransaction stores a broker fxRate with the transaction', async () => {
@@ -205,13 +208,13 @@ describe('DynamoRepository single-item operations', () => {
     await repo.putTransaction({ ...txn, currency: 'USD', fxRate: 1.0842 });
     expect(ddbMock.commandCalls(PutCommand)[0]!.args[0].input).toEqual({
       TableName: 'tbl',
-      Item: { PK: 'USER#u', SK: 'TXN#2025-01-01#i', entityType: 'TRANSACTION', ...txn, currency: 'USD', fxRate: 1.0842 },
+      Item: { PK: 'USER#u', SK: 'TXN#p1#2025-01-01#i', entityType: 'TRANSACTION', ...txn, currency: 'USD', fxRate: 1.0842 },
       ConditionExpression: 'attribute_not_exists(PK)',
     });
   });
 
   it('listTransactions returns the stored fxRate', async () => {
-    ddbMock.on(QueryCommand).resolves({ Items: [{ PK: 'USER#u', SK: 'TXN#2025-01-01#i', entityType: 'TRANSACTION', ...txn, fxRate: 1.0842 }] });
+    ddbMock.on(QueryCommand).resolves({ Items: [{ PK: 'USER#u', SK: 'TXN#p1#2025-01-01#i', entityType: 'TRANSACTION', ...txn, fxRate: 1.0842 }] });
     expect(await repo.listTransactions('u')).toEqual([{ ...txn, fxRate: 1.0842 }]);
   });
 
@@ -263,7 +266,7 @@ describe('DynamoRepository single-item operations', () => {
     expect(ddbMock.commandCalls(UpdateCommand)).toHaveLength(0);
   });
 
-  const status: ImportStatus = { importId: 'imp', userId: 'u', fileName: 'a.csv', status: 'PENDING', createdAt: 't', updatedAt: 't' };
+  const status: ImportStatus = { importId: 'imp', userId: 'u', portfolioId: 'p1', fileName: 'a.csv', status: 'PENDING', createdAt: 't', updatedAt: 't' };
 
   it('putImport stores the import under the user partition', async () => {
     ddbMock.on(PutCommand).resolves({});
@@ -286,5 +289,132 @@ describe('DynamoRepository single-item operations', () => {
       Key: { PK: 'USER#u', SK: 'IMPORT#imp' },
       ConsistentRead: true,
     });
+  });
+});
+
+describe('DynamoRepository transactions per portfolio', () => {
+  it('listTransactions queries all portfolios by default and one portfolio by its prefix', async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [] });
+    await repo.listTransactions('u');
+    await repo.listTransactions('u', 'p1');
+    expect(ddbMock.commandCalls(QueryCommand).map((c) => c.args[0].input.ExpressionAttributeValues)).toEqual([
+      { ':pk': 'USER#u', ':sk': 'TXN#' },
+      { ':pk': 'USER#u', ':sk': 'TXN#p1#' },
+    ]);
+  });
+
+  it('deleteTransactions batch-deletes by key in chunks of 25', async () => {
+    ddbMock.on(BatchWriteCommand).resolves({});
+    const many = Array.from({ length: 30 }, (_, i) => ({ ...txn, id: `t${i}` }));
+    await repo.deleteTransactions(many);
+    const calls = ddbMock.commandCalls(BatchWriteCommand).map((c) => c.args[0].input.RequestItems!.tbl!);
+    expect(calls.map((c) => c.length)).toEqual([25, 5]);
+    expect(calls[0]![0]).toEqual({ DeleteRequest: { Key: { PK: 'USER#u', SK: 'TXN#p1#2025-01-01#t0' } } });
+  });
+
+  it('deleteTransactions does nothing for an empty list', async () => {
+    await repo.deleteTransactions([]);
+    expect(ddbMock.commandCalls(BatchWriteCommand)).toHaveLength(0);
+  });
+
+  it('deleteTransactions retries unprocessed items with backoff', async () => {
+    vi.useFakeTimers();
+    const pending = [{ DeleteRequest: { Key: { PK: 'USER#u', SK: 'TXN#p1#2025-01-01#i' } } }];
+    ddbMock
+      .on(BatchWriteCommand)
+      .resolvesOnce({ UnprocessedItems: { tbl: pending } })
+      .resolvesOnce({ UnprocessedItems: {} });
+    const promise = repo.deleteTransactions([txn, { ...txn, id: 'j' }]);
+    await vi.advanceTimersByTimeAsync(100);
+    await promise;
+    const calls = ddbMock.commandCalls(BatchWriteCommand);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.args[0].input.RequestItems!.tbl).toEqual(pending);
+  });
+
+  it('deleteTransactions gives up after 9 attempts', async () => {
+    vi.useFakeTimers();
+    ddbMock.on(BatchWriteCommand).callsFake((input: { RequestItems: Record<string, unknown[]> }) => ({ UnprocessedItems: input.RequestItems }));
+    const promise = repo.deleteTransactions([txn]);
+    const assertion = expect(promise).rejects.toThrow('BatchWrite: unprocessed items remain after retries');
+    await vi.runAllTimersAsync();
+    await assertion;
+    expect(ddbMock.commandCalls(BatchWriteCommand)).toHaveLength(9);
+  });
+});
+
+describe('DynamoRepository portfolios', () => {
+  const p: Portfolio = { portfolioId: 'p1', userId: 'u', name: 'Main', createdAt: 't', updatedAt: 't' };
+  const conditionFailed = () => new ConditionalCheckFailedException({ message: 'exists', $metadata: {} });
+
+  it('listPortfolios queries the PORTFOLIO# prefix with a consistent read', async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [{ PK: 'USER#u', SK: 'PORTFOLIO#p1', entityType: 'PORTFOLIO', ...p }] });
+    expect(await repo.listPortfolios('u')).toEqual([p]);
+    expect(ddbMock.commandCalls(QueryCommand)[0]!.args[0].input).toMatchObject({
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+      ExpressionAttributeValues: { ':pk': 'USER#u', ':sk': 'PORTFOLIO#' },
+      ConsistentRead: true,
+    });
+  });
+
+  it('getPortfolio reads one item or returns null', async () => {
+    ddbMock
+      .on(GetCommand)
+      .resolvesOnce({ Item: { PK: 'USER#u', SK: 'PORTFOLIO#p1', entityType: 'PORTFOLIO', ...p } })
+      .resolvesOnce({});
+    expect(await repo.getPortfolio('u', 'p1')).toEqual(p);
+    expect(await repo.getPortfolio('u', 'nope')).toBeNull();
+    expect(ddbMock.commandCalls(GetCommand)[0]!.args[0].input).toEqual({
+      TableName: 'tbl',
+      Key: { PK: 'USER#u', SK: 'PORTFOLIO#p1' },
+      ConsistentRead: true,
+    });
+  });
+
+  it('createPortfolio is create-only and reports an existing item as false', async () => {
+    ddbMock.on(PutCommand).resolvesOnce({}).rejectsOnce(conditionFailed());
+    expect(await repo.createPortfolio(p)).toBe(true);
+    expect(await repo.createPortfolio(p)).toBe(false);
+    expect(ddbMock.commandCalls(PutCommand)[0]!.args[0].input).toEqual({
+      TableName: 'tbl',
+      Item: { PK: 'USER#u', SK: 'PORTFOLIO#p1', entityType: 'PORTFOLIO', ...p },
+      ConditionExpression: 'attribute_not_exists(PK)',
+    });
+  });
+
+  it('createPortfolio propagates other errors', async () => {
+    ddbMock.on(PutCommand).rejects(new Error('ddb down'));
+    await expect(repo.createPortfolio(p)).rejects.toThrow('ddb down');
+  });
+
+  it('renamePortfolio updates name/updatedAt of an existing item and returns it', async () => {
+    ddbMock.on(UpdateCommand).resolves({ Attributes: { PK: 'USER#u', SK: 'PORTFOLIO#p1', entityType: 'PORTFOLIO', ...p, name: 'New', updatedAt: 'n' } });
+    expect(await repo.renamePortfolio('u', 'p1', 'New', 'n')).toEqual({ ...p, name: 'New', updatedAt: 'n' });
+    expect(ddbMock.commandCalls(UpdateCommand)[0]!.args[0].input).toEqual({
+      TableName: 'tbl',
+      Key: { PK: 'USER#u', SK: 'PORTFOLIO#p1' },
+      UpdateExpression: 'SET #n = :name, updatedAt = :now',
+      ConditionExpression: 'attribute_exists(PK)',
+      ExpressionAttributeNames: { '#n': 'name' },
+      ExpressionAttributeValues: { ':name': 'New', ':now': 'n' },
+      ReturnValues: 'ALL_NEW',
+    });
+  });
+
+  it('renamePortfolio tolerates a response without attributes', async () => {
+    ddbMock.on(UpdateCommand).resolves({});
+    expect(await repo.renamePortfolio('u', 'p1', 'New', 'n')).toEqual({});
+  });
+
+  it('renamePortfolio returns null for a missing portfolio and rethrows other errors', async () => {
+    ddbMock.on(UpdateCommand).rejectsOnce(conditionFailed()).rejectsOnce(new Error('ddb down'));
+    expect(await repo.renamePortfolio('u', 'nope', 'x', 'n')).toBeNull();
+    await expect(repo.renamePortfolio('u', 'p1', 'x', 'n')).rejects.toThrow('ddb down');
+  });
+
+  it('deletePortfolio deletes the portfolio item', async () => {
+    ddbMock.on(DeleteCommand).resolves({});
+    await repo.deletePortfolio('u', 'p1');
+    expect(ddbMock.commandCalls(DeleteCommand)[0]!.args[0].input).toEqual({ TableName: 'tbl', Key: { PK: 'USER#u', SK: 'PORTFOLIO#p1' } });
   });
 });

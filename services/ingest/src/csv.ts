@@ -17,10 +17,13 @@ export interface RowError {
   message: string;
 }
 
+/** A validated CSV row: a transaction without portfolio (the whole import targets one portfolio). */
+export type CsvRowInput = Omit<TransactionInput, 'portfolioId'>;
+
 export interface ParsedRow {
   /** 1-based data row number (header excluded). */
   row: number;
-  input: TransactionInput;
+  input: CsvRowInput;
 }
 
 export type CsvParseResult = { ok: true; rows: ParsedRow[]; rowCount: number } | { ok: false; errors: RowError[]; rowCount: number };

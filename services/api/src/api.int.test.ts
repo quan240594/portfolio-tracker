@@ -74,6 +74,36 @@ describe.skipIf(!available)('api against LocalStack', () => {
     expect(body.holdingsCount).toBe(6);
   });
 
+  it('lists the seeded portfolios and scopes reads to one of them', async () => {
+    const list = await call('GET', '/portfolios');
+    expect(list.body.portfolios.map((p: { portfolioId: string; name: string }) => [p.portfolioId, p.name])).toEqual([
+      ['default', 'Main portfolio'],
+      ['trading-212', 'Trading 212'],
+    ]);
+    const broker = await call('GET', '/holdings', { query: { portfolioId: 'trading-212' } });
+    expect(broker.body.holdings.map((h: { symbol: string }) => h.symbol).sort()).toEqual(['AAPL', 'MSFT']);
+    const main = await call('GET', '/portfolio', { query: { portfolioId: 'default' } });
+    expect(main.body.holdingsCount).toBe(4);
+    const all = await call('GET', '/portfolio', { query: { portfolioId: 'all' } });
+    expect(all.body.holdingsCount).toBe(6);
+    expect((await call('GET', '/portfolio', { query: { portfolioId: 'nope' } })).status).toBe(404);
+  });
+
+  it('creates, renames and force-deletes a portfolio with its transactions', async () => {
+    const created = await call('POST', '/portfolios', { body: { name: 'Scratch' } });
+    expect(created.status).toBe(201);
+    const id = created.body.portfolioId as string;
+    expect((await call('POST', '/portfolios', { body: { name: 'scratch' } })).status).toBe(409);
+    const renamed = await call('PATCH', `/portfolios/${id}`, { body: { name: 'Scratch 2' } });
+    expect(renamed.body.name).toBe('Scratch 2');
+    const txn = await call('POST', '/transactions', { body: { portfolioId: id, date: '2026-01-05', type: 'BUY', symbol: 'SAP.DE', quantity: 1, price: 200, currency: 'EUR' } });
+    expect(txn.status).toBe(201);
+    expect((await call('DELETE', `/portfolios/${id}`)).body.error.code).toBe('PORTFOLIO_NOT_EMPTY');
+    expect((await call('DELETE', `/portfolios/${id}`, { query: { force: 'true' } })).status).toBe(204);
+    expect((await call('DELETE', `/transactions/${txn.body.id}`)).status).toBe(404);
+    expect((await call('GET', '/portfolios')).body.portfolios).toHaveLength(2);
+  });
+
   it('serves holdings, allocation, history and dividends from seeded data', async () => {
     const holdings = await call('GET', '/holdings');
     expect(holdings.body.holdings.every((h: { priceStale: boolean }) => !h.priceStale)).toBe(true);
@@ -89,16 +119,16 @@ describe.skipIf(!available)('api against LocalStack', () => {
   });
 
   it('creates and deletes a transaction', async () => {
-    const created = await call('POST', '/transactions', { body: { date: '2026-01-05', type: 'BUY', symbol: 'SAP.DE', quantity: 1, price: 200, currency: 'EUR' } });
+    const created = await call('POST', '/transactions', { body: { portfolioId: 'default', date: '2026-01-05', type: 'BUY', symbol: 'SAP.DE', quantity: 1, price: 200, currency: 'EUR' } });
     expect(created.status).toBe(201);
-    const oversell = await call('POST', '/transactions', { body: { date: '2026-01-06', type: 'SELL', symbol: 'SAP.DE', quantity: 2, price: 200, currency: 'EUR' } });
+    const oversell = await call('POST', '/transactions', { body: { portfolioId: 'default', date: '2026-01-06', type: 'SELL', symbol: 'SAP.DE', quantity: 2, price: 200, currency: 'EUR' } });
     expect(oversell.status).toBe(422);
     expect((await call('DELETE', `/transactions/${created.body.id}`)).status).toBe(204);
     expect((await call('DELETE', `/transactions/${created.body.id}`)).status).toBe(404);
   });
 
   it('issues a presigned URL that accepts a CSV upload', async () => {
-    const created = await call('POST', '/imports', { body: { fileName: 'trades.csv' } });
+    const created = await call('POST', '/imports', { body: { fileName: 'trades.csv', portfolioId: 'trading-212' } });
     expect(created.status).toBe(201);
     const put = await fetch(created.body.uploadUrl, {
       method: 'PUT',
@@ -109,6 +139,6 @@ describe.skipIf(!available)('api against LocalStack', () => {
     const head = await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: importObjectKey('demo', created.body.importId) }));
     expect(head.ContentType).toBe('text/csv');
     const status = await call('GET', `/imports/${created.body.importId}`);
-    expect(status.body).toMatchObject({ status: 'PENDING', fileName: 'trades.csv' });
+    expect(status.body).toMatchObject({ status: 'PENDING', fileName: 'trades.csv', portfolioId: 'trading-212' });
   });
 });

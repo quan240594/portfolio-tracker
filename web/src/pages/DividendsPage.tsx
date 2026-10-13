@@ -7,6 +7,7 @@ import { EmptyState } from '../components/EmptyState';
 import { LoadingRegion, Skeleton } from '../components/Skeleton';
 import { DividendBarChart } from '../components/charts/DividendBarChart';
 import { BASE_CURRENCY, formatDate, formatMoney } from '../lib/format';
+import { usePortfolioScope } from '../features/portfolios/usePortfolioScope';
 
 function PaymentsTable({ payments, currency, caption }: Readonly<{ payments: DividendPayment[]; currency: string; caption: string }>) {
   return (
@@ -73,13 +74,15 @@ function ReceivedList({ received, currency }: Readonly<{ received?: DividendPaym
 }
 
 export function DividendsPage() {
-  const { data, isPending, isError, error, refetch } = useDividends();
+  const { scope, ready, scopeName, current } = usePortfolioScope();
+  const { data, isPending, isError, error, refetch } = useDividends(scope, { enabled: ready });
   const ccy = data?.baseCurrency ?? BASE_CURRENCY;
+  const amountsIn = scopeName ? `${scopeName} · amounts in ${ccy}` : `Amounts in ${ccy}`;
 
   if (isError) {
     return (
       <>
-        <PageHeader title="Dividends" />
+        <PageHeader title="Dividends" description={scopeName || undefined} />
         <ErrorState error={error} onRetry={() => void refetch()} title="Could not load dividends" />
       </>
     );
@@ -89,7 +92,7 @@ export function DividendsPage() {
 
   return (
     <>
-      <PageHeader title="Dividends" description={`Amounts in ${ccy} (per-share amounts in the paying currency). Received amounts are net of withholding tax; upcoming amounts are gross estimates.`} />
+      <PageHeader title="Dividends" description={`${amountsIn} (per-share amounts in the paying currency). Received amounts are net of withholding tax; upcoming amounts are gross estimates.`} />
       <div className="space-y-6">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <KpiCard loading={isPending} label="Total received" value={data && formatMoney(data.totalReceived, ccy)} hint="All time" />
@@ -103,7 +106,7 @@ export function DividendsPage() {
         </div>
 
         {empty ? (
-          <EmptyState title="No dividends yet" description="Dividend transactions and announced payouts for your holdings will show up here." />
+          <EmptyState title={current ? `No dividends in ${current.name} yet` : 'No dividends yet'} description="Dividend transactions and announced payouts for your holdings will show up here." />
         ) : (
           <>
             <section className="card p-4" aria-labelledby="div-monthly">

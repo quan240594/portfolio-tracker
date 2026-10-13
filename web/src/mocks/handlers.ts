@@ -2,10 +2,14 @@ import { delay, http, HttpResponse, type HttpHandler } from 'msw';
 import {
   ALLOCATION_DIMENSIONS,
   createImportSchema,
+  createPortfolioSchema,
   historyQuerySchema,
+  portfolioScopeSchema,
+  updatePortfolioSchema,
   transactionInputSchema,
   type ApiError,
   type CreateImportResponse,
+  type ListPortfoliosResponse,
   type ListTransactionsResponse,
 } from '@portfolio/shared';
 import { API_BASE_URL } from '../config';
@@ -23,6 +27,14 @@ async function latency() {
   if (import.meta.env.MODE !== 'test') await delay(150 + (crypto.getRandomValues(new Uint32Array(1))[0]! / 2 ** 32) * 250);
 }
 
+/** Parses `?portfolioId=` (omitted/`all` = combined); throws a 400 for malformed ids. */
+function scopeOf(request: Request): string | undefined {
+  const raw = new URL(request.url).searchParams.get('portfolioId') ?? undefined;
+  const parsed = portfolioScopeSchema.safeParse({ portfolioId: raw });
+  if (!parsed.success) throw new db.MockHttpError(400, 'VALIDATION_ERROR', 'Invalid portfolio id', parsed.error.flatten());
+  return parsed.data.portfolioId;
+}
+
 function guard<T>(fn: () => T | Promise<T>) {
   return async () => {
     try {
@@ -37,14 +49,46 @@ function guard<T>(fn: () => T | Promise<T>) {
 export const handlers: HttpHandler[] = [
   http.get(api('/health'), () => HttpResponse.json({ status: 'ok' })),
 
-  http.get(api('/portfolio'), async () => {
+  http.get(api('/portfolios'), async () => {
     await latency();
-    return HttpResponse.json(db.getPortfolio());
+    return HttpResponse.json<ListPortfoliosResponse>({ portfolios: db.listPortfolios() });
   }),
 
-  http.get(api('/holdings'), async () => {
+  http.post(api('/portfolios'), async ({ request }) => {
     await latency();
-    return HttpResponse.json(db.getHoldings());
+    const parsed = createPortfolioSchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) {
+      return errorResponse(400, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Invalid portfolio', parsed.error.flatten());
+    }
+    return guard(() => HttpResponse.json(db.createPortfolio(parsed.data.name), { status: 201 }))();
+  }),
+
+  http.patch(api('/portfolios/:id'), async ({ request, params }) => {
+    await latency();
+    const parsed = updatePortfolioSchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) {
+      return errorResponse(400, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Invalid portfolio', parsed.error.flatten());
+    }
+    return guard(() => HttpResponse.json(db.renamePortfolio(String(params.id), parsed.data.name)))();
+  }),
+
+  http.delete(api('/portfolios/:id'), async ({ request, params }) => {
+    await latency();
+    const force = new URL(request.url).searchParams.get('force') === 'true';
+    return guard(() => {
+      db.deletePortfolio(String(params.id), force);
+      return new HttpResponse(null, { status: 204 });
+    })();
+  }),
+
+  http.get(api('/portfolio'), async ({ request }) => {
+    await latency();
+    return guard(() => HttpResponse.json(db.getPortfolio(scopeOf(request))))();
+  }),
+
+  http.get(api('/holdings'), async ({ request }) => {
+    await latency();
+    return guard(() => HttpResponse.json(db.getHoldings(scopeOf(request))))();
   }),
 
   http.get(api('/allocation'), async ({ request }) => {
@@ -53,24 +97,24 @@ export const handlers: HttpHandler[] = [
     if (!(ALLOCATION_DIMENSIONS as readonly string[]).includes(by)) {
       return errorResponse(400, 'VALIDATION_ERROR', `Invalid allocation dimension: ${by}`);
     }
-    return HttpResponse.json(db.getAllocation(by as (typeof ALLOCATION_DIMENSIONS)[number]));
+    return guard(() => HttpResponse.json(db.getAllocation(by as (typeof ALLOCATION_DIMENSIONS)[number], scopeOf(request))))();
   }),
 
   http.get(api('/history'), async ({ request }) => {
     await latency();
     const parsed = historyQuerySchema.safeParse({ range: new URL(request.url).searchParams.get('range') ?? undefined });
     if (!parsed.success) return errorResponse(400, 'VALIDATION_ERROR', 'Invalid range', parsed.error.flatten());
-    return HttpResponse.json(db.getHistory(parsed.data.range));
+    return guard(() => HttpResponse.json(db.getHistory(parsed.data.range, scopeOf(request))))();
   }),
 
-  http.get(api('/dividends'), async () => {
+  http.get(api('/dividends'), async ({ request }) => {
     await latency();
-    return HttpResponse.json(db.getDividends());
+    return guard(() => HttpResponse.json(db.getDividends(scopeOf(request))))();
   }),
 
-  http.get(api('/transactions'), async () => {
+  http.get(api('/transactions'), async ({ request }) => {
     await latency();
-    return HttpResponse.json<ListTransactionsResponse>({ transactions: db.listTransactions() });
+    return guard(() => HttpResponse.json<ListTransactionsResponse>({ transactions: db.listTransactions(scopeOf(request)) }))();
   }),
 
   http.post(api('/transactions'), async ({ request }) => {
@@ -94,11 +138,13 @@ export const handlers: HttpHandler[] = [
     if (!parsed.success) {
       return errorResponse(400, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Invalid import', parsed.error.flatten());
     }
-    const imp = db.createImport(parsed.data.fileName);
-    return HttpResponse.json<CreateImportResponse>(
-      { importId: imp.importId, uploadUrl: `${origin()}${MOCK_UPLOAD_PATH.replace(':importId', imp.importId)}?X-Mock-Signature=demo`, expiresInSeconds: 300 },
-      { status: 201 },
-    );
+    return guard(() => {
+      const imp = db.createImport(parsed.data.fileName, parsed.data.portfolioId);
+      return HttpResponse.json<CreateImportResponse>(
+        { importId: imp.importId, uploadUrl: `${origin()}${MOCK_UPLOAD_PATH.replace(':importId', imp.importId)}?X-Mock-Signature=demo`, expiresInSeconds: 300 },
+        { status: 201 },
+      );
+    })();
   }),
 
   http.get(api('/imports/:id'), async ({ params }) => {

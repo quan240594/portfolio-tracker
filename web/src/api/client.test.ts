@@ -13,58 +13,58 @@ describe('api client', () => {
         HttpResponse.json({ error: { code: 'VALIDATION_ERROR', message: 'Bad input', details: { f: 1 } } }, { status: 400 }),
       ),
     );
-    const err = await api.getHoldings().catch((e: unknown) => e);
+    const err = await api.getHoldings('all').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err).toMatchObject({ status: 400, code: 'VALIDATION_ERROR', message: 'Bad input', details: { f: 1 } });
   });
 
   it('falls back to an HTTP_<status> code for non-envelope errors', async () => {
     server.use(http.get('/api/portfolio', () => new HttpResponse('Bad gateway', { status: 502 })));
-    await expect(api.getPortfolio()).rejects.toMatchObject({ status: 502, code: 'HTTP_502' });
+    await expect(api.getPortfolio('all')).rejects.toMatchObject({ status: 502, code: 'HTTP_502' });
   });
 
   it('maps network failures to NETWORK_ERROR', async () => {
     server.use(http.get('/api/dividends', () => HttpResponse.error()));
-    await expect(api.getDividends()).rejects.toMatchObject({ status: 0, code: 'NETWORK_ERROR' });
+    await expect(api.getDividends('all')).rejects.toMatchObject({ status: 0, code: 'NETWORK_ERROR' });
   });
 
   it('handles 204 No Content', async () => {
-    const { transactions } = await api.listTransactions();
+    const { transactions } = await api.listTransactions('all');
     await expect(api.deleteTransaction(transactions[0]!.id)).resolves.toBeUndefined();
   });
 
   it('falls back to the status text or a generic message for non-JSON error bodies', async () => {
     server.use(http.get('/api/holdings', () => new HttpResponse('<html>oops</html>', { status: 500, statusText: 'Internal Server Error' })));
-    await expect(api.getHoldings()).rejects.toMatchObject({ status: 500, code: 'HTTP_500', message: 'Internal Server Error' });
+    await expect(api.getHoldings('all')).rejects.toMatchObject({ status: 500, code: 'HTTP_500', message: 'Internal Server Error' });
 
     // MSW always fills in a status text, so stub fetch to simulate a proxy that sends none.
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(null, { status: 418 }));
-    await expect(api.getHoldings()).rejects.toMatchObject({ status: 418, code: 'HTTP_418', message: 'Request failed with status 418' });
+    await expect(api.getHoldings('all')).rejects.toMatchObject({ status: 418, code: 'HTTP_418', message: 'Request failed with status 418' });
   });
 
   it('ignores malformed error envelopes', async () => {
     server.use(http.get('/api/holdings', () => HttpResponse.json({ error: null }, { status: 400, statusText: 'Bad Request' })));
-    await expect(api.getHoldings()).rejects.toMatchObject({ code: 'HTTP_400', message: 'Bad Request' });
+    await expect(api.getHoldings('all')).rejects.toMatchObject({ code: 'HTTP_400', message: 'Bad Request' });
     server.use(http.get('/api/holdings', () => HttpResponse.json({ error: { code: 'X', message: 42 } }, { status: 400, statusText: 'Bad Request' })));
-    await expect(api.getHoldings()).rejects.toMatchObject({ code: 'HTTP_400' });
+    await expect(api.getHoldings('all')).rejects.toMatchObject({ code: 'HTTP_400' });
     server.use(http.get('/api/holdings', () => HttpResponse.json(['nope'], { status: 400, statusText: 'Bad Request' })));
-    await expect(api.getHoldings()).rejects.toMatchObject({ code: 'HTTP_400' });
+    await expect(api.getHoldings('all')).rejects.toMatchObject({ code: 'HTTP_400' });
   });
 
   it('rejects invalid JSON in successful responses', async () => {
     server.use(http.get('/api/portfolio', () => new HttpResponse('not json', { status: 200 })));
-    await expect(api.getPortfolio()).rejects.toMatchObject({ status: 200, code: 'INVALID_RESPONSE', message: 'The server returned an invalid response.' });
+    await expect(api.getPortfolio('all')).rejects.toMatchObject({ status: 200, code: 'INVALID_RESPONSE', message: 'The server returned an invalid response.' });
   });
 
   it('returns undefined for an empty 200 body', async () => {
     server.use(http.get('/api/portfolio', () => new HttpResponse(null, { status: 200 })));
-    await expect(api.getPortfolio()).resolves.toBeUndefined();
+    await expect(api.getPortfolio('all')).resolves.toBeUndefined();
   });
 
   it('re-throws aborts untouched', async () => {
     const controller = new AbortController();
     controller.abort();
-    const err = await api.getPortfolio(controller.signal).catch((e: unknown) => e);
+    const err = await api.getPortfolio('all', controller.signal).catch((e: unknown) => e);
     expect(err).not.toBeInstanceOf(ApiError);
     expect(err).toMatchObject({ name: 'AbortError' });
   });
@@ -77,12 +77,12 @@ describe('api client', () => {
         return HttpResponse.json({ importId: 'i1', uploadUrl: 'http://localhost/u', expiresInSeconds: 60 }, { status: 201 });
       }),
     );
-    await expect(api.createImport({ fileName: 'a.csv' })).resolves.toMatchObject({ importId: 'i1' });
-    expect(seen).toEqual({ contentType: 'application/json', accept: 'application/json', body: { fileName: 'a.csv' } });
+    await expect(api.createImport({ fileName: 'a.csv', portfolioId: 'default' })).resolves.toMatchObject({ importId: 'i1' });
+    expect(seen).toEqual({ contentType: 'application/json', accept: 'application/json', body: { fileName: 'a.csv', portfolioId: 'default' } });
 
-    const history = await api.getHistory('3M');
+    const history = await api.getHistory('all', '3M');
     expect(history.range).toBe('3M');
-    const allocation = await api.getAllocation('currency');
+    const allocation = await api.getAllocation('all', 'currency');
     expect(allocation.by).toBe('currency');
   });
 

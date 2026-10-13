@@ -6,6 +6,13 @@ import { buildSampleCsv, CSV_HEADER } from './sampleCsv';
 import { renderWithProviders } from '../../test/utils';
 import { server } from '../../mocks/server';
 import { listTransactions, resetDb } from '../../mocks/db';
+import { renderHook, act } from '@testing-library/react';
+import { useCsvImport } from './useCsvImport';
+import { createTestQueryClient } from '../../test/utils';
+import { QueryClientProvider } from '@tanstack/react-query';
+
+/** The portfolio picker loads GET /portfolios; the import pipeline assertions ignore it. */
+const isPortfolioList = (request: Request) => new URL(request.url).pathname === '/api/portfolios';
 
 const csvFile = (content: string, name = 'trades.csv') => new File([content], name, { type: 'text/csv' });
 
@@ -27,7 +34,7 @@ describe('CsvImport', () => {
     const calls: string[] = [];
     let uploadedContentType: string | null = null;
     server.events.on('request:start', ({ request }) => {
-      calls.push(`${request.method} ${new URL(request.url).pathname}`);
+      if (!isPortfolioList(request)) calls.push(`${request.method} ${new URL(request.url).pathname}`);
       if (request.method === 'PUT') uploadedContentType = request.headers.get('content-type');
     });
 
@@ -176,7 +183,7 @@ describe('CsvImport', () => {
     expect(await screen.findByText(/Processing trades\.csv… this usually takes a few seconds\./)).toBeInTheDocument();
     expect(await screen.findByText('✓ Import completed')).toBeInTheDocument();
     // Missing counts default to 0.
-    expect(screen.getByText('Imported 0 of 0 rows from trades.csv.')).toBeInTheDocument();
+    expect(await screen.findByText('Imported 0 of 0 rows from trades.csv into Main portfolio.')).toBeInTheDocument();
     expect(screen.queryByLabelText('CSV file')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Done' }));
@@ -198,7 +205,9 @@ describe('CsvImport', () => {
   it('reports a failed upload to storage', async () => {
     const user = userEvent.setup();
     const calls: string[] = [];
-    server.events.on('request:start', ({ request }) => calls.push(`${request.method} ${new URL(request.url).pathname}`));
+    server.events.on('request:start', ({ request }) => {
+        if (!isPortfolioList(request)) calls.push(`${request.method} ${new URL(request.url).pathname}`);
+      });
     server.use(http.put('*/__mock-s3/imports/:importId', () => new HttpResponse('denied', { status: 500 })));
     renderWithProviders(<CsvImport pollIntervalMs={5} />);
     await user.upload(screen.getByLabelText('CSV file'), csvFile(buildSampleCsv()));
@@ -233,7 +242,9 @@ describe('CsvImport', () => {
   it('rejects files larger than 1 MB before calling the API', async () => {
     const user = userEvent.setup();
     const calls: string[] = [];
-    server.events.on('request:start', ({ request }) => calls.push(request.url));
+    server.events.on('request:start', ({ request }) => {
+      if (!isPortfolioList(request)) calls.push(request.url);
+    });
     renderWithProviders(<CsvImport />);
     await user.upload(screen.getByLabelText('CSV file'), csvFile('a'.repeat(1024 * 1024 + 1), 'big.csv'));
     await user.click(screen.getByRole('button', { name: 'Upload & import' }));
@@ -260,7 +271,9 @@ describe('CsvImport', () => {
   describe('stops the pipeline when closed mid-flight', () => {
     const track = () => {
       const calls: string[] = [];
-      server.events.on('request:start', ({ request }) => calls.push(`${request.method} ${new URL(request.url).pathname}`));
+      server.events.on('request:start', ({ request }) => {
+        if (!isPortfolioList(request)) calls.push(`${request.method} ${new URL(request.url).pathname}`);
+      });
       return calls;
     };
     const gated = () => {
@@ -354,5 +367,46 @@ describe('CsvImport', () => {
       expect(errors).not.toHaveBeenCalled();
     });
   });
-});
 
+  describe('target portfolio', () => {
+    it('defaults to the main portfolio, imports into the chosen one and reports it', async () => {
+      resetDb({ empty: true });
+      const user = userEvent.setup();
+      let body: unknown;
+      server.events.on('request:start', async ({ request }) => {
+        if (request.method === 'POST' && new URL(request.url).pathname === '/api/imports') body = await request.clone().json();
+      });
+      renderWithProviders(<CsvImport pollIntervalMs={5} />);
+      const select = screen.getByLabelText('Import into portfolio');
+      expect(select).toBeRequired();
+      await screen.findByRole('option', { name: 'Trading 212' });
+      expect(select).toHaveValue('default');
+
+      await user.selectOptions(select, 'Trading 212');
+      await user.upload(screen.getByLabelText('CSV file'), csvFile(buildSampleCsv()));
+      await user.click(screen.getByRole('button', { name: 'Upload & import' }));
+      expect(await screen.findByText('Imported 5 of 5 rows from trades.csv into Trading 212.')).toBeInTheDocument();
+      expect(body).toEqual({ fileName: 'trades.csv', portfolioId: 'trading-212' });
+      expect(listTransactions('trading-212')).toHaveLength(5);
+      expect(listTransactions('default')).toHaveLength(0);
+      server.events.removeAllListeners();
+    });
+
+    it('preselects the portfolio in scope', async () => {
+      renderWithProviders(<CsvImport />, { route: '/transactions?portfolio=trading-212' });
+      expect(screen.getByLabelText('Import into portfolio')).toHaveValue('trading-212');
+      expect(screen.getByRole('option', { name: 'Loading portfolios…' })).toBeInTheDocument();
+      await screen.findByRole('option', { name: 'Trading 212' });
+      expect(screen.getByLabelText('Import into portfolio')).toHaveValue('trading-212');
+    });
+
+    it('rejects an invalid portfolio id before calling the API', async () => {
+      const qc = createTestQueryClient();
+      const { result } = renderHook(() => useCsvImport(), {
+        wrapper: ({ children }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>,
+      });
+      await act(() => result.current.start(csvFile('a'), 'Not Valid'));
+      expect(result.current.state).toEqual({ phase: 'error', message: 'Choose a portfolio to import into.' });
+    });
+  });
+});

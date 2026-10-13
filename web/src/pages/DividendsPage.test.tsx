@@ -88,7 +88,7 @@ describe('DividendsPage', () => {
     renderApp('/dividends');
     expect(await screen.findByRole('heading', { level: 1, name: 'Dividends' })).toBeInTheDocument();
     expect(
-      screen.getByText('Amounts in EUR (per-share amounts in the paying currency). Received amounts are net of withholding tax; upcoming amounts are gross estimates.'),
+      screen.getByText('All portfolios · amounts in EUR (per-share amounts in the paying currency). Received amounts are net of withholding tax; upcoming amounts are gross estimates.'),
     ).toBeInTheDocument();
   });
 });

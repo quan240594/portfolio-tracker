@@ -26,7 +26,7 @@ describe('DashboardPage', () => {
     expect(screen.getByText('Loading holdings')).toBeInTheDocument();
 
     expect(await screen.findByRole('img', { name: chartFor('1Y') })).toBeInTheDocument();
-    expect(screen.getByText(/^Values in EUR · as of/)).toBeInTheDocument();
+    expect(screen.getByText(/^All portfolios · values in EUR · as of/)).toBeInTheDocument();
     expect(screen.getByText(/P&L change over period:/)).toBeInTheDocument();
     expect(screen.getByText(/Total return [+\u2212]?[\d.,]+% on amount invested/)).toBeInTheDocument();
 

@@ -1,5 +1,6 @@
 import {
   BatchGetCommand,
+  BatchWriteCommand,
   DeleteCommand,
   GetCommand,
   PutCommand,
@@ -17,16 +18,29 @@ import {
   type FxRates,
   type ImportStatus,
   type InstrumentProfile,
+  type Portfolio,
   type Quote,
   type Transaction,
 } from '@portfolio/shared';
 
 /** Data access used by the route handlers. Implemented by DynamoRepository and by in-memory fakes in tests. */
 export interface Repository {
-  listTransactions(userId: string): Promise<Transaction[]>;
+  /** All portfolios of the user (unsorted). */
+  listPortfolios(userId: string): Promise<Portfolio[]>;
+  getPortfolio(userId: string, portfolioId: string): Promise<Portfolio | null>;
+  /** Create-only put; resolves false when the portfolio already exists (e.g. a concurrent default creation). */
+  createPortfolio(portfolio: Portfolio): Promise<boolean>;
+  /** Renames an existing portfolio; resolves null when it does not exist. */
+  renamePortfolio(userId: string, portfolioId: string, name: string, updatedAt: string): Promise<Portfolio | null>;
+  deletePortfolio(userId: string, portfolioId: string): Promise<void>;
+  /** Transactions of one portfolio, or of all portfolios when `portfolioId` is omitted. */
+  listTransactions(userId: string, portfolioId?: string): Promise<Transaction[]>;
+  /** Looks a transaction up by id across all portfolios of the user. */
   findTransaction(userId: string, id: string): Promise<Transaction | null>;
   putTransaction(txn: Transaction): Promise<void>;
   deleteTransaction(txn: Transaction): Promise<void>;
+  /** Batch delete (chunks of 25, retrying unprocessed items). */
+  deleteTransactions(txns: readonly Transaction[]): Promise<void>;
   getQuotes(symbols: string[]): Promise<Record<string, Quote>>;
   getProfiles(symbols: string[]): Promise<Record<string, InstrumentProfile>>;
   getFx(base: string): Promise<FxRates | null>;
@@ -56,6 +70,11 @@ const chunk = <T>(arr: readonly T[], size: number): T[][] => {
 };
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const isConditionalCheckFailure = (err: unknown) => (err as Error | undefined)?.name === 'ConditionalCheckFailedException';
+
+export const BATCH_WRITE_SIZE = 25;
+const MAX_BATCH_ATTEMPTS = 9;
 
 export class DynamoRepository implements Repository {
   constructor(
@@ -88,10 +107,79 @@ export class DynamoRepository implements Repository {
     return unprocessed && unprocessed.length > 0 ? [...out, ...(await this.batchGetChunk(unprocessed, attempt + 1))] : out;
   }
 
-  async listTransactions(userId: string): Promise<Transaction[]> {
+  private async batchWrite(requests: Record<string, unknown>[]): Promise<void> {
+    for (const part of chunk(requests, BATCH_WRITE_SIZE)) {
+      let pending: Record<string, unknown>[] | undefined = part;
+      for (let attempt = 0; pending && pending.length > 0; attempt++) {
+        if (attempt >= MAX_BATCH_ATTEMPTS) throw new Error('BatchWrite: unprocessed items remain after retries');
+        if (attempt > 0) await sleep(Math.min(50 * 2 ** attempt, 2000));
+        const res = await this.doc.send(new BatchWriteCommand({ RequestItems: { [this.tableName]: pending as never } }));
+        pending = res.UnprocessedItems?.[this.tableName] as Record<string, unknown>[] | undefined;
+      }
+    }
+  }
+
+  async listPortfolios(userId: string): Promise<Portfolio[]> {
     const items = await this.queryAll({
       KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
-      ExpressionAttributeValues: { ':pk': keys.user(userId).PK, ':sk': keys.transactionPrefix },
+      ExpressionAttributeValues: { ':pk': keys.user(userId).PK, ':sk': keys.portfolioPrefix },
+      ConsistentRead: true,
+    });
+    return items.map((i) => fromItem<Portfolio>(i));
+  }
+
+  async getPortfolio(userId: string, portfolioId: string): Promise<Portfolio | null> {
+    const res = await this.doc.send(
+      new GetCommand({ TableName: this.tableName, Key: keys.portfolio(userId, portfolioId), ConsistentRead: true }),
+    );
+    return res.Item ? fromItem<Portfolio>(res.Item) : null;
+  }
+
+  async createPortfolio(portfolio: Portfolio): Promise<boolean> {
+    try {
+      await this.doc.send(
+        new PutCommand({
+          TableName: this.tableName,
+          Item: { ...keys.portfolio(portfolio.userId, portfolio.portfolioId), entityType: ENTITY.portfolio, ...portfolio },
+          ConditionExpression: 'attribute_not_exists(PK)',
+        }),
+      );
+      return true;
+    } catch (err) {
+      if (isConditionalCheckFailure(err)) return false;
+      throw err;
+    }
+  }
+
+  async renamePortfolio(userId: string, portfolioId: string, name: string, updatedAt: string): Promise<Portfolio | null> {
+    try {
+      const res = await this.doc.send(
+        new UpdateCommand({
+          TableName: this.tableName,
+          Key: keys.portfolio(userId, portfolioId),
+          UpdateExpression: 'SET #n = :name, updatedAt = :now',
+          ConditionExpression: 'attribute_exists(PK)',
+          ExpressionAttributeNames: { '#n': 'name' },
+          ExpressionAttributeValues: { ':name': name, ':now': updatedAt },
+          ReturnValues: 'ALL_NEW',
+        }),
+      );
+      return fromItem<Portfolio>(res.Attributes ?? {});
+    } catch (err) {
+      if (isConditionalCheckFailure(err)) return null;
+      throw err;
+    }
+  }
+
+  async deletePortfolio(userId: string, portfolioId: string): Promise<void> {
+    await this.doc.send(new DeleteCommand({ TableName: this.tableName, Key: keys.portfolio(userId, portfolioId) }));
+  }
+
+  async listTransactions(userId: string, portfolioId?: string): Promise<Transaction[]> {
+    const prefix = portfolioId === undefined ? keys.transactionPrefix : keys.portfolioTransactionPrefix(portfolioId);
+    const items = await this.queryAll({
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+      ExpressionAttributeValues: { ':pk': keys.user(userId).PK, ':sk': prefix },
     });
     return items.map((i) => fromItem<Transaction>(i));
   }
@@ -109,7 +197,7 @@ export class DynamoRepository implements Repository {
     await this.doc.send(
       new PutCommand({
         TableName: this.tableName,
-        Item: { ...keys.transaction(txn.userId, txn.date, txn.id), entityType: ENTITY.transaction, ...txn },
+        Item: { ...keys.transaction(txn.userId, txn.portfolioId, txn.date, txn.id), entityType: ENTITY.transaction, ...txn },
         ConditionExpression: 'attribute_not_exists(PK)',
       }),
     );
@@ -117,7 +205,13 @@ export class DynamoRepository implements Repository {
 
   async deleteTransaction(txn: Transaction): Promise<void> {
     await this.doc.send(
-      new DeleteCommand({ TableName: this.tableName, Key: keys.transaction(txn.userId, txn.date, txn.id) }),
+      new DeleteCommand({ TableName: this.tableName, Key: keys.transaction(txn.userId, txn.portfolioId, txn.date, txn.id) }),
+    );
+  }
+
+  async deleteTransactions(txns: readonly Transaction[]): Promise<void> {
+    await this.batchWrite(
+      txns.map((t) => ({ DeleteRequest: { Key: keys.transaction(t.userId, t.portfolioId, t.date, t.id) } })),
     );
   }
 

@@ -27,7 +27,7 @@ beforeEach(() => {
 });
 
 const txns = (n: number): Transaction[] =>
-  Array.from({ length: n }, (_, i) => ({ id: `imp-${i + 1}`, userId: 'u', date: '2025-01-01', type: 'BUY', symbol: 'A', quantity: 1, price: 1, fee: 0, currency: 'EUR', createdAt: 'x', importId: 'imp' }));
+  Array.from({ length: n }, (_, i) => ({ id: `imp-${i + 1}`, userId: 'u', portfolioId: 'p1', date: '2025-01-01', type: 'BUY', symbol: 'A', quantity: 1, price: 1, fee: 0, currency: 'EUR', createdAt: 'x', importId: 'imp' }));
 
 describe('DynamoIngestStore', () => {
   it('writes in chunks of 25 and retries UnprocessedItems', async () => {
@@ -44,7 +44,7 @@ describe('DynamoIngestStore', () => {
     const calls = ddbMock.commandCalls(BatchWriteCommand).map((c) => c.args[0].input.RequestItems!.tbl!.length);
     expect(calls).toEqual([25, 5, 25, 10]);
     const item = ddbMock.commandCalls(BatchWriteCommand)[0]!.args[0].input.RequestItems!.tbl![0]!.PutRequest!.Item;
-    expect(item).toMatchObject({ PK: 'USER#u', SK: 'TXN#2025-01-01#imp-1', entityType: 'TRANSACTION', importId: 'imp' });
+    expect(item).toMatchObject({ PK: 'USER#u', SK: 'TXN#p1#2025-01-01#imp-1', entityType: 'TRANSACTION', importId: 'imp', portfolioId: 'p1' });
   });
 
   it('gives up after repeated UnprocessedItems so the message is retried', async () => {
@@ -77,7 +77,7 @@ describe('handler with AWS SDK clients (mocked)', () => {
     events: new EventBridgePublisher(new EventBridgeClient({ region: 'eu-west-1' }), 'bus'),
     now: () => new Date('2026-06-15T12:00:00.000Z'),
   }));
-  const pending = { PK: 'USER#demo', SK: 'IMPORT#i1', importId: 'i1', userId: 'demo', fileName: 'f.csv', status: 'PENDING', createdAt: 'x', updatedAt: 'x' };
+  const pending = { PK: 'USER#demo', SK: 'IMPORT#i1', importId: 'i1', userId: 'demo', portfolioId: 'default', fileName: 'f.csv', status: 'PENDING', createdAt: 'x', updatedAt: 'x' };
 
   it('imports end-to-end and publishes from portfolio.ingest', async () => {
     ddbMock.on(GetCommand).resolves({ Item: pending });
@@ -92,14 +92,24 @@ describe('handler with AWS SDK clients (mocked)', () => {
     expect(s3Mock.commandCalls(GetObjectCommand)[0]!.args[0].input).toEqual({ Bucket: 'bucket', Key: 'imports/demo/i1.csv' });
     const entry = ebMock.commandCalls(PutEventsCommand)[0]!.args[0].input.Entries![0]!;
     expect(entry).toMatchObject({ Source: 'portfolio.ingest', DetailType: 'TransactionsChanged', EventBusName: 'bus' });
-    expect(JSON.parse(entry.Detail!)).toEqual({ userId: 'demo', symbols: ['AAPL'], reason: 'IMPORTED', importId: 'i1' });
+    expect(JSON.parse(entry.Detail!)).toEqual({ userId: 'demo', portfolioId: 'default', symbols: ['AAPL'], reason: 'IMPORTED', importId: 'i1' });
+    expect(ddbMock.commandCalls(GetCommand).map((c) => c.args[0].input.Key)).toEqual([
+      { PK: 'USER#demo', SK: 'IMPORT#i1' },
+      { PK: 'USER#demo', SK: 'PORTFOLIO#default' },
+    ]);
+    const written = ddbMock.commandCalls(BatchWriteCommand)[0]!.args[0].input.RequestItems!.tbl![0]!.PutRequest!.Item;
+    expect(written).toMatchObject({ SK: 'TXN#default#2025-01-02#i1-1', portfolioId: 'default' });
     const statuses = ddbMock.commandCalls(UpdateCommand).map((c) => c.args[0].input.ExpressionAttributeValues?.[':completed'] ?? c.args[0].input.ExpressionAttributeValues?.[':processing']).filter(Boolean);
     expect(statuses).toEqual(['PROCESSING', 'COMPLETED']);
   });
 
   it('turns DynamoDB throttling into a batch item failure without marking the import FAILED', async () => {
     const throttle = Object.assign(new Error('Throughput exceeded'), { name: 'ProvisionedThroughputExceededException' });
-    ddbMock.on(GetCommand).resolvesOnce({ Item: pending }).rejectsOnce(throttle);
+    ddbMock.on(GetCommand).resolves({ Item: pending });
+    ddbMock
+      .on(GetCommand, { Key: { PK: 'USER#demo', SK: 'PORTFOLIO#default' } })
+      .resolvesOnce({ Item: { PK: 'USER#demo' } })
+      .rejectsOnce(throttle);
     ddbMock.on(UpdateCommand).resolves({});
     ddbMock.on(QueryCommand).resolves({ Items: [] });
     ddbMock.on(BatchWriteCommand).resolves({});

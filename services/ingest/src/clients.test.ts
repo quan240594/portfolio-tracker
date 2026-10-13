@@ -33,7 +33,7 @@ describe('createAwsDeps', () => {
     ebMock.on(PutEventsCommand).resolves({});
     await deps.store.getImport('u', 'i');
     await deps.reader.readText('bkt', 'k', 10);
-    await deps.events.transactionsChanged({ userId: 'u', symbols: [], reason: 'IMPORTED' });
+    await deps.events.transactionsChanged({ userId: 'u', portfolioId: 'p1', symbols: [], reason: 'IMPORTED' });
     expect(ddbMock.commandCalls(GetCommand)[0]!.args[0].input.TableName).toBe('tbl');
     expect(ebMock.commandCalls(PutEventsCommand)[0]!.args[0].input.Entries![0]!.EventBusName).toBe('bus');
 

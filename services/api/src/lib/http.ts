@@ -33,7 +33,7 @@ export function toResponse(
     headers: {
       'content-type': 'application/json',
       'access-control-allow-origin': corsOrigin,
-      'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+      'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS',
       'access-control-allow-headers': 'content-type,authorization',
       'cache-control': 'no-store',
     },

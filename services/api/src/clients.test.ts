@@ -37,7 +37,7 @@ describe('createAwsDeps', () => {
     expect(await ddbConfig.region()).toBe('eu-central-1');
 
     ebMock.on(PutEventsCommand).resolves({ FailedEntryCount: 0 });
-    await deps.events.transactionsChanged({ userId: 'u', symbols: ['A'], reason: 'CREATED' });
+    await deps.events.transactionsChanged({ userId: 'u', portfolioId: 'default', symbols: ['A'], reason: 'CREATED' });
     const put = ebMock.commandCalls(PutEventsCommand)[0]!;
     expect(put.args[0].input.Entries![0]!.EventBusName).toBe('bus');
     expect(await clientConfig(put.thisValue).region()).toBe('eu-central-1');
@@ -57,7 +57,7 @@ describe('createAwsDeps', () => {
     expect(ddbEndpoint).toMatchObject({ hostname: 'localhost', port: 4566, protocol: 'http:' });
 
     ebMock.on(PutEventsCommand).resolves({});
-    await deps.events.transactionsChanged({ userId: 'u', symbols: [], reason: 'DELETED' });
+    await deps.events.transactionsChanged({ userId: 'u', portfolioId: 'default', symbols: [], reason: 'DELETED' });
     const ebEndpoint = await clientConfig(ebMock.commandCalls(PutEventsCommand)[0]!.thisValue).endpoint!();
     expect(ebEndpoint).toMatchObject({ hostname: 'localhost', port: 4566 });
 

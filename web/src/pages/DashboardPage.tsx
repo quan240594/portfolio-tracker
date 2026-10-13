@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { HISTORY_RANGES, type AllocationDimension, type HistoryRange } from '@portfolio/shared';
+import { HISTORY_RANGES, type AllocationDimension, type GetPortfolioResponse, type HistoryRange } from '@portfolio/shared';
 import { useAllocation, useHistory, useHoldings, usePortfolio } from '../api/hooks';
 import { KpiCard } from '../components/KpiCard';
 import { Change } from '../components/Change';
@@ -12,6 +12,7 @@ import { PageHeader } from '../components/Layout';
 import { ValueChart } from '../components/charts/ValueChart';
 import { AllocationDonut } from '../components/charts/AllocationDonut';
 import { StaleBadge } from '../features/holdings/HoldingsTable';
+import { usePortfolioScope } from '../features/portfolios/usePortfolioScope';
 import { BASE_CURRENCY, formatDate, formatMoney, formatPercent, formatWeight } from '../lib/format';
 
 const ALLOCATION_TABS: { value: Exclude<AllocationDimension, 'symbol'>; label: string }[] = [
@@ -25,7 +26,8 @@ const RANGE_OPTIONS = HISTORY_RANGES.map((r) => ({ value: r, label: r }));
 
 
 function KpiGrid() {
-  const { data, isPending, isError, error, refetch } = usePortfolio();
+  const { scope, ready } = usePortfolioScope();
+  const { data, isPending, isError, error, refetch } = usePortfolio(scope, { enabled: ready });
   if (isError) return <ErrorState error={error} onRetry={() => void refetch()} title="Could not load portfolio summary" />;
   const ccy = data?.baseCurrency ?? BASE_CURRENCY;
   return (
@@ -74,7 +76,8 @@ function KpiGrid() {
 
 function PerformanceCard() {
   const [range, setRange] = useState<HistoryRange>('1Y');
-  const { data, isPending, isError, error, refetch, isPlaceholderData } = useHistory(range);
+  const { scope, ready } = usePortfolioScope();
+  const { data, isPending, isError, error, refetch, isPlaceholderData } = useHistory(scope, range, { enabled: ready });
   const first = data?.points[0];
   const last = data?.points.at(-1);
   const delta = first && last ? last.value - last.invested - (first.value - first.invested) : 0;
@@ -124,7 +127,8 @@ function PerformanceCard() {
 
 function AllocationCard() {
   const [by, setBy] = useState<Exclude<AllocationDimension, 'symbol'>>('assetClass');
-  const { data, isPending, isError, error, refetch } = useAllocation(by);
+  const { scope, ready } = usePortfolioScope();
+  const { data, isPending, isError, error, refetch } = useAllocation(scope, by, { enabled: ready });
   const panelId = 'allocation-panel';
 
   let body: ReactNode;
@@ -155,7 +159,8 @@ function AllocationCard() {
 }
 
 function TopHoldingsCard() {
-  const { data, isPending, isError, error, refetch } = useHoldings();
+  const { scope, ready, withScope } = usePortfolioScope();
+  const { data, isPending, isError, error, refetch } = useHoldings(scope, { enabled: ready });
 
   let body: ReactNode;
   if (isError) {
@@ -196,7 +201,7 @@ function TopHoldingsCard() {
         <h2 id="top-title" className="font-semibold">
           Top holdings
         </h2>
-        <Link to="/holdings" className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400">
+        <Link to={withScope('/holdings')} className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400">
           View all →
         </Link>
       </div>
@@ -205,24 +210,34 @@ function TopHoldingsCard() {
   );
 }
 
+/** "<scope> · values in EUR · as of …" once the summary has loaded; just the scope name before that. */
+function dashboardDescription(data: GetPortfolioResponse | undefined, scopeName: string): string | undefined {
+  if (!data) return scopeName || undefined;
+  const prefix = scopeName ? `${scopeName} · values` : 'Values';
+  const asOf = formatDate(data.asOf, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return `${prefix} in ${data.baseCurrency} · as of ${asOf}`;
+}
+
 export function DashboardPage() {
-  const portfolio = usePortfolio();
+  const { scope, ready, scopeName, withScope, current } = usePortfolioScope();
+  const portfolio = usePortfolio(scope, { enabled: ready });
   const isEmpty = portfolio.data?.holdingsCount === 0 && portfolio.data.totalReturn === 0;
 
   return (
     <>
-      <PageHeader
-        title="Dashboard"
-        description={portfolio.data ? `Values in ${portfolio.data.baseCurrency} · as of ${formatDate(portfolio.data.asOf, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : undefined}
-      />
+      <PageHeader title="Dashboard" description={dashboardDescription(portfolio.data, scopeName)} />
       {isEmpty ? (
         <EmptyState
-          title="No transactions yet"
-          description="Add your first buy or import a CSV export from your broker to see your portfolio come to life."
+          title={current ? `No transactions in ${current.name} yet` : 'No transactions yet'}
+          description={
+            current
+              ? 'Add a buy to this portfolio or import a CSV export from your broker to see it come to life.'
+              : 'Add your first buy or import a CSV export from your broker to see your portfolio come to life.'
+          }
           actions={
             <>
-              <Link to="/transactions?action=add" className="btn-primary">Add transaction</Link>
-              <Link to="/transactions?action=import" className="btn-secondary">Import CSV</Link>
+              <Link to={withScope('/transactions?action=add')} className="btn-primary">Add transaction</Link>
+              <Link to={withScope('/transactions?action=import')} className="btn-secondary">Import CSV</Link>
             </>
           }
         />

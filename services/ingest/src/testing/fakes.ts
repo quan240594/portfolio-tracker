@@ -10,11 +10,14 @@ export class InMemoryIngestStore implements IngestStore {
   transactions: Transaction[] = [];
   users = new Set<string>();
   tracked = new Map<string, string>();
+  /** `${userId}/${portfolioId}` of existing portfolios. */
+  portfolios = new Set<string>(['demo/default']);
   writes = 0;
 
-  addImport(userId: string, importId: string, status: ImportStatus['status'] = 'PENDING') {
+  addImport(userId: string, importId: string, status: ImportStatus['status'] = 'PENDING', portfolioId = 'default') {
     const ts = '2026-06-15T00:00:00.000Z';
-    this.imports.set(`${userId}/${importId}`, { importId, userId, fileName: 'f.csv', status, createdAt: ts, updatedAt: ts });
+    this.imports.set(`${userId}/${importId}`, { importId, userId, portfolioId, fileName: 'f.csv', status, createdAt: ts, updatedAt: ts });
+    this.portfolios.add(`${userId}/${portfolioId}`);
   }
   imp(userId: string, importId: string) {
     return this.imports.get(`${userId}/${importId}`);
@@ -34,6 +37,9 @@ export class InMemoryIngestStore implements IngestStore {
   }
   markCompleted(userId: string, importId: string, rowCount: number, importedCount: number) {
     return this.settle(() => Object.assign(this.imp(userId, importId)!, { status: 'COMPLETED', rowCount, importedCount }));
+  }
+  portfolioExists(userId: string, portfolioId: string) {
+    return Promise.resolve(this.portfolios.has(`${userId}/${portfolioId}`));
   }
   listTransactions(userId: string) {
     return Promise.resolve(this.transactions.filter((t) => t.userId === userId));

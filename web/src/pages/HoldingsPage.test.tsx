@@ -17,7 +17,7 @@ describe('HoldingsPage', () => {
     const table = await screen.findByRole('table');
     expect(within(table).getAllByRole('rowheader')).toHaveLength(holdings.length);
     expect(
-      screen.getByText(sp(`${holdings.length} positions · ${formatMoney(total, 'EUR')} · all amounts in EUR`)),
+      screen.getByText(sp(`All portfolios · ${holdings.length} positions · ${formatMoney(total, 'EUR')} · all amounts in EUR`)),
     ).toBeInTheDocument();
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
@@ -59,6 +59,6 @@ describe('HoldingsPage', () => {
     renderWithProviders(<HoldingsPage />);
     expect(await screen.findByRole('heading', { name: 'No open positions' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Add transaction' })).toHaveAttribute('href', '/transactions?action=add');
-    expect(screen.getByText(/^0 positions/)).toBeInTheDocument();
+    expect(screen.getByText(/^All portfolios · 0 positions/)).toBeInTheDocument();
   });
 });

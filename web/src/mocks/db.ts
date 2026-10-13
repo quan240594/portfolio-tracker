@@ -1,6 +1,10 @@
 /** In-memory mock backend that derives every response from transactions using the shared calculators. */
 import {
+  ALL_PORTFOLIOS,
   CSV_COLUMNS,
+  DEFAULT_PORTFOLIO_ID,
+  DEFAULT_PORTFOLIO_NAME,
+  MAX_PORTFOLIOS,
   PortfolioError,
   buildPositions,
   buildValueHistory,
@@ -18,10 +22,11 @@ import {
   type GetPortfolioResponse,
   type HistoryRange,
   type ImportStatus,
+  type Portfolio,
   type Transaction,
   type TransactionInput,
 } from '@portfolio/shared';
-import { BASE_CURRENCY, MOCK_USER_ID, STALE_SYMBOLS, createSeed, type MockSeed } from './fixtures';
+import { BASE_CURRENCY, MOCK_USER_ID, STALE_SYMBOLS, TRADING_212_ID, TRADING_212_NAME, createSeed, type MockSeed } from './fixtures';
 
 interface MockImport {
   status: ImportStatus;
@@ -31,6 +36,7 @@ interface MockImport {
 
 interface DbState {
   seed: MockSeed;
+  portfolios: Portfolio[];
   transactions: Transaction[];
   imports: Map<string, MockImport>;
   nextId: number;
@@ -38,17 +44,26 @@ interface DbState {
 
 let state: DbState = init();
 
+function seedPortfolio(portfolioId: string, name: string, createdAt: string): Portfolio {
+  return { portfolioId, userId: MOCK_USER_ID, name, createdAt, updatedAt: createdAt };
+}
+
 function init(options: { empty?: boolean } = {}): DbState {
   const seed = createSeed();
+  const first = seed.transactions[0]?.createdAt ?? `${seed.today}T00:00:00.000Z`;
   return {
     seed,
+    portfolios: [
+      seedPortfolio(DEFAULT_PORTFOLIO_ID, DEFAULT_PORTFOLIO_NAME, first),
+      seedPortfolio(TRADING_212_ID, TRADING_212_NAME, first.replace(/\.\d{3}Z$/, '.001Z')),
+    ],
     transactions: options.empty ? [] : [...seed.transactions],
     imports: new Map(),
     nextId: 1,
   };
 }
 
-/** Reset to the default demo portfolio (or an empty one). Call between tests. */
+/** Reset to the two demo portfolios (optionally without transactions). Call between tests. */
 export function resetDb(options: { empty?: boolean } = {}): void {
   state = init(options);
 }
@@ -73,10 +88,26 @@ function quotesFor(transactions: readonly Transaction[]) {
   return quotes;
 }
 
-function portfolio() {
+/** `?portfolioId=`: omitted or 'all' = every portfolio combined; unknown ids are a 404. */
+export type MockScope = string | undefined;
+
+function requirePortfolio(portfolioId: string): Portfolio {
+  const p = state.portfolios.find((x) => x.portfolioId === portfolioId);
+  if (!p) throw new MockHttpError(404, 'NOT_FOUND', `Portfolio ${portfolioId} not found`);
+  return p;
+}
+
+function scoped(scope: MockScope): Transaction[] {
+  if (scope === undefined || scope === ALL_PORTFOLIOS) return state.transactions;
+  requirePortfolio(scope);
+  return state.transactions.filter((t) => t.portfolioId === scope);
+}
+
+function portfolio(scope: MockScope) {
+  const transactions = scoped(scope);
   const result = calculatePortfolio({
-    transactions: state.transactions,
-    quotes: quotesFor(state.transactions),
+    transactions,
+    quotes: quotesFor(transactions),
     profiles: state.seed.profiles,
     fx: state.seed.fx,
     fxHistory: state.seed.fxHistory,
@@ -85,18 +116,18 @@ function portfolio() {
   return result;
 }
 
-export const getPortfolio = (): GetPortfolioResponse => portfolio().summary;
+export const getPortfolio = (scope?: MockScope): GetPortfolioResponse => portfolio(scope).summary;
 
-export const getHoldings = (): GetHoldingsResponse => ({ baseCurrency: BASE_CURRENCY, holdings: portfolio().holdings });
+export const getHoldings = (scope?: MockScope): GetHoldingsResponse => ({ baseCurrency: BASE_CURRENCY, holdings: portfolio(scope).holdings });
 
-export const getAllocation = (by: AllocationDimension): GetAllocationResponse => ({
+export const getAllocation = (by: AllocationDimension, scope?: MockScope): GetAllocationResponse => ({
   by,
   baseCurrency: BASE_CURRENCY,
-  slices: calculateAllocation(portfolio().holdings, by),
+  slices: calculateAllocation(portfolio(scope).holdings, by),
 });
 
-export function getHistory(range: HistoryRange): GetHistoryResponse {
-  const sorted = sortTransactions(state.transactions);
+export function getHistory(range: HistoryRange, scope?: MockScope): GetHistoryResponse {
+  const sorted = sortTransactions(scoped(scope));
   const today = state.seed.today;
   const from = historyRangeStart(range, today, sorted[0]?.date);
   return {
@@ -106,11 +137,10 @@ export function getHistory(range: HistoryRange): GetHistoryResponse {
   };
 }
 
-export const getDividends = (): GetDividendsResponse =>
-  calculateDividends(state.transactions, state.seed.dividendEvents, state.seed.fx, state.seed.today, state.seed.fxHistory);
+export const getDividends = (scope?: MockScope): GetDividendsResponse =>
+  calculateDividends(scoped(scope), state.seed.dividendEvents, state.seed.fx, state.seed.today, state.seed.fxHistory);
 
-export const listTransactions = (): Transaction[] =>
-  sortTransactions(state.transactions).reverse();
+export const listTransactions = (scope?: MockScope): Transaction[] => sortTransactions(scoped(scope)).reverse();
 
 function assertConsistent(transactions: readonly Transaction[]) {
   try {
@@ -121,7 +151,73 @@ function assertConsistent(transactions: readonly Transaction[]) {
   }
 }
 
+/**
+ * Overselling is checked within the target portfolio only; replaying everything combined additionally
+ * enforces one currency per symbol across portfolios (so the combined view can always be computed).
+ */
+function assertPortfolioConsistent(next: readonly Transaction[], portfolioId: string) {
+  assertConsistent(next.filter((t) => t.portfolioId === portfolioId));
+  assertConsistent(next);
+}
+
+// --- Portfolios -------------------------------------------------------------------------------------
+
+const byCreated = (a: Portfolio, b: Portfolio) => a.createdAt.localeCompare(b.createdAt);
+
+/** Like the API: (re)creates the default portfolio when the user has none. */
+export function listPortfolios(): Portfolio[] {
+  if (!state.portfolios.length) state.portfolios = [seedPortfolio(DEFAULT_PORTFOLIO_ID, DEFAULT_PORTFOLIO_NAME, nowIso())];
+  return [...state.portfolios].sort(byCreated);
+}
+
+function assertUniqueName(name: string, exceptId?: string) {
+  const lower = name.toLowerCase();
+  if (state.portfolios.some((p) => p.portfolioId !== exceptId && p.name.toLowerCase() === lower)) {
+    throw new MockHttpError(409, 'CONFLICT', `A portfolio named “${name}” already exists.`);
+  }
+}
+
+const newPortfolioId = () =>
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `p-${Date.now().toString(36)}-${state.nextId++}`;
+
+export function createPortfolio(name: string): Portfolio {
+  if (state.portfolios.length >= MAX_PORTFOLIOS) {
+    throw new MockHttpError(422, 'UNPROCESSABLE', `You can have at most ${MAX_PORTFOLIOS} portfolios.`);
+  }
+  assertUniqueName(name);
+  const now = nowIso();
+  const p: Portfolio = { portfolioId: newPortfolioId(), userId: MOCK_USER_ID, name, createdAt: now, updatedAt: now };
+  state.portfolios = [...state.portfolios, p];
+  return p;
+}
+
+export function renamePortfolio(portfolioId: string, name: string): Portfolio {
+  const existing = requirePortfolio(portfolioId);
+  assertUniqueName(name, portfolioId);
+  const updated = { ...existing, name, updatedAt: nowIso() };
+  state.portfolios = state.portfolios.map((p) => (p.portfolioId === portfolioId ? updated : p));
+  return updated;
+}
+
+export function deletePortfolio(portfolioId: string, force = false): void {
+  const p = requirePortfolio(portfolioId);
+  if (state.portfolios.length === 1) {
+    throw new MockHttpError(409, 'LAST_PORTFOLIO', 'You cannot delete your only portfolio.');
+  }
+  const count = state.transactions.filter((t) => t.portfolioId === portfolioId).length;
+  if (count > 0 && !force) {
+    throw new MockHttpError(409, 'PORTFOLIO_NOT_EMPTY', `Portfolio “${p.name}” still has ${count} transactions.`, { transactionCount: count });
+  }
+  state.transactions = state.transactions.filter((t) => t.portfolioId !== portfolioId);
+  state.portfolios = state.portfolios.filter((x) => x.portfolioId !== portfolioId);
+}
+
+// --- Transactions & imports -------------------------------------------------------------------------
+
 export function addTransaction(input: TransactionInput, importId?: string, rowNumber?: number): Transaction {
+  requirePortfolio(input.portfolioId);
   const id = importId ? `${importId}-${rowNumber}` : `mock-${Date.now().toString(36)}-${state.nextId++}`;
   const txn: Transaction = {
     id,
@@ -133,22 +229,24 @@ export function addTransaction(input: TransactionInput, importId?: string, rowNu
   };
   if (!input.note) delete txn.note;
   const next = [...state.transactions, txn];
-  assertConsistent(next);
+  assertPortfolioConsistent(next, txn.portfolioId);
   state.transactions = next;
   return txn;
 }
 
 export function deleteTransaction(id: string): void {
-  if (!state.transactions.some((t) => t.id === id)) throw new MockHttpError(404, 'NOT_FOUND', `Transaction ${id} not found`);
+  const txn = state.transactions.find((t) => t.id === id);
+  if (!txn) throw new MockHttpError(404, 'NOT_FOUND', `Transaction ${id} not found`);
   const next = state.transactions.filter((t) => t.id !== id);
-  assertConsistent(next);
+  assertPortfolioConsistent(next, txn.portfolioId);
   state.transactions = next;
 }
 
-export function createImport(fileName: string): ImportStatus {
+export function createImport(fileName: string, portfolioId: string): ImportStatus {
+  requirePortfolio(portfolioId);
   const importId = `imp-${Date.now().toString(36)}-${state.nextId++}`;
   const now = nowIso();
-  const status: ImportStatus = { importId, userId: MOCK_USER_ID, fileName, status: 'PENDING', createdAt: now, updatedAt: now };
+  const status: ImportStatus = { importId, userId: MOCK_USER_ID, portfolioId, fileName, status: 'PENDING', createdAt: now, updatedAt: now };
   state.imports.set(importId, { status, polls: 0 });
   return status;
 }
@@ -169,7 +267,7 @@ export function getImport(importId: string): ImportStatus {
     imp.status = { ...imp.status, status: 'PROCESSING', updatedAt: nowIso() };
     return imp.status;
   }
-  imp.status = { ...imp.status, ...processCsv(importId, imp.csv), updatedAt: nowIso() };
+  imp.status = { ...imp.status, ...processCsv(importId, imp.status.portfolioId, imp.csv), updatedAt: nowIso() };
   return imp.status;
 }
 
@@ -207,7 +305,7 @@ const REQUIRED = ['date', 'type', 'symbol', 'quantity', 'price', 'fee', 'currenc
 /** Case-insensitive header → schema key (e.g. "FXRATE" → "fxRate"). */
 const COLUMN_BY_LOWER = new Map<string, string>(CSV_COLUMNS.map((c) => [c.toLowerCase(), c]));
 
-function processCsv(importId: string, csv: string): Partial<ImportStatus> {
+function processCsv(importId: string, portfolioId: string, csv: string): Partial<ImportStatus> {
   const [header, ...data] = parseCsv(csv);
   const cols = (header ?? []).map((h) => COLUMN_BY_LOWER.get(h.toLowerCase()) ?? h.toLowerCase());
   const missing = REQUIRED.filter((c) => !cols.includes(c));
@@ -216,11 +314,14 @@ function processCsv(importId: string, csv: string): Partial<ImportStatus> {
   }
   const errors: { row: number; message: string }[] = [];
   const parsed: { row: number; input: TransactionInput }[] = [];
+  if (!state.portfolios.some((p) => p.portfolioId === portfolioId)) {
+    return { status: 'FAILED', rowCount: data.length, importedCount: 0, errors: [{ row: 0, message: 'The target portfolio no longer exists' }] };
+  }
   data.forEach((cells, i) => {
     const row = i + 2;
     const obj = Object.fromEntries(cols.map((c, j) => [c, cells[j] ?? '']));
     const res = csvRowSchema.safeParse(obj);
-    if (res.success) parsed.push({ row, input: res.data });
+    if (res.success) parsed.push({ row, input: { ...res.data, portfolioId } });
     else
       errors.push({
         row,
@@ -228,11 +329,11 @@ function processCsv(importId: string, csv: string): Partial<ImportStatus> {
       });
   });
   if (!errors.length) {
+    const incoming = parsed.map(({ row, input }) => ({ ...input, id: `${importId}-${row}`, userId: MOCK_USER_ID, createdAt: nowIso() }));
     try {
-      buildPositions([
-        ...state.transactions,
-        ...parsed.map(({ row, input }) => ({ ...input, id: `${importId}-${row}`, userId: MOCK_USER_ID, createdAt: nowIso() })),
-      ]);
+      // Oversell check against the target portfolio, currency consistency against everything.
+      buildPositions([...state.transactions.filter((t) => t.portfolioId === portfolioId), ...incoming]);
+      buildPositions([...state.transactions, ...incoming]);
     } catch (err) {
       if (!(err instanceof PortfolioError)) throw err;
       errors.push({ row: parsed.find((p) => err.message.includes(` ${p.input.symbol} `))?.row ?? 0, message: err.message });
