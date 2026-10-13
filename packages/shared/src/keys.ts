@@ -4,7 +4,8 @@
  *
  * | Entity          | PK                 | SK                        | entityType      |
  * |-----------------|--------------------|---------------------------|-----------------|
- * | Transaction     | USER#{userId}      | TXN#{date}#{id}           | TRANSACTION     |
+ * | Portfolio       | USER#{userId}      | PORTFOLIO#{portfolioId}   | PORTFOLIO       |
+ * | Transaction     | USER#{userId}      | TXN#{portfolioId}#{date}#{id} | TRANSACTION |
  * | Import status   | USER#{userId}      | IMPORT#{importId}         | IMPORT          |
  * | User registry   | USERS              | USER#{userId}             | USER            |
  * | Tracked ticker  | TRACKED            | TICKER#{symbol}           | TRACKED_TICKER  |
@@ -16,6 +17,7 @@
  * | FX daily fixing | FX#{base}          | DAY#{date}                | FX_DAY          |
  */
 export const ENTITY = {
+  portfolio: 'PORTFOLIO',
   transaction: 'TRANSACTION',
   import: 'IMPORT',
   user: 'USER',
@@ -30,8 +32,16 @@ export const ENTITY = {
 
 export const keys = {
   user: (userId: string) => ({ PK: `USER#${userId}` }),
-  transaction: (userId: string, date: string, id: string) => ({ PK: `USER#${userId}`, SK: `TXN#${date}#${id}` }),
+  portfolio: (userId: string, portfolioId: string) => ({ PK: `USER#${userId}`, SK: `PORTFOLIO#${portfolioId}` }),
+  portfolioPrefix: 'PORTFOLIO#',
+  transaction: (userId: string, portfolioId: string, date: string, id: string) => ({
+    PK: `USER#${userId}`,
+    SK: `TXN#${portfolioId}#${date}#${id}`,
+  }),
+  /** begins_with prefix for all transactions of a user (all portfolios). */
   transactionPrefix: 'TXN#',
+  /** begins_with prefix for the transactions of one portfolio. */
+  portfolioTransactionPrefix: (portfolioId: string) => `TXN#${portfolioId}#`,
   import: (userId: string, importId: string) => ({ PK: `USER#${userId}`, SK: `IMPORT#${importId}` }),
   userRegistry: (userId: string) => ({ PK: 'USERS', SK: `USER#${userId}` }),
   trackedTicker: (symbol: string) => ({ PK: 'TRACKED', SK: `TICKER#${symbol}` }),

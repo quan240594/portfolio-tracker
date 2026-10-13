@@ -19,6 +19,7 @@ export const DETAIL_TYPES = {
 
 export interface TransactionsChangedDetail {
   userId: string;
+  portfolioId: string;
   symbols: string[];
   reason: 'CREATED' | 'DELETED' | 'IMPORTED';
   importId?: string;

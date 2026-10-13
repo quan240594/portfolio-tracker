@@ -15,13 +15,19 @@ const symbol = z
   .max(20)
   .regex(/^[A-Za-z0-9.\-:^=]+$/, 'Invalid symbol')
   .transform((s) => s.toUpperCase());
+/** `default` or a lower-case UUID; keeps DynamoDB sort keys free of `#`. */
+export const portfolioIdSchema = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9-]{0,63}$/, 'Invalid portfolio id');
+const portfolioName = z.string().trim().min(1, 'Name is required').max(60);
+
 const currency = z
   .string()
   .trim()
   .length(3)
   .transform((s) => s.toUpperCase());
 
-export const transactionInputSchema = z.object({
+const transactionFields = z.object({
   date: isoDate,
   type: z.enum(TRANSACTION_TYPES),
   symbol,
@@ -33,11 +39,13 @@ export const transactionInputSchema = z.object({
   // Empty/null means "not provided" (use the ECB fixing), not 0.
   fxRate: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number().positive().optional()),
 });
+export const transactionInputSchema = transactionFields.extend({ portfolioId: portfolioIdSchema });
 export type TransactionInput = z.infer<typeof transactionInputSchema>;
 
 /** CSV header (order-insensitive, case-insensitive): date,type,symbol,quantity,price,fee,currency[,note][,fxRate] */
 export const CSV_COLUMNS = ['date', 'type', 'symbol', 'quantity', 'price', 'fee', 'currency', 'note', 'fxRate'] as const;
-export const csvRowSchema = transactionInputSchema.extend({
+/** CSV rows carry no portfolioId: the whole import targets the portfolio chosen in POST /imports. */
+export const csvRowSchema = transactionFields.extend({
   type: z
     .string()
     .trim()
@@ -48,17 +56,27 @@ export const csvRowSchema = transactionInputSchema.extend({
   fxRate: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number().positive().optional()),
 });
 
-export const allocationQuerySchema = z.object({
+/** Optional `?portfolioId=` on read endpoints; omitted or `all` = every portfolio combined. */
+export const ALL_PORTFOLIOS = 'all';
+export const portfolioScopeSchema = z.object({
+  portfolioId: portfolioIdSchema.optional(),
+});
+
+export const allocationQuerySchema = portfolioScopeSchema.extend({
   by: z.enum(ALLOCATION_DIMENSIONS).default('assetClass'),
 });
 
 export const HISTORY_RANGES = ['1M', '3M', '6M', 'YTD', '1Y', 'ALL'] as const;
 export type HistoryRange = (typeof HISTORY_RANGES)[number];
-export const historyQuerySchema = z.object({
+export const historyQuerySchema = portfolioScopeSchema.extend({
   range: z.enum(HISTORY_RANGES).default('1Y'),
 });
 
+export const createPortfolioSchema = z.object({ name: portfolioName });
+export const updatePortfolioSchema = z.object({ name: portfolioName });
+
 export const createImportSchema = z.object({
+  portfolioId: portfolioIdSchema,
   fileName: z
     .string()
     .min(1)

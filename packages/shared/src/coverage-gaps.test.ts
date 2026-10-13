@@ -21,6 +21,7 @@ let seq = 0;
 const tx = (p: Partial<Transaction>): Transaction => ({
   id: `g${++seq}`,
   userId: 'u',
+  portfolioId: 'default',
   date: '2026-01-02',
   type: 'BUY',
   symbol: 'A',
@@ -35,7 +36,7 @@ const tx = (p: Partial<Transaction>): Transaction => ({
 describe('keys', () => {
   it('builds every single-table key in the documented format', () => {
     expect(keys.user('u')).toEqual({ PK: 'USER#u' });
-    expect(keys.transaction('u', '2026-01-02', 't1')).toEqual({ PK: 'USER#u', SK: 'TXN#2026-01-02#t1' });
+    expect(keys.transaction('u', 'p1', '2026-01-02', 't1')).toEqual({ PK: 'USER#u', SK: 'TXN#p1#2026-01-02#t1' });
     expect(keys.import('u', 'i1')).toEqual({ PK: 'USER#u', SK: 'IMPORT#i1' });
     expect(keys.userRegistry('u')).toEqual({ PK: 'USERS', SK: 'USER#u' });
     expect(keys.trackedTicker('AAPL')).toEqual({ PK: 'TRACKED', SK: 'TICKER#AAPL' });
@@ -137,11 +138,11 @@ describe('schemas', () => {
     expect(csvRowSchema.parse({ ...row, fee: null }).fee).toBe(0);
     expect(csvRowSchema.parse(row).fee).toBe(0);
     expect(csvRowSchema.parse({ ...row, note: 'hi' }).note).toBe('hi');
-    expect(transactionInputSchema.parse({ ...row, type: 'SELL' }).fee).toBe(0);
+    expect(transactionInputSchema.parse({ ...row, portfolioId: 'default', type: 'SELL' }).fee).toBe(0);
   });
   it('rejects bad symbols and currencies', () => {
     const row = { date: '2026-01-02', type: 'BUY', quantity: 1, price: 1, currency: 'EUR' };
-    expect(transactionInputSchema.safeParse({ ...row, symbol: 'BAD SYMBOL' }).success).toBe(false);
-    expect(transactionInputSchema.safeParse({ ...row, symbol: 'A', currency: 'EURO' }).success).toBe(false);
+    expect(transactionInputSchema.safeParse({ ...row, portfolioId: 'default', symbol: 'BAD SYMBOL' }).success).toBe(false);
+    expect(transactionInputSchema.safeParse({ ...row, portfolioId: 'default', symbol: 'A', currency: 'EURO' }).success).toBe(false);
   });
 });
