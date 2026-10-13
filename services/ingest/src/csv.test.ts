@@ -18,10 +18,67 @@ describe('parseImportCsv', () => {
     expect(res.ok).toBe(true);
   });
 
+  describe('optional fxRate column', () => {
+    it('is not required', () => {
+      const res = parseImportCsv(`${HEADER}\n2025-01-02,BUY,AAPL,1,1,0,USD\n`);
+      expect(res).toMatchObject({ ok: true, rows: [{ input: expect.not.objectContaining({ fxRate: expect.anything() }) }] });
+    });
+
+    it('parses a valid broker rate, matching the header case-insensitively', () => {
+      for (const name of ['fxRate', 'FXRATE', 'fxrate', ' FxRate ']) {
+        const res = parseImportCsv(`${HEADER},${name}\n2025-01-02,BUY,AAPL,10,150,1,USD, 1.0842 \n`);
+        expect(res).toEqual({
+          ok: true,
+          rowCount: 1,
+          rows: [{ row: 1, input: { date: '2025-01-02', type: 'BUY', symbol: 'AAPL', quantity: 10, price: 150, fee: 1, currency: 'USD', fxRate: 1.0842 } }],
+        });
+      }
+    });
+
+    it('treats an empty value as absent', () => {
+      const res = parseImportCsv(`${HEADER},fxRate,note\n2025-01-02,BUY,AAPL,1,1,0,USD,,n\n2025-01-03,BUY,AAPL,1,1,0,USD,1.1,\n`);
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.rows[0]!.input.fxRate).toBeUndefined();
+        expect(res.rows[1]!.input).toMatchObject({ fxRate: 1.1 });
+      }
+    });
+
+    it('reports non-numeric, zero and negative rates as row errors', () => {
+      const res = parseImportCsv(`${HEADER},fxRate\n2025-01-02,BUY,AAPL,1,1,0,USD,abc\n2025-01-02,BUY,AAPL,1,1,0,USD,0\n2025-01-02,BUY,AAPL,1,1,0,USD,-1.1\n`);
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+        expect(res.errors.map((e) => e.row)).toEqual([1, 2, 3]);
+        for (const e of res.errors) expect(e.message).toMatch(/^fxRate: /);
+      }
+    });
+
+    it('keeps the field-count rule: an fxRate header requires a value slot on every row', () => {
+      const res = parseImportCsv(`${HEADER},fxRate\n2025-01-02,BUY,AAPL,1,1,0,USD\n2025-01-02,BUY,AAPL,1,1,0,USD,1.1,extra\n`);
+      expect(res).toEqual({
+        ok: false,
+        rowCount: 2,
+        errors: [
+          { row: 1, message: 'Expected 8 fields but found 7' },
+          { row: 2, message: 'Expected 8 fields but found 9 — quote values containing commas' },
+        ],
+      });
+    });
+
+    it('rejects a duplicated fxRate column regardless of case', () => {
+      const res = parseImportCsv(`${HEADER},fxRate,FXRATE\n2025-01-02,BUY,AAPL,1,1,0,USD,1.1,1.2\n`);
+      expect(res).toEqual({ ok: false, rowCount: 1, errors: [{ row: 0, message: 'Duplicate column(s): fxRate' }] });
+    });
+  });
+
   it('reports missing required columns as row 0', () => {
     const res = parseImportCsv('date,type,symbol,quantity\n2025-01-02,BUY,AAPL,1\n');
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.errors[0]).toMatchObject({ row: 0, message: expect.stringContaining('price, fee, currency') });
+    if (!res.ok) {
+      expect(res.errors[0]).toMatchObject({ row: 0, message: expect.stringContaining('price, fee, currency. Expected header: ') });
+      expect(res.errors[0]!.message).toContain('date,type,symbol,quantity,price,fee,currency,note,fxRate');
+      expect(res.errors[0]!.message).not.toMatch(/column\(s\):[^.]*(note|fxRate)/);
+    }
   });
 
   it('reports every invalid row with 1-based row numbers', () => {

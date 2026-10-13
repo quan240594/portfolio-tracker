@@ -1,6 +1,7 @@
 import type {
   DividendEvent,
   EodPrice,
+  FxDay,
   FxRates,
   ImportStatus,
   InstrumentProfile,
@@ -19,6 +20,7 @@ export class InMemoryRepository implements Repository {
   quotes: Record<string, Quote> = {};
   profiles: Record<string, InstrumentProfile> = {};
   fx: FxRates | null = null;
+  fxDays: FxDay[] = [];
   eod: EodPrice[] = [];
   dividendEvents: DividendEvent[] = [];
   users = new Set<string>();
@@ -45,6 +47,11 @@ export class InMemoryRepository implements Repository {
   }
   async getFx(base: string) {
     return this.fx && this.fx.base === base ? this.fx : null;
+  }
+  async getFxHistory(base: string, from: string, to: string) {
+    return this.fxDays
+      .filter((d) => d.base === base && d.date >= from && d.date <= to)
+      .sort((a, b) => a.date.localeCompare(b.date));
   }
   async getEod(symbol: string, from: string, to: string) {
     return this.eod.filter((e) => e.symbol === symbol && e.date >= from && e.date <= to);

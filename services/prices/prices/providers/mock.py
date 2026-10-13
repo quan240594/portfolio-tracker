@@ -13,7 +13,7 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime, time, timedelta
 
 from ..errors import SymbolNotFoundError
-from ..models import DividendEvent, EodPrice, FxRates, InstrumentProfile, Quote, iso_datetime
+from ..models import DividendEvent, EodPrice, FxDay, FxRates, InstrumentProfile, Quote, iso_datetime
 from ..symbols import currency_for, is_crypto, minimal_profile
 
 ANCHOR = date(2015, 1, 1)
@@ -224,19 +224,56 @@ class MockProvider:
         return out
 
 
+FX_AMPLITUDE: dict[str, float] = {"DKK": 0.002}  # DKK is pegged to the EUR (ERM II)
+
+
+def mock_eur_rate(currency: str, d: date) -> float:
+    """Smooth deterministic EUR→`currency` fixing: MOCK_FX_RATES level x two seeded sine waves (±~6%)."""
+    seed = symbol_seed(f"FX:{currency}")
+    amplitude = FX_AMPLITUDE.get(currency, 0.05)
+    t = (d - ANCHOR).days
+    slow = 2 * math.pi * t / (700 + seed % 500) + (seed % 628) / 100
+    fast = 2 * math.pi * t / (60 + (seed >> 16) % 60) + ((seed >> 32) % 628) / 100
+    wave = amplitude * (math.sin(slow) + 0.2 * math.sin(fast))
+    return round(MOCK_FX_RATES[currency] * math.exp(wave), 6)
+
+
+def _last_business_day(d: date) -> date:
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
+
+
 class MockFx:
+    """Offline FX: ECB-like fixings on weekdays only, consistent between `get_latest` and `get_history`."""
+
     name = "mock-fx"
 
     def __init__(self, now: Callable[[], datetime] | None = None) -> None:
         self._now = now or (lambda: datetime.now(UTC))
 
+    def _rates(self, base: str, d: date) -> dict[str, float]:
+        eur = {c: mock_eur_rate(c, d) for c in MOCK_FX_RATES}
+        if base == "EUR":
+            return eur
+        if base not in eur:
+            raise SymbolNotFoundError(f"mock-fx: unsupported base {base}", provider=self.name)
+        per_eur = eur[base]
+        rates = {c: round(r / per_eur, 6) for c, r in eur.items() if c != base}
+        rates["EUR"] = round(1 / per_eur, 6)
+        return rates
+
     def get_latest(self, base: str) -> FxRates:
-        if base != "EUR":
-            if base not in MOCK_FX_RATES:
-                raise SymbolNotFoundError(f"mock-fx: unsupported base {base}", provider=self.name)
-            per_eur = MOCK_FX_RATES[base]
-            rates = {c: round(r / per_eur, 6) for c, r in MOCK_FX_RATES.items() if c != base}
-            rates["EUR"] = round(1 / per_eur, 6)
-        else:
-            rates = dict(MOCK_FX_RATES)
-        return FxRates(base=base, rates=rates, asOf=iso_datetime(self._now()))
+        now = self._now()
+        day = _last_business_day(now.astimezone(UTC).date())
+        return FxRates(base=base, rates=self._rates(base, day), asOf=iso_datetime(now), date=day.isoformat())
+
+    def get_history(self, base: str, start: date, end: date) -> list[FxDay]:
+        end = min(end, self._now().astimezone(UTC).date())
+        out: list[FxDay] = []
+        d = start
+        while d <= end:
+            if d.weekday() < 5:
+                out.append(FxDay(base=base, date=d.isoformat(), rates=self._rates(base, d)))
+            d += timedelta(days=1)
+        return out

@@ -30,11 +30,13 @@ export const transactionInputSchema = z.object({
   fee: z.coerce.number().nonnegative().default(0),
   currency,
   note: z.string().max(500).optional(),
+  // Empty/null means "not provided" (use the ECB fixing), not 0.
+  fxRate: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number().positive().optional()),
 });
 export type TransactionInput = z.infer<typeof transactionInputSchema>;
 
-/** Required CSV header (order-insensitive, case-insensitive): date,type,symbol,quantity,price,fee,currency[,note] */
-export const CSV_COLUMNS = ['date', 'type', 'symbol', 'quantity', 'price', 'fee', 'currency', 'note'] as const;
+/** CSV header (order-insensitive, case-insensitive): date,type,symbol,quantity,price,fee,currency[,note][,fxRate] */
+export const CSV_COLUMNS = ['date', 'type', 'symbol', 'quantity', 'price', 'fee', 'currency', 'note', 'fxRate'] as const;
 export const csvRowSchema = transactionInputSchema.extend({
   type: z
     .string()
@@ -43,6 +45,7 @@ export const csvRowSchema = transactionInputSchema.extend({
     .pipe(z.enum(TRANSACTION_TYPES)),
   fee: z.preprocess((v) => (v === '' || v == null ? 0 : v), z.coerce.number().nonnegative()),
   note: z.preprocess((v) => (v === '' ? undefined : v), z.string().max(500).optional()),
+  fxRate: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number().positive().optional()),
 });
 
 export const allocationQuerySchema = z.object({

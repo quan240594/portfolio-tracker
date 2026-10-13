@@ -20,7 +20,7 @@ from prices.errors import (
 from prices.handlers import amsterdam_hour, parse_symbols
 from prices.logging_setup import JsonFormatter, setup_logging
 from prices.models import DividendEvent, EodPrice, InstrumentProfile, Quote
-from prices.providers.mock import MockProvider
+from prices.providers.mock import MockFx, MockProvider
 from tests.conftest import Infra
 
 EU_WINDOW = datetime(2026, 10, 13, 16, 30, tzinfo=UTC)  # 18:30 Europe/Amsterdam (CEST)
@@ -72,8 +72,14 @@ def test_scheduled_refresh_writes_exact_items_and_emits_event(infra: Infra) -> N
     fx = infra.get("FX#EUR", "LATEST")
     assert fx is not None
     assert set(fx) == {"PK", "SK", "entityType", "base", "rates", "asOf"}
-    assert fx["entityType"] == "FX" and fx["base"] == "EUR" and fx["rates"]["USD"] == Decimal("1.085")
+    latest_usd = MockFx(now=lambda: EU_WINDOW).get_latest("EUR").rates["USD"]
+    assert (
+        fx["entityType"] == "FX" and fx["base"] == "EUR" and fx["rates"]["USD"] == Decimal(repr(latest_usd))
+    )
     assert all(isinstance(v, Decimal) for v in fx["rates"].values())
+    day = infra.get("FX#EUR", "DAY#2026-10-13")
+    assert day is not None and day["rates"] == fx["rates"]
+    assert summary["fxHistoryOk"] is True and summary["fxDaysWritten"] == 9  # 2026-10-01..13, weekdays
 
     events = infra.events()
     assert len(events) == 1

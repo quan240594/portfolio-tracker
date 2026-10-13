@@ -38,3 +38,6 @@ export function renderApp(route = '/') {
     ),
   };
 }
+
+/** Intl separates currency symbols with a no-break space; DOM text matchers normalise it to a plain space. */
+export const sp = (s: string) => s.replace(/\u00a0/g, ' ');

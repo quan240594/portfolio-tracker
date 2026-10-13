@@ -85,6 +85,48 @@ describe('DynamoRepository queries', () => {
   });
 });
 
+describe('DynamoRepository.getFxHistory', () => {
+  it('queries the FX partition for DAY# keys between from and to and maps items to FxDay', async () => {
+    ddbMock.on(QueryCommand).resolves({
+      Items: [
+        { PK: 'FX#EUR', SK: 'DAY#2025-01-02', entityType: 'FX_DAY', base: 'EUR', date: '2025-01-02', rates: { USD: 1.03, GBP: 0.83 }, source: 'ECB' },
+      ],
+    });
+    expect(await repo.getFxHistory('EUR', '2024-12-26', '2025-01-31')).toEqual([{ base: 'EUR', date: '2025-01-02', rates: { USD: 1.03, GBP: 0.83 } }]);
+    expect(ddbMock.commandCalls(QueryCommand)[0]!.args[0].input).toEqual({
+      TableName: 'tbl',
+      KeyConditionExpression: 'PK = :pk AND SK BETWEEN :from AND :to',
+      ExpressionAttributeValues: { ':pk': 'FX#EUR', ':from': 'DAY#2024-12-26', ':to': 'DAY#2025-01-31' },
+      ExclusiveStartKey: undefined,
+    });
+  });
+
+  it('follows LastEvaluatedKey until every page is read, keeping DynamoDB order', async () => {
+    ddbMock
+      .on(QueryCommand)
+      .resolvesOnce({ Items: [{ PK: 'FX#EUR', SK: 'DAY#2025-01-02', base: 'EUR', date: '2025-01-02', rates: { USD: 1.03 } }], LastEvaluatedKey: { PK: 'FX#EUR', SK: 'DAY#2025-01-02' } })
+      .resolvesOnce({ Items: [], LastEvaluatedKey: { PK: 'FX#EUR', SK: 'DAY#2025-01-03' } })
+      .resolvesOnce({ Items: [{ PK: 'FX#EUR', SK: 'DAY#2025-01-06', base: 'EUR', date: '2025-01-06', rates: { USD: 1.04 } }] });
+    const days = await repo.getFxHistory('EUR', '2025-01-01', '2025-01-31');
+    expect(days.map((d) => d.date)).toEqual(['2025-01-02', '2025-01-06']);
+    expect(ddbMock.commandCalls(QueryCommand).map((c) => c.args[0].input.ExclusiveStartKey)).toEqual([
+      undefined,
+      { PK: 'FX#EUR', SK: 'DAY#2025-01-02' },
+      { PK: 'FX#EUR', SK: 'DAY#2025-01-03' },
+    ]);
+  });
+
+  it('derives base/date from the keys and defaults rates when attributes are missing', async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [{ PK: 'FX#EUR', SK: 'DAY#2025-01-02', entityType: 'FX_DAY' }] });
+    expect(await repo.getFxHistory('EUR', '2025-01-01', '2025-01-31')).toEqual([{ base: 'EUR', date: '2025-01-02', rates: {} }]);
+  });
+
+  it('returns an empty list when there are no fixings', async () => {
+    ddbMock.on(QueryCommand).resolves({});
+    expect(await repo.getFxHistory('EUR', '2025-01-01', '2025-01-31')).toEqual([]);
+  });
+});
+
 describe('DynamoRepository BatchGet', () => {
   it('getProfiles requests PROFILE keys and indexes results by symbol', async () => {
     ddbMock.on(BatchGetCommand).resolves({
@@ -156,6 +198,21 @@ describe('DynamoRepository single-item operations', () => {
     ddbMock.on(DeleteCommand).resolves({});
     await repo.deleteTransaction(txn);
     expect(ddbMock.commandCalls(DeleteCommand)[0]!.args[0].input).toEqual({ TableName: 'tbl', Key: { PK: 'USER#u', SK: 'TXN#2025-01-01#i' } });
+  });
+
+  it('putTransaction stores a broker fxRate with the transaction', async () => {
+    ddbMock.on(PutCommand).resolves({});
+    await repo.putTransaction({ ...txn, currency: 'USD', fxRate: 1.0842 });
+    expect(ddbMock.commandCalls(PutCommand)[0]!.args[0].input).toEqual({
+      TableName: 'tbl',
+      Item: { PK: 'USER#u', SK: 'TXN#2025-01-01#i', entityType: 'TRANSACTION', ...txn, currency: 'USD', fxRate: 1.0842 },
+      ConditionExpression: 'attribute_not_exists(PK)',
+    });
+  });
+
+  it('listTransactions returns the stored fxRate', async () => {
+    ddbMock.on(QueryCommand).resolves({ Items: [{ PK: 'USER#u', SK: 'TXN#2025-01-01#i', entityType: 'TRANSACTION', ...txn, fxRate: 1.0842 }] });
+    expect(await repo.listTransactions('u')).toEqual([{ ...txn, fxRate: 1.0842 }]);
   });
 
   it('propagates conditional-check failures from putTransaction', async () => {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import type { Holding } from '@portfolio/shared';
 import { Change } from '../../components/Change';
 import { formatMoney, formatPercent, formatQuantity, formatWeight } from '../../lib/format';
@@ -8,21 +8,57 @@ interface Column {
   key: SortKey;
   label: string;
   align: 'left' | 'right';
+  /** Longer explanation, shown as a tooltip and linked to the footnote below the table. */
+  hint?: string;
 }
+
+export const CURRENCY_EFFECT_HINT =
+  'The part of the unrealized P&L caused by exchange-rate moves since purchase (e.g. a weaker US dollar against the euro). Holdings that trade in euros have none.';
 
 const COLUMNS: Column[] = [
   { key: 'symbol', label: 'Holding', align: 'left' },
   { key: 'quantity', label: 'Quantity', align: 'right' },
-  { key: 'averageCostLocal', label: 'Avg cost', align: 'right' },
-  { key: 'priceLocal', label: 'Price', align: 'right' },
+  { key: 'averageCostBase', label: 'Avg cost', align: 'right' },
+  { key: 'priceBase', label: 'Price', align: 'right' },
   { key: 'marketValue', label: 'Market value', align: 'right' },
   { key: 'unrealizedPnl', label: 'Unrealized P&L', align: 'right' },
   { key: 'unrealizedPnlPct', label: 'P&L %', align: 'right' },
+  { key: 'currencyEffect', label: 'Currency effect', align: 'right', hint: CURRENCY_EFFECT_HINT },
   { key: 'dayChange', label: 'Day change', align: 'right' },
   { key: 'weight', label: 'Weight', align: 'right' },
 ];
 
-const localDigits = (h: Holding) => (h.priceLocal < 1 ? 6 : 2);
+const unitDigits = (price: number) => (price < 1 ? 6 : 2);
+
+/** Per-unit amount in the base currency, with the trading-currency amount underneath for foreign holdings. */
+function UnitAmount({ base, local, holding, currency }: { base: number; local: number; holding: Holding; currency: string }) {
+  return (
+    <>
+      <span className="block">{formatMoney(base, currency, { maxDigits: unitDigits(holding.priceBase) })}</span>
+      {holding.currency !== currency && (
+        <span className="muted block text-xs" title={`In ${holding.currency}, the trading currency`}>
+          {formatMoney(local, holding.currency, { maxDigits: unitDigits(holding.priceLocal) })}
+        </span>
+      )}
+    </>
+  );
+}
+
+function CurrencyEffect({ holding, currency }: { holding: Holding; currency: string }) {
+  if (holding.currency === currency) {
+    return (
+      <span className="muted" title={`No currency effect: ${holding.symbol} trades in ${currency}`}>
+        <span aria-hidden="true">—</span>
+        <span className="sr-only">none</span>
+      </span>
+    );
+  }
+  return (
+    <span title={CURRENCY_EFFECT_HINT}>
+      <Change amount={holding.currencyEffect} currency={currency} />
+    </span>
+  );
+}
 
 export function StaleBadge() {
   return (
@@ -55,6 +91,7 @@ interface Props {
 }
 
 export function HoldingsTable({ holdings, currency }: Props) {
+  const hintId = useId();
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'marketValue', dir: 'desc' });
   const sorted = useMemo(() => sortHoldings(holdings, sort.key, sort.dir), [holdings, sort]);
 
@@ -80,6 +117,8 @@ export function HoldingsTable({ holdings, currency }: Props) {
                   >
                     <button
                       type="button"
+                      title={col.hint}
+                      aria-describedby={col.hint ? hintId : undefined}
                       onClick={() => toggle(col.key)}
                       className={`inline-flex items-center gap-1 rounded hover:text-slate-900 dark:hover:text-white ${active ? 'text-slate-900 dark:text-white' : 'muted'}`}
                     >
@@ -104,14 +143,21 @@ export function HoldingsTable({ holdings, currency }: Props) {
                   <div className="muted max-w-[16rem] truncate text-xs">{h.name}</div>
                 </th>
                 <td className="px-3 py-2.5 text-right tabular-nums">{formatQuantity(h.quantity)}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{formatMoney(h.averageCostLocal, h.currency, { maxDigits: localDigits(h) })}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{formatMoney(h.priceLocal, h.currency, { maxDigits: localDigits(h) })}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums">
+                  <UnitAmount base={h.averageCostBase} local={h.averageCostLocal} holding={h} currency={currency} />
+                </td>
+                <td className="px-3 py-2.5 text-right tabular-nums">
+                  <UnitAmount base={h.priceBase} local={h.priceLocal} holding={h} currency={currency} />
+                </td>
                 <td className="px-3 py-2.5 text-right font-medium tabular-nums">{formatMoney(h.marketValue, currency)}</td>
                 <td className="px-3 py-2.5 text-right">
                   <Change amount={h.unrealizedPnl} currency={currency} />
                 </td>
                 <td className="px-3 py-2.5 text-right">
                   <Change pct={h.unrealizedPnlPct} value={h.unrealizedPnl} />
+                </td>
+                <td className="px-3 py-2.5 text-right">
+                  <CurrencyEffect holding={h} currency={currency} />
                 </td>
                 <td className="px-3 py-2.5 text-right">
                   <div className="flex flex-col items-end">
@@ -173,15 +219,27 @@ export function HoldingsTable({ holdings, currency }: Props) {
                   <dd className="tabular-nums">{formatQuantity(h.quantity)}</dd>
                 </div>
                 <div>
-                  <dt className="muted">Price / avg cost</dt>
+                  <dt className="muted">Price</dt>
                   <dd className="tabular-nums">
-                    {formatMoney(h.priceLocal, h.currency, { maxDigits: localDigits(h) })} / {formatMoney(h.averageCostLocal, h.currency, { maxDigits: localDigits(h) })}
+                    <UnitAmount base={h.priceBase} local={h.priceLocal} holding={h} currency={currency} />
+                  </dd>
+                </div>
+                <div>
+                  <dt className="muted">Avg cost</dt>
+                  <dd className="tabular-nums">
+                    <UnitAmount base={h.averageCostBase} local={h.averageCostLocal} holding={h} currency={currency} />
                   </dd>
                 </div>
                 <div>
                   <dt className="muted">Unrealized P&amp;L</dt>
                   <dd>
                     <Change amount={h.unrealizedPnl} pct={h.unrealizedPnlPct} currency={currency} />
+                  </dd>
+                </div>
+                <div>
+                  <dt className="muted">Currency effect</dt>
+                  <dd>
+                    <CurrencyEffect holding={h} currency={currency} />
                   </dd>
                 </div>
                 <div>
@@ -195,6 +253,11 @@ export function HoldingsTable({ holdings, currency }: Props) {
           ))}
         </ul>
       </div>
+
+      <p id={hintId} className="muted mt-3 text-xs">
+        Avg cost and price are in {currency} (purchase-date and today's exchange rates); for holdings in another currency the
+        trading-currency amount is shown underneath. Currency effect: {CURRENCY_EFFECT_HINT.charAt(0).toLowerCase() + CURRENCY_EFFECT_HINT.slice(1)}
+      </p>
     </>
   );
 }

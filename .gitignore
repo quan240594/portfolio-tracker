@@ -28,3 +28,4 @@ __pycache__/
 .scannerwork/
 # Python coverage report consumed by Sonar
 coverage.xml
+.coverage

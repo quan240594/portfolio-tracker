@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import date
 
 DEFAULT_REGION = "eu-west-1"
+DEFAULT_FX_HISTORY_START = date(2015, 1, 1)
+
+
+def _parse_date(raw: str | None, default: date) -> date:
+    return date.fromisoformat(raw.strip()) if raw and raw.strip() else default
 
 
 @dataclass(frozen=True)
@@ -18,6 +24,7 @@ class Settings:
     eu_refresh_hours: frozenset[int]
     region: str
     endpoint_url: str | None
+    fx_history_start: date = DEFAULT_FX_HISTORY_START
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -35,4 +42,5 @@ class Settings:
             eu_refresh_hours=hours,
             region=os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or DEFAULT_REGION,
             endpoint_url=os.environ.get("AWS_ENDPOINT_URL") or None,
+            fx_history_start=_parse_date(os.environ.get("FX_HISTORY_START"), DEFAULT_FX_HISTORY_START),
         )

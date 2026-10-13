@@ -76,7 +76,8 @@ Market-data adapters map canonical ↔ provider symbols.
 
 ## CSV import format
 
-Header (case-insensitive, any order): `date,type,symbol,quantity,price,fee,currency[,note]`.
+Header (case-insensitive, any order): `date,type,symbol,quantity,price,fee,currency[,note][,fxRate]`.
+`fxRate` = units of `currency` per 1 EUR as applied by the broker (optional; ECB fixing used when empty).
 Validated by `csvRowSchema`. Max 1 MB / 5000 rows. **All-or-nothing**: if any row fails validation
 or the import would oversell a position, nothing is written and the import is `FAILED` with
 row-level errors. Transaction ids from imports are deterministic (`{importId}-{rowNumber}`) so
@@ -93,7 +94,8 @@ SQS redelivery is idempotent.
   `if_not_exists` / conditional puts so concurrent writers never clobber `createdAt`).
 - Profile `country`: full English name (`United States`, `Netherlands`); `Global` for world funds/crypto.
   `sector`: free text from the provider, `Diversified` for broad ETFs.
-- FX item: `rates` is a DynamoDB **map** (exception to "stored flat") and excludes the base currency.
+- FX items (`LATEST` and `DAY#{date}`, entityType `FX` / `FX_DAY`): `rates` is a DynamoDB **map** (exception to
+  "stored flat") and excludes the base currency. `FX_DAY` also stores `date`.
 - Minor-unit quotes (`GBX`/`GBp`, LSE) are converted to the major currency (`GBP`, ÷100) by the prices
   service before writing, so every stored price/amount is in an ISO-4217 major currency.
 
@@ -110,7 +112,22 @@ handler accepts both). Then:
 4. `pnpm --filter @portfolio/web dev` — Vite on `:5173`, proxies `/api/*` → `:3001` (prefix stripped).
 5. Optional: `cd services/prices && python -m prices.local refresh` with `MARKET_DATA_PROVIDER=mock`.
 
-## Known v1 limitations
+## Currency conversion (base currency EUR)
 
-- Cost basis is converted at the current FX rate (no historical FX), so FX effects are folded into returns.
+Every monetary value in API responses is in the portfolio base currency (`DEFAULT_BASE_CURRENCY = 'EUR'`)
+unless its field name ends in `Local`. Conversion is done only in `packages/shared` (`FxTimeline`):
+
+| Amount | Rate used |
+|---|---|
+| BUY cost, SELL proceeds, DIVIDEND received | `transaction.fxRate` (broker-applied) → ECB fixing of the transaction date (previous business day on weekends/holidays) → latest rate |
+| Market value, day change, upcoming dividends | latest rate (`FX#EUR` / `LATEST`) |
+| Value history | ECB fixing of each day; `invested` = cost basis at purchase-date rates |
+
+Realized P&L = proceeds at sell-date rate − average cost at purchase-date rates. `currencyEffect` = market value −
+value at the cost-weighted purchase rates, i.e. the part of unrealized P&L caused by EUR moving against the
+instrument currency. Daily fixings come from Frankfurter (ECB reference rates) and are stored as
+`FX#EUR` / `DAY#{date}` items by the prices service (backfilled from `FX_HISTORY_START`).
+
+## Known limitations
+
 - Single demo user unless a JWT authorizer (Cognito) is enabled.

@@ -16,6 +16,8 @@ import type {
 import type { HistoryRange, TransactionInput } from './schemas.js';
 
 export const DEMO_USER_ID = 'demo';
+/** Portfolio base currency: every monetary value in API responses (unless suffixed `Local`) is in it. */
+export const DEFAULT_BASE_CURRENCY = 'EUR';
 
 export const API_ROUTES = {
   health: 'GET /health',

@@ -18,21 +18,21 @@ import {
 
 describe('chart formatters', () => {
   it('formats compact money ticks in the given currency', () => {
-    expect(compactMoneyTick('EUR')(1_250_000)).toBe('€1.3M');
-    expect(compactMoneyTick('USD')(-1500)).toBe('\u2212US$1.5K');
+    expect(compactMoneyTick('EUR')(1_250_000)).toBe('€\u00a01,3\u00a0mln.');
+    expect(compactMoneyTick('USD')(-1500)).toBe('\u2212US$\u00a01,5K');
   });
 
   it('uses day/month ticks for short ranges and month/year ticks for long ranges', () => {
     const short = dateTickFormatter([{ date: '2024-01-01' }, { date: '2024-03-01' }]);
-    expect(short('2024-02-15')).toBe('15 Feb');
+    expect(short('2024-02-15')).toBe('15 feb');
     const long = dateTickFormatter([{ date: '2023-01-01' }, { date: '2024-03-01' }]);
-    expect(long('2024-02-15')).toBe('Feb 24');
-    expect(dateTickFormatter([])('2024-02-15')).toBe('15 Feb');
+    expect(long('2024-02-15')).toBe('feb 24');
+    expect(dateTickFormatter([])('2024-02-15')).toBe('15 feb');
   });
 
   it('formats tooltip labels', () => {
-    expect(dateLabel('2024-03-05')).toBe('5 Mar 2024');
-    expect(monthLabel('2024-11')).toBe('Nov 24');
+    expect(dateLabel('2024-03-05')).toBe('5 mrt 2024');
+    expect(monthLabel('2024-11')).toBe('nov 24');
   });
 
   it('maps series keys to human names', () => {
@@ -43,8 +43,8 @@ describe('chart formatters', () => {
   });
 
   it('formats tooltip values as money with a mapped or raw series name', () => {
-    expect(moneyTooltip('EUR', valueSeriesName)('1234.5', 'value')).toEqual(['€1,234.50', 'Value']);
-    expect(moneyTooltip('EUR')(10, 'Stocks')).toEqual(['€10.00', 'Stocks']);
+    expect(moneyTooltip('EUR', valueSeriesName)('1234.5', 'value')).toEqual(['€\u00a01.234,50', 'Value']);
+    expect(moneyTooltip('EUR')(10, 'Stocks')).toEqual(['€\u00a010,00', 'Stocks']);
   });
 });
 
@@ -76,8 +76,8 @@ describe('AllocationDonut', () => {
     const items = screen.getAllByRole('listitem');
     expect(items).toHaveLength(2);
     expect(items[0]).toHaveTextContent('Stock');
-    expect(items[0]).toHaveTextContent('€7.5K');
-    expect(items[0]).toHaveTextContent('75.0%');
+    expect(items[0]).toHaveTextContent('€ 7,5K');
+    expect(items[0]).toHaveTextContent('75,0%');
     // Short acronyms stay upper-case.
     expect(items[1]).toHaveTextContent('ETF');
   });
@@ -90,8 +90,8 @@ describe('AllocationDonut', () => {
     const other = items[7]!;
     expect(other).toHaveTextContent('Other');
     // 93 + 92 + 91 = 276; weights 0.093 + 0.092 + 0.091 = 27.6%
-    expect(other).toHaveTextContent('€276');
-    expect(other).toHaveTextContent('27.6%');
+    expect(other).toHaveTextContent('€ 276');
+    expect(other).toHaveTextContent('27,6%');
     expect(within(items[0]!).getByText('Label 0').previousSibling).toHaveStyle({ background: SERIES_COLORS[0] });
   });
 
@@ -115,7 +115,7 @@ describe('ValueChart', () => {
     );
     expect(
       screen.getByRole('img', {
-        name: 'Portfolio value from 1 Jan 2024 to 1 Jun 2024: €1,000.00 to €1,200.00; invested €1,000.00.',
+        name: 'Portfolio value from 1 jan 2024 to 1 jun 2024: €\u00a01.000,00 to €\u00a01.200,00; invested €\u00a01.000,00.',
       }),
     ).toBeInTheDocument();
   });
@@ -138,7 +138,7 @@ describe('DividendBarChart', () => {
       />,
     );
     expect(
-      screen.getByRole('img', { name: 'Monthly dividends across 3 months, totalling €15.50 received and upcoming.' }),
+      screen.getByRole('img', { name: 'Monthly dividends across 3 months, totalling €\u00a015,50 received and upcoming.' }),
     ).toBeInTheDocument();
   });
 });

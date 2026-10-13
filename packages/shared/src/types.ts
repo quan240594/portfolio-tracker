@@ -27,6 +27,12 @@ export interface Transaction {
   fee: number;
   currency: Currency;
   note?: string;
+  /**
+   * FX rate the broker applied at execution: units of `currency` per 1 unit of the portfolio base
+   * currency (ECB convention, e.g. 1.0842 for USD with base EUR). Takes precedence over the ECB
+   * historical rate for the trade date. Omit for trades in the base currency.
+   */
+  fxRate?: number;
   importId?: string;
   createdAt: IsoDateTime;
 }
@@ -73,6 +79,13 @@ export interface FxRates {
   asOf: IsoDateTime;
 }
 
+/** Daily ECB reference rates (business days only), same convention as FxRates. */
+export interface FxDay {
+  base: Currency;
+  date: IsoDate;
+  rates: Record<Currency, number>;
+}
+
 /** All monetary fields on Holding/Summary are in the portfolio base currency unless suffixed `Local`. */
 export interface Holding {
   symbol: string;
@@ -84,11 +97,17 @@ export interface Holding {
   quantity: number;
   averageCostLocal: number;
   priceLocal: number;
+  /** Average cost per unit in base currency, at the FX rates of the original purchases. */
+  averageCostBase: number;
+  /** Current price per unit in base currency, at today's FX rate. */
+  priceBase: number;
   priceStale: boolean;
   costBasis: number;
   marketValue: number;
   unrealizedPnl: number;
   unrealizedPnlPct: number;
+  /** Part of unrealizedPnl caused by FX moves since purchase (0 for base-currency holdings). */
+  currencyEffect: number;
   dayChange: number;
   dayChangePct: number;
   realizedPnl: number;
@@ -103,6 +122,8 @@ export interface PortfolioSummary {
   totalCost: number;
   unrealizedPnl: number;
   unrealizedPnlPct: number;
+  /** Part of unrealizedPnl caused by FX moves since purchase. */
+  currencyEffect: number;
   realizedPnl: number;
   dividendsReceived: number;
   /** unrealized + realized + dividends */

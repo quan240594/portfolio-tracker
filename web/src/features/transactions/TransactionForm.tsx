@@ -3,12 +3,13 @@ import { TRANSACTION_TYPES, transactionInputSchema, type Transaction, type Trans
 import type { ZodIssue } from 'zod';
 import { useCreateTransaction } from '../../api/hooks';
 import { errorMessage } from '../../api/client';
+import { BASE_CURRENCY, normalizeDecimalInput } from '../../lib/format';
 
-type FieldName = 'date' | 'type' | 'symbol' | 'quantity' | 'price' | 'fee' | 'currency' | 'note';
+type FieldName = 'date' | 'type' | 'symbol' | 'quantity' | 'price' | 'fee' | 'currency' | 'fxRate' | 'note';
 type Values = Record<FieldName, string>;
 type Errors = Partial<Record<FieldName, string>>;
 
-const FIELD_ORDER: FieldName[] = ['date', 'type', 'symbol', 'quantity', 'price', 'fee', 'currency', 'note'];
+const FIELD_ORDER: FieldName[] = ['date', 'type', 'symbol', 'currency', 'fxRate', 'quantity', 'price', 'fee', 'note'];
 const COMMON_CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'SEK', 'DKK', 'NOK', 'JPY', 'CAD', 'AUD'];
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -20,9 +21,18 @@ const initialValues = (): Values => ({
   quantity: '',
   price: '',
   fee: '0',
-  currency: 'EUR',
+  currency: BASE_CURRENCY,
+  fxRate: '',
   note: '',
 });
+
+const normalizedCurrency = (raw: string) => raw.trim().toUpperCase();
+
+/** The FX rate only applies to trades in a valid 3-letter currency other than the base (EUR). */
+export const needsFxRate = (currency: string) => {
+  const c = normalizedCurrency(currency);
+  return /^[A-Z]{3}$/.test(c) && c !== BASE_CURRENCY;
+};
 
 function friendlyMessage(field: FieldName, issue: ZodIssue, raw: string): string {
   const empty = raw.trim() === '';
@@ -42,6 +52,8 @@ function friendlyMessage(field: FieldName, issue: ZodIssue, raw: string): string
       return issue.code === 'invalid_type' ? 'Enter a valid number' : 'Fee cannot be negative';
     case 'currency':
       return 'Use a 3-letter currency code (e.g. EUR)';
+    case 'fxRate':
+      return issue.code === 'invalid_type' ? 'Enter a valid number' : 'FX rate must be greater than 0';
     case 'note':
       return 'Note is too long (max 500 characters)';
     default:
@@ -49,13 +61,22 @@ function friendlyMessage(field: FieldName, issue: ZodIssue, raw: string): string
   }
 }
 
-/** Validates raw form strings with the shared schema; empty numeric fields are reported as required. */
-export function validateTransaction(values: Values): { data?: TransactionInput; errors: Errors } {
+const decimalOrUndefined = (raw: string) => (raw.trim() === '' ? undefined : normalizeDecimalInput(raw));
+
+/**
+ * Validates raw form strings with the shared schema; empty numeric fields are reported as required.
+ * Decimals may use a comma (Dutch input). The FX rate is optional and dropped for base-currency trades.
+ */
+export function validateTransaction(values: Omit<Values, 'fxRate'> & { fxRate?: string }): { data?: TransactionInput; errors: Errors } {
+  const { fxRate = '', ...rest } = values;
+  const rate = needsFxRate(values.currency) ? decimalOrUndefined(fxRate) : undefined;
   const candidate = {
-    ...values,
-    quantity: values.quantity.trim() === '' ? undefined : values.quantity,
-    price: values.price.trim() === '' ? undefined : values.price,
+    ...rest,
+    quantity: decimalOrUndefined(values.quantity),
+    price: decimalOrUndefined(values.price),
+    fee: normalizeDecimalInput(values.fee),
     note: values.note.trim() === '' ? undefined : values.note.trim(),
+    ...(rate !== undefined ? { fxRate: rate } : {}),
   };
   const res = transactionInputSchema.safeParse(candidate);
   if (res.success) return { data: res.data, errors: {} };
@@ -101,14 +122,17 @@ export function TransactionForm({ onSuccess, onCancel }: Props) {
     });
   };
 
-  const fieldProps = (name: FieldName) => ({
-    id: `txn-${name}`,
-    name,
-    value: values[name],
-    onChange: set(name),
-    'aria-invalid': errors[name] ? true : undefined,
-    'aria-describedby': errors[name] ? `txn-${name}-error` : undefined,
-  });
+  const fieldProps = (name: FieldName, helpId?: string) => {
+    const describedBy = [helpId, errors[name] ? `txn-${name}-error` : undefined].filter(Boolean).join(' ');
+    return {
+      id: `txn-${name}`,
+      name,
+      value: values[name],
+      onChange: set(name),
+      'aria-invalid': errors[name] ? true : undefined,
+      'aria-describedby': describedBy || undefined,
+    };
+  };
 
   const fieldError = (name: FieldName) =>
     errors[name] ? (
@@ -118,6 +142,7 @@ export function TransactionForm({ onSuccess, onCancel }: Props) {
     ) : null;
 
   const isDividend = values.type === 'DIVIDEND';
+  const showFxRate = needsFxRate(values.currency);
 
   return (
     <form ref={formRef} onSubmit={onSubmit} noValidate aria-label="Add transaction" className="space-y-4">
@@ -153,6 +178,18 @@ export function TransactionForm({ onSuccess, onCancel }: Props) {
           </datalist>
           {fieldError('currency')}
         </div>
+        {showFxRate && (
+          <div className="sm:col-span-2">
+            <label className="label" htmlFor="txn-fxRate">
+              FX rate ({normalizedCurrency(values.currency)} per 1 {BASE_CURRENCY}) <span className="muted font-normal">(optional)</span>
+            </label>
+            <input type="text" inputMode="decimal" className="input" placeholder="e.g. 1,0842" autoComplete="off" {...fieldProps('fxRate', 'txn-fxRate-help')} />
+            <p id="txn-fxRate-help" className="muted mt-1 text-xs">
+              From your broker statement. Leave empty to use the ECB rate of the trade date.
+            </p>
+            {fieldError('fxRate')}
+          </div>
+        )}
         <div>
           <label className="label" htmlFor="txn-quantity">{isDividend ? 'Eligible units' : 'Quantity'}</label>
           <input type="text" inputMode="decimal" className="input" required {...fieldProps('quantity')} />

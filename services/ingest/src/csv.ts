@@ -3,7 +3,14 @@ import { CSV_COLUMNS, csvRowSchema, type TransactionInput } from '@portfolio/sha
 
 export const MAX_ROWS = 5000;
 export const MAX_ERRORS = 100;
-const REQUIRED_COLUMNS = CSV_COLUMNS.filter((c) => c !== 'note');
+const OPTIONAL_COLUMNS: readonly string[] = ['note', 'fxRate'];
+const REQUIRED_COLUMNS = CSV_COLUMNS.filter((c) => !OPTIONAL_COLUMNS.includes(c));
+/** Lower-cased header name -> canonical column name (e.g. `fxrate` -> `fxRate`). */
+const CANONICAL_COLUMNS = new Map<string, string>(CSV_COLUMNS.map((c) => [c.toLowerCase(), c]));
+const canonicalColumn = (name: string) => {
+  const lower = name.toLowerCase();
+  return CANONICAL_COLUMNS.get(lower) ?? lower;
+};
 
 export interface RowError {
   row: number;
@@ -30,7 +37,7 @@ export function parseImportCsv(content: string): CsvParseResult {
   }
 
   const [rawHeader = [], ...records] = lines;
-  const header = rawHeader.map((h) => h.toLowerCase());
+  const header = rawHeader.map(canonicalColumn);
   if (records.length === 0) {
     return { ok: false, rowCount: 0, errors: [{ row: 0, message: 'CSV contains no data rows' }] };
   }

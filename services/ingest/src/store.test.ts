@@ -168,6 +168,13 @@ describe('DynamoIngestStore.putTransactions', () => {
     expect(sleep).not.toHaveBeenCalled();
   });
 
+  it('stores a broker fxRate on the transaction item', async () => {
+    ddbMock.on(BatchWriteCommand).resolves({});
+    await new DynamoIngestStore(doc, 'tbl', async () => {}).putTransactions([{ ...txn(1), currency: 'USD', fxRate: 1.0842 }]);
+    const item = ddbMock.commandCalls(BatchWriteCommand)[0]!.args[0].input.RequestItems!.tbl![0]!.PutRequest!.Item;
+    expect(item).toMatchObject({ PK: 'USER#u', SK: 'TXN#2025-01-01#imp-1', entityType: 'TRANSACTION', currency: 'USD', fxRate: 1.0842 });
+  });
+
   it('retries only the unprocessed items, ignoring other tables in the response', async () => {
     ddbMock
       .on(BatchWriteCommand)

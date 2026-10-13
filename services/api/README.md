@@ -12,8 +12,19 @@ src/repository.ts   DynamoDB single-table access (DocumentClient)
 src/events.ts       EventBridge TransactionsChanged publisher (source portfolio.api)
 src/presigner.ts    S3 presigned PUT URLs for CSV imports
 src/local.ts        local HTTP server on :3001 wrapping the handler
-scripts/seed.ts     idempotent LocalStack seed for user `demo`
+scripts/seed.ts     idempotent LocalStack seed for user `demo` (incl. daily ECB fixings FX_DAY for USD/GBP/CHF)
 ```
+
+## Currency conversion
+
+Every amount is reported in the base currency (`BASE_CURRENCY`, default `DEFAULT_BASE_CURRENCY` = EUR).
+Portfolio, holdings, allocation, history and dividends load the latest rates (`FX#{base}` / `LATEST`) plus the
+daily ECB fixings (`FX#{base}` / `DAY#{date}`) from 7 days before the first transaction until today. Each
+transaction is converted at its broker-applied `fxRate` if present, else at the fixing of its trade date (the previous
+business day's for weekends/holidays), else at the latest rate. Market values use the latest rate; the resulting FX
+part of the unrealized P&L is reported as `currencyEffect`. Without a `LATEST` item the newest fixing is used; without
+any FX data only base-currency portfolios work (`FX_UNAVAILABLE` otherwise). `POST /transactions` accepts an optional
+`fxRate` (units of the transaction currency per 1 unit of base currency, > 0), stored and returned with the transaction.
 
 Errors use `{ error: { code, message, details? } }`: `VALIDATION_ERROR` 400, `NOT_FOUND` 404,
 `UNPROCESSABLE` 422 (oversell / mixed currency), `FX_UNAVAILABLE` 503, `INTERNAL_ERROR` 500.

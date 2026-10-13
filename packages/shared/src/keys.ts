@@ -13,6 +13,7 @@
  * | Profile         | TICKER#{symbol}    | PROFILE                   | PROFILE         |
  * | Dividend event  | TICKER#{symbol}    | DIV#{exDate}              | DIVIDEND_EVENT  |
  * | FX rates        | FX#{base}          | LATEST                    | FX              |
+ * | FX daily fixing | FX#{base}          | DAY#{date}                | FX_DAY          |
  */
 export const ENTITY = {
   transaction: 'TRANSACTION',
@@ -24,6 +25,7 @@ export const ENTITY = {
   profile: 'PROFILE',
   dividendEvent: 'DIVIDEND_EVENT',
   fx: 'FX',
+  fxDay: 'FX_DAY',
 } as const;
 
 export const keys = {
@@ -42,6 +44,8 @@ export const keys = {
   dividendPrefix: 'DIV#',
   tickerPk: (symbol: string) => `TICKER#${symbol}`,
   fx: (base: string) => ({ PK: `FX#${base}`, SK: 'LATEST' }),
+  fxDay: (base: string, date: string) => ({ PK: `FX#${base}`, SK: `DAY#${date}` }),
+  fxDayPrefix: 'DAY#',
 } as const;
 
 /** S3 object key layout for CSV uploads; the ingest service parses userId/importId from it. */

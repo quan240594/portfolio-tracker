@@ -1,6 +1,7 @@
 """Lambda entry points.
 
-- `prices.handlers.scheduled_refresh`      — EventBridge Scheduler cron: FX + quotes for tracked tickers.
+- `prices.handlers.scheduled_refresh`      — EventBridge Scheduler cron: FX (latest + daily ECB fixings,
+                                             gaps backfilled) + quotes for tracked tickers.
 - `prices.handlers.on_transactions_changed` — SQS (enrich-queue) batch of TransactionsChanged envelopes.
 """
 
@@ -19,7 +20,7 @@ from .config import Settings
 from .errors import ProviderError, ProviderUnavailableError, SymbolNotFoundError
 from .events import EventPublisher
 from .logging_setup import request_id, setup_logging
-from .models import EodPrice, InstrumentProfile, Quote, iso_datetime, parse_iso_datetime
+from .models import EodPrice, FxDay, FxRates, InstrumentProfile, Quote, iso_datetime, parse_iso_datetime
 from .providers import FxProvider, MarketDataProvider, build_fx_provider, build_provider, fetch_quotes
 from .repository import Repository
 from .symbols import has_exchange_suffix, minimal_profile, normalize
@@ -100,20 +101,61 @@ def scheduled_refresh(event: dict[str, Any] | None, context: Any) -> dict[str, A
     return run_scheduled_refresh(get_deps(), utcnow())
 
 
-def _refresh_fx(deps: Deps) -> bool:
+def _refresh_fx(deps: Deps) -> FxRates | None:
     try:
         fx = deps.fx.get_latest(deps.settings.base_currency)
         deps.repo.put_fx(fx)
         log.info("fx refreshed", extra={"base": fx.base, "currencies": len(fx.rates), "asOf": fx.asOf})
-        return True
+        return fx
     except (ProviderError, ClientError, BotoCoreError) as exc:
         log.error("fx refresh failed", extra={"error": str(exc)})
-        return False
+        return None
+
+
+def backfill_fx_history(deps: Deps, today: date, start: date | None = None) -> dict[str, Any]:
+    """Store daily ECB fixings (FX_DAY items) from `start` — default: the day after the latest stored
+    fixing, or `FX_HISTORY_START` when none exists — through `today`. Provider/storage errors propagate."""
+    base = deps.settings.base_currency
+    stored = deps.repo.latest_fx_day(base)
+    if start is None:
+        start = date.fromisoformat(stored) + timedelta(days=1) if stored else deps.settings.fx_history_start
+    days = deps.fx.get_history(base, start, today) if start <= today else []
+    written = deps.repo.put_fx_days(days) if days else 0
+    last_day = max(filter(None, [stored, days[-1].date if days else None]), default=None)
+    result = {
+        "base": base,
+        "start": start.isoformat(),
+        "end": today.isoformat(),
+        "fxDaysWritten": written,
+        "lastDay": last_day,
+    }
+    log.info("fx history stored", extra=result)
+    return result
+
+
+def _store_fx_days(deps: Deps, latest: FxRates | None, today: date) -> tuple[int, bool]:
+    """Backfill missing fixings, then store today's fixing from the latest rates. Never raises.
+
+    Today's fixing is only written after a successful backfill: otherwise it would become the newest
+    FX_DAY item and hide the gap from the next run's "latest stored day + 1" computation."""
+    try:
+        result = backfill_fx_history(deps, today)
+        written = int(result["fxDaysWritten"])
+        base = deps.settings.base_currency
+        fixing = latest.date if latest is not None and latest.base == base else None
+        if latest is not None and fixing and fixing > (result["lastDay"] or ""):
+            written += deps.repo.put_fx_days([FxDay(base=base, date=fixing, rates=dict(latest.rates))])
+        return written, True
+    except Exception:
+        log.exception("fx history refresh failed")
+        return 0, False
 
 
 def run_scheduled_refresh(deps: Deps, now: datetime) -> dict[str, Any]:
     symbols = deps.repo.list_tracked()
-    fx_ok = _refresh_fx(deps)
+    latest_fx = _refresh_fx(deps)
+    fx_ok = latest_fx is not None
+    fx_days_written, fx_history_ok = _store_fx_days(deps, latest_fx, now.astimezone(UTC).date())
 
     in_eu_window = amsterdam_hour(now) in deps.settings.eu_refresh_hours
     skipped: list[str] = []
@@ -160,6 +202,8 @@ def run_scheduled_refresh(deps: Deps, now: datetime) -> dict[str, Any]:
         "skipped": len(skipped),
         "failed": len(failed),
         "fxUpdated": fx_ok,
+        "fxDaysWritten": fx_days_written,
+        "fxHistoryOk": fx_history_ok,
         "eventPublished": published,
         "euWindow": in_eu_window,
         "failedSymbols": sorted(failed),

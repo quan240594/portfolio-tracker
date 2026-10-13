@@ -10,7 +10,7 @@ import { EmptyState } from '../components/EmptyState';
 import { LoadingRegion, Skeleton } from '../components/Skeleton';
 import { TransactionForm } from '../features/transactions/TransactionForm';
 import { CsvImport } from '../features/transactions/CsvImport';
-import { formatDate, formatMoney, formatQuantity } from '../lib/format';
+import { BASE_CURRENCY, formatDate, formatFxRate, formatMoney, formatQuantity } from '../lib/format';
 
 type Action = 'add' | 'import' | null;
 
@@ -117,7 +117,14 @@ export function TransactionsPage() {
                   <td className="px-3 py-2.5 text-right tabular-nums">{formatQuantity(t.quantity)}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums">{formatMoney(t.price, t.currency, { maxDigits: t.price < 1 ? 6 : 2 })}</td>
                   <td className="hidden px-3 py-2.5 text-right tabular-nums sm:table-cell">{formatMoney(t.fee, t.currency)}</td>
-                  <td className="px-3 py-2.5 text-right font-medium tabular-nums">{formatMoney(total(t), t.currency)}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">
+                    <span className="block font-medium">{formatMoney(total(t), t.currency)}</span>
+                    {t.fxRate !== undefined && t.currency !== BASE_CURRENCY && (
+                      <span className="muted block text-xs whitespace-nowrap" title={`Broker FX rate: ${formatFxRate(t.fxRate)} ${t.currency} per 1 ${BASE_CURRENCY}`}>
+                        ≈ {formatMoney(total(t) / t.fxRate, BASE_CURRENCY)} · FX {formatFxRate(t.fxRate)}
+                      </span>
+                    )}
+                  </td>
                   <td className="muted hidden max-w-[14rem] truncate px-3 py-2.5 lg:table-cell" title={t.note}>
                     {t.note ?? (t.importId ? 'Imported' : '')}
                   </td>

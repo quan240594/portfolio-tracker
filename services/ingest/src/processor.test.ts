@@ -151,4 +151,19 @@ describe('processImportObject', () => {
     expect(events.published).toEqual([{ userId: 'demo', symbols: ['ASML.AS', 'MSFT'], reason: 'IMPORTED', importId: 'imp1' }]);
     expect(store.imp('demo', 'imp1')).toMatchObject({ status: 'COMPLETED', rowCount: 3, importedCount: 3 });
   });
+
+  it('persists a broker fxRate and omits it when the column is empty or absent', async () => {
+    const { run, store } = setup(`${HEADER},FxRate\n2025-01-02,BUY,AAPL,10,150,1,USD,1.0842\n2025-01-03,BUY,ASML.AS,1,600,1,EUR,\n`);
+    expect(await run()).toBe('COMPLETED');
+    expect(store.transactions[0]).toMatchObject({ id: 'imp1-1', symbol: 'AAPL', currency: 'USD', fxRate: 1.0842 });
+    expect(store.transactions[1]).not.toHaveProperty('fxRate');
+    expect(store.transactions[1]).not.toHaveProperty('note');
+  });
+
+  it('marks the import FAILED with a row error for an invalid fxRate and writes nothing', async () => {
+    const { run, store } = setup(`${HEADER},fxRate\n2025-01-02,BUY,AAPL,10,150,1,USD,1.08\n2025-01-03,BUY,AAPL,1,150,1,USD,-2\n`);
+    expect(await run()).toBe('FAILED');
+    expect(store.transactions).toHaveLength(0);
+    expect(store.imp('demo', 'imp1')).toMatchObject({ status: 'FAILED', rowCount: 2, errors: [{ row: 2, message: expect.stringMatching(/^fxRate: /) }] });
+  });
 });

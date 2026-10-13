@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEMO_USER_ID } from '@portfolio/shared';
+import { DEFAULT_BASE_CURRENCY, DEMO_USER_ID } from '@portfolio/shared';
 import { loadConfig } from './config.js';
 
 describe('loadConfig', () => {
@@ -14,6 +14,14 @@ describe('loadConfig', () => {
       endpointUrl: undefined,
       region: 'eu-west-1',
     });
+  });
+
+  it('defaults the base currency to DEFAULT_BASE_CURRENCY (EUR), also for blank values', () => {
+    expect(DEFAULT_BASE_CURRENCY).toBe('EUR');
+    expect(loadConfig({}).baseCurrency).toBe(DEFAULT_BASE_CURRENCY);
+    expect(loadConfig({ BASE_CURRENCY: '' }).baseCurrency).toBe('EUR');
+    expect(loadConfig({ BASE_CURRENCY: '   ' }).baseCurrency).toBe('EUR');
+    expect(loadConfig({ BASE_CURRENCY: ' gbp ' }).baseCurrency).toBe('GBP');
   });
 
   it('reads every setting from the environment and upper-cases the base currency', () => {

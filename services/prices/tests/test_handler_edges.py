@@ -35,6 +35,12 @@ class FakeRepo:
     def put_fx(self, fx: FxRates) -> None:
         pass
 
+    def latest_fx_day(self, base: str) -> str | None:
+        return "2026-10-13"
+
+    def put_fx_days(self, days: list[Any]) -> int:
+        return len(list(days))
+
     def latest_quotes(self, symbols: list[str]) -> dict[str, Quote]:
         return {}
 
@@ -83,9 +89,12 @@ class FakeProvider:
 
 
 def deps(repo: FakeRepo, provider: FakeProvider) -> Any:
-    fx = SimpleNamespace(get_latest=lambda base: FxRates(base=base, asOf="t", rates={"USD": 1.1}))
+    fx = SimpleNamespace(
+        get_latest=lambda base: FxRates(base=base, asOf="t", rates={"USD": 1.1}),
+        get_history=lambda base, start, end: [],
+    )
     publisher = SimpleNamespace(prices_updated=lambda *a: True)
-    settings = SimpleNamespace(eu_refresh_hours={18}, base_currency="EUR")
+    settings = SimpleNamespace(eu_refresh_hours={18}, base_currency="EUR", fx_history_start=NOW.date())
     return SimpleNamespace(settings=settings, repo=repo, provider=provider, fx=fx, publisher=publisher)
 
 

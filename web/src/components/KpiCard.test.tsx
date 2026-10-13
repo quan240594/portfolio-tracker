@@ -3,7 +3,7 @@ import { http, HttpResponse } from 'msw';
 import { KpiCard } from './KpiCard';
 import { Change } from './Change';
 import { DashboardPage } from '../pages/DashboardPage';
-import { renderWithProviders } from '../test/utils';
+import { renderWithProviders, sp } from '../test/utils';
 import { server } from '../mocks/server';
 import { resetDb, getPortfolio } from '../mocks/db';
 import { formatMoney } from '../lib/format';
@@ -11,11 +11,11 @@ import { formatMoney } from '../lib/format';
 describe('KpiCard', () => {
   it('renders label, value, change and hint', () => {
     renderWithProviders(
-      <KpiCard label="Day change" value="+€12.00" change={<Change pct={1.5} value={12} />} hint="since yesterday" />,
+      <KpiCard label="Day change" value="€ +12,00" change={<Change pct={1.5} value={12} />} hint="since yesterday" />,
     );
     const card = screen.getByRole('region', { name: 'Day change' });
-    expect(within(card).getByText('+€12.00')).toBeInTheDocument();
-    expect(within(card).getByText('+1.50%')).toBeInTheDocument();
+    expect(within(card).getByText('€ +12,00')).toBeInTheDocument();
+    expect(within(card).getByText('+1,50%')).toBeInTheDocument();
     expect(within(card).getByText('up')).toHaveClass('sr-only');
     expect(within(card).getByText('since yesterday')).toBeInTheDocument();
   });
@@ -23,7 +23,7 @@ describe('KpiCard', () => {
   it('signals losses with a minus sign and "down" text, not only colour', () => {
     renderWithProviders(<KpiCard label="P&L" value="x" change={<Change pct={-2.25} value={-1} />} />);
     const card = screen.getByRole('region', { name: 'P&L' });
-    expect(within(card).getByText('\u22122.25%')).toBeInTheDocument();
+    expect(within(card).getByText('\u22122,25%')).toBeInTheDocument();
     expect(within(card).getByText('down')).toBeInTheDocument();
   });
 
@@ -41,17 +41,26 @@ describe('Dashboard KPIs', () => {
     renderWithProviders(<DashboardPage />);
 
     const total = await screen.findByRole('region', { name: 'Total value' });
-    expect(await within(total).findByText(formatMoney(summary.totalValue, 'EUR'))).toBeInTheDocument();
+    expect(await within(total).findByText(sp(formatMoney(summary.totalValue, 'EUR')))).toBeInTheDocument();
     expect(within(total).getByText(new RegExp(`${summary.holdingsCount} holdings`))).toBeInTheDocument();
 
     const unrealized = screen.getByRole('region', { name: 'Unrealized P&L' });
-    expect(within(unrealized).getByText(formatMoney(summary.unrealizedPnl, 'EUR', { signed: true }))).toBeInTheDocument();
+    expect(within(unrealized).getByText(sp(formatMoney(summary.unrealizedPnl, 'EUR', { signed: true })))).toBeInTheDocument();
 
     const totalReturn = screen.getByRole('region', { name: 'Total return' });
-    expect(within(totalReturn).getByText(formatMoney(summary.totalReturn, 'EUR', { signed: true }))).toBeInTheDocument();
+    expect(within(totalReturn).getByText(sp(formatMoney(summary.totalReturn, 'EUR', { signed: true })))).toBeInTheDocument();
 
     const dividends = screen.getByRole('region', { name: 'Dividends received' });
-    expect(within(dividends).getByText(formatMoney(summary.dividendsReceived, 'EUR'))).toBeInTheDocument();
+    expect(within(dividends).getByText(sp(formatMoney(summary.dividendsReceived, 'EUR')))).toBeInTheDocument();
+
+    // The mock FX history has the euro strengthening against the dollar → a negative currency effect.
+    expect(summary.currencyEffect).toBeLessThan(0);
+    expect(within(unrealized).getByText(sp(`Incl. ${formatMoney(summary.currencyEffect, 'EUR', { signed: true })} currency effect`))).toBeInTheDocument();
+    const fx = screen.getByRole('region', { name: 'Currency effect' });
+    expect(within(fx).getByTestId('kpi-value')).toHaveTextContent(sp(`▼down${formatMoney(summary.currencyEffect, 'EUR', { signed: true })}`));
+    expect(within(fx).getByText(/^Part of the unrealized P&L caused by exchange-rate moves since purchase/)).toHaveTextContent(
+      'weaker US dollar lowers the EUR value of US shares. Already included in Unrealized P&L.',
+    );
     expect(screen.getByRole('region', { name: 'Day change' })).toBeInTheDocument();
   });
 

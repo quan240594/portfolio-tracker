@@ -9,10 +9,13 @@ test.describe('Portfolio Tracker (mock mode)', () => {
     await expect(page).toHaveTitle(/Dashboard · Portfolio Tracker/);
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
 
-    for (const label of ['Total value', 'Day change', 'Unrealized P&L', 'Total return', 'Dividends received']) {
+    for (const label of ['Total value', 'Day change', 'Unrealized P&L', 'Currency effect', 'Total return', 'Dividends received']) {
       const card = page.getByRole('region', { name: label, exact: true });
-      await expect(card.getByTestId('kpi-value')).toHaveText(/€/);
+      // Dutch formatting: "€ 12.345,67" (thousands dot, decimal comma).
+      await expect(card.getByTestId('kpi-value')).toHaveText(/€\s[+\u2212]?[\d.]+,\d{2}$/);
     }
+    // The demo's euro strengthened against the dollar → negative currency effect.
+    await expect(page.getByRole('region', { name: 'Currency effect', exact: true }).getByTestId('kpi-value')).toContainText('\u2212');
 
     const chart = page.getByTestId('value-chart');
     await expect(chart.locator('.recharts-area-area')).toBeVisible();
@@ -43,6 +46,13 @@ test.describe('Portfolio Tracker (mock mode)', () => {
     await expect(table.getByRole('columnheader', { name: /Market value/ })).toHaveAttribute('aria-sort', 'descending');
     await expect(table.getByText('Stale price')).toBeVisible();
 
+    // EUR-first unit prices with the USD price underneath, and a currency effect for USD holdings.
+    const aapl = table.getByRole('row').filter({ has: page.getByRole('rowheader', { name: /AAPL/ }) });
+    await expect(aapl.getByRole('cell').nth(2)).toHaveText(/^€\s[\d.]+,\d{2}\s*US\$\s[\d.]+,\d{2}$/);
+    await expect(aapl.getByRole('cell').nth(6)).toContainText('\u2212');
+    await table.getByRole('button', { name: 'Currency effect' }).click();
+    await expect(table.getByRole('columnheader', { name: 'Currency effect' })).toHaveAttribute('aria-sort', 'descending');
+
     await table.getByRole('button', { name: /^Holding/ }).click();
     await expect(table.getByRole('columnheader', { name: /^Holding/ })).toHaveAttribute('aria-sort', 'ascending');
     await expect(firstRowSymbol(page)).toHaveText('AAPL');
@@ -53,7 +63,7 @@ test.describe('Portfolio Tracker (mock mode)', () => {
     await table.getByRole('button', { name: /^Weight/ }).click();
     await expect(table.getByRole('columnheader', { name: /^Weight/ })).toHaveAttribute('aria-sort', 'descending');
     const weights = await table.locator('tbody tr td:last-child').allInnerTexts();
-    const values = weights.map((w) => parseFloat(w.replace('%', '')));
+    const values = weights.map((w) => parseFloat(w.replace('%', '').replace(',', '.')));
     expect(values).toEqual([...values].sort((a, b) => b - a));
   });
 
@@ -85,7 +95,7 @@ test.describe('Portfolio Tracker (mock mode)', () => {
     await expect(page.getByRole('status').filter({ hasText: 'Added buy of 4 SAP.DE.' })).toBeVisible();
     const row = page.getByRole('row').filter({ hasText: 'SAP.DE' });
     await expect(row).toHaveCount(1);
-    await expect(row).toContainText('€806.90');
+    await expect(row).toContainText('€ 806,90');
 
     await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Holdings' }).click();
     await expect(page.getByRole('table').getByRole('rowheader')).toHaveCount(9);

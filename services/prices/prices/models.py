@@ -101,3 +101,14 @@ class FxRates:
     base: str
     asOf: str  # noqa: N815
     rates: dict[str, float] = field(default_factory=dict)
+    # ECB fixing date (YYYY-MM-DD) the rates belong to; not part of the `FX#{base}`/`LATEST` item.
+    date: str | None = None
+
+
+@dataclass(frozen=True)
+class FxDay:
+    """Daily ECB reference rates (business days only): `rates[C]` = units of C per 1 `base`."""
+
+    base: str
+    date: str
+    rates: dict[str, float] = field(default_factory=dict)

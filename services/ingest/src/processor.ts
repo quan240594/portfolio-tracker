@@ -92,6 +92,7 @@ export async function processImportObject(deps: IngestDeps, ref: S3ObjectRef): P
       createdAt: new Date(baseMs + row).toISOString(),
     };
     if (t.note === undefined) delete t.note;
+    if (t.fxRate === undefined) delete t.fxRate;
     return t;
   });
 

@@ -12,11 +12,14 @@ from botocore.exceptions import ClientError
 
 from . import aws
 from .keys import (
+    FX_DAY_PREFIX,
     TICKER_SK_PREFIX,
     TRACKED_PK,
     dividend_item,
     eod_item,
+    fx_day_item,
     fx_item,
+    fx_pk,
     profile_item,
     profile_key,
     quote_from_item,
@@ -24,7 +27,7 @@ from .keys import (
     quote_key,
     tracked_item,
 )
-from .models import DividendEvent, EodPrice, FxRates, InstrumentProfile, Quote
+from .models import DividendEvent, EodPrice, FxDay, FxRates, InstrumentProfile, Quote
 
 log = logging.getLogger(__name__)
 
@@ -95,6 +98,20 @@ class Repository:
 
     def put_fx(self, fx: FxRates) -> None:
         self.table.put_item(Item=fx_item(fx))
+
+    def latest_fx_day(self, base: str) -> str | None:
+        """Date (YYYY-MM-DD) of the most recent stored FX_DAY item for `base`, or None."""
+        resp = self.table.query(
+            KeyConditionExpression=Key("PK").eq(fx_pk(base)) & Key("SK").begins_with(FX_DAY_PREFIX),
+            ScanIndexForward=False,
+            Limit=1,
+            ProjectionExpression="SK",
+        )
+        items = resp.get("Items", [])
+        return str(items[0]["SK"])[len(FX_DAY_PREFIX) :] if items else None
+
+    def put_fx_days(self, days: Iterable[FxDay]) -> int:
+        return self._batch_put(fx_day_item(d) for d in days)
 
     def put_eods(self, rows: Iterable[EodPrice]) -> int:
         return self._batch_put(eod_item(r) for r in rows)

@@ -17,7 +17,7 @@ export function HoldingsPage() {
         title="Holdings"
         description={
           data
-            ? `${data.holdings.length} positions · ${formatMoney(total, data.baseCurrency)} · prices in trading currency, values in ${data.baseCurrency}`
+            ? `${data.holdings.length} positions · ${formatMoney(total, data.baseCurrency)} · all amounts in ${data.baseCurrency}`
             : undefined
         }
       />

@@ -9,7 +9,7 @@ from dataclasses import asdict
 from decimal import Decimal
 from typing import Any
 
-from .models import DividendEvent, EodPrice, FxRates, InstrumentProfile, Quote
+from .models import DividendEvent, EodPrice, FxDay, FxRates, InstrumentProfile, Quote
 
 ENTITY_TRACKED_TICKER = "TRACKED_TICKER"
 ENTITY_QUOTE = "QUOTE"
@@ -17,11 +17,13 @@ ENTITY_EOD = "EOD"
 ENTITY_PROFILE = "PROFILE"
 ENTITY_DIVIDEND_EVENT = "DIVIDEND_EVENT"
 ENTITY_FX = "FX"
+ENTITY_FX_DAY = "FX_DAY"
 
 TRACKED_PK = "TRACKED"
 TICKER_SK_PREFIX = "TICKER#"
 EOD_PREFIX = "EOD#"
 DIVIDEND_PREFIX = "DIV#"
+FX_DAY_PREFIX = "DAY#"
 
 
 def ticker_pk(symbol: str) -> str:
@@ -48,8 +50,16 @@ def dividend_key(symbol: str, ex_date: str) -> dict[str, str]:
     return {"PK": ticker_pk(symbol), "SK": f"{DIVIDEND_PREFIX}{ex_date}"}
 
 
+def fx_pk(base: str) -> str:
+    return f"FX#{base}"
+
+
 def fx_key(base: str) -> dict[str, str]:
-    return {"PK": f"FX#{base}", "SK": "LATEST"}
+    return {"PK": fx_pk(base), "SK": "LATEST"}
+
+
+def fx_day_key(base: str, date: str) -> dict[str, str]:
+    return {"PK": fx_pk(base), "SK": f"{FX_DAY_PREFIX}{date}"}
 
 
 def to_decimal(value: float | int | Decimal) -> Decimal:
@@ -108,7 +118,22 @@ def dividend_item(d: DividendEvent) -> dict[str, Any]:
 
 
 def fx_item(fx: FxRates) -> dict[str, Any]:
-    return {**fx_key(fx.base), "entityType": ENTITY_FX, **_flat(fx)}
+    """`FxRates` shape only ({base, rates, asOf}); the fixing date lives on the FX_DAY items."""
+    flat = _flat(fx)
+    flat.pop("date", None)
+    return {**fx_key(fx.base), "entityType": ENTITY_FX, **flat}
+
+
+def fx_day_item(day: FxDay) -> dict[str, Any]:
+    """{PK:'FX#EUR', SK:'DAY#2026-10-13', entityType:'FX_DAY', base, date, rates:{USD: Decimal, ...}}."""
+    rates = {c: to_decimal(r) for c, r in sorted(day.rates.items()) if c != day.base}
+    return {
+        **fx_day_key(day.base, day.date),
+        "entityType": ENTITY_FX_DAY,
+        "base": day.base,
+        "date": day.date,
+        "rates": rates,
+    }
 
 
 def quote_from_item(item: dict[str, Any]) -> Quote:

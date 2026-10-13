@@ -6,7 +6,7 @@ import { ErrorState } from '../components/ErrorState';
 import { EmptyState } from '../components/EmptyState';
 import { LoadingRegion, Skeleton } from '../components/Skeleton';
 import { DividendBarChart } from '../components/charts/DividendBarChart';
-import { formatDate, formatMoney } from '../lib/format';
+import { BASE_CURRENCY, formatDate, formatMoney } from '../lib/format';
 
 function PaymentsTable({ payments, currency, caption }: { payments: DividendPayment[]; currency: string; caption: string }) {
   return (
@@ -38,7 +38,7 @@ function PaymentsTable({ payments, currency, caption }: { payments: DividendPaym
 
 export function DividendsPage() {
   const { data, isPending, isError, error, refetch } = useDividends();
-  const ccy = data?.baseCurrency ?? 'EUR';
+  const ccy = data?.baseCurrency ?? BASE_CURRENCY;
 
   if (isError) {
     return (
@@ -53,7 +53,7 @@ export function DividendsPage() {
 
   return (
     <>
-      <PageHeader title="Dividends" description="Received amounts are net of withholding tax; upcoming amounts are gross estimates." />
+      <PageHeader title="Dividends" description={`Amounts in ${ccy} (per-share amounts in the paying currency). Received amounts are net of withholding tax; upcoming amounts are gross estimates.`} />
       <div className="space-y-6">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <KpiCard loading={isPending} label="Total received" value={data && formatMoney(data.totalReceived, ccy)} hint="All time" />

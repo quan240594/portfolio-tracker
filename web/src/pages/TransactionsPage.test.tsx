@@ -40,22 +40,30 @@ describe('TransactionsPage', () => {
       http.get('/api/transactions', () =>
         HttpResponse.json({
           transactions: [
-            txn({ id: 'b', type: 'BUY', quantity: 2, price: 100, fee: 1, note: 'Core' }),
+            txn({ id: 'b', type: 'BUY', quantity: 2, price: 100, fee: 1, note: 'Core', fxRate: 1.0842 }),
             txn({ id: 's', type: 'SELL', quantity: 1, price: 150, fee: 2 }),
             txn({ id: 'd', type: 'DIVIDEND', quantity: 10, price: 0.123456, fee: 0.5, importId: 'imp-1' }),
+            txn({ id: 'e', symbol: 'ASML.AS', currency: 'EUR', quantity: 1, price: 700, fee: 0, fxRate: 1 }),
           ],
         }),
       ),
     );
     renderApp('/transactions');
     await screen.findByRole('table', { name: 'Transactions, newest first' });
-    const [buy, sell, div] = rows();
-    expect(buy).toHaveTextContent('US$201.00');
+    const [buy, sell, div, eurBuy] = rows();
+    expect(buy).toHaveTextContent('US$ 201,00');
     expect(buy).toHaveTextContent('Core');
-    expect(sell).toHaveTextContent('US$148.00');
+    // Broker FX rate: the EUR equivalent (201 / 1.0842) and the rate itself are shown under the total.
+    const fxLine = within(buy!).getByTitle('Broker FX rate: 1,0842 USD per 1 EUR');
+    expect(fxLine).toHaveTextContent(/^≈ € 185,39 · FX 1,0842$/);
+    expect(sell).toHaveTextContent('US$ 148,00');
+    expect(sell).not.toHaveTextContent('FX');
     expect(within(sell!).getAllByRole('cell').at(-2)).toHaveTextContent(/^$/);
-    expect(div).toHaveTextContent('US$0.123456');
-    expect(div).toHaveTextContent('US$0.73');
+    expect(div).toHaveTextContent('US$ 0,123456');
+    expect(div).toHaveTextContent('US$ 0,73');
+    // A rate on a EUR trade is meaningless and not shown.
+    expect(eurBuy).toHaveTextContent('€ 700,00');
+    expect(eurBuy).not.toHaveTextContent('FX');
     expect(div).toHaveTextContent('Imported');
     expect(within(div!).getByText('DIVIDEND')).toBeInTheDocument();
   });
@@ -94,12 +102,12 @@ describe('TransactionsPage', () => {
     expect(within(dialog).getByLabelText('Date')).toHaveFocus();
 
     await user.type(within(dialog).getByLabelText('Symbol'), 'asml.as');
-    await user.type(within(dialog).getByLabelText('Quantity'), '1.5');
+    await user.type(within(dialog).getByLabelText('Quantity'), '1,5');
     await user.type(within(dialog).getByLabelText('Price per unit'), '700');
     await user.click(within(dialog).getByRole('button', { name: 'Save transaction' }));
 
-    expect(await screen.findByText('Added buy of 1.5 ASML.AS.')).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent('Added buy of 1.5 ASML.AS.');
+    expect(await screen.findByText('Added buy of 1,5 ASML.AS.')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Added buy of 1,5 ASML.AS.');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(router.state.location.search).toBe('');
     await waitFor(() => expect(rows()).toHaveLength(before + 1));

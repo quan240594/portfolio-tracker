@@ -15,6 +15,17 @@ describe('sample CSV', () => {
     }
   });
 
+  it('includes the optional fxRate column: one USD row with a broker rate, EUR rows empty', () => {
+    expect(CSV_HEADER.split(',').at(-1)).toBe('fxRate');
+    const parsed = SAMPLE_CSV_ROWS.map((line) => {
+      const cells = line.split(',');
+      expect(cells).toHaveLength(CSV_COLUMNS.length);
+      return csvRowSchema.parse(Object.fromEntries(CSV_COLUMNS.map((c, i) => [c, cells[i]!])));
+    });
+    expect(parsed.filter((r) => r.fxRate !== undefined)).toEqual([expect.objectContaining({ symbol: 'AAPL', currency: 'USD', fxRate: 1.0812 })]);
+    expect(parsed.filter((r) => r.currency === 'EUR').every((r) => r.fxRate === undefined)).toBe(true);
+  });
+
   it('downloads the sample through a temporary object URL', async () => {
     vi.useFakeTimers();
     const createObjectURL = vi.fn((_: Blob) => 'blob:sample');

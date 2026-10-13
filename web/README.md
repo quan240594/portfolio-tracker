@@ -19,6 +19,9 @@ pnpm --filter @portfolio/web dev:mock   # http://localhost:5173
 
 Mock mode keeps state in memory per page load: adding/deleting transactions and CSV imports recompute holdings,
 allocation, history and dividends with the shared calculators in `@portfolio/shared`; a reload resets the demo data.
+The demo includes a seeded daily EUR/USD history (USD per 1 EUR drifting ~1.04 → 1.17 over the year) that is passed as
+`fxHistory` to the calculators, so USD holdings show a realistic (negative) currency effect; two USD buys carry a broker
+`fxRate`.
 
 ## Scripts
 
@@ -55,7 +58,7 @@ src/
   pages/        Dashboard, Holdings, Dividends, Transactions
   mocks/        fixtures.ts (deterministic demo data), db.ts (in-memory backend), handlers.ts, browser.ts, server.ts
   theme/        ThemeProvider (light/dark, prefers-color-scheme, persisted in localStorage `pt-theme`)
-  lib/format.ts Intl formatters (en-GB locale, currency from the API's baseCurrency)
+  lib/format.ts Intl formatters (nl-NL locale, EUR default from DEFAULT_BASE_CURRENCY) + Dutch decimal-input parsing
 e2e/            Playwright specs
 ```
 
@@ -69,3 +72,21 @@ e2e/            Playwright specs
 - CSV import: `POST /imports` → `PUT uploadUrl` (`Content-Type: text/csv`) → poll `GET /imports/{id}` every 1.5 s
   (max 60 s) until `COMPLETED`/`FAILED`; row-level errors are shown on failure.
 - Gains/losses are never conveyed by colour alone: values carry an explicit +/− sign, an arrow and screen-reader text.
+
+## Currency & formatting
+
+- The portfolio base currency is **EUR** (`DEFAULT_BASE_CURRENCY`); every amount is shown in euros first. UI copy is
+  English, but numbers and dates use the Dutch locale `nl-NL` everywhere (tables, KPIs, chart axes and tooltips):
+  `€ 1.234,56`, signed `€ +12,00` / `€ −12,00`, `+12,34%`, dates `13 okt 2026`, months `okt 26`.
+- Holdings: *Avg cost* and *Price* show `averageCostBase` / `priceBase` (EUR at purchase-date / today's FX); for
+  holdings in another currency the trading-currency value (`averageCostLocal` / `priceLocal`) is a muted second line.
+  Sorting on these columns uses the EUR values. The sortable *Currency effect* column (`Holding.currencyEffect`) is the
+  part of unrealized P&L caused by FX moves since purchase (— for EUR holdings).
+- Dashboard: a *Currency effect* KPI (`PortfolioSummary.currencyEffect`), also mentioned under Unrealized P&L.
+- Dividends: totals and amounts in EUR; per-share amounts stay in the paying currency.
+- Transactions: the form defaults to EUR and, for other currencies, offers an optional **FX rate** (units of the trade
+  currency per 1 EUR from the broker statement, e.g. `1.0842` for USD; empty = ECB rate of the trade date), validated by
+  `transactionInputSchema`. Number fields accept a Dutch decimal comma (`1,0842`, `1.234,56`). The list shows the
+  rate and the EUR equivalent under the total when a rate is present.
+- CSV import: optional `fxRate` column (header `date,type,symbol,quantity,price,fee,currency,note,fxRate`, matched
+  case-insensitively); CSV numbers use a dot as decimal separator. The sample CSV has one USD row with a rate.

@@ -12,6 +12,7 @@ import {
   type AssetClass,
   type DividendEvent,
   type EodPrice,
+  type FxDay,
   type FxRates,
   type InstrumentProfile,
   type Quote,
@@ -72,7 +73,26 @@ const DIV_EVENTS: [string, number, number, number][] = [
   ['VWRL.AS', 60, 75, 0.45],
 ];
 
-const FX_EUR: FxRates['rates'] = { USD: 1.09, GBP: 0.86, CHF: 0.94 };
+/** Seed ids whose trade carries an explicit broker-applied `fxRate` (the others use the ECB fixing). */
+const BROKER_FX_TXNS = new Set(['seed-01', 'seed-08', 'seed-11']);
+/** Broker FX margin vs. the ECB fixing; always to the customer's disadvantage. */
+const BROKER_FX_SPREAD = 0.0025;
+
+interface FxSeed {
+  currency: string;
+  /** Units of `currency` per 1 EUR at the start / end of the seeded period. */
+  from: number;
+  to: number;
+  /** Daily OU noise sigma (log space). */
+  sigma: number;
+}
+
+/** EUR strengthens over the seeded period (USD 1.04 -> 1.17), so USD holdings show a negative currency effect. */
+const FX_SEEDS: FxSeed[] = [
+  { currency: 'USD', from: 1.04, to: 1.17, sigma: 0.003 },
+  { currency: 'GBP', from: 0.83, to: 0.87, sigma: 0.002 },
+  { currency: 'CHF', from: 0.96, to: 0.93, sigma: 0.002 },
+];
 const EPOCH = '2024-01-01';
 const MIN_EOD_DAYS = 400;
 
@@ -89,6 +109,34 @@ const toWeekday = (date: string) => {
   return dow === 6 ? addDays(date, -1) : dow === 0 ? addDays(date, -2) : date;
 };
 const round = (n: number, dp: number) => Math.round(n * 10 ** dp) / 10 ** dp;
+
+/** Easter Sunday (anonymous Gregorian algorithm). */
+function easter(year: number): string {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/** ECB (TARGET2) publishes fixings on weekdays except New Year, Good Friday, Easter Monday, 1 May and 25/26 Dec. */
+export function isEcbBusinessDay(date: string): boolean {
+  if (isWeekend(date)) return false;
+  const md = date.slice(5);
+  if (['01-01', '05-01', '12-25', '12-26'].includes(md)) return false;
+  const e = easter(Number(date.slice(0, 4)));
+  return date !== addDays(e, -2) && date !== addDays(e, 1);
+}
 
 function mulberry32(seed: number) {
   let a = seed >>> 0;
@@ -121,6 +169,37 @@ export function generateCloses(inst: InstrumentSeed, from: string, to: string): 
   return closes;
 }
 
+/**
+ * Deterministic daily ECB fixings (business days only) for every FX_SEEDS currency between `from`
+ * and `to`: a log-linear trend pinned to `seed.from` / `seed.to` at the period ends plus a
+ * mean-reverting noise bridge (zero at both ends), so the latest fixing is exactly `seed.to`.
+ */
+export function generateFxDays(from: string, to: string): FxDay[] {
+  const total = Math.max(1, daysBetween(from, to));
+  const paths = FX_SEEDS.map((fx) => {
+    const rand = mulberry32(hash(`FX#${fx.currency}`));
+    const gauss = () => Math.sqrt(-2 * Math.log(rand() || 1e-12)) * Math.cos(2 * Math.PI * rand());
+    const noise: number[] = [];
+    let x = 0;
+    for (let t = 0; t <= total; t++) noise.push((x = x * 0.985 + fx.sigma * gauss()));
+    return { fx, noise };
+  });
+  const days: FxDay[] = [];
+  for (let date = from, t = 0; date <= to; date = addDays(date, 1), t++) {
+    if (!isEcbBusinessDay(date)) continue;
+    const frac = t / total;
+    const rates = Object.fromEntries(
+      paths.map(({ fx, noise }) => {
+        const bridge = noise[t]! - noise[0]! - (noise[total]! - noise[0]!) * frac;
+        const trend = Math.log(fx.from) + frac * Math.log(fx.to / fx.from);
+        return [fx.currency, round(Math.exp(trend + bridge), 4)];
+      }),
+    );
+    days.push({ base: 'EUR', date, rates });
+  }
+  return days;
+}
+
 export interface SeedOptions {
   doc: DynamoDBDocumentClient;
   tableName: string;
@@ -134,6 +213,12 @@ export async function seed({ doc, tableName, userId = 'demo', today = iso(new Da
   const eodFrom = addDays(today, -Math.max(MIN_EOD_DAYS, daysBetween(firstTxnDate, today) + 10));
   const now = new Date().toISOString();
   const items: Record<string, unknown>[] = [];
+
+  const fxDays = generateFxDays(eodFrom, today);
+  const fxOn = (currency: string, date: string) => {
+    for (let i = fxDays.length - 1; i >= 0; i--) if (fxDays[i]!.date <= date) return fxDays[i]!.rates[currency]!;
+    throw new Error(`No FX fixing for ${currency} on/before ${date}`);
+  };
 
   const closes = new Map(INSTRUMENTS.map((i) => [i.profile.symbol, generateCloses(i, eodFrom, today)]));
   const closeOn = (symbol: string, date: string) => {
@@ -160,8 +245,11 @@ export async function seed({ doc, tableName, userId = 'demo', today = iso(new Da
     const inst = INSTRUMENTS.find((x) => x.profile.symbol === symbol)!;
     const raw = addDays(today, -daysAgo);
     const date = inst.crypto ? raw : toWeekday(raw);
-    return {
-      id: `seed-${String(i + 1).padStart(2, '0')}`,
+    const id = `seed-${String(i + 1).padStart(2, '0')}`;
+    const currency = inst.profile.currency;
+    const brokerFx = BROKER_FX_TXNS.has(id) && currency !== 'EUR';
+    const t: Transaction = {
+      id,
       userId,
       date,
       type,
@@ -169,10 +257,13 @@ export async function seed({ doc, tableName, userId = 'demo', today = iso(new Da
       quantity,
       price: type === 'DIVIDEND' ? dividend! : closeOn(symbol, date),
       fee,
-      currency: inst.profile.currency,
-      note: 'Demo seed',
+      currency,
+      note: brokerFx ? 'Demo seed (broker FX rate)' : 'Demo seed',
       createdAt: `${date}T12:00:00.000Z`,
     };
+    // Buying USD with EUR yields fewer USD per EUR than the fixing; converting USD back costs more USD per EUR.
+    if (brokerFx) t.fxRate = round(fxOn(currency, date) * (type === 'BUY' ? 1 - BROKER_FX_SPREAD : 1 + BROKER_FX_SPREAD), 4);
+    return t;
   });
   for (const t of transactions) items.push({ ...keys.transaction(userId, t.date, t.id), entityType: ENTITY.transaction, ...t });
 
@@ -182,7 +273,10 @@ export async function seed({ doc, tableName, userId = 'demo', today = iso(new Da
     items.push({ ...keys.dividendEvent(symbol, ev.exDate), entityType: ENTITY.dividendEvent, ...ev });
   }
 
-  const fx: FxRates = { base: 'EUR', rates: FX_EUR, asOf: now };
+  for (const day of fxDays) items.push({ ...keys.fxDay(day.base, day.date), entityType: ENTITY.fxDay, ...day });
+  // LATEST mirrors the newest daily fixing so market values and history agree.
+  const lastFx = fxDays.at(-1)!;
+  const fx: FxRates = { base: 'EUR', rates: lastFx.rates, asOf: `${lastFx.date}T15:00:00.000Z` };
   items.push({ ...keys.fx('EUR'), entityType: ENTITY.fx, ...fx });
   items.push({ ...keys.userRegistry(userId), entityType: ENTITY.user, userId, createdAt: now, updatedAt: now });
 
@@ -193,8 +287,8 @@ export async function seed({ doc, tableName, userId = 'demo', today = iso(new Da
   await batchWrite(doc, tableName, items.map((Item) => ({ PutRequest: { Item } })));
 
   log(`Seeded user '${userId}': ${transactions.length} transactions, ${INSTRUMENTS.length} instruments, ` +
-    `${items.length} items total (EOD ${eodFrom}..${today}); removed ${stale.length} stale seed transactions.`);
-  return { transactions, itemCount: items.length };
+    `${fxDays.length} FX fixings, ${items.length} items total (EOD/FX ${eodFrom}..${today}); removed ${stale.length} stale seed transactions.`);
+  return { transactions, fxDays, itemCount: items.length };
 }
 
 async function querySeedTransactionKeys(doc: DynamoDBDocumentClient, tableName: string, userId: string) {

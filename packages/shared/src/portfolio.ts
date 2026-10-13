@@ -1,4 +1,4 @@
-import { toBase } from './fx.js';
+import { FxTimeline } from './fx.js';
 import type {
   AllocationDimension,
   AllocationSlice,
@@ -7,6 +7,7 @@ import type {
   DividendOverview,
   DividendPayment,
   EodPrice,
+  FxDay,
   FxRates,
   Holding,
   InstrumentProfile,
@@ -32,58 +33,100 @@ export function sortTransactions(txns: readonly Transaction[]): Transaction[] {
   return [...txns].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
 }
 
-/** Per-symbol position state in the instrument's local currency (average-cost method). */
+/**
+ * Per-symbol position state (average-cost method), tracked both in the instrument's local currency
+ * and in the portfolio base currency at the FX rate of each transaction.
+ */
 export interface Position {
   symbol: string;
   currency: Currency;
   quantity: number;
   costLocal: number;
+  costBase: number;
   realizedPnlLocal: number;
+  realizedPnlBase: number;
   dividendsLocal: number;
+  dividendsBase: number;
+  /** Total ever paid for buys (incl. fees) in base currency; denominator for total return %. */
+  investedBase: number;
 }
 
-/** Replays transactions up to and including `asOfDate` (inclusive), throws on overselling. */
-export function buildPositions(txns: readonly Transaction[], asOfDate?: IsoDate): Map<string, Position> {
+/**
+ * FX rate for a transaction: the broker-reported `fxRate` wins, then the ECB fixing for the trade
+ * date, then the latest rate. Without a timeline (e.g. pure oversell validation) base == local.
+ */
+function txRate(t: Transaction, fx?: FxTimeline): number {
+  if (!fx || t.currency === fx.base) return 1;
+  return t.fxRate && t.fxRate > 0 ? t.fxRate : fx.rate(t.currency, t.date);
+}
+
+/** Replays transactions up to and including `asOfDate`, throws on overselling. */
+export function buildPositions(txns: readonly Transaction[], asOfDate?: IsoDate, fx?: FxTimeline): Map<string, Position> {
   const positions = new Map<string, Position>();
   for (const t of sortTransactions(txns)) {
     if (asOfDate && t.date > asOfDate) break;
-    applyTransaction(positions, t);
+    applyTransaction(positions, t, fx);
   }
   return positions;
 }
 
 /** Mutates `positions` by applying a single transaction (caller guarantees chronological order). */
-export function applyTransaction(positions: Map<string, Position>, t: Transaction): void {
+export function applyTransaction(positions: Map<string, Position>, t: Transaction, fx?: FxTimeline): void {
   let p = positions.get(t.symbol);
   if (!p) {
-    p = { symbol: t.symbol, currency: t.currency, quantity: 0, costLocal: 0, realizedPnlLocal: 0, dividendsLocal: 0 };
+    p = {
+      symbol: t.symbol,
+      currency: t.currency,
+      quantity: 0,
+      costLocal: 0,
+      costBase: 0,
+      realizedPnlLocal: 0,
+      realizedPnlBase: 0,
+      dividendsLocal: 0,
+      dividendsBase: 0,
+      investedBase: 0,
+    };
     positions.set(t.symbol, p);
   }
   if (t.currency !== p.currency) {
     throw new PortfolioError(`Mixed currencies for ${t.symbol}: ${p.currency} and ${t.currency}`);
   }
+  const rate = txRate(t, fx);
   switch (t.type) {
-    case 'BUY':
+    case 'BUY': {
+      const cost = t.quantity * t.price + t.fee;
       p.quantity += t.quantity;
-      p.costLocal += t.quantity * t.price + t.fee;
+      p.costLocal += cost;
+      p.costBase += cost / rate;
+      p.investedBase += cost / rate;
       break;
+    }
     case 'SELL': {
       if (t.quantity > p.quantity + EPSILON) {
         throw new PortfolioError(`Cannot sell ${t.quantity} ${t.symbol} on ${t.date}: only ${p.quantity} held`);
       }
-      const avg = p.quantity > 0 ? p.costLocal / p.quantity : 0;
-      p.realizedPnlLocal += t.quantity * t.price - t.fee - avg * t.quantity;
-      p.costLocal -= avg * t.quantity;
+      const share = p.quantity > 0 ? t.quantity / p.quantity : 0;
+      const removedLocal = p.costLocal * share;
+      const removedBase = p.costBase * share;
+      const proceeds = t.quantity * t.price - t.fee;
+      p.realizedPnlLocal += proceeds - removedLocal;
+      p.realizedPnlBase += proceeds / rate - removedBase;
+      p.costLocal -= removedLocal;
+      p.costBase -= removedBase;
       p.quantity -= t.quantity;
       if (p.quantity < EPSILON) {
         p.quantity = 0;
         p.costLocal = 0;
+        p.costBase = 0;
       }
       break;
     }
-    case 'DIVIDEND':
-      p.dividendsLocal += t.quantity * t.price - t.fee;
+    case 'DIVIDEND': {
+      const net = t.quantity * t.price - t.fee;
+      p.dividendsLocal += net;
+      p.dividendsBase += net / rate;
       break;
+    }
   }
 }
 
@@ -91,7 +134,10 @@ export interface PortfolioInput {
   transactions: readonly Transaction[];
   quotes: Readonly<Record<string, Quote>>;
   profiles: Readonly<Record<string, InstrumentProfile>>;
+  /** Latest FX rates (market values are always converted at these). */
   fx: FxRates;
+  /** Daily ECB fixings used to convert each transaction at its own date. */
+  fxHistory?: readonly FxDay[];
   now?: Date;
 }
 
@@ -101,22 +147,23 @@ export interface PortfolioResult {
 }
 
 /**
- * Computes current holdings and summary. Cost basis is converted with the *current* FX rate
- * (no historical FX), so currency effects are not separated from price returns in v1.
- * Holdings that are fully sold are excluded from `holdings` but their realized P&L and dividends
- * still count in the summary.
+ * Computes current holdings and summary in the base currency. Costs, realized P&L and dividends use
+ * the FX rate of each transaction (broker rate > ECB fixing > latest); market values use the latest
+ * rate, so unrealized P&L includes the currency effect, reported separately as `currencyEffect`.
+ * Fully sold holdings are excluded from `holdings` but still count in realized P&L and dividends.
  */
-export function calculatePortfolio({ transactions, quotes, profiles, fx, now = new Date() }: PortfolioInput): PortfolioResult {
-  const positions = buildPositions(transactions);
+export function calculatePortfolio({ transactions, quotes, profiles, fx, fxHistory, now = new Date() }: PortfolioInput): PortfolioResult {
+  const timeline = new FxTimeline(fx, fxHistory);
+  const positions = buildPositions(transactions, undefined, timeline);
   const holdings: Holding[] = [];
   let realizedPnl = 0;
   let dividendsReceived = 0;
+  let invested = 0;
 
   for (const p of positions.values()) {
-    const realized = toBase(p.realizedPnlLocal, p.currency, fx);
-    const dividends = toBase(p.dividendsLocal, p.currency, fx);
-    realizedPnl += realized;
-    dividendsReceived += dividends;
+    realizedPnl += p.realizedPnlBase;
+    dividendsReceived += p.dividendsBase;
+    invested += p.investedBase;
     if (p.quantity <= 0) continue;
 
     const quote = quotes[p.symbol];
@@ -126,10 +173,11 @@ export function calculatePortfolio({ transactions, quotes, profiles, fx, now = n
     const prevLocal = quote?.previousClose ?? priceLocal;
     const priceCurrency = quote?.currency ?? p.currency;
 
-    const marketValue = toBase(p.quantity * priceLocal, priceCurrency, fx);
-    const costBasis = toBase(p.costLocal, p.currency, fx);
-    const dayChange = toBase(p.quantity * (priceLocal - prevLocal), priceCurrency, fx);
+    const marketValue = timeline.toBase(p.quantity * priceLocal, priceCurrency);
+    const dayChange = timeline.toBase(p.quantity * (priceLocal - prevLocal), priceCurrency);
     const prevValue = marketValue - dayChange;
+    // Value had FX stayed at the (cost-weighted) purchase rates; the difference is the FX effect.
+    const valueAtCostFx = priceCurrency === p.currency && p.costLocal > 0 ? (p.quantity * priceLocal * p.costBase) / p.costLocal : marketValue;
 
     holdings.push({
       symbol: p.symbol,
@@ -141,15 +189,18 @@ export function calculatePortfolio({ transactions, quotes, profiles, fx, now = n
       quantity: p.quantity,
       averageCostLocal: round(avgLocal, 4),
       priceLocal,
+      averageCostBase: round(p.costBase / p.quantity, 4),
+      priceBase: round(marketValue / p.quantity, 4),
       priceStale: !quote,
-      costBasis: round(costBasis),
+      costBasis: round(p.costBase),
       marketValue: round(marketValue),
-      unrealizedPnl: round(marketValue - costBasis),
-      unrealizedPnlPct: pct(marketValue - costBasis, costBasis),
+      unrealizedPnl: round(marketValue - p.costBase),
+      unrealizedPnlPct: pct(marketValue - p.costBase, p.costBase),
+      currencyEffect: round(marketValue - valueAtCostFx),
       dayChange: round(dayChange),
       dayChangePct: pct(dayChange, prevValue),
-      realizedPnl: round(realized),
-      dividendsReceived: round(dividends),
+      realizedPnl: round(p.realizedPnlBase),
+      dividendsReceived: round(p.dividendsBase),
       weight: 0,
     });
   }
@@ -157,12 +208,12 @@ export function calculatePortfolio({ transactions, quotes, profiles, fx, now = n
   const totalValue = holdings.reduce((s, h) => s + h.marketValue, 0);
   const totalCost = holdings.reduce((s, h) => s + h.costBasis, 0);
   const dayChange = holdings.reduce((s, h) => s + h.dayChange, 0);
+  const currencyEffect = holdings.reduce((s, h) => s + h.currencyEffect, 0);
   for (const h of holdings) h.weight = totalValue > 0 ? round(h.marketValue / totalValue, 4) : 0;
   holdings.sort((a, b) => b.marketValue - a.marketValue);
 
   const unrealizedPnl = totalValue - totalCost;
   const totalReturn = unrealizedPnl + realizedPnl + dividendsReceived;
-  const invested = sumBuys(transactions, fx);
 
   return {
     holdings,
@@ -172,6 +223,7 @@ export function calculatePortfolio({ transactions, quotes, profiles, fx, now = n
       totalCost: round(totalCost),
       unrealizedPnl: round(unrealizedPnl),
       unrealizedPnlPct: pct(unrealizedPnl, totalCost),
+      currencyEffect: round(currencyEffect),
       realizedPnl: round(realizedPnl),
       dividendsReceived: round(dividendsReceived),
       totalReturn: round(totalReturn),
@@ -182,12 +234,6 @@ export function calculatePortfolio({ transactions, quotes, profiles, fx, now = n
       asOf: now.toISOString(),
     },
   };
-}
-
-function sumBuys(txns: readonly Transaction[], fx: FxRates): number {
-  return txns
-    .filter((t) => t.type === 'BUY')
-    .reduce((s, t) => s + toBase(t.quantity * t.price + t.fee, t.currency, fx), 0);
 }
 
 export function calculateAllocation(holdings: readonly Holding[], by: AllocationDimension): AllocationSlice[] {
@@ -212,9 +258,10 @@ const addDays = (date: IsoDate, days: number): IsoDate => {
 };
 
 /**
- * Daily portfolio value series between `from` and `to` (inclusive) using EOD closes.
- * Missing closes carry forward the last known close (weekends/holidays), falling back to the
- * position's average cost. Values are converted at current FX (see calculatePortfolio).
+ * Daily portfolio value series between `from` and `to` (inclusive) in the base currency.
+ * Each day's value uses that day's ECB fixing (carried over weekends/holidays) when `fxHistory` is
+ * given, else the latest rate; `invested` is the cost basis at the purchase-date rates.
+ * Missing closes carry forward the last known close, falling back to the position's average cost.
  */
 export function buildValueHistory(
   transactions: readonly Transaction[],
@@ -222,9 +269,11 @@ export function buildValueHistory(
   fx: FxRates,
   from: IsoDate,
   to: IsoDate,
+  fxHistory?: readonly FxDay[],
 ): ValuePoint[] {
   const sorted = sortTransactions(transactions);
   if (sorted.length === 0 || from > to) return [];
+  const timeline = new FxTimeline(fx, fxHistory);
   const start = from < sorted[0]!.date ? sorted[0]!.date : from;
 
   const closeIndex = new Map<string, Map<IsoDate, number>>();
@@ -243,7 +292,7 @@ export function buildValueHistory(
   const positions = new Map<string, Position>();
   let next = 0;
   for (let date = start; date <= to; date = addDays(date, 1)) {
-    while (next < sorted.length && sorted[next]!.date <= date) applyTransaction(positions, sorted[next++]!);
+    while (next < sorted.length && sorted[next]!.date <= date) applyTransaction(positions, sorted[next++]!, timeline);
     let value = 0;
     let invested = 0;
     for (const p of positions.values()) {
@@ -251,8 +300,8 @@ export function buildValueHistory(
       if (close !== undefined) lastClose.set(p.symbol, close);
       if (p.quantity <= 0) continue;
       const price = lastClose.get(p.symbol) ?? p.costLocal / p.quantity;
-      value += toBase(p.quantity * price, p.currency, fx);
-      invested += toBase(p.costLocal, p.currency, fx);
+      value += timeline.toBase(p.quantity * price, p.currency, date);
+      invested += p.costBase;
     }
     points.push({ date, value: round(value), invested: round(invested) });
   }
@@ -260,16 +309,18 @@ export function buildValueHistory(
 }
 
 /**
- * Received = DIVIDEND transactions. Upcoming = announced DividendEvents with exDate > today
- * multiplied by the current quantity held (gross, no withholding tax estimate).
- * Projection for the next 12 months = trailing-12-month received (simple run-rate) or upcoming, whichever is higher.
+ * Received = DIVIDEND transactions, converted at their own date's rate (broker rate > ECB fixing).
+ * Upcoming = announced DividendEvents with exDate > today × current quantity (gross, latest FX).
+ * Projection for the next 12 months = max(trailing-12-month received, upcoming).
  */
 export function calculateDividends(
   transactions: readonly Transaction[],
   events: readonly DividendEvent[],
   fx: FxRates,
   today: IsoDate = new Date().toISOString().slice(0, 10),
+  fxHistory?: readonly FxDay[],
 ): DividendOverview {
+  const timeline = new FxTimeline(fx, fxHistory);
   const received: DividendPayment[] = sortTransactions(transactions)
     .filter((t) => t.type === 'DIVIDEND')
     .map((t) => ({
@@ -277,7 +328,7 @@ export function calculateDividends(
       date: t.date,
       perShareLocal: t.price,
       currency: t.currency,
-      amount: toBase(t.quantity * t.price - t.fee, t.currency, fx),
+      amount: (t.quantity * t.price - t.fee) / txRate(t, timeline),
       status: 'RECEIVED' as const,
     }));
 
@@ -289,7 +340,7 @@ export function calculateDividends(
       date: e.payDate ?? e.exDate,
       perShareLocal: e.amount,
       currency: e.currency,
-      amount: toBase(positions.get(e.symbol)!.quantity * e.amount, e.currency, fx),
+      amount: timeline.toBase(positions.get(e.symbol)!.quantity * e.amount, e.currency),
       status: 'UPCOMING' as const,
     }))
     .sort((a, b) => a.date.localeCompare(b.date));

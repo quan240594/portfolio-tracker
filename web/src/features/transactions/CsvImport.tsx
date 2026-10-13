@@ -32,9 +32,14 @@ export function CsvImport({ onDone, ...options }: Props) {
           {CSV_HEADER}
         </code>
         <p className="muted mt-2 text-xs">
-          Columns are case-insensitive and may be in any order; <code>note</code> is optional. Dates use YYYY-MM-DD, types are BUY, SELL or
-          DIVIDEND (for dividends, price is the gross amount per share and fee the withholding tax). Max 1 MB / 5,000 rows. Imports are
+          Columns are case-insensitive and may be in any order; <code>note</code> and <code>fxRate</code> are optional. Dates use
+          YYYY-MM-DD, numbers use a dot as decimal separator (e.g. 186.86), types are BUY, SELL or DIVIDEND (for dividends, price is the
+          gross amount per share and fee the withholding tax). Amounts are in the trade&apos;s currency. Max 1 MB / 5,000 rows. Imports are
           all-or-nothing.
+        </p>
+        <p className="muted mt-2 text-xs" data-testid="csv-fxrate-help">
+          <code>fxRate</code>: units of the trade currency per 1 EUR, as on your broker statement (e.g. 1.0842 for USD). Leave it empty
+          for EUR trades, or to use the ECB rate of the trade date.
         </p>
         <button type="button" className="mt-2 text-xs font-medium text-brand-600 underline hover:text-brand-700 dark:text-brand-400" onClick={downloadSampleCsv}>
           Download sample CSV

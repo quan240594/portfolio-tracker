@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import type { GetDividendsResponse } from '@portfolio/shared';
 import { DividendsPage } from './DividendsPage';
-import { renderApp, renderWithProviders } from '../test/utils';
+import { renderApp, renderWithProviders, sp } from '../test/utils';
 import { server } from '../mocks/server';
 import { getDividends } from '../mocks/db';
 import { formatDate, formatMoney } from '../lib/format';
@@ -18,11 +18,11 @@ describe('DividendsPage', () => {
     expect(screen.getByText('Loading chart')).toBeInTheDocument();
 
     const total = await screen.findByRole('region', { name: 'Total received' });
-    expect(await within(total).findByText(formatMoney(data.totalReceived, 'EUR'))).toBeInTheDocument();
+    expect(await within(total).findByText(sp(formatMoney(data.totalReceived, 'EUR')))).toBeInTheDocument();
     expect(within(total).getByText('All time')).toBeInTheDocument();
-    expect(within(screen.getByRole('region', { name: 'Last 12 months' })).getByText(formatMoney(data.last12Months, 'EUR'))).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Last 12 months' })).getByText(sp(formatMoney(data.last12Months, 'EUR')))).toBeInTheDocument();
     const projected = screen.getByRole('region', { name: 'Projected next 12 months' });
-    expect(within(projected).getByText(`≈ ${formatMoney(data.projectedNext12Months / 12, 'EUR')} per month`)).toBeInTheDocument();
+    expect(within(projected).getByText(sp(`≈ ${formatMoney(data.projectedNext12Months / 12, 'EUR')} per month`))).toBeInTheDocument();
 
     expect(screen.getByRole('img', { name: /^Monthly dividends across \d+ months/ })).toBeInTheDocument();
 
@@ -31,7 +31,8 @@ describe('DividendsPage', () => {
     const first = data.upcoming[0]!;
     expect(upcoming[0]).toHaveTextContent(first.symbol);
     expect(upcoming[0]).toHaveTextContent(`pays ${formatDate(first.date)}`);
-    expect(upcoming[0]).toHaveTextContent(formatMoney(first.amount, 'EUR'));
+    expect(upcoming[0]).toHaveTextContent(sp(formatMoney(first.amount, 'EUR')));
+    expect(upcoming[0]).toHaveTextContent(sp(`${formatMoney(first.perShareLocal, first.currency, { maxDigits: 4 })} per share`));
 
     const table = within(screen.getByRole('region', { name: 'Received' })).getByRole('table', { name: 'Received dividends, newest first' });
     const rows = within(table).getAllByRole('row').slice(1);
@@ -39,7 +40,16 @@ describe('DividendsPage', () => {
     const newest = data.received.at(-1)!;
     expect(rows[0]).toHaveTextContent(formatDate(newest.date));
     expect(rows[0]).toHaveTextContent(newest.symbol);
-    expect(rows[0]).toHaveTextContent(formatMoney(newest.amount, 'EUR'));
+    expect(rows[0]).toHaveTextContent(sp(formatMoney(newest.amount, 'EUR')));
+
+    // Per-share amounts stay in the paying currency; amounts are converted to EUR.
+    expect(within(table).getByRole('columnheader', { name: 'Amount (EUR)' })).toBeInTheDocument();
+    const usd = [...data.received].reverse().findIndex((p) => p.currency === 'USD');
+    const usdPayment = [...data.received].reverse()[usd]!;
+    const usdCells = within(rows[usd]!).getAllByRole('cell');
+    expect(usdCells[2]).toHaveTextContent(sp(formatMoney(usdPayment.perShareLocal, 'USD', { maxDigits: 4 })));
+    expect(usdCells[2]).toHaveTextContent(/^US\$/);
+    expect(usdCells[3]).toHaveTextContent(new RegExp(`^${sp(formatMoney(usdPayment.amount, 'EUR'))}$`));
   });
 
   it('shows an error and retries', async () => {
@@ -77,6 +87,8 @@ describe('DividendsPage', () => {
   it('is reachable from the router', async () => {
     renderApp('/dividends');
     expect(await screen.findByRole('heading', { level: 1, name: 'Dividends' })).toBeInTheDocument();
-    expect(screen.getByText('Received amounts are net of withholding tax; upcoming amounts are gross estimates.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Amounts in EUR (per-share amounts in the paying currency). Received amounts are net of withholding tax; upcoming amounts are gross estimates.'),
+    ).toBeInTheDocument();
   });
 });

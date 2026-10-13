@@ -552,3 +552,131 @@ describe('imports edge cases', () => {
     expect(json(res).error.message).toBe('Invalid import request');
   });
 });
+
+describe('historical FX (ECB fixings and broker rates)', () => {
+  const day = (date: string, USD: number) => ({ base: 'EUR', date, rates: { USD, GBP: 0.85 } });
+
+  it.each(['/portfolio', '/holdings', '/allocation', '/history', '/dividends'])(
+    'GET %s loads fixings from 7 days before the first transaction until today',
+    async (path) => {
+      const { handler, repo } = setup();
+      const getFxHistory = vi.spyOn(repo, 'getFxHistory');
+      expect((await handler(apiEvent('GET', path))).statusCode).toBe(200);
+      // first transaction of user demo is 2025-01-10 (other users' transactions are ignored)
+      expect(getFxHistory).toHaveBeenCalledWith('EUR', '2025-01-03', '2026-06-15');
+    },
+  );
+
+  it('skips the history query for a base-currency-only portfolio', async () => {
+    const { handler, repo } = setup();
+    repo.transactions = repo.transactions.filter((t) => t.currency === 'EUR');
+    const getFxHistory = vi.spyOn(repo, 'getFxHistory');
+    for (const path of ['/portfolio', '/history', '/dividends']) expect((await handler(apiEvent('GET', path))).statusCode).toBe(200);
+    expect(getFxHistory).not.toHaveBeenCalled();
+  });
+
+  it('costs a USD buy at the trade-date fixing and reports the currency effect', async () => {
+    const { handler, repo } = setup();
+    repo.fxDays = [day('2025-02-28', 1.04), day('2025-03-03', 1.05), day('2026-06-12', 1.1)];
+    const { holdings } = json(await handler(apiEvent('GET', '/holdings')));
+    const aapl = holdings.find((h: { symbol: string }) => h.symbol === 'AAPL');
+    // cost 5*150 USD / 1.05 = 714.29 EUR; value 5*220 / 1.1 (latest) = 1000 EUR
+    expect(aapl).toMatchObject({ costBasis: 714.29, marketValue: 1000, unrealizedPnl: 285.71, averageCostBase: 142.8571, priceBase: 200 });
+    // at the purchase rate the position would be worth 1100/1.05 = 1047.62 -> FX cost 47.62 EUR
+    expect(aapl.currencyEffect).toBe(-47.62);
+    expect(holdings.find((h: { symbol: string }) => h.symbol === 'VWRL.AS').currencyEffect).toBe(0);
+
+    const summary = json(await handler(apiEvent('GET', '/portfolio')));
+    expect(summary).toMatchObject({ totalValue: 2200, totalCost: 1716.29, currencyEffect: -47.62 });
+  });
+
+  it('carries the previous fixing to trade dates without one (weekend / holiday)', async () => {
+    const { handler, repo } = setup();
+    repo.fxDays = [day('2025-02-28', 1.04)];
+    const { holdings } = json(await handler(apiEvent('GET', '/holdings')));
+    expect(holdings.find((h: { symbol: string }) => h.symbol === 'AAPL').costBasis).toBe(721.15); // 750 / 1.04
+  });
+
+  it('prefers the broker-applied fxRate over the ECB fixing', async () => {
+    const { handler, repo } = setup();
+    repo.fxDays = [day('2025-03-03', 1.05)];
+    repo.transactions.find((t) => t.id === 't2')!.fxRate = 1.02;
+    const { holdings } = json(await handler(apiEvent('GET', '/holdings')));
+    expect(holdings.find((h: { symbol: string }) => h.symbol === 'AAPL').costBasis).toBe(735.29); // 750 / 1.02
+  });
+
+  it('falls back to the latest rate when no fixings exist', async () => {
+    const { handler } = setup();
+    const { holdings } = json(await handler(apiEvent('GET', '/holdings')));
+    expect(holdings.find((h: { symbol: string }) => h.symbol === 'AAPL')).toMatchObject({ costBasis: 681.82, currencyEffect: 0 });
+  });
+
+  it('uses the newest fixing as latest rate when the LATEST item is missing', async () => {
+    const { handler, repo } = setup();
+    repo.fx = null;
+    repo.fxDays = [day('2025-03-03', 1.05), day('2026-06-12', 1.1)];
+    const res = await handler(apiEvent('GET', '/portfolio'));
+    expect(res.statusCode).toBe(200);
+    expect(json(res)).toMatchObject({ totalValue: 2200, totalCost: 1716.29, currencyEffect: -47.62 });
+  });
+
+  it('values each history day at that day’s fixing and invested at purchase-date rates', async () => {
+    const { handler, repo } = setup();
+    repo.eod = [
+      { symbol: 'VWRL.AS', date: '2026-05-10', close: 110, currency: 'EUR' },
+      { symbol: 'AAPL', date: '2026-05-10', close: 200, currency: 'USD' },
+    ];
+    repo.fxDays = [day('2025-03-03', 1.05), day('2026-05-15', 1.25), day('2026-06-01', 1.0)];
+    const { points } = json(await handler(apiEvent('GET', '/history', { query: { range: '1M' } })));
+    // 2026-05-16 (Saturday) carries Friday's 1.25: 10*110 + 5*200/1.25
+    expect(points[0]).toEqual({ date: '2026-05-16', value: 1900, invested: 1716.29 });
+    expect(points.find((p: { date: string }) => p.date === '2026-06-01')).toMatchObject({ value: 2100 });
+  });
+
+  it('converts received dividends at the pay-date fixing', async () => {
+    const { handler, repo } = setup();
+    repo.fxDays = [day('2025-08-01', 1.25)];
+    const body = json(await handler(apiEvent('GET', '/dividends')));
+    expect(body.received).toEqual([expect.objectContaining({ symbol: 'AAPL', date: '2025-08-01', amount: 1 })]); // 1.25 USD / 1.25
+    expect(body.totalReceived).toBe(1);
+  });
+});
+
+describe('transaction fxRate', () => {
+  const body = { date: '2026-06-01', type: 'BUY', symbol: 'MSFT', quantity: 2, price: 400, currency: 'USD' };
+
+  it('persists and returns a broker fxRate, and lists it on GET /transactions', async () => {
+    const { handler, repo } = setup();
+    const res = await handler(apiEvent('POST', '/transactions', { body: { ...body, fxRate: '1.0842' } }));
+    expect(res.statusCode).toBe(201);
+    expect(json(res)).toMatchObject({ id: 'uuid-1', currency: 'USD', fxRate: 1.0842 });
+    expect(repo.transactions.at(-1)).toMatchObject({ id: 'uuid-1', fxRate: 1.0842 });
+    const listed = json(await handler(apiEvent('GET', '/transactions'))).transactions;
+    expect(listed.find((t: { id: string }) => t.id === 'uuid-1')).toMatchObject({ fxRate: 1.0842 });
+  });
+
+  it('omits fxRate when not provided', async () => {
+    const { handler, repo } = setup();
+    const res = await handler(apiEvent('POST', '/transactions', { body }));
+    expect(json(res)).not.toHaveProperty('fxRate');
+    expect(repo.transactions.at(-1)).not.toHaveProperty('fxRate');
+  });
+
+  it.each([0, -1.1, 'abc'])('rejects fxRate %s with 400', async (fxRate) => {
+    const { handler, repo } = setup();
+    const before = repo.transactions.length;
+    const res = await handler(apiEvent('POST', '/transactions', { body: { ...body, fxRate } }));
+    expect(res.statusCode).toBe(400);
+    expect(json(res).error.details[0].path).toEqual(['fxRate']);
+    expect(repo.transactions).toHaveLength(before);
+  });
+
+  it('a stored broker fxRate drives the cost basis of the new position', async () => {
+    const { handler, repo } = setup();
+    repo.quotes.MSFT = { symbol: 'MSFT', price: 400, previousClose: 400, currency: 'USD', asOf: '2026-06-15T20:00:00Z', source: 'test' };
+    await handler(apiEvent('POST', '/transactions', { body: { ...body, fxRate: 1.25 } }));
+    const { holdings } = json(await handler(apiEvent('GET', '/holdings')));
+    // cost 800/1.25 = 640, value 800/1.1 = 727.27 -> the whole gain is currency effect
+    expect(holdings.find((h: { symbol: string }) => h.symbol === 'MSFT')).toMatchObject({ costBasis: 640, marketValue: 727.27, currencyEffect: 87.27 });
+  });
+});

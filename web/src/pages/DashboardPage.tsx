@@ -12,7 +12,7 @@ import { PageHeader } from '../components/Layout';
 import { ValueChart } from '../components/charts/ValueChart';
 import { AllocationDonut } from '../components/charts/AllocationDonut';
 import { StaleBadge } from '../features/holdings/HoldingsTable';
-import { formatDate, formatMoney, formatPercent, formatWeight } from '../lib/format';
+import { BASE_CURRENCY, formatDate, formatMoney, formatPercent, formatWeight } from '../lib/format';
 
 const ALLOCATION_TABS: { value: Exclude<AllocationDimension, 'symbol'>; label: string }[] = [
   { value: 'assetClass', label: 'Asset class' },
@@ -23,12 +23,13 @@ const ALLOCATION_TABS: { value: Exclude<AllocationDimension, 'symbol'>; label: s
 
 const RANGE_OPTIONS = HISTORY_RANGES.map((r) => ({ value: r, label: r }));
 
+
 function KpiGrid() {
   const { data, isPending, isError, error, refetch } = usePortfolio();
   if (isError) return <ErrorState error={error} onRetry={() => void refetch()} title="Could not load portfolio summary" />;
-  const ccy = data?.baseCurrency ?? 'EUR';
+  const ccy = data?.baseCurrency ?? BASE_CURRENCY;
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5" aria-busy={isPending || undefined}>
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy={isPending || undefined}>
       <KpiCard
         loading={isPending}
         label="Total value"
@@ -46,6 +47,13 @@ function KpiGrid() {
         label="Unrealized P&L"
         value={data && formatMoney(data.unrealizedPnl, ccy, { signed: true })}
         change={data && <Change pct={data.unrealizedPnlPct} value={data.unrealizedPnl} />}
+        hint={data && `Incl. ${formatMoney(data.currencyEffect, ccy, { signed: true })} currency effect`}
+      />
+      <KpiCard
+        loading={isPending}
+        label="Currency effect"
+        value={data && <Change amount={data.currencyEffect} currency={ccy} />}
+        hint={`Part of the unrealized P&L caused by exchange-rate moves since purchase — e.g. a weaker US dollar lowers the ${ccy} value of US shares. Already included in Unrealized P&L.`}
       />
       <KpiCard
         loading={isPending}

@@ -9,7 +9,7 @@ from datetime import date
 from typing import Protocol, runtime_checkable
 
 from ..errors import ProviderError, SymbolNotFoundError
-from ..models import DividendEvent, EodPrice, FxRates, InstrumentProfile, Quote
+from ..models import DividendEvent, EodPrice, FxDay, FxRates, InstrumentProfile, Quote
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +31,8 @@ class FxProvider(Protocol):
     name: str
 
     def get_latest(self, base: str) -> FxRates: ...
+
+    def get_history(self, base: str, start: date, end: date) -> list[FxDay]: ...
 
 
 @dataclass

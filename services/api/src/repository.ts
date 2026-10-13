@@ -13,6 +13,7 @@ import {
   keys,
   type DividendEvent,
   type EodPrice,
+  type FxDay,
   type FxRates,
   type ImportStatus,
   type InstrumentProfile,
@@ -29,6 +30,8 @@ export interface Repository {
   getQuotes(symbols: string[]): Promise<Record<string, Quote>>;
   getProfiles(symbols: string[]): Promise<Record<string, InstrumentProfile>>;
   getFx(base: string): Promise<FxRates | null>;
+  /** Daily ECB fixings for `base` between `from` and `to` (inclusive, YYYY-MM-DD), oldest first. */
+  getFxHistory(base: string, from: string, to: string): Promise<FxDay[]>;
   getEod(symbol: string, from: string, to: string): Promise<EodPrice[]>;
   getDividendEvents(symbol: string): Promise<DividendEvent[]>;
   registerUser(userId: string): Promise<void>;
@@ -132,6 +135,22 @@ export class DynamoRepository implements Repository {
   async getFx(base: string): Promise<FxRates | null> {
     const res = await this.doc.send(new GetCommand({ TableName: this.tableName, Key: keys.fx(base) }));
     return res.Item ? fromItem<FxRates>(res.Item) : null;
+  }
+
+  async getFxHistory(base: string, from: string, to: string): Promise<FxDay[]> {
+    const items = await this.queryAll({
+      KeyConditionExpression: 'PK = :pk AND SK BETWEEN :from AND :to',
+      ExpressionAttributeValues: {
+        ':pk': keys.fxDay(base, from).PK,
+        ':from': keys.fxDay(base, from).SK,
+        ':to': keys.fxDay(base, to).SK,
+      },
+    });
+    return items.map((i) => ({
+      base: typeof i.base === 'string' ? i.base : base,
+      date: typeof i.date === 'string' ? i.date : String(i.SK).slice(keys.fxDayPrefix.length),
+      rates: (i.rates ?? {}) as FxDay['rates'],
+    }));
   }
 
   async getEod(symbol: string, from: string, to: string): Promise<EodPrice[]> {

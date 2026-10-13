@@ -13,6 +13,11 @@ describe('CsvImport', () => {
   it('shows the expected header', () => {
     renderWithProviders(<CsvImport />);
     expect(screen.getByTestId('csv-header')).toHaveTextContent(CSV_HEADER);
+    expect(CSV_HEADER).toMatch(/,note,fxRate$/);
+    expect(screen.getByText(/numbers use a dot as decimal separator/)).toHaveTextContent('note and fxRate are optional');
+    expect(screen.getByTestId('csv-fxrate-help')).toHaveTextContent(
+      'fxRate: units of the trade currency per 1 EUR, as on your broker statement (e.g. 1.0842 for USD). Leave it empty for EUR trades, or to use the ECB rate of the trade date.',
+    );
     expect(screen.getByRole('button', { name: 'Download sample CSV' })).toBeInTheDocument();
   });
 
@@ -40,6 +45,9 @@ describe('CsvImport', () => {
     expect(calls.filter((c) => c.startsWith('GET /api/imports/')).length).toBeGreaterThanOrEqual(2);
     expect(uploadedContentType).toBe('text/csv');
     expect(listTransactions()).toHaveLength(5);
+    // The optional fxRate column is imported (header matched case-insensitively), empty cells are omitted.
+    const imported = listTransactions();
+    expect(imported.filter((t) => t.fxRate !== undefined)).toEqual([expect.objectContaining({ symbol: 'AAPL', type: 'BUY', fxRate: 1.0812 })]);
 
     const invalidated = invalidate.mock.calls.map((c) => (c[0] as { queryKey: unknown[] }).queryKey[0]);
     expect(invalidated).toEqual(expect.arrayContaining(['portfolio', 'holdings', 'allocation', 'history', 'dividends', 'transactions']));

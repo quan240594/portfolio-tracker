@@ -2,7 +2,7 @@ import { screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { server } from '../../mocks/server';
 import userEvent from '@testing-library/user-event';
-import { TransactionForm, validateTransaction } from './TransactionForm';
+import { TransactionForm, needsFxRate, validateTransaction } from './TransactionForm';
 import { renderWithProviders } from '../../test/utils';
 import { listTransactions } from '../../mocks/db';
 
@@ -154,6 +154,97 @@ describe('TransactionForm extras', () => {
   });
 });
 
+describe('TransactionForm FX rate', () => {
+  it('defaults to EUR and only offers the FX rate for other currencies', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<TransactionForm />);
+    expect(screen.getByLabelText('Currency')).toHaveValue('EUR');
+    expect(screen.queryByLabelText(/FX rate/)).not.toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText('Currency'));
+    await user.type(screen.getByLabelText('Currency'), 'us');
+    expect(screen.queryByLabelText(/FX rate/)).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText('Currency'), 'd');
+    const fx = screen.getByLabelText('FX rate (USD per 1 EUR) (optional)');
+    expect(fx).toHaveValue('');
+    expect(fx).toHaveAccessibleDescription('From your broker statement. Leave empty to use the ECB rate of the trade date.');
+
+    await user.clear(screen.getByLabelText('Currency'));
+    await user.type(screen.getByLabelText('Currency'), 'eur');
+    expect(screen.queryByLabelText(/FX rate/)).not.toBeInTheDocument();
+  });
+
+  it('validates the FX rate with the shared schema and focuses it', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<TransactionForm />);
+    await user.type(screen.getByLabelText('Symbol'), 'KO');
+    await user.clear(screen.getByLabelText('Currency'));
+    await user.type(screen.getByLabelText('Currency'), 'USD');
+    await user.type(screen.getByLabelText(/^FX rate/), '0');
+    await user.type(screen.getByLabelText('Quantity'), '1');
+    await user.type(screen.getByLabelText('Price per unit'), '60');
+    await user.click(screen.getByRole('button', { name: 'Save transaction' }));
+
+    const fx = screen.getByLabelText(/^FX rate/);
+    expect(screen.getByText('FX rate must be greater than 0')).toBeInTheDocument();
+    expect(fx).toHaveFocus();
+    expect(fx).toHaveAttribute('aria-invalid', 'true');
+    expect(fx).toHaveAccessibleDescription(
+      'From your broker statement. Leave empty to use the ECB rate of the trade date. FX rate must be greater than 0',
+    );
+
+    await user.clear(fx);
+    await user.type(fx, 'abc');
+    await user.click(screen.getByRole('button', { name: 'Save transaction' }));
+    expect(screen.getByText('Enter a valid number')).toBeInTheDocument();
+  });
+
+  it('submits the broker FX rate, accepting a Dutch decimal comma', async () => {
+    const user = userEvent.setup();
+    const onSuccess = vi.fn();
+    renderWithProviders(<TransactionForm onSuccess={onSuccess} />);
+    await user.type(screen.getByLabelText('Symbol'), 'ko');
+    await user.clear(screen.getByLabelText('Currency'));
+    await user.type(screen.getByLabelText('Currency'), 'usd');
+    await user.type(screen.getByLabelText(/^FX rate/), '1,0842');
+    await user.type(screen.getByLabelText('Quantity'), '3');
+    await user.type(screen.getByLabelText('Price per unit'), '61,25');
+    await user.click(screen.getByRole('button', { name: 'Save transaction' }));
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+    expect(onSuccess.mock.calls[0]![0]).toMatchObject({ symbol: 'KO', currency: 'USD', quantity: 3, price: 61.25, fxRate: 1.0842 });
+    expect(screen.getByLabelText('Currency')).toHaveValue('EUR');
+    expect(screen.queryByLabelText(/FX rate/)).not.toBeInTheDocument();
+  });
+
+  it('leaves the FX rate out when it is empty', async () => {
+    const user = userEvent.setup();
+    const onSuccess = vi.fn();
+    renderWithProviders(<TransactionForm onSuccess={onSuccess} />);
+    await user.type(screen.getByLabelText('Symbol'), 'KO');
+    await user.clear(screen.getByLabelText('Currency'));
+    await user.type(screen.getByLabelText('Currency'), 'USD');
+    await user.type(screen.getByLabelText('Quantity'), '1');
+    await user.type(screen.getByLabelText('Price per unit'), '60');
+    await user.click(screen.getByRole('button', { name: 'Save transaction' }));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+    expect(onSuccess.mock.calls[0]![0]).not.toHaveProperty('fxRate');
+  });
+});
+
+describe('needsFxRate', () => {
+  it.each([
+    ['USD', true],
+    [' gbp ', true],
+    ['EUR', false],
+    ['eur', false],
+    ['US', false],
+    ['', false],
+  ])('%j → %s', (currency, expected) => {
+    expect(needsFxRate(currency)).toBe(expected);
+  });
+});
+
 describe('validateTransaction', () => {
   const valid = { date: '2024-01-02', type: 'BUY', symbol: 'KO', quantity: '1', price: '1', fee: '0', currency: 'USD', note: '' };
 
@@ -181,6 +272,23 @@ describe('validateTransaction', () => {
     });
     expect(res.errors).toEqual({});
     expect(res.data).toEqual({ date: '2024-01-02', type: 'DIVIDEND', symbol: 'KO', quantity: 10, price: 0.485, fee: 0, currency: 'USD' });
+  });
+
+  it('parses an optional FX rate for foreign-currency trades and drops it for EUR trades', () => {
+    expect(validateTransaction({ ...valid, fxRate: '1.0842' }).data).toMatchObject({ currency: 'USD', fxRate: 1.0842 });
+    expect(validateTransaction({ ...valid, fxRate: ' 1,1 ' }).data).toMatchObject({ fxRate: 1.1 });
+    expect(validateTransaction({ ...valid, fxRate: '' }).data).not.toHaveProperty('fxRate');
+    expect(validateTransaction({ ...valid, currency: 'EUR', fxRate: '1.2' }).data).not.toHaveProperty('fxRate');
+    expect(validateTransaction({ ...valid, fxRate: '-1' }).errors.fxRate).toBe('FX rate must be greater than 0');
+    expect(validateTransaction({ ...valid, fxRate: 'x' }).errors.fxRate).toBe('Enter a valid number');
+  });
+
+  it('accepts Dutch decimal commas and thousands separators', () => {
+    expect(validateTransaction({ ...valid, quantity: '1.000,5', price: '0,485', fee: '1,50' }).data).toMatchObject({
+      quantity: 1000.5,
+      price: 0.485,
+      fee: 1.5,
+    });
   });
 
   it('reports a malformed date', () => {

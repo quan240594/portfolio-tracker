@@ -40,6 +40,7 @@ export async function createTransaction(ctx: RouteContext): Promise<RouteResult>
     createdAt: now().toISOString(),
   };
   if (txn.note === undefined) delete txn.note;
+  if (txn.fxRate === undefined) delete txn.fxRate;
 
   const existing = await repo.listTransactions(ctx.userId);
   buildPositions([...existing, txn]); // throws PortfolioError (-> 422) on oversell / mixed currency

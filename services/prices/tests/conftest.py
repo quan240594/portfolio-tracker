@@ -31,6 +31,8 @@ def _env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("TABLE_NAME", TABLE)
     monkeypatch.setenv("EVENT_BUS_NAME", BUS)
     monkeypatch.setenv("MARKET_DATA_PROVIDER", "mock")
+    # Keep the initial FX_DAY backfill small (the default 2015-01-01 means ~3000 items per test).
+    monkeypatch.setenv("FX_HISTORY_START", "2026-10-01")
     for name in ["AWS_ENDPOINT_URL", "EU_REFRESH_HOURS", "FX_PROVIDER", "COINGECKO_COIN_IDS", *API_KEY_ENV]:
         monkeypatch.delenv(name, raising=False)
     aws.reset()

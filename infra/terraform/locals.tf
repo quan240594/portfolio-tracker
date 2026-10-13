@@ -20,7 +20,7 @@ locals {
   lambda_timeouts = {
     api            = 10
     ingest         = 60
-    prices_refresh = 120
+    prices_refresh = 300
     prices_enrich  = 120
   }
 

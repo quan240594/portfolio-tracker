@@ -2,6 +2,7 @@
 
     python -m prices.local refresh [SYMBOL ...] [--all-hours]
     python -m prices.local enrich SYMBOL [SYMBOL ...]
+    python -m prices.local fx-backfill [--start YYYY-MM-DD]
 
 Defaults: AWS_ENDPOINT_URL=http://localhost:4566, TABLE_NAME / EVENT_BUS_NAME=portfolio-tracker-local,
 region eu-west-1, dummy credentials, MARKET_DATA_PROVIDER=mock. Existing env vars win.
@@ -15,6 +16,7 @@ import os
 import sys
 import uuid
 from collections.abc import Sequence
+from datetime import UTC, date
 from types import SimpleNamespace
 
 LOCAL_DEFAULTS = {
@@ -54,6 +56,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     refresh.add_argument("--all-hours", action="store_true", help="ignore EU_REFRESH_HOURS gating")
     enrich = sub.add_parser("enrich", help="run on_transactions_changed for SYMBOLs")
     enrich.add_argument("symbols", nargs="+")
+    backfill = sub.add_parser(
+        "fx-backfill",
+        help="store daily ECB fixings (FX_DAY) up to today; default start: day after the latest stored "
+        "fixing, else FX_HISTORY_START",
+    )
+    backfill.add_argument("--start", type=date.fromisoformat, metavar="YYYY-MM-DD", help="force start date")
     args = parser.parse_args(argv)
 
     apply_local_env()
@@ -68,9 +76,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     secrets.clear_cache()
     handlers.reset()
     context = SimpleNamespace(aws_request_id=f"local-{uuid.uuid4()}")
-    symbols = [normalize(s) for s in args.symbols]
+    symbols = [normalize(s) for s in getattr(args, "symbols", [])]
 
-    if args.command == "refresh":
+    if args.command == "fx-backfill":
+        today = handlers.utcnow().astimezone(UTC).date()
+        result = handlers.backfill_fx_history(handlers.get_deps(), today, args.start)
+    elif args.command == "refresh":
         if symbols:
             repo = handlers.get_deps().repo
             now = iso_datetime(handlers.utcnow())

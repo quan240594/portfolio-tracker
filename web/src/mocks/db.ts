@@ -1,5 +1,6 @@
 /** In-memory mock backend that derives every response from transactions using the shared calculators. */
 import {
+  CSV_COLUMNS,
   PortfolioError,
   buildPositions,
   buildValueHistory,
@@ -20,7 +21,7 @@ import {
   type Transaction,
   type TransactionInput,
 } from '@portfolio/shared';
-import { BASE_CURRENCY, FX, MOCK_USER_ID, STALE_SYMBOLS, createSeed, type MockSeed } from './fixtures';
+import { BASE_CURRENCY, MOCK_USER_ID, STALE_SYMBOLS, createSeed, type MockSeed } from './fixtures';
 
 interface MockImport {
   status: ImportStatus;
@@ -77,7 +78,8 @@ function portfolio() {
     transactions: state.transactions,
     quotes: quotesFor(state.transactions),
     profiles: state.seed.profiles,
-    fx: FX,
+    fx: state.seed.fx,
+    fxHistory: state.seed.fxHistory,
   });
   for (const h of result.holdings) if (STALE_SYMBOLS.has(h.symbol)) h.priceStale = true;
   return result;
@@ -100,12 +102,12 @@ export function getHistory(range: HistoryRange): GetHistoryResponse {
   return {
     range,
     baseCurrency: BASE_CURRENCY,
-    points: buildValueHistory(sorted, state.seed.eod, FX, from, today),
+    points: buildValueHistory(sorted, state.seed.eod, state.seed.fx, from, today, state.seed.fxHistory),
   };
 }
 
 export const getDividends = (): GetDividendsResponse =>
-  calculateDividends(state.transactions, state.seed.dividendEvents, FX, state.seed.today);
+  calculateDividends(state.transactions, state.seed.dividendEvents, state.seed.fx, state.seed.today, state.seed.fxHistory);
 
 export const listTransactions = (): Transaction[] =>
   sortTransactions(state.transactions).reverse();
@@ -199,10 +201,12 @@ export function parseCsv(text: string): string[][] {
 }
 
 const REQUIRED = ['date', 'type', 'symbol', 'quantity', 'price', 'fee', 'currency'];
+/** Case-insensitive header → schema key (e.g. "FXRATE" → "fxRate"). */
+const COLUMN_BY_LOWER = new Map<string, string>(CSV_COLUMNS.map((c) => [c.toLowerCase(), c]));
 
 function processCsv(importId: string, csv: string): Partial<ImportStatus> {
   const [header, ...data] = parseCsv(csv);
-  const cols = (header ?? []).map((h) => h.toLowerCase());
+  const cols = (header ?? []).map((h) => COLUMN_BY_LOWER.get(h.toLowerCase()) ?? h.toLowerCase());
   const missing = REQUIRED.filter((c) => !cols.includes(c));
   if (missing.length) {
     return { status: 'FAILED', rowCount: data.length, importedCount: 0, errors: [{ row: 1, message: `Missing column(s): ${missing.join(', ')}` }] };

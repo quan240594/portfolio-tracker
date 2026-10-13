@@ -110,10 +110,11 @@ def test_dividends() -> None:
 
 def test_mock_fx() -> None:
     fx = MockFx(now=lambda: NOW).get_latest("EUR")
-    assert fx.base == "EUR" and fx.rates["USD"] == 1.085 and "EUR" not in fx.rates
-    assert fx.asOf == "2026-10-13T12:00:00.000Z"
+    assert fx.base == "EUR" and fx.rates["USD"] == pytest.approx(1.085, rel=0.07) and "EUR" not in fx.rates
+    assert fx.asOf == "2026-10-13T12:00:00.000Z" and fx.date == "2026-10-13"
+    assert MockFx(now=lambda: SATURDAY).get_latest("EUR").date == "2026-10-16"
     usd = MockFx(now=lambda: NOW).get_latest("USD")
-    assert usd.rates["EUR"] == pytest.approx(1 / 1.085, rel=1e-5) and "USD" not in usd.rates
+    assert usd.rates["EUR"] == pytest.approx(1 / fx.rates["USD"], rel=1e-5) and "USD" not in usd.rates
     with pytest.raises(SymbolNotFoundError):
         MockFx().get_latest("XXX")
     json.dumps(fx.rates)

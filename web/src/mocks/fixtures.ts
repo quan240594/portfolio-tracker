@@ -6,13 +6,14 @@ import type {
   Currency,
   DividendEvent,
   EodPrice,
+  FxDay,
   FxRates,
   InstrumentProfile,
   IsoDate,
   Quote,
   Transaction,
 } from '@portfolio/shared';
-import { buildPositions } from '@portfolio/shared';
+import { FxTimeline, buildPositions } from '@portfolio/shared';
 
 export const MOCK_USER_ID = 'demo';
 export const BASE_CURRENCY: Currency = 'EUR';
@@ -38,9 +39,16 @@ export const INSTRUMENTS: InstrumentSeed[] = [
 /** Symbols the mock API reports with `priceStale: true`, to exercise the UI indicator. */
 export const STALE_SYMBOLS = new Set(['IWDA.AS']);
 
-export const FX: FxRates = { base: 'EUR', rates: { EUR: 1, USD: 1.0852 }, asOf: new Date().toISOString() };
-
 const HISTORY_DAYS = 400;
+
+/**
+ * EUR/USD (USD per 1 EUR) drifts from ~1.04 a year ago to ~1.17 today: the euro strengthened, so US
+ * holdings show a negative currency effect in EUR.
+ */
+export const USD_PER_EUR_START = 1.035;
+export const USD_PER_EUR_END = 1.17;
+/** Broker FX spread on top of the ECB fixing (the broker gives fewer USD per EUR). */
+const BROKER_FX_SPREAD = 0.0025;
 
 function mulberry32(seed: number) {
   let a = seed;
@@ -76,6 +84,10 @@ const round = (n: number, dp: number) => Math.round(n * 10 ** dp) / 10 ** dp;
 
 export interface MockMarket {
   today: IsoDate;
+  /** Latest rates (equal to the most recent day in `fxHistory`). */
+  fx: FxRates;
+  /** Daily ECB-style fixings over the full history window (business days only). */
+  fxHistory: FxDay[];
   profiles: Record<string, InstrumentProfile>;
   eod: Record<string, EodPrice[]>;
   quotes: Record<string, Quote>;
@@ -100,6 +112,20 @@ function buildEod(seed: InstrumentSeed, today: IsoDate): EodPrice[] {
     price = price / (1 + dailyDrift + shock);
   }
   return prices.reverse();
+}
+
+/** Seeded daily EUR/USD fixings with a linear trend plus small noise; weekends are skipped like the ECB. */
+export function buildFxHistory(today: IsoDate): FxDay[] {
+  const rnd = mulberry32(hash('EURUSD'));
+  const days: FxDay[] = [];
+  for (let i = HISTORY_DAYS; i >= 0; i--) {
+    const date = addDays(today, -i);
+    const noise = (rnd() - 0.5) * 0.008;
+    if (isWeekend(date)) continue;
+    const trend = USD_PER_EUR_END - ((USD_PER_EUR_END - USD_PER_EUR_START) * i) / HISTORY_DAYS;
+    days.push({ base: BASE_CURRENCY, date, rates: { USD: round(trend + (i === 0 ? 0 : noise), 4) } });
+  }
+  return days;
 }
 
 export function closeOn(eod: readonly EodPrice[], date: IsoDate): number {
@@ -131,6 +157,9 @@ const DIVIDEND_SCHEDULES: DividendSchedule[] = [
 
 export function createSeed(now: Date = new Date()): MockSeed {
   const today = isoDay(now);
+  const fxHistory = buildFxHistory(today);
+  const fx: FxRates = { base: BASE_CURRENCY, rates: { EUR: 1, ...fxHistory.at(-1)!.rates }, asOf: now.toISOString() };
+  const timeline = new FxTimeline(fx, fxHistory);
   const profiles: Record<string, InstrumentProfile> = {};
   const eod: Record<string, EodPrice[]> = {};
   const quotes: Record<string, Quote> = {};
@@ -162,13 +191,16 @@ export function createSeed(now: Date = new Date()): MockSeed {
       createdAt: `${t.date}T09:30:00.000Z`,
     });
   };
-  const trade = (type: 'BUY' | 'SELL', symbol: string, daysAgo: number, quantity: number, fee: number, note?: string) => {
+  /** `brokerFx` records the broker's FX rate (ECB fixing minus spread) on the transaction, as on a statement. */
+  const trade = (type: 'BUY' | 'SELL', symbol: string, daysAgo: number, quantity: number, fee: number, note?: string, brokerFx = false) => {
     const date = profiles[symbol]!.assetClass === 'CRYPTO' ? addDays(today, -daysAgo) : tradingDay(addDays(today, -daysAgo));
-    push({ date, type, symbol, quantity, price: closeOn(eod[symbol]!, date), fee, currency: profiles[symbol]!.currency, ...(note ? { note } : {}) });
+    const currency = profiles[symbol]!.currency;
+    const fxRate = brokerFx ? round(timeline.rate(currency, date) * (1 - BROKER_FX_SPREAD), 4) : undefined;
+    push({ date, type, symbol, quantity, price: closeOn(eod[symbol]!, date), fee, currency, ...(note ? { note } : {}), ...(fxRate ? { fxRate } : {}) });
   };
 
   trade('BUY', 'VWRL.AS', 378, 80, 2, 'Initial core position');
-  trade('BUY', 'AAPL', 372, 25, 1);
+  trade('BUY', 'AAPL', 372, 25, 1, 'Broker FX rate', true);
   trade('BUY', 'MSFT', 365, 12, 1);
   trade('BUY', 'KO', 358, 60, 1);
   trade('BUY', 'JNJ', 341, 30, 1);
@@ -179,7 +211,7 @@ export function createSeed(now: Date = new Date()): MockSeed {
   trade('BUY', 'AAPL', 201, 10, 1);
   trade('BUY', 'BTC-EUR', 152, 0.05, 2.5);
   trade('BUY', 'VWRL.AS', 131, 40, 2);
-  trade('BUY', 'MSFT', 118, 5, 1);
+  trade('BUY', 'MSFT', 118, 5, 1, undefined, true);
   trade('BUY', 'IWDA.AS', 89, 50, 2);
   trade('SELL', 'AAPL', 58, 10, 1, 'Trimmed position');
   trade('BUY', 'VWRL.AS', 19, 30, 2);
@@ -203,5 +235,5 @@ export function createSeed(now: Date = new Date()): MockSeed {
   }
   transactions.sort((a, b) => a.date.localeCompare(b.date));
 
-  return { today, profiles, eod, quotes, dividendEvents, transactions };
+  return { today, fx, fxHistory, profiles, eod, quotes, dividendEvents, transactions };
 }
