@@ -1,0 +1,23 @@
+node_modules/
+dist/
+build/
+coverage/
+*.zip
+.env
+.env.*
+!.env.example
+.DS_Store
+# python
+__pycache__/
+.venv/
+.pytest_cache/
+*.pyc
+# terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl.bak
+# localstack
+.localstack/
