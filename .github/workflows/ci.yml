@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  PYTHON_VERSION: "3.12"
+  TERRAFORM_VERSION: "1.9.8"
+
+jobs:
+  node:
+    name: Node (typecheck, lint, test, build, package)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4 # version from package.json "packageManager"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r --if-present typecheck
+      - run: pnpm -r --if-present lint
+      - run: pnpm -r --if-present test
+      - run: pnpm -r --if-present build
+      - name: Package Lambda artifacts
+        run: |
+          pnpm --filter @portfolio/api package
+          pnpm --filter @portfolio/ingest package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lambda-node
+          path: |
+            services/api/dist/api.zip
+            services/ingest/dist/ingest.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  python:
+    name: Python (prices)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: services/prices
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            services/prices/requirements.txt
+            services/prices/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest -q
+      - name: Package Lambda artifact
+        run: bash scripts/package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lambda-prices
+          path: services/prices/dist/prices.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  terraform:
+    name: Terraform (fmt, validate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: Create placeholder Lambda artifacts
+        working-directory: .
+        run: |
+          for z in services/api/dist/api.zip services/ingest/dist/ingest.zip services/prices/dist/prices.zip; do
+            mkdir -p "$(dirname "$z")"
+            python3 -c "import sys, zipfile; zipfile.ZipFile(sys.argv[1], 'w').writestr('placeholder.txt', 'ci')" "$z"
+          done
+      - run: terraform fmt -recursive -check -diff
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+      - name: Terraform test (mocked provider, offline plan)
+        run: terraform test
+
+  integration:
+    name: Integration (LocalStack)
+    needs: node
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      localstack:
+        image: localstack/localstack:3
+        ports:
+          - 4566:4566
+        env:
+          SERVICES: dynamodb,s3,sqs,events,ssm
+          AWS_DEFAULT_REGION: eu-west-1
+          EAGER_SERVICE_LOADING: "1"
+        options: >-
+          --health-cmd "curl -fsS http://localhost:4566/_localstack/health"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+          --health-start-period 10s
+    env:
+      LOCALSTACK: "1"
+      AWS_ENDPOINT_URL: http://localhost:4566
+      AWS_REGION: eu-west-1
+      AWS_DEFAULT_REGION: eu-west-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      TABLE_NAME: portfolio-tracker-local
+      IMPORT_BUCKET: portfolio-tracker-imports-local
+      EVENT_BUS_NAME: portfolio-tracker-local
+      INGEST_QUEUE_NAME: portfolio-tracker-ingest-local
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Bootstrap LocalStack resources
+        run: bash infra/localstack/init/ready.d/01-bootstrap.sh
+      - run: pnpm --filter @portfolio/api test:integration
+      - run: pnpm --filter @portfolio/ingest test:integration
+
+  e2e:
+    name: E2E (Playwright)
+    needs: node
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @portfolio/web exec playwright install --with-deps chromium
+      - run: pnpm --filter @portfolio/web test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report
+            web/test-results
+          if-no-files-found: ignore
+          retention-days: 7

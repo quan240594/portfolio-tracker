@@ -1,0 +1,28 @@
+# Copy to terraform.tfvars (git-ignored) or <env>.tfvars and pass with -var-file.
+region = "eu-west-1"
+env    = "dev"
+
+# Repo root containing services/*/dist/*.zip (defaults to ../.. relative to this directory).
+# artifacts_dir = "/path/to/portfolio-tracker"
+
+base_currency        = "EUR"
+log_level            = "INFO"
+market_data_provider = "mock" # or "live"
+market_data_api_key_params = [
+  "twelvedata-api-key",
+  "eodhd-api-key",
+  "coingecko-api-key",
+  "alphavantage-api-key",
+]
+price_refresh_cron = "cron(0 8,13,18,22 ? * MON-FRI *)"
+eu_refresh_hours   = "18"
+
+extra_cors_origins = ["http://localhost:5173"]
+enable_auth        = false
+
+# Leave empty to skip the SNS topic / email subscription for DLQ alarms.
+alarm_email = ""
+
+# "owner/repo" to create the GitHub OIDC deploy role (github_oidc.tf). Empty = skip.
+github_repo                 = ""
+create_github_oidc_provider = true

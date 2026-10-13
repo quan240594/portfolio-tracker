@@ -62,11 +62,11 @@ Every SQS queue has a DLQ (`maxReceiveCount = 3`). SQS-triggered Lambdas use
 
 | Service | Command | Artifact | Handler | Runtime |
 |---|---|---|---|---|
-| `services/api` | `pnpm --filter @portfolio/api package` | `services/api/dist/api.zip` | `index.handler` | nodejs20.x, arm64 |
-| `services/ingest` | `pnpm --filter @portfolio/ingest package` | `services/ingest/dist/ingest.zip` | `index.handler` | nodejs20.x, arm64 |
+| `services/api` | `pnpm --filter @portfolio/api package` | `services/api/dist/api.zip` | `index.handler` | nodejs22.x, arm64 |
+| `services/ingest` | `pnpm --filter @portfolio/ingest package` | `services/ingest/dist/ingest.zip` | `index.handler` | nodejs22.x, arm64 |
 | `services/prices` | `services/prices/scripts/package.sh` | `services/prices/dist/prices.zip` | `prices.handlers.scheduled_refresh` / `prices.handlers.on_transactions_changed` | python3.12, arm64 |
 
-TS bundles: esbuild, ESM (`index.mjs`), `--platform=node --target=node20`, `@aws-sdk/*` external (provided by runtime).
+TS bundles: esbuild, ESM (`index.mjs`), `--platform=node --target=node22`, AWS SDK v3 **bundled** (pinned version; the presign fix `requestChecksumCalculation` needs a recent SDK).
 
 ## Symbols
 
@@ -81,6 +81,21 @@ Validated by `csvRowSchema`. Max 1 MB / 5000 rows. **All-or-nothing**: if any ro
 or the import would oversell a position, nothing is written and the import is `FAILED` with
 row-level errors. Transaction ids from imports are deterministic (`{importId}-{rowNumber}`) so
 SQS redelivery is idempotent.
+
+## API & item conventions
+
+- HTTP status: `200` reads, `201` POST create (body = created resource), `204` DELETE (no body),
+  `400 VALIDATION_ERROR`, `404 NOT_FOUND`, `422 UNPROCESSABLE` (e.g. oversell), `503 FX_UNAVAILABLE`, `500 INTERNAL`.
+- Import `errors[].row`: 1-based CSV data row (header excluded); `0` = file-level error (size, header, encoding).
+- Same-day ordering: `buildPositions` orders by `date`, then `createdAt`. Writers must make `createdAt`
+  strictly increasing within a batch (ingest uses processing time + row number in ms).
+- Registry items: `USERS` → `{ userId, createdAt, updatedAt }`; `TRACKED` → `TrackedTicker` (`currency` optional; written with
+  `if_not_exists` / conditional puts so concurrent writers never clobber `createdAt`).
+- Profile `country`: full English name (`United States`, `Netherlands`); `Global` for world funds/crypto.
+  `sector`: free text from the provider, `Diversified` for broad ETFs.
+- FX item: `rates` is a DynamoDB **map** (exception to "stored flat") and excludes the base currency.
+- Minor-unit quotes (`GBX`/`GBp`, LSE) are converted to the major currency (`GBP`, ÷100) by the prices
+  service before writing, so every stored price/amount is in an ISO-4217 major currency.
 
 ## Local development
 

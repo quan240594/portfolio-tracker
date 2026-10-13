@@ -1,0 +1,25 @@
+# Local AWS emulation for development. See docs/architecture.md ("Local development").
+#   docker compose up -d   # waits for init hooks via healthcheck
+#   docker compose down    # state is ephemeral
+services:
+  localstack:
+    # Override with LOCALSTACK_IMAGE (e.g. public.ecr.aws/localstack/localstack:3) if Docker Hub is unreachable.
+    image: ${LOCALSTACK_IMAGE:-localstack/localstack:3}
+    container_name: portfolio-tracker-localstack
+    ports:
+      - "127.0.0.1:4566:4566"
+    environment:
+      SERVICES: dynamodb,s3,sqs,events,ssm
+      AWS_DEFAULT_REGION: eu-west-1
+      DEFAULT_REGION: eu-west-1
+      EAGER_SERVICE_LOADING: "1"
+      DEBUG: ${LOCALSTACK_DEBUG:-0}
+    volumes:
+      - ./infra/localstack/init/ready.d:/etc/localstack/init/ready.d:ro
+    healthcheck:
+      # Healthy only once the ready.d bootstrap script has completed.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:4566/_localstack/init/ready | grep -Eq '\"completed\": ?true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s

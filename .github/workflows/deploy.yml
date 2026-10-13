@@ -1,0 +1,129 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: Target environment
+        type: choice
+        options: [dev, prod]
+        default: dev
+
+concurrency:
+  group: deploy-${{ inputs.env }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # GitHub OIDC -> AWS
+
+env:
+  NODE_VERSION: "22"
+  PYTHON_VERSION: "3.12"
+  TERRAFORM_VERSION: "1.9.8"
+  AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-1' }}
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.env }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # GitHub environment (dev/prod) — configure protection rules/reviewers for prod.
+    # Required: secret AWS_DEPLOY_ROLE_ARN, variables TF_STATE_BUCKET, TF_LOCK_TABLE.
+    # Optional variables: AWS_REGION, ALARM_EMAIL, ENABLE_AUTH, MARKET_DATA_PROVIDER.
+    environment: ${{ inputs.env }}
+    env:
+      TF_IN_AUTOMATION: "1"
+      TF_INPUT: "0"
+      TF_VAR_env: ${{ inputs.env }}
+      TF_VAR_region: ${{ vars.AWS_REGION || 'eu-west-1' }}
+      # Keep the OIDC deploy role managed (removing this would delete the role in use).
+      TF_VAR_github_repo: ${{ github.repository }}
+      TF_VAR_create_github_oidc_provider: ${{ vars.CREATE_GITHUB_OIDC_PROVIDER || 'true' }}
+      TF_VAR_alarm_email: ${{ vars.ALARM_EMAIL || '' }}
+      TF_VAR_enable_auth: ${{ vars.ENABLE_AUTH || 'false' }}
+      TF_VAR_market_data_provider: ${{ vars.MARKET_DATA_PROVIDER || 'mock' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---- Build Lambda artifacts --------------------------------------------
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Package Node Lambdas
+        run: |
+          pnpm --filter @portfolio/api package
+          pnpm --filter @portfolio/ingest package
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Package prices Lambda
+        run: bash services/prices/scripts/package.sh
+
+      # ---- Terraform -----------------------------------------------------------
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: gha-deploy-${{ inputs.env }}-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: Terraform init
+        working-directory: infra/terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=portfolio-tracker/${{ inputs.env }}/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="dynamodb_table=${{ vars.TF_LOCK_TABLE }}" \
+            -backend-config="encrypt=true"
+      - name: Terraform plan
+        working-directory: infra/terraform
+        run: terraform plan -out=tfplan
+      - name: Terraform apply
+        working-directory: infra/terraform
+        run: terraform apply tfplan
+      - name: Read outputs
+        id: tf
+        working-directory: infra/terraform
+        run: |
+          {
+            echo "api_url=$(terraform output -raw api_url)"
+            echo "web_bucket=$(terraform output -raw web_bucket)"
+            echo "distribution_id=$(terraform output -raw cloudfront_distribution_id)"
+            echo "web_url=$(terraform output -raw web_url)"
+          } >> "$GITHUB_OUTPUT"
+
+      # ---- Web -----------------------------------------------------------------
+      - name: Build web
+        env:
+          VITE_API_BASE_URL: ${{ steps.tf.outputs.api_url }}
+        run: pnpm --filter @portfolio/web build
+      - name: Upload web to S3
+        env:
+          WEB_BUCKET: ${{ steps.tf.outputs.web_bucket }}
+        run: |
+          # Vite hashed assets: long-lived cache; everything else (index.html, public/*): revalidate.
+          if [ -d web/dist/assets ]; then
+            aws s3 sync web/dist/assets "s3://${WEB_BUCKET}/assets" --delete \
+              --cache-control "public,max-age=31536000,immutable"
+          fi
+          aws s3 sync web/dist "s3://${WEB_BUCKET}" --delete \
+            --exclude "assets/*" --cache-control "no-cache"
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ steps.tf.outputs.distribution_id }}" --paths "/*" \
+            --query 'Invalidation.Id' --output text
+      - name: Summary
+        run: |
+          {
+            echo "### Deployed \`${{ inputs.env }}\`"
+            echo "- Web: ${{ steps.tf.outputs.web_url }}"
+            echo "- API: ${{ steps.tf.outputs.api_url }}"
+          } >> "$GITHUB_STEP_SUMMARY"

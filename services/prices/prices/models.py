@@ -1,0 +1,103 @@
+"""Domain models mirroring packages/shared/src/types.ts (field names are the camelCase TS names)."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import UTC, date, datetime
+
+ASSET_CLASSES = ("STOCK", "ETF", "CRYPTO", "BOND", "CASH", "OTHER")
+
+
+def iso_datetime(dt: datetime) -> str:
+    """ISO-8601 UTC with millisecond precision and `Z`, identical to JS `Date#toISOString()`."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    dt = dt.astimezone(UTC)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{dt.microsecond // 1000:03d}Z"
+
+
+def parse_iso_datetime(value: str) -> datetime:
+    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+def iso_date(d: date) -> str:
+    return d.isoformat()
+
+
+MINOR_UNIT_CURRENCIES = {"GBX": "GBP", "GBp": "GBP", "ZAc": "ZAR", "ILA": "ILS"}
+
+
+def normalize_currency(code: str | None, default: str) -> str:
+    """Upper-cases ISO codes but preserves minor-unit codes (e.g. "GBp") so models can rescale them."""
+    if not code:
+        return default
+    return code if code in MINOR_UNIT_CURRENCIES else code.upper()
+
+
+def _rescale_minor_units(obj: object, *fields: str) -> None:
+    """Converts prices quoted in minor units (pence) to the major currency so FX lookups work."""
+    major = MINOR_UNIT_CURRENCIES.get(obj.currency)  # type: ignore[attr-defined]
+    if major is None:
+        return
+    for f in fields:
+        object.__setattr__(obj, f, getattr(obj, f) / 100)
+    object.__setattr__(obj, "currency", major)
+
+
+@dataclass(frozen=True)
+class Quote:
+    symbol: str
+    price: float
+    previousClose: float  # noqa: N815 - mirrors TS field name
+    currency: str
+    asOf: str  # noqa: N815
+    source: str
+
+    def __post_init__(self) -> None:
+        _rescale_minor_units(self, "price", "previousClose")
+
+
+@dataclass(frozen=True)
+class InstrumentProfile:
+    symbol: str
+    name: str
+    assetClass: str  # noqa: N815
+    currency: str
+    sector: str | None = None
+    country: str | None = None
+    exchange: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.assetClass not in ASSET_CLASSES:
+            raise ValueError(f"invalid assetClass {self.assetClass!r}")
+
+
+@dataclass(frozen=True)
+class EodPrice:
+    symbol: str
+    date: str
+    close: float
+    currency: str
+
+    def __post_init__(self) -> None:
+        _rescale_minor_units(self, "close")
+
+
+@dataclass(frozen=True)
+class DividendEvent:
+    symbol: str
+    exDate: str  # noqa: N815
+    amount: float
+    currency: str
+    payDate: str | None = None  # noqa: N815
+
+    def __post_init__(self) -> None:
+        _rescale_minor_units(self, "amount")
+
+
+@dataclass(frozen=True)
+class FxRates:
+    base: str
+    asOf: str  # noqa: N815
+    rates: dict[str, float] = field(default_factory=dict)

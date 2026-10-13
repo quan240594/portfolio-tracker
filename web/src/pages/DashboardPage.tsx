@@ -1,0 +1,218 @@
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
+import { HISTORY_RANGES, type AllocationDimension, type HistoryRange } from '@portfolio/shared';
+import { useAllocation, useHistory, useHoldings, usePortfolio } from '../api/hooks';
+import { KpiCard } from '../components/KpiCard';
+import { Change } from '../components/Change';
+import { ErrorState } from '../components/ErrorState';
+import { EmptyState } from '../components/EmptyState';
+import { LoadingRegion, Skeleton } from '../components/Skeleton';
+import { SegmentedControl } from '../components/SegmentedControl';
+import { PageHeader } from '../components/Layout';
+import { ValueChart } from '../components/charts/ValueChart';
+import { AllocationDonut } from '../components/charts/AllocationDonut';
+import { StaleBadge } from '../features/holdings/HoldingsTable';
+import { formatDate, formatMoney, formatPercent, formatWeight } from '../lib/format';
+
+const ALLOCATION_TABS: { value: Exclude<AllocationDimension, 'symbol'>; label: string }[] = [
+  { value: 'assetClass', label: 'Asset class' },
+  { value: 'sector', label: 'Sector' },
+  { value: 'country', label: 'Country' },
+  { value: 'currency', label: 'Currency' },
+];
+
+const RANGE_OPTIONS = HISTORY_RANGES.map((r) => ({ value: r, label: r }));
+
+function KpiGrid() {
+  const { data, isPending, isError, error, refetch } = usePortfolio();
+  if (isError) return <ErrorState error={error} onRetry={() => void refetch()} title="Could not load portfolio summary" />;
+  const ccy = data?.baseCurrency ?? 'EUR';
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5" aria-busy={isPending || undefined}>
+      <KpiCard
+        loading={isPending}
+        label="Total value"
+        value={data && formatMoney(data.totalValue, ccy)}
+        hint={data && `${data.holdingsCount} holdings · cost ${formatMoney(data.totalCost, ccy)}`}
+      />
+      <KpiCard
+        loading={isPending}
+        label="Day change"
+        value={data && formatMoney(data.dayChange, ccy, { signed: true })}
+        change={data && <Change pct={data.dayChangePct} value={data.dayChange} />}
+      />
+      <KpiCard
+        loading={isPending}
+        label="Unrealized P&L"
+        value={data && formatMoney(data.unrealizedPnl, ccy, { signed: true })}
+        change={data && <Change pct={data.unrealizedPnlPct} value={data.unrealizedPnl} />}
+      />
+      <KpiCard
+        loading={isPending}
+        label="Total return"
+        value={data && formatMoney(data.totalReturn, ccy, { signed: true })}
+        change={data && <Change pct={data.totalReturnPct} value={data.totalReturn} />}
+        hint={data && `Incl. ${formatMoney(data.realizedPnl, ccy, { signed: true })} realized, ${formatMoney(data.dividendsReceived, ccy)} dividends`}
+      />
+      <KpiCard
+        loading={isPending}
+        label="Dividends received"
+        value={data && formatMoney(data.dividendsReceived, ccy)}
+        hint="Net of withholding tax, all time"
+      />
+    </div>
+  );
+}
+
+function PerformanceCard() {
+  const [range, setRange] = useState<HistoryRange>('1Y');
+  const { data, isPending, isError, error, refetch, isPlaceholderData } = useHistory(range);
+  const first = data?.points[0];
+  const last = data?.points.at(-1);
+  const delta = first && last ? last.value - last.invested - (first.value - first.invested) : 0;
+
+  return (
+    <section className="card p-4 lg:col-span-2" aria-labelledby="perf-title">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 id="perf-title" className="font-semibold">
+            Value vs invested
+          </h2>
+          {data && first && last && (
+            <p className="muted text-xs">
+              P&amp;L change over period: <Change amount={delta} currency={data.baseCurrency} />
+            </p>
+          )}
+        </div>
+        <SegmentedControl label="Chart range" options={RANGE_OPTIONS} value={range} onChange={setRange} />
+      </div>
+      {isError ? (
+        <ErrorState error={error} onRetry={() => void refetch()} title="Could not load history" />
+      ) : isPending ? (
+        <LoadingRegion label="Loading chart">
+          <Skeleton className="h-72 w-full" />
+        </LoadingRegion>
+      ) : data.points.length === 0 ? (
+        <p className="muted flex h-72 items-center justify-center text-sm">No history for this period yet.</p>
+      ) : (
+        <div className={isPlaceholderData ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
+          <ValueChart points={data.points} currency={data.baseCurrency} />
+          <div className="muted mt-2 flex gap-4 text-xs" aria-hidden="true">
+            <span className="flex items-center gap-1.5"><span className="h-0.5 w-4 bg-brand-500" /> Value</span>
+            <span className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-dashed border-slate-400" /> Invested</span>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function AllocationCard() {
+  const [by, setBy] = useState<Exclude<AllocationDimension, 'symbol'>>('assetClass');
+  const { data, isPending, isError, error, refetch } = useAllocation(by);
+  const panelId = 'allocation-panel';
+  return (
+    <section className="card p-4" aria-labelledby="alloc-title">
+      <h2 id="alloc-title" className="mb-3 font-semibold">
+        Allocation
+      </h2>
+      <SegmentedControl variant="tabs" label="Allocation by" options={ALLOCATION_TABS} value={by} onChange={setBy} panelId={panelId} idPrefix="alloc-tab" />
+      <div id={panelId} role="tabpanel" aria-labelledby={`alloc-tab-${by}`} className="mt-4">
+        {isError ? (
+          <ErrorState error={error} onRetry={() => void refetch()} title="Could not load allocation" />
+        ) : isPending ? (
+          <LoadingRegion label="Loading allocation">
+            <Skeleton className="mx-auto h-48 w-48 rounded-full" />
+          </LoadingRegion>
+        ) : data.slices.length === 0 ? (
+          <p className="muted text-sm">Nothing to allocate yet.</p>
+        ) : (
+          <AllocationDonut slices={data.slices} currency={data.baseCurrency} />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function TopHoldingsCard() {
+  const { data, isPending, isError, error, refetch } = useHoldings();
+  return (
+    <section className="card p-4" aria-labelledby="top-title">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 id="top-title" className="font-semibold">
+          Top holdings
+        </h2>
+        <Link to="/holdings" className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400">
+          View all →
+        </Link>
+      </div>
+      {isError ? (
+        <ErrorState error={error} onRetry={() => void refetch()} title="Could not load holdings" />
+      ) : isPending ? (
+        <LoadingRegion label="Loading holdings">
+          <div className="space-y-3">
+            {Array.from({ length: 5 }, (_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+          </div>
+        </LoadingRegion>
+      ) : (
+        <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+          {data.holdings.slice(0, 5).map((h) => (
+            <li key={h.symbol} className="flex items-center gap-3 py-2.5 text-sm">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 font-semibold">
+                  {h.symbol} {h.priceStale && <StaleBadge />}
+                </div>
+                <div className="muted truncate text-xs">{h.name}</div>
+              </div>
+              <div className="text-right">
+                <div className="font-medium tabular-nums">{formatMoney(h.marketValue, data.baseCurrency)}</div>
+                <Change pct={h.unrealizedPnlPct} value={h.unrealizedPnl} className="text-xs" />
+              </div>
+              <div className="muted w-12 text-right text-xs tabular-nums">{formatWeight(h.weight)}</div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+export function DashboardPage() {
+  const portfolio = usePortfolio();
+  const isEmpty = portfolio.data && portfolio.data.holdingsCount === 0 && portfolio.data.totalReturn === 0;
+
+  return (
+    <>
+      <PageHeader
+        title="Dashboard"
+        description={portfolio.data ? `Values in ${portfolio.data.baseCurrency} · as of ${formatDate(portfolio.data.asOf, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}` : undefined}
+      />
+      {isEmpty ? (
+        <EmptyState
+          title="No transactions yet"
+          description="Add your first buy or import a CSV export from your broker to see your portfolio come to life."
+          actions={
+            <>
+              <Link to="/transactions?action=add" className="btn-primary">Add transaction</Link>
+              <Link to="/transactions?action=import" className="btn-secondary">Import CSV</Link>
+            </>
+          }
+        />
+      ) : (
+        <div className="space-y-6">
+          <KpiGrid />
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <PerformanceCard />
+            <AllocationCard />
+          </div>
+          <TopHoldingsCard />
+          {portfolio.data && (
+            <p className="muted text-xs">
+              Total return {formatPercent(portfolio.data.totalReturnPct, { signed: true })} on amount invested, including realized gains and dividends.
+            </p>
+          )}
+        </div>
+      )}
+    </>
+  );
+}

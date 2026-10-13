@@ -155,3 +155,24 @@ describe('schemas & keys', () => {
     expect(parseImportObjectKey('other/x.csv')).toBeNull();
   });
 });
+
+describe('validation & performance regressions', () => {
+  it('rejects impossible calendar dates', () => {
+    const base = { type: 'BUY', symbol: 'A', quantity: 1, price: 1, currency: 'EUR' };
+    expect(csvRowSchema.safeParse({ ...base, date: '2025-13-40' }).success).toBe(false);
+    expect(csvRowSchema.safeParse({ ...base, date: '2025-02-29' }).success).toBe(false);
+    expect(csvRowSchema.safeParse({ ...base, date: '2024-02-29' }).success).toBe(true);
+  });
+  it('builds multi-year history for many transactions quickly and matches point-in-time positions', () => {
+    const txns = Array.from({ length: 2000 }, (_, i) =>
+      tx({ currency: 'EUR', symbol: `S${i % 20}`, quantity: 1, price: 10, date: new Date(Date.UTC(2021, 0, 1 + i)).toISOString().slice(0, 10) }),
+    );
+    const t0 = performance.now();
+    const points = buildValueHistory(txns, {}, fx, '2021-01-01', '2026-06-30');
+    expect(performance.now() - t0).toBeLessThan(500);
+    expect(points.at(-1)!.invested).toBe(20000);
+    const mid = points.find((p) => p.date === '2022-06-15')!;
+    const expected = [...buildPositions(txns, '2022-06-15').values()].reduce((s, p) => s + p.costLocal, 0);
+    expect(mid.invested).toBeCloseTo(expected);
+  });
+});

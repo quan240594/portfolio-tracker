@@ -1,0 +1,19 @@
+# Accepted findings for `trivy config infra/terraform` (personal-scale project; revisit for production use).
+#
+# AWS-0132 (HIGH)  S3 buckets use SSE-S3 rather than a customer-managed KMS key. Data is low sensitivity
+#                  (transient CSV uploads, public SPA assets); SSE-S3 avoids KMS cost/key-policy coupling
+#                  with CloudFront OAC and presigned uploads.
+AWS-0132
+# AWS-0011 (HIGH)  No WAF on CloudFront. Static SPA only; API Gateway has route throttling. WAF adds fixed cost.
+AWS-0011
+# AWS-0010 (MEDIUM) CloudFront standard logging disabled (cost/noise); API Gateway access logs are enabled.
+AWS-0010
+# AWS-0090 (MEDIUM) No S3 versioning: imports are transient (30-day expiry), web bucket is a rebuildable artifact.
+AWS-0090
+# LOW findings:
+# AWS-0017 CloudWatch log groups use the default CloudWatch Logs encryption (no CMK).
+AWS-0017
+# AWS-0025 DynamoDB uses the AWS managed aws/dynamodb key (SSE on) rather than a CMK.
+AWS-0025
+# AWS-0089 No S3 server access logging (cost/noise; CloudTrail data events can be enabled if needed).
+AWS-0089

@@ -1,0 +1,13 @@
+# Copy to backend-<env>.hcl (one per env; use a distinct `key`), then:
+#   terraform init -backend-config=backend-<env>.hcl
+#
+# Name the state bucket / lock table with the `portfolio-tracker-` prefix so the optional
+# GitHub deploy role (github_oidc.tf) can access them.
+bucket         = "portfolio-tracker-tfstate-123456789012"
+key            = "portfolio-tracker/dev/terraform.tfstate"
+region         = "eu-west-1"
+encrypt        = true
+dynamodb_table = "portfolio-tracker-tflock"
+
+# Terraform >= 1.10 alternative to the DynamoDB lock table:
+# use_lockfile = true

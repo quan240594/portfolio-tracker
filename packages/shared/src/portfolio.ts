@@ -47,39 +47,44 @@ export function buildPositions(txns: readonly Transaction[], asOfDate?: IsoDate)
   const positions = new Map<string, Position>();
   for (const t of sortTransactions(txns)) {
     if (asOfDate && t.date > asOfDate) break;
-    let p = positions.get(t.symbol);
-    if (!p) {
-      p = { symbol: t.symbol, currency: t.currency, quantity: 0, costLocal: 0, realizedPnlLocal: 0, dividendsLocal: 0 };
-      positions.set(t.symbol, p);
-    }
-    if (t.currency !== p.currency) {
-      throw new PortfolioError(`Mixed currencies for ${t.symbol}: ${p.currency} and ${t.currency}`);
-    }
-    switch (t.type) {
-      case 'BUY':
-        p.quantity += t.quantity;
-        p.costLocal += t.quantity * t.price + t.fee;
-        break;
-      case 'SELL': {
-        if (t.quantity > p.quantity + EPSILON) {
-          throw new PortfolioError(`Cannot sell ${t.quantity} ${t.symbol} on ${t.date}: only ${p.quantity} held`);
-        }
-        const avg = p.quantity > 0 ? p.costLocal / p.quantity : 0;
-        p.realizedPnlLocal += t.quantity * t.price - t.fee - avg * t.quantity;
-        p.costLocal -= avg * t.quantity;
-        p.quantity -= t.quantity;
-        if (p.quantity < EPSILON) {
-          p.quantity = 0;
-          p.costLocal = 0;
-        }
-        break;
-      }
-      case 'DIVIDEND':
-        p.dividendsLocal += t.quantity * t.price - t.fee;
-        break;
-    }
+    applyTransaction(positions, t);
   }
   return positions;
+}
+
+/** Mutates `positions` by applying a single transaction (caller guarantees chronological order). */
+export function applyTransaction(positions: Map<string, Position>, t: Transaction): void {
+  let p = positions.get(t.symbol);
+  if (!p) {
+    p = { symbol: t.symbol, currency: t.currency, quantity: 0, costLocal: 0, realizedPnlLocal: 0, dividendsLocal: 0 };
+    positions.set(t.symbol, p);
+  }
+  if (t.currency !== p.currency) {
+    throw new PortfolioError(`Mixed currencies for ${t.symbol}: ${p.currency} and ${t.currency}`);
+  }
+  switch (t.type) {
+    case 'BUY':
+      p.quantity += t.quantity;
+      p.costLocal += t.quantity * t.price + t.fee;
+      break;
+    case 'SELL': {
+      if (t.quantity > p.quantity + EPSILON) {
+        throw new PortfolioError(`Cannot sell ${t.quantity} ${t.symbol} on ${t.date}: only ${p.quantity} held`);
+      }
+      const avg = p.quantity > 0 ? p.costLocal / p.quantity : 0;
+      p.realizedPnlLocal += t.quantity * t.price - t.fee - avg * t.quantity;
+      p.costLocal -= avg * t.quantity;
+      p.quantity -= t.quantity;
+      if (p.quantity < EPSILON) {
+        p.quantity = 0;
+        p.costLocal = 0;
+      }
+      break;
+    }
+    case 'DIVIDEND':
+      p.dividendsLocal += t.quantity * t.price - t.fee;
+      break;
+  }
 }
 
 export interface PortfolioInput {
@@ -235,8 +240,10 @@ export function buildValueHistory(
   }
 
   const points: ValuePoint[] = [];
+  const positions = new Map<string, Position>();
+  let next = 0;
   for (let date = start; date <= to; date = addDays(date, 1)) {
-    const positions = buildPositions(sorted, date);
+    while (next < sorted.length && sorted[next]!.date <= date) applyTransaction(positions, sorted[next++]!);
     let value = 0;
     let invested = 0;
     for (const p of positions.values()) {
@@ -270,7 +277,7 @@ export function calculateDividends(
       date: t.date,
       perShareLocal: t.price,
       currency: t.currency,
-      amount: round(toBase(t.quantity * t.price - t.fee, t.currency, fx)),
+      amount: toBase(t.quantity * t.price - t.fee, t.currency, fx),
       status: 'RECEIVED' as const,
     }));
 
@@ -282,7 +289,7 @@ export function calculateDividends(
       date: e.payDate ?? e.exDate,
       perShareLocal: e.amount,
       currency: e.currency,
-      amount: round(toBase(positions.get(e.symbol)!.quantity * e.amount, e.currency, fx)),
+      amount: toBase(positions.get(e.symbol)!.quantity * e.amount, e.currency, fx),
       status: 'UPCOMING' as const,
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -305,8 +312,9 @@ export function calculateDividends(
     totalReceived: round(received.reduce((s, d) => s + d.amount, 0)),
     last12Months: round(last12Months),
     projectedNext12Months: round(Math.max(last12Months, upcomingTotal)),
-    received,
-    upcoming,
+    // Round per payment only for display; totals above are summed from unrounded amounts.
+    received: received.map((d) => ({ ...d, amount: round(d.amount) })),
+    upcoming: upcoming.map((d) => ({ ...d, amount: round(d.amount) })),
     monthly: [...monthly.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([month, m]) => ({ month, received: round(m.received), upcoming: round(m.upcoming) })),

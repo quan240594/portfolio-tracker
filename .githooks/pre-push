@@ -1,0 +1,48 @@
+#!/bin/sh
+# Enforces "always scan locally before pushing". Enable once per clone with:
+#   git config core.hooksPath .githooks
+# Bypass in a genuine emergency with: SKIP_SONAR=1 git push
+
+if [ -n "$SKIP_SONAR" ]; then
+  echo "pre-push: SKIP_SONAR set, skipping local Sonar scan" >&2
+  exit 0
+fi
+
+if ! command -v sonar-scanner >/dev/null 2>&1; then
+  echo "pre-push: sonar-scanner not found on PATH (brew install sonar-scanner), aborting push." >&2
+  echo "pre-push: bypass once with SKIP_SONAR=1 git push if truly needed." >&2
+  exit 1
+fi
+
+if [ ! -f .env.sonar.local ] && [ -z "$SONAR_TOKEN" ]; then
+  echo "pre-push: no .env.sonar.local and SONAR_TOKEN is not set, aborting push." >&2
+  echo "pre-push: see scripts/sonar-scan.sh for one-time setup, or bypass with SKIP_SONAR=1 git push." >&2
+  exit 1
+fi
+
+# A dirty tree skews Sonar's SCM blame and misdates pre-existing issues as new.
+if [ -n "$(git status --porcelain)" ]; then
+  echo "pre-push: working tree has uncommitted changes, aborting push." >&2
+  echo "pre-push: commit everything first so Sonar's blame/new-code detection is accurate." >&2
+  exit 1
+fi
+
+# Regenerate coverage so the scan reflects the code being pushed, same as CI.
+echo "pre-push: running test coverage (TS + Python)..."
+if ! scripts/coverage.sh; then
+  echo "pre-push: tests failed, aborting push." >&2
+  exit 1
+fi
+
+echo "pre-push: running local Sonar scan..."
+if [ -f .env.sonar.local ]; then
+  scan() { scripts/sonar-scan.sh; }
+else
+  scan() { sonar-scanner -Dsonar.host.url=https://sonarcloud.io -Dsonar.token="$SONAR_TOKEN"; }
+fi
+if ! scan; then
+  echo "pre-push: Sonar scan failed, aborting push." >&2
+  exit 1
+fi
+
+echo "pre-push: Sonar scan complete - check https://sonarcloud.io/dashboard?id=quan240594_portfolio-tracker for the quality gate result."

@@ -1,7 +1,13 @@
 import { z } from 'zod';
 import { TRANSACTION_TYPES, ALLOCATION_DIMENSIONS } from './types.js';
 
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
+const isoDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD')
+  .refine((s) => {
+    const d = new Date(`${s}T00:00:00Z`);
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+  }, 'Invalid calendar date');
 const symbol = z
   .string()
   .trim()

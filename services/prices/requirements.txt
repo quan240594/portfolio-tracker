@@ -1,0 +1,2 @@
+# Runtime dependencies bundled into dist/prices.zip.
+# Intentionally empty: the service uses only the stdlib + boto3/botocore (provided by the Lambda runtime).

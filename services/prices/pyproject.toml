@@ -1,0 +1,44 @@
+[project]
+name = "portfolio-prices"
+version = "0.1.0"
+description = "Market-data service (quotes, EOD, profiles, dividends, FX) for portfolio-tracker"
+requires-python = ">=3.12"
+# Runtime dependencies: none. boto3/botocore are provided by the AWS Lambda python3.12 runtime.
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "boto3",
+  "moto[dynamodb,events,ssm,sqs]>=5",
+  "pytest",
+  "pytest-cov",
+  "ruff",
+  "time-machine",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = [".venv", "dist", "build"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "S", "BLE", "C4", "SIM", "RUF"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106", "S108", "S603", "N802", "N815"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra --strict-markers"
+filterwarnings = ["ignore::DeprecationWarning:botocore.*"]
+
+[tool.coverage.run]
+source = ["prices"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 85

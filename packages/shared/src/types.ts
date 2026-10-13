@@ -165,3 +165,11 @@ export interface ImportStatus {
   createdAt: IsoDateTime;
   updatedAt: IsoDateTime;
 }
+
+/** Registry item listing every symbol any user holds; drives the scheduled price refresh. */
+export interface TrackedTicker {
+  symbol: string;
+  currency?: Currency;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}

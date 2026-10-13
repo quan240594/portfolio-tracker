@@ -1,0 +1,6 @@
+boto3
+moto[dynamodb,events,ssm,sqs]>=5
+pytest
+pytest-cov
+ruff
+time-machine
