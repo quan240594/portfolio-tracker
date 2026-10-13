@@ -31,5 +31,12 @@ export default defineConfig({
     include: ['src/**/*.test.{ts,tsx}'],
     css: false,
     restoreMocks: true,
+    coverage: {
+      provider: 'v8',
+      include: ['src/**'],
+      exclude: ['src/**/*.test.{ts,tsx}', 'src/mocks/**', 'src/test/**', 'src/main.tsx', 'src/vite-env.d.ts'],
+      reporter: ['lcov', 'text-summary', 'text'],
+      thresholds: { statements: 95, branches: 95, functions: 95, lines: 95 },
+    },
   },
 });

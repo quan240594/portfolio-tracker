@@ -3,6 +3,7 @@ import type { DividendOverview } from '@portfolio/shared';
 import { useTheme } from '../../theme/ThemeProvider';
 import { formatMoney, formatMonth } from '../../lib/format';
 import { chartTheme } from './palette';
+import { compactMoneyTick, dividendSeriesName, moneyTooltip, monthLabel } from './chartFormatters';
 
 type Monthly = DividendOverview['monthly'];
 
@@ -35,14 +36,14 @@ export function DividendBarChart({ monthly: raw, currency }: { monthly: Monthly;
         <BarChart data={monthly} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid stroke={c.grid} vertical={false} />
           <XAxis dataKey="month" tickFormatter={formatMonth} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-          <YAxis tickFormatter={(v: number) => formatMoney(v, currency, { compact: true })} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={56} />
+          <YAxis tickFormatter={compactMoneyTick(currency)} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={56} />
           <Tooltip
             cursor={{ fill: c.grid, opacity: 0.5 }}
             contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.tooltipBorder}`, borderRadius: 8, color: c.text, fontSize: 12 }}
-            labelFormatter={(m) => formatMonth(String(m))}
-            formatter={(v, name) => [formatMoney(Number(v), currency), name === 'received' ? 'Received' : 'Upcoming']}
+            labelFormatter={monthLabel}
+            formatter={moneyTooltip(currency, dividendSeriesName)}
           />
-          <Legend formatter={(v: string) => (v === 'received' ? 'Received' : 'Upcoming')} wrapperStyle={{ fontSize: 12 }} />
+          <Legend formatter={dividendSeriesName} wrapperStyle={{ fontSize: 12 }} />
           <Bar dataKey="received" stackId="d" fill={c.received} radius={[0, 0, 0, 0]} isAnimationActive={false} />
           <Bar dataKey="upcoming" stackId="d" fill={c.upcoming} radius={[4, 4, 0, 0]} isAnimationActive={false} />
         </BarChart>

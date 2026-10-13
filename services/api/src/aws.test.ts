@@ -88,7 +88,25 @@ describe('EventBridgePublisher', () => {
 
   it('throws when an entry fails', async () => {
     ebMock.on(PutEventsCommand).resolves({ FailedEntryCount: 1, Entries: [{ ErrorCode: 'ThrottlingException', ErrorMessage: 'slow down' }] });
-    await expect(publisher.transactionsChanged({ userId: 'u', symbols: [], reason: 'DELETED' })).rejects.toThrow(/ThrottlingException/);
+    await expect(publisher.transactionsChanged({ userId: 'u', symbols: [], reason: 'DELETED' })).rejects.toThrow(
+      'PutEvents failed: ThrottlingException slow down',
+    );
+  });
+
+  it('reports an unknown failure when no entry carries an error code', async () => {
+    ebMock.on(PutEventsCommand).resolves({ FailedEntryCount: 1 });
+    await expect(publisher.transactionsChanged({ userId: 'u', symbols: [], reason: 'DELETED' })).rejects.toThrow(
+      /^PutEvents failed: unknown$/,
+    );
+    ebMock.on(PutEventsCommand).resolves({ FailedEntryCount: 1, Entries: [{ EventId: 'ok' }, { ErrorCode: 'InternalFailure' }] });
+    await expect(publisher.transactionsChanged({ userId: 'u', symbols: [], reason: 'DELETED' })).rejects.toThrow(
+      /^PutEvents failed: InternalFailure$/,
+    );
+  });
+
+  it('propagates transport errors from EventBridge', async () => {
+    ebMock.on(PutEventsCommand).rejects(new Error('network down'));
+    await expect(publisher.transactionsChanged({ userId: 'u', symbols: ['A'], reason: 'CREATED' })).rejects.toThrow('network down');
   });
 });
 

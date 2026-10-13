@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { CsvImport } from './CsvImport';
@@ -109,4 +109,242 @@ describe('CsvImport', () => {
     await user.click(screen.getByRole('button', { name: 'Upload & import' }));
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/taking longer than expected/));
   });
+
+  it('downloads the sample CSV', async () => {
+    const user = userEvent.setup();
+    const createObjectURL = vi.fn(() => 'blob:sample');
+    Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    try {
+      renderWithProviders(<CsvImport />);
+      await user.click(screen.getByRole('button', { name: 'Download sample CSV' }));
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      expect(click).toHaveBeenCalledTimes(1);
+    } finally {
+      // @ts-expect-error remove stubs jsdom does not provide
+      delete URL.createObjectURL;
+      // @ts-expect-error remove stubs jsdom does not provide
+      delete URL.revokeObjectURL;
+    }
+  });
+
+  it('disables the submit button until a file is chosen, and again when the selection is cleared', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CsvImport />);
+    const submit = screen.getByRole('button', { name: 'Upload & import' });
+    expect(submit).toBeDisabled();
+    const input = screen.getByLabelText('CSV file');
+    await user.upload(input, csvFile('x'));
+    expect(submit).toBeEnabled();
+    fireEvent.change(input, { target: { files: [] } });
+    expect(submit).toBeDisabled();
+    fireEvent.submit(submit.closest('form')!);
+    expect(screen.queryByRole('status')).toBeEmptyDOMElement();
+  });
+
+  it('shows upload and processing progress while busy, then offers Done', async () => {
+    const user = userEvent.setup();
+    const onDone = vi.fn();
+    let releaseUpload!: () => void;
+    const uploadGate = new Promise<void>((r) => (releaseUpload = r));
+    server.use(
+      http.put('*/__mock-s3/imports/:importId', async () => {
+        await uploadGate;
+        return new HttpResponse(null, { status: 200 });
+      }),
+      http.get('/api/imports/:id', ({ params }) =>
+        HttpResponse.json({ importId: String(params.id), userId: 'demo', fileName: 'trades.csv', status: 'COMPLETED', createdAt: '', updatedAt: '' }),
+      ),
+    );
+    renderWithProviders(<CsvImport pollIntervalMs={20} onDone={onDone} />);
+    await user.upload(screen.getByLabelText('CSV file'), csvFile(buildSampleCsv()));
+    await user.click(screen.getByRole('button', { name: 'Upload & import' }));
+
+    expect(await screen.findByText('Uploading trades.csv…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Importing…' })).toBeDisabled();
+    expect(screen.getByLabelText('CSV file')).toBeDisabled();
+
+    releaseUpload();
+    expect(await screen.findByText(/Processing trades\.csv… this usually takes a few seconds\./)).toBeInTheDocument();
+    expect(await screen.findByText('✓ Import completed')).toBeInTheDocument();
+    // Missing counts default to 0.
+    expect(screen.getByText('Imported 0 of 0 rows from trades.csv.')).toBeInTheDocument();
+    expect(screen.queryByLabelText('CSV file')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    expect(onDone).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: 'Import another file' }));
+    expect(screen.getByLabelText('CSV file')).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Upload & import' })).toBeDisabled();
+  });
+
+  it('has no Done button without an onDone handler', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CsvImport pollIntervalMs={5} />);
+    await user.upload(screen.getByLabelText('CSV file'), csvFile(buildSampleCsv()));
+    await user.click(screen.getByRole('button', { name: 'Upload & import' }));
+    expect(await screen.findByText('✓ Import completed')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Done' })).not.toBeInTheDocument();
+  });
+
+  it('reports a failed upload to storage', async () => {
+    const user = userEvent.setup();
+    const calls: string[] = [];
+    server.events.on('request:start', ({ request }) => calls.push(`${request.method} ${new URL(request.url).pathname}`));
+    server.use(http.put('*/__mock-s3/imports/:importId', () => new HttpResponse('denied', { status: 500 })));
+    renderWithProviders(<CsvImport pollIntervalMs={5} />);
+    await user.upload(screen.getByLabelText('CSV file'), csvFile(buildSampleCsv()));
+    await user.click(screen.getByRole('button', { name: 'Upload & import' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Uploading the file failed (HTTP 500).');
+    expect(calls.some((c) => c.startsWith('GET /api/imports/'))).toBe(false);
+    server.events.removeAllListeners();
+
+    await user.click(screen.getByRole('button', { name: 'Import another file' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('reports API errors when creating the import', async () => {
+    const user = userEvent.setup();
+    server.use(http.post('/api/imports', () => HttpResponse.json({ error: { code: 'RATE_LIMITED', message: 'Too many imports, slow down' } }, { status: 429 })));
+    renderWithProviders(<CsvImport pollIntervalMs={5} />);
+    await user.upload(screen.getByLabelText('CSV file'), csvFile('x'));
+    await user.click(screen.getByRole('button', { name: 'Upload & import' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Too many imports, slow down');
+  });
+
+  it('surfaces unexpected (non-API) failures instead of hanging', async () => {
+    const user = userEvent.setup();
+    server.use(http.post('/api/imports', () => new HttpResponse(null, { status: 204 })));
+    renderWithProviders(<CsvImport pollIntervalMs={5} />);
+    await user.upload(screen.getByLabelText('CSV file'), csvFile('x'));
+    await user.click(screen.getByRole('button', { name: 'Upload & import' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/importId/);
+    expect(screen.getByRole('button', { name: 'Import another file' })).toBeInTheDocument();
+  });
+
+  it('rejects files larger than 1 MB before calling the API', async () => {
+    const user = userEvent.setup();
+    const calls: string[] = [];
+    server.events.on('request:start', ({ request }) => calls.push(request.url));
+    renderWithProviders(<CsvImport />);
+    await user.upload(screen.getByLabelText('CSV file'), csvFile('a'.repeat(1024 * 1024 + 1), 'big.csv'));
+    await user.click(screen.getByRole('button', { name: 'Upload & import' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('The file is larger than 1 MB.');
+    expect(calls).toEqual([]);
+    server.events.removeAllListeners();
+  });
+
+  it('shows a FAILED import without row details', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get('/api/imports/:id', ({ params }) =>
+        HttpResponse.json({ importId: String(params.id), userId: 'demo', fileName: 'trades.csv', status: 'FAILED', errors: [], createdAt: '', updatedAt: '' }),
+      ),
+    );
+    renderWithProviders(<CsvImport pollIntervalMs={5} />);
+    await user.upload(screen.getByLabelText('CSV file'), csvFile('x'));
+    await user.click(screen.getByRole('button', { name: 'Upload & import' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Import failed — nothing was imported');
+    expect(within(alert).queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  describe('stops the pipeline when closed mid-flight', () => {
+    const track = () => {
+      const calls: string[] = [];
+      server.events.on('request:start', ({ request }) => calls.push(`${request.method} ${new URL(request.url).pathname}`));
+      return calls;
+    };
+    const gated = () => {
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      return { gate, release };
+    };
+    const settle = () => new Promise((r) => setTimeout(r, 60));
+    afterEach(() => server.events.removeAllListeners());
+
+    async function startImport(pollIntervalMs = 10) {
+      const user = userEvent.setup();
+      const view = renderWithProviders(<CsvImport pollIntervalMs={pollIntervalMs} />);
+      await user.upload(screen.getByLabelText('CSV file'), csvFile(buildSampleCsv()));
+      await user.click(screen.getByRole('button', { name: 'Upload & import' }));
+      return view;
+    }
+
+    it('while creating the import', async () => {
+      const calls = track();
+      const { gate, release } = gated();
+      server.use(
+        http.post('/api/imports', async () => {
+          await gate;
+          return HttpResponse.json({ importId: 'imp-x', uploadUrl: `${location.origin}/__mock-s3/imports/imp-x`, expiresInSeconds: 60 }, { status: 201 });
+        }),
+      );
+      const { unmount } = await startImport();
+      unmount();
+      release();
+      await settle();
+      expect(calls).toEqual(['POST /api/imports']);
+    });
+
+    it('while uploading', async () => {
+      const calls = track();
+      const { gate, release } = gated();
+      server.use(
+        http.put('*/__mock-s3/imports/:importId', async () => {
+          await gate;
+          return new HttpResponse(null, { status: 200 });
+        }),
+      );
+      const { unmount } = await startImport();
+      await waitFor(() => expect(calls.some((c) => c.startsWith('PUT'))).toBe(true));
+      unmount();
+      release();
+      await settle();
+      expect(calls.filter((c) => c.startsWith('GET'))).toEqual([]);
+    });
+
+    it('while waiting between polls', async () => {
+      const calls = track();
+      const { unmount } = await startImport(150);
+      await screen.findByText(/^Processing/);
+      unmount();
+      await new Promise((r) => setTimeout(r, 250));
+      expect(calls.filter((c) => c.startsWith('GET'))).toEqual([]);
+    });
+
+    it('while a status request is in flight', async () => {
+      const calls = track();
+      const { gate, release } = gated();
+      server.use(
+        http.get('/api/imports/:id', async ({ params }) => {
+          await gate;
+          return HttpResponse.json({ importId: String(params.id), userId: 'demo', fileName: 'trades.csv', status: 'PROCESSING', createdAt: '', updatedAt: '' });
+        }),
+      );
+      const { unmount } = await startImport();
+      await waitFor(() => expect(calls.some((c) => c.startsWith('GET'))).toBe(true));
+      unmount();
+      release();
+      await settle();
+      expect(calls.filter((c) => c.startsWith('GET'))).toHaveLength(1);
+    });
+
+    it('when a request fails after closing', async () => {
+      const { gate, release } = gated();
+      server.use(
+        http.post('/api/imports', async () => {
+          await gate;
+          return HttpResponse.json({ error: { code: 'INTERNAL', message: 'late failure' } }, { status: 500 });
+        }),
+      );
+      const errors = vi.spyOn(console, 'error');
+      const { unmount } = await startImport();
+      unmount();
+      release();
+      await settle();
+      expect(errors).not.toHaveBeenCalled();
+    });
+  });
 });
+

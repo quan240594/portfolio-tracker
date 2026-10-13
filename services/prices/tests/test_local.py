@@ -37,3 +37,21 @@ def test_local_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert os.environ["AWS_ENDPOINT_URL"] == "http://localhost:4566"
     assert os.environ["TABLE_NAME"] == "portfolio-tracker-local"
     assert os.environ["AWS_REGION"] == "eu-west-1"
+
+
+def test_local_refresh_without_symbols_and_module_entrypoint(
+    infra: Infra, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import runpy
+    import sys
+
+    monkeypatch.setenv("AWS_ENDPOINT_URL", "")
+    infra.track("MSFT")
+    assert local.main(["refresh"]) == 0
+    assert json.loads(capsys.readouterr().out)["refreshed"] == 1
+
+    monkeypatch.setattr(sys, "argv", ["prices.local", "refresh"])
+    sys.modules.pop("prices.local", None)
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_module("prices.local", run_name="__main__")
+    assert exc.value.code == 0

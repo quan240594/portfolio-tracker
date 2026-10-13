@@ -3,6 +3,7 @@ import type { AllocationSlice } from '@portfolio/shared';
 import { useTheme } from '../../theme/ThemeProvider';
 import { formatMoney, formatWeight } from '../../lib/format';
 import { SERIES_COLORS, chartTheme } from './palette';
+import { moneyTooltip } from './chartFormatters';
 
 const MAX_SLICES = 8;
 
@@ -38,7 +39,7 @@ export function AllocationDonut({ slices, currency }: { slices: AllocationSlice[
             <Tooltip
               contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.tooltipBorder}`, borderRadius: 8, fontSize: 12 }}
               itemStyle={{ color: c.text }}
-              formatter={(v, name) => [formatMoney(Number(v), currency), String(name)]}
+              formatter={moneyTooltip(currency)}
             />
           </PieChart>
         </ResponsiveContainer>

@@ -59,3 +59,42 @@ describe('misc formatters', () => {
     expect(trendOf(0)).toBe('flat');
   });
 });
+
+describe('formatter edge cases', () => {
+  it('handles zero, negatives and tiny values', () => {
+    expect(formatMoney(0, 'EUR', { signed: true })).toBe('€0.00');
+    expect(formatMoney(0.004, 'EUR', { signed: true })).toBe('€0.00');
+    expect(formatMoney(-1_250_000, 'EUR', { compact: true })).toBe('\u2212€1.3M');
+    expect(formatPercent(-0.001)).toBe('0.00%');
+    expect(formatPercent(-12.5, { digits: 1 })).toBe('\u221212.5%');
+    expect(formatWeight(0)).toBe('0.0%');
+    expect(formatWeight(1, 0)).toBe('100%');
+    expect(formatQuantity(-2.5)).toBe('-2.5');
+    expect(formatQuantity(0)).toBe('0');
+  });
+
+  it('renders NaN without throwing', () => {
+    expect(formatMoney(Number.NaN, 'EUR')).toBe('€NaN');
+    expect(formatMoney(Number.NaN, 'EUR', { signed: true })).toBe('€NaN');
+    expect(formatPercent(Number.NaN)).toBe('NaN%');
+    expect(formatQuantity(Number.NaN)).toBe('NaN');
+    expect(trendOf(Number.NaN)).toBe('flat');
+  });
+
+  it('treats values within ±0.000001 as flat', () => {
+    expect(trendOf(0.0000005)).toBe('flat');
+    expect(trendOf(-0.0000005)).toBe('flat');
+    expect(trendOf(0.00001)).toBe('up');
+  });
+
+  it('caches money formatters per currency/options', () => {
+    expect(formatMoney(1, 'GBP')).toBe('£1.00');
+    expect(formatMoney(2, 'GBP')).toBe('£2.00');
+    expect(formatMoney(1, 'JPY', { maxDigits: 0 })).toBe('JP¥1');
+  });
+
+  it('formats timestamps and custom date options', () => {
+    expect(formatDate('2024-03-05T12:00:00Z', { year: 'numeric' })).toBe('2024');
+    expect(formatDate('2024-12-31', { month: 'long' })).toBe('December');
+  });
+});

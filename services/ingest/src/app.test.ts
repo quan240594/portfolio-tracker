@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHandler } from './app.js';
+import { logger } from './logger.js';
 import { eventBridgeBody, fakeIngestDeps, s3NotificationBody, sqsEvent } from './testing/fakes.js';
 
 const BUCKET = 'portfolio-tracker-imports-test';
@@ -141,4 +142,72 @@ describe('ingest handler', () => {
     expect(store.imp('demo', 'imp1')!.errors).toHaveLength(100);
     expect(store.imp('demo', 'imp1')!.rowCount).toBe(150);
   });
+
+  describe('logging context and acknowledgement', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it('scopes the Lambda request id to the invocation', async () => {
+      const { handler, key } = setup();
+      const append = vi.spyOn(logger, 'appendKeys');
+      const remove = vi.spyOn(logger, 'removeKeys');
+      await handler(sqsEvent(eventBridgeBody(BUCKET, key)), { awsRequestId: 'req-1' });
+      expect(append).toHaveBeenCalledWith({ requestId: 'req-1' });
+      expect(remove).toHaveBeenCalledWith(['requestId']);
+      await handler(sqsEvent());
+      expect(append).toHaveBeenLastCalledWith({ requestId: undefined });
+    });
+
+    it('acknowledges malformed and reference-free bodies with a warning', async () => {
+      const { handler, store } = setup();
+      const warn = vi.spyOn(logger, 'warn');
+      const res = await handler(sqsEvent('{not json', JSON.stringify({ Event: 's3:TestEvent' }), 'null'));
+      expect(res.batchItemFailures).toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(3);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('no S3 object references'), { messageId: 'm2' });
+      expect(store.imp('demo', 'imp1')!.status).toBe('PENDING');
+    });
+
+    it('logs the outcome of each processed object', async () => {
+      const { handler, key } = setup();
+      const info = vi.spyOn(logger, 'info');
+      await handler(sqsEvent(eventBridgeBody(BUCKET, key), eventBridgeBody(BUCKET, 'other/x.csv')));
+      const outcomes = info.mock.calls.filter(([msg]) => msg === 'Processed object').map(([, extra]) => extra);
+      expect(outcomes).toEqual([
+        expect.objectContaining({ messageId: 'm1', key, outcome: 'COMPLETED', latencyMs: expect.any(Number) }),
+        expect.objectContaining({ messageId: 'm2', key: 'other/x.csv', outcome: 'IGNORED' }),
+      ]);
+    });
+
+    it('fails the whole import when a note contains an unquoted comma', async () => {
+      const { handler, store, events, key } = setup(`${HEADER}\n2025-01-02,BUY,AAPL,10,150,1,USD,first\n2025-01-03,BUY,AAPL,1,150,1,USD,dip, again\n`);
+      const res = await handler(sqsEvent(eventBridgeBody(BUCKET, key)));
+      expect(res.batchItemFailures).toEqual([]);
+      expect(store.imp('demo', 'imp1')).toMatchObject({
+        status: 'FAILED',
+        rowCount: 2,
+        errors: [{ row: 2, message: 'Expected 8 fields but found 9 — quote values containing commas' }],
+      });
+      expect(store.transactions).toHaveLength(0);
+      expect(events.published).toHaveLength(0);
+    });
+
+    it('imports a URL-encoded S3 notification key', async () => {
+      const { handler, store } = setup(GOOD_CSV, 'my report');
+      const res = await handler(sqsEvent(s3NotificationBody(BUCKET, 'imports/demo/my+report.csv')));
+      expect(res.batchItemFailures).toEqual([]);
+      expect(store.imp('demo', 'my report')!.status).toBe('COMPLETED');
+    });
+
+    it('fails the import (not the message) when the CSV is empty or the header is broken', async () => {
+      const empty = setup('');
+      await empty.handler(sqsEvent(eventBridgeBody(BUCKET, empty.key)));
+      expect(empty.store.imp('demo', 'imp1')).toMatchObject({ status: 'FAILED', errors: [{ row: 0, message: 'CSV contains no data rows' }] });
+
+      const dup = setup(`${HEADER},Symbol\n2025-01-02,BUY,AAPL,1,1,0,USD,note,MSFT\n`);
+      const res = await dup.handler(sqsEvent(eventBridgeBody(BUCKET, dup.key)));
+      expect(res.batchItemFailures).toEqual([]);
+      expect(dup.store.imp('demo', 'imp1')).toMatchObject({ status: 'FAILED', errors: [{ row: 0, message: 'Duplicate column(s): symbol' }] });
+    });
+  });
 });
+

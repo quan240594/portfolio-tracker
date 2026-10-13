@@ -1,4 +1,6 @@
 import { screen, waitFor } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
+import { server } from '../../mocks/server';
 import userEvent from '@testing-library/user-event';
 import { TransactionForm, validateTransaction } from './TransactionForm';
 import { renderWithProviders } from '../../test/utils';
@@ -81,7 +83,98 @@ describe('TransactionForm', () => {
   });
 });
 
+describe('TransactionForm extras', () => {
+  it('relabels quantity, price and fee for dividends', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<TransactionForm />);
+    expect(screen.getByLabelText('Quantity')).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('Type'), 'DIVIDEND');
+    expect(screen.getByLabelText('Eligible units')).toBeInTheDocument();
+    expect(screen.getByLabelText('Gross dividend per unit')).toBeInTheDocument();
+    expect(screen.getByLabelText('Withholding tax')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Dividend' })).toBeInTheDocument();
+  });
+
+  it('calls onCancel and only renders Cancel when provided', async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    const { unmount } = renderWithProviders(<TransactionForm onCancel={onCancel} />);
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    unmount();
+    renderWithProviders(<TransactionForm />);
+    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+  });
+
+  it('shows a saving state, resets after success and keeps the note', async () => {
+    const user = userEvent.setup();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let posted: unknown;
+    server.use(
+      http.post('/api/transactions', async ({ request }) => {
+        posted = await request.json();
+        await gate;
+        return HttpResponse.json({ ...(posted as object), id: 'new', userId: 'demo', createdAt: '2024-01-01T00:00:00Z' }, { status: 201 });
+      }),
+    );
+    renderWithProviders(<TransactionForm />);
+    await user.type(screen.getByLabelText('Symbol'), 'ko');
+    await user.type(screen.getByLabelText('Quantity'), '3');
+    await user.type(screen.getByLabelText('Price per unit'), '60');
+    await user.type(screen.getByLabelText(/^Note/), '  First buy  ');
+    await user.click(screen.getByRole('button', { name: 'Save transaction' }));
+
+    expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled();
+    release();
+    await waitFor(() => expect(screen.getByLabelText('Symbol')).toHaveValue(''));
+    expect(posted).toMatchObject({ symbol: 'KO', quantity: 3, price: 60, note: 'First buy' });
+    expect(screen.getByLabelText(/^Note/)).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Save transaction' })).toBeEnabled();
+  });
+
+  it('shows network errors from the server', async () => {
+    const user = userEvent.setup();
+    server.use(http.post('/api/transactions', () => HttpResponse.error()));
+    renderWithProviders(<TransactionForm />);
+    await user.type(screen.getByLabelText('Symbol'), 'KO');
+    await user.type(screen.getByLabelText('Quantity'), '1');
+    await user.type(screen.getByLabelText('Price per unit'), '1');
+    await user.click(screen.getByRole('button', { name: 'Save transaction' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server');
+  });
+
+  it('reports a missing date and focuses it first', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<TransactionForm />);
+    await user.clear(screen.getByLabelText('Date'));
+    await user.click(screen.getByRole('button', { name: 'Save transaction' }));
+    expect(screen.getByText('Date is required')).toBeInTheDocument();
+    expect(screen.getByLabelText('Date')).toHaveFocus();
+  });
+});
+
 describe('validateTransaction', () => {
+  const valid = { date: '2024-01-02', type: 'BUY', symbol: 'KO', quantity: '1', price: '1', fee: '0', currency: 'USD', note: '' };
+
+  it.each([
+    ['symbol', { symbol: 'A'.repeat(21) }, 'Symbol is too long (max 20 characters)'],
+    ['symbol', { symbol: '   ' }, 'Symbol is required'],
+    ['quantity', { quantity: 'many' }, 'Enter a valid number'],
+    ['quantity', { quantity: '-1' }, 'Quantity must be greater than 0'],
+    ['price', { price: 'free' }, 'Enter a valid number'],
+    ['fee', { fee: '-1' }, 'Fee cannot be negative'],
+    ['note', { note: 'x'.repeat(501) }, 'Note is too long (max 500 characters)'],
+    ['type', { type: 'HOLD' }, expect.stringMatching(/Invalid enum value/)],
+    ['date', { date: '' }, 'Date is required'],
+    ['date', { date: '2024-02-30' }, 'Enter a date as YYYY-MM-DD'],
+  ] as const)('maps %s errors to friendly messages (%j)', (field, patch, message) => {
+    const res = validateTransaction({ ...valid, ...patch });
+    expect(res.data).toBeUndefined();
+    expect(res.errors[field]).toEqual(message);
+  });
+
+
   it('returns parsed data for valid input', () => {
     const res = validateTransaction({
       date: '2024-01-02', type: 'DIVIDEND', symbol: ' ko ', quantity: '10', price: '0.485', fee: '', currency: 'usd', note: '  ',

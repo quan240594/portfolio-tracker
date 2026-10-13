@@ -32,7 +32,7 @@ export function renderApp(route = '/') {
     ...render(
       <ThemeProvider>
         <QueryClientProvider client={queryClient}>
-          <RouterProvider router={router} />
+          <RouterProvider router={router} future={{ v7_startTransition: true }} />
         </QueryClientProvider>
       </ThemeProvider>,
     ),

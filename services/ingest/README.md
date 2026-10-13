@@ -6,8 +6,10 @@ Each SQS message body is either an EventBridge S3 `Object Created` event (AWS) o
 (LocalStack). For every `imports/{userId}/{importId}.csv` object:
 
 1. Load the `IMPORT` item; `COMPLETED`/`FAILED` → acknowledge (idempotent). Conditionally set `PROCESSING`.
-2. Read the object (max 1 MB), parse with `csv-parse` (case-insensitive header, any order), validate every row
-   with `csvRowSchema` (max 5000 rows) and replay existing + imported transactions with `buildPositions`.
+2. Read the object (max 1 MB), parse with `csv-parse` (case-insensitive header, any order; unknown columns ignored, duplicate columns rejected;
+   blank lines ignored), validate every row with `csvRowSchema` (max 5000 rows) and replay existing + imported transactions with `buildPositions`.
+   Every row must have exactly as many fields as the header; otherwise the row is reported as
+   `Expected N fields but found M` (values containing commas, e.g. notes, must be quoted: `"bought dip, again"`).
 3. Any problem → `FAILED` with `errors[]` (row numbers 1-based excluding header, row 0 = file-level; capped at 100); nothing is written.
 4. Otherwise BatchWrite transactions (ids `{importId}-{row}`), upsert `USERS` / `TRACKED` items, publish
    `TransactionsChanged` (source `portfolio.ingest`, reason `IMPORTED`) and set `COMPLETED`.

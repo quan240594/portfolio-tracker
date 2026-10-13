@@ -31,9 +31,12 @@ function rowForPortfolioError(err: PortfolioError, rows: ParsedRow[]): number {
     const hit = rows.find((r) => r.input.type === 'SELL' && r.input.symbol === symbol && r.input.date === date && String(r.input.quantity) === qty);
     if (hit) return hit.row;
   }
-  const mixed = /^Mixed currencies for (\S+):/.exec(err.message);
+  const mixed = /^Mixed currencies for (\S+): \S+ and (\S+)/.exec(err.message);
   if (mixed) {
-    const hit = rows.find((r) => r.input.symbol === mixed[1]);
+    const [, symbol, offending] = mixed;
+    // Prefer the row carrying the conflicting currency; fall back to any row of the symbol.
+    const hit =
+      rows.find((r) => r.input.symbol === symbol && r.input.currency === offending) ?? rows.find((r) => r.input.symbol === symbol);
     if (hit) return hit.row;
   }
   return 0;

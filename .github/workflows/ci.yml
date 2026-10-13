@@ -32,7 +32,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r --if-present typecheck
       - run: pnpm -r --if-present lint
-      - run: pnpm -r --if-present test
+      - run: pnpm -r --if-present test:coverage # enforces the 95% thresholds
       - run: pnpm -r --if-present build
       - name: Package Lambda artifacts
         run: |
@@ -66,7 +66,7 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: ruff check .
       - run: ruff format --check .
-      - run: pytest -q
+      - run: pytest -q --cov=prices # fail_under = 95 in pyproject.toml
       - name: Package Lambda artifact
         run: bash scripts/package.sh
       - uses: actions/upload-artifact@v4

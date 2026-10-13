@@ -17,4 +17,41 @@ describe('extractS3Objects', () => {
     expect(extractS3Objects('not json')).toEqual([]);
     expect(extractS3Objects(JSON.stringify({ 'detail-type': 'Object Deleted', detail: { bucket: { name: 'b' }, object: { key: 'k' } } }))).toEqual([]);
   });
+
+  it('accepts EventBridge-shaped messages without a detail-type', () => {
+    expect(extractS3Objects(JSON.stringify({ detail: { bucket: { name: 'b' }, object: { key: 'k' } } }))).toEqual([{ bucket: 'b', key: 'k' }]);
+  });
+
+  it('ignores EventBridge events whose bucket name or key is not a string', () => {
+    expect(extractS3Objects(JSON.stringify({ 'detail-type': 'Object Created', detail: { bucket: { name: 1 }, object: { key: 'k' } } }))).toEqual([]);
+    expect(extractS3Objects(JSON.stringify({ 'detail-type': 'Object Created', detail: { bucket: { name: 'b' }, object: {} } }))).toEqual([]);
+  });
+
+  it('ignores JSON bodies that are not objects', () => {
+    for (const body of ['null', '42', '"text"', '[1,2]']) expect(extractS3Objects(body)).toEqual([]);
+  });
+
+  it('returns every created object of a multi-record S3 notification and skips malformed records', () => {
+    const body = JSON.stringify({
+      Records: [
+        null,
+        'x',
+        { eventName: 'ObjectCreated:Put' },
+        { eventName: 'ObjectCreated:Put', s3: { bucket: 'b', object: { key: 'k' } } },
+        { eventName: 'ObjectCreated:Put', s3: { bucket: { name: 'b' }, object: { key: 7 } } },
+        { eventName: 'ObjectCreated:CompleteMultipartUpload', s3: { bucket: { name: 'b' }, object: { key: 'imports/u/a+b.csv' } } },
+        { s3: { bucket: { name: 'b2' }, object: { key: 'imports/u/c.csv' } } },
+      ],
+    });
+    expect(extractS3Objects(body)).toEqual([
+      { bucket: 'b', key: 'imports/u/a%20b.csv' },
+      { bucket: 'b2', key: 'imports/u/c.csv' },
+    ]);
+  });
+
+  it('ignores objects that match neither shape', () => {
+    expect(extractS3Objects(JSON.stringify({ detail: { bucket: { name: 'b' } } }))).toEqual([]);
+    expect(extractS3Objects(JSON.stringify({ Records: 'nope' }))).toEqual([]);
+  });
 });
+
