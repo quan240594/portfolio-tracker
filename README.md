@@ -3,6 +3,9 @@
 Personal investment-portfolio analytics: holdings, P&L, allocation, value history, dividends and
 CSV imports — built as a full-stack, event-driven AWS serverless reference project.
 
+**Live demo:** <https://quan240594.github.io/portfolio-tracker/> — the SPA running entirely in your browser on sample
+data (mocked API, nothing is saved).
+
 | Area | Stack |
 |---|---|
 | Web | React 18 + TypeScript, Vite, TanStack Query, Recharts, Tailwind, Vitest/RTL/MSW, Playwright |
@@ -71,6 +74,24 @@ Configured in [sonar-project.properties](sonar-project.properties) (project `qua
 
 See [infra/terraform/README.md](infra/terraform/README.md) (remote state bootstrap, `terraform apply`, API keys in SSM,
 web upload) and [.github/workflows/deploy.yml](.github/workflows/deploy.yml) (GitHub OIDC → AWS).
+
+## Deployment (GitHub Pages)
+
+The public demo is deployed by [.github/workflows/pages.yml](.github/workflows/pages.yml).
+
+- **Trigger:** push to `main` touching `web/**`, `packages/shared/**`, `pnpm-lock.yaml` or the workflow itself; or run it
+  manually (*Actions → Pages → Run workflow*).
+- **Build:** `pnpm --filter @portfolio/web build:pages` — demo mode (`--mode mock`, `VITE_USE_MOCKS=true`, MSW in the
+  browser, in-memory sample data that resets on reload) with base path `/portfolio-tracker/`. It never calls a real API.
+  The build also writes `404.html` (copy of `index.html`, so deep links like `/portfolio-tracker/holdings` survive a
+  refresh) and `.nojekyll`. Then `upload-pages-artifact` (`web/dist`) → `deploy-pages` (environment `github-pages`).
+- **One-time setting:** *Settings → Pages → Source: GitHub Actions* (already done).
+- **Preview locally:**
+
+  ```bash
+  pnpm --filter @portfolio/web build:pages && pnpm --filter @portfolio/web preview:pages   # http://localhost:4173/portfolio-tracker/
+  pnpm --filter @portfolio/web test:e2e:pages   # Playwright against the Pages build (Pages-like server with 404.html fallback)
+  ```
 
 ## Disclaimer
 

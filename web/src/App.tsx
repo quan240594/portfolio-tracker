@@ -9,6 +9,7 @@ import { DividendsPage } from './pages/DividendsPage';
 import { TransactionsPage } from './pages/TransactionsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { ApiError } from './api/client';
+import { routerBasename } from './config';
 
 const TITLES: Record<string, string> = {
   '/': 'Dashboard',
@@ -75,7 +76,7 @@ export const ROUTER_FUTURE = {
   v7_skipActionErrorRevalidation: true,
 } as const;
 
-const router = createBrowserRouter(routes, { future: ROUTER_FUTURE });
+const router = createBrowserRouter(routes, { future: ROUTER_FUTURE, basename: routerBasename() });
 const queryClient = createQueryClient();
 
 export function App() {

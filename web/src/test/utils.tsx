@@ -23,9 +23,9 @@ export function renderWithProviders(ui: ReactElement, { route = '/' }: { route?:
   return { queryClient, ...render(ui, { wrapper: Wrapper }) };
 }
 
-export function renderApp(route = '/') {
+export function renderApp(route = '/', { basename }: { basename?: string } = {}) {
   const queryClient = createTestQueryClient();
-  const router = createMemoryRouter(routes, { initialEntries: [route], future: ROUTER_FUTURE });
+  const router = createMemoryRouter(routes, { initialEntries: [route], basename, future: ROUTER_FUTURE });
   return {
     queryClient,
     router,

@@ -8,13 +8,16 @@
     "dev:mock": "vite --mode mock",
     "build": "tsc -b && vite build",
     "build:mock": "tsc -b && vite build --mode mock",
+    "build:pages": "tsc -b && VITE_USE_MOCKS=true VITE_API_BASE_URL= VITE_BASE_PATH=/portfolio-tracker/ vite build --mode mock",
     "preview": "vite preview",
+    "preview:pages": "VITE_BASE_PATH=/portfolio-tracker/ vite preview --port 4173",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:pages": "pnpm build:pages && playwright test --config playwright.pages.config.ts"
   },
   "dependencies": {
     "@portfolio/shared": "workspace:*",
