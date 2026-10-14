@@ -1,3 +1,4 @@
+import { FxTimeline } from './fx.js';
 import { describe, expect, it } from 'vitest';
 import {
   computeAnalyticsSummary,
@@ -10,7 +11,7 @@ import {
   type AnalyticsData,
 } from './analytics-compute.js';
 import { analyticsGoalQuerySchema } from './analytics-api.js';
-import { addIsoDays } from './analytics.js';
+import { addIsoDays, dailyFlows, isInvestmentFlow, transactionCashFlows } from './analytics.js';
 import type { EodPrice, FxRates, Transaction } from './types.js';
 
 const fx: FxRates = { base: 'EUR', rates: { USD: 1.25 }, asOf: '2026-01-02T00:00:00Z' };
@@ -310,5 +311,36 @@ describe('computeGoal', () => {
   it('lets the caller override the starting yield', () => {
     const g = computeGoal(base(), { ...query, currentYieldPct: 4 });
     expect(g.inputs).toMatchObject({ currentIncome: 48.4, currentYieldPct: 4 });
+  });
+});
+
+describe('cash movements and splits are not investment flows', () => {
+  const cash = [
+    tx({ type: 'DEPOSIT', symbol: 'CASH.EUR', date: '2024-12-01', quantity: 50_000, price: 1 }),
+    tx({ type: 'WITHDRAWAL', symbol: 'CASH.EUR', date: '2025-06-01', quantity: 1_000, price: 1 }),
+    tx({ type: 'FEE', symbol: 'CASH.EUR', date: '2025-06-02', quantity: 1, price: 5 }),
+    tx({ type: 'INTEREST', symbol: 'CASH.EUR', date: '2025-06-03', quantity: 1, price: 7 }),
+  ];
+
+  it('classifies only trades and dividends as investment flows', () => {
+    expect(['BUY', 'SELL', 'DIVIDEND', 'DEPOSIT', 'WITHDRAWAL', 'FEE', 'INTEREST', 'SPLIT'].filter((type) => isInvestmentFlow({ type: type as Transaction['type'] }))).toEqual(['BUY', 'SELL', 'DIVIDEND']);
+  });
+
+  it('keeps them out of the IRR and TWR flows', () => {
+    const timeline = new FxTimeline(fx);
+    const txns = [...cash, tx({}), tx({ type: 'SPLIT', date: '2025-03-01', quantity: 2, price: 0 })];
+    expect(transactionCashFlows(txns, timeline)).toEqual(transactionCashFlows([tx({})], timeline));
+    expect([...dailyFlows(txns, timeline).keys()]).toEqual(['2025-01-02']);
+  });
+
+  it('does not change the returns, and "since" is the first investment, not an earlier deposit', () => {
+    const plain = computeAnalyticsSummary(base()).performance;
+    const withCash = computeAnalyticsSummary(base({ transactions: [...cash, tx({})] })).performance;
+    expect(withCash).toEqual(plain);
+    expect(withCash).toMatchObject({ since: '2025-01-02', irrPct: 21, twrPct: 21 });
+  });
+
+  it('reports no performance for a portfolio that only holds cash', () => {
+    expect(computeAnalyticsSummary(base({ transactions: cash })).performance).toMatchObject({ since: null, irrPct: null, twrPct: null });
   });
 });

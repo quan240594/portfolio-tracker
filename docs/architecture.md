@@ -257,6 +257,15 @@ Web: dashboard widgets (`features/analytics/`) read `GET /analytics/summary`; in
 browser session (`sessionStorage`, per scope). `/analytics` is lazy-loaded and has tabs Returns, Risk, Benchmark,
 Dividend growth and Income goal (`?tab=`); everything follows the active portfolio scope. Not investment advice.
 
+**Scope with cash tracking and custom assets.** Return figures (IRR, TWR, returns by period, benchmark) measure the
+*invested holdings*: only BUY, SELL and DIVIDEND transactions are flows, and the value they are measured against is the
+market value of the holdings. DEPOSIT, WITHDRAWAL, FEE, INTEREST and SPLIT are ignored as flows (a split changes units,
+not value; positions and value history still apply it), and the "since" date is the first investment transaction.
+Cash balances and custom assets are therefore not part of these returns yet. A cash-inclusive IRR would use
+`externalCashFlows()` (deposits/withdrawals for portfolios with cash tracking) against a terminal value that includes cash
+and custom assets; that is a follow-up.
+
+
 ## Portfolio management
 
 Cash, splits, categories with target allocation and rebalancing, custom assets, a watchlist, a dividend

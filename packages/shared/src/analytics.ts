@@ -55,8 +55,15 @@ export function transactionAmount(t: Transaction, timeline: FxTimeline): number 
   return (t.type === 'BUY' ? gross + t.fee : gross - t.fee) / txRate(t, timeline);
 }
 
+/**
+ * Analytics measure the invested holdings, so only trades and dividends are flows. Cash movements (DEPOSIT,
+ * WITHDRAWAL, FEE, INTEREST) and SPLIT carry no investment cash flow of their own: a split changes units, not value,
+ * and cash balances are not part of the holdings value these returns are measured against.
+ */
+export const isInvestmentFlow = (t: Pick<Transaction, 'type'>): boolean => t.type === 'BUY' || t.type === 'SELL' || t.type === 'DIVIDEND';
+
 export function transactionCashFlows(transactions: readonly Transaction[], timeline: FxTimeline): CashFlow[] {
-  return transactions.map((t) => {
+  return transactions.filter(isInvestmentFlow).map((t) => {
     const amount = transactionAmount(t, timeline);
     return { date: t.date, amount: t.type === 'BUY' ? -amount : amount };
   });
@@ -71,7 +78,7 @@ export interface DayFlows {
 
 export function dailyFlows(transactions: readonly Transaction[], timeline: FxTimeline): Map<string, DayFlows> {
   const out = new Map<string, DayFlows>();
-  for (const t of transactions) {
+  for (const t of transactions.filter(isInvestmentFlow)) {
     const amount = transactionAmount(t, timeline);
     const day = out.get(t.date) ?? { contributions: 0, income: 0 };
     if (t.type === 'BUY') day.contributions += amount;
