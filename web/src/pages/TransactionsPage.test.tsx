@@ -108,8 +108,10 @@ describe('TransactionsPage', () => {
 
     expect(await screen.findByText('Added buy of 1,5 ASML.AS.')).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('Added buy of 1,5 ASML.AS.');
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(router.state.location.search).toBe('');
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(router.state.location.search).toBe('');
+    });
     await waitFor(() => expect(rows()).toHaveLength(before + 1));
   });
 
@@ -154,7 +156,7 @@ describe('TransactionsPage', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Upload & import' }));
     expect(await within(dialog).findByText('✓ Import completed', undefined, { timeout: 4000 })).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: 'Done' }));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
   describe('delete', () => {
@@ -191,7 +193,7 @@ describe('TransactionsPage', () => {
       await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' }));
 
       expect(await screen.findByText(`Deleted dividend of ${first.symbol} on ${formatDate(first.date)}.`)).toBeInTheDocument();
-      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
       await waitFor(() => expect(rows()).toHaveLength(before - 1));
       expect(listTransactions().some((t) => t.id === first.id)).toBe(false);
     });
