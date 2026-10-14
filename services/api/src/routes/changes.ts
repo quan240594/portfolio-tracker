@@ -1,4 +1,4 @@
-import type { TransactionsChangedDetail } from '@portfolio/shared';
+import { marketSymbols, type TransactionsChangedDetail } from '@portfolio/shared';
 import { logger } from '../lib/logger.js';
 import type { RouteContext } from '../deps.js';
 
@@ -13,9 +13,12 @@ export async function publishChange(
   symbols: string[],
   reason: Exclude<TransactionsChangedDetail['reason'], 'IMPORTED'>,
 ): Promise<void> {
+  // Cash (CASH.*) and custom (CUSTOM:*) symbols have no price feed, so there is nothing to enrich.
+  const priced = marketSymbols(symbols);
+  if (priced.length === 0) return;
   try {
-    await ctx.deps.events.transactionsChanged({ userId: ctx.userId, portfolioId, symbols, reason });
+    await ctx.deps.events.transactionsChanged({ userId: ctx.userId, portfolioId, symbols: priced, reason });
   } catch (err) {
-    logger.error('Failed to publish TransactionsChanged', { error: err as Error, reason, portfolioId, symbols });
+    logger.error('Failed to publish TransactionsChanged', { error: err as Error, reason, portfolioId, symbols: priced });
   }
 }

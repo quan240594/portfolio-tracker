@@ -42,7 +42,7 @@ test.describe('Portfolio Tracker (mock mode)', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Holdings' })).toBeVisible();
 
     const table = page.getByRole('table');
-    await expect(table.getByRole('rowheader')).toHaveCount(8);
+    await expect(table.getByRole('rowheader')).toHaveCount(12);
     await expect(table.getByRole('columnheader', { name: /Market value/ })).toHaveAttribute('aria-sort', 'descending');
     await expect(table.getByText('Stale price')).toBeVisible();
 
@@ -98,7 +98,7 @@ test.describe('Portfolio Tracker (mock mode)', () => {
     await expect(row).toContainText('€ 806,90');
 
     await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Holdings' }).click();
-    await expect(page.getByRole('table').getByRole('rowheader')).toHaveCount(9);
+    await expect(page.getByRole('table').getByRole('rowheader')).toHaveCount(13);
     await expect(page.getByRole('rowheader', { name: /SAP\.DE/ })).toBeVisible();
   });
 

@@ -1,14 +1,17 @@
 
-export const ASSET_CLASSES = ['STOCK', 'ETF', 'CRYPTO', 'BOND', 'CASH', 'OTHER'] as const;
+export const ASSET_CLASSES = ['STOCK', 'ETF', 'CRYPTO', 'BOND', 'CASH', 'REAL_ESTATE', 'DEPOSIT', 'OTHER'] as const;
 export type AssetClass = (typeof ASSET_CLASSES)[number];
 
-export const TRANSACTION_TYPES = ['BUY', 'SELL', 'DIVIDEND'] as const;
+export const TRANSACTION_TYPES = ['BUY', 'SELL', 'DIVIDEND', 'DEPOSIT', 'WITHDRAWAL', 'SPLIT', 'FEE', 'INTEREST'] as const;
 export type TransactionType = (typeof TRANSACTION_TYPES)[number];
 
 /**
  * For BUY/SELL: quantity = units, price = per-unit price, fee = broker fee.
  * For DIVIDEND: quantity = eligible units, price = gross dividend per unit, fee = withholding tax.
  * All amounts are in `currency` (the instrument's trading currency).
+ * Portfolio management types (see management.ts): DEPOSIT/WITHDRAWAL/FEE/INTEREST are cash movements on symbol
+ * `CASH.<currency>` (amount = quantity * price, fee must be 0); SPLIT: quantity = new shares per old share
+ * (4 for 4:1, 0.1 for 1:10), fee 0, price ignored.
  */
 export interface Transaction {
   id: string;
@@ -129,6 +132,12 @@ export interface PortfolioSummary {
   dayChangePct: number;
   holdingsCount: number;
   asOf: string;
+  /** Base-currency cash balance; only present when cash tracking is on for a portfolio in scope. Included in totalValue. */
+  cashValue?: number;
+  /** Base-currency value of custom (non-market) assets; only present when there are any. Included in totalValue. */
+  customAssetsValue?: number;
+  /** Interest minus account fees on cash (base currency); part of totalReturn. Only present with cash tracking. */
+  cashIncome?: number;
 }
 
 export const ALLOCATION_DIMENSIONS = ['assetClass', 'sector', 'country', 'currency', 'symbol'] as const;

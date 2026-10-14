@@ -6,6 +6,7 @@ import {
   DEFAULT_PORTFOLIO_NAME,
   MAX_PORTFOLIOS,
   PortfolioError,
+  applyManagement,
   buildPositions,
   buildValueHistory,
   calculateAllocation,
@@ -13,6 +14,7 @@ import {
   calculatePortfolio,
   csvRowSchema,
   historyRangeStart,
+  managementHistoryExtra,
   sortTransactions,
   type AllocationDimension,
   type AnalyticsData,
@@ -28,6 +30,10 @@ import {
   type TransactionInput,
 } from '@portfolio/shared';
 import { BASE_CURRENCY, MOCK_USER_ID, STALE_SYMBOLS, TRADING_212_ID, TRADING_212_NAME, createSeed, type MockSeed } from './fixtures';
+import { deleteManagementData, managementScope, resetManagement } from './management-db';
+import { MockHttpError } from './utils';
+
+export { MockHttpError };
 
 interface MockImport {
   status: ImportStatus;
@@ -52,6 +58,7 @@ function seedPortfolio(portfolioId: string, name: string, createdAt: string): Po
 function init(options: { empty?: boolean } = {}): DbState {
   const seed = createSeed();
   const first = seed.transactions[0]?.createdAt ?? `${seed.today}T00:00:00.000Z`;
+  resetManagement(seed, options);
   return {
     seed,
     portfolios: [
@@ -69,17 +76,6 @@ export function resetDb(options: { empty?: boolean } = {}): void {
   state = init(options);
 }
 
-export class MockHttpError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message: string,
-    readonly details?: unknown,
-  ) {
-    super(message);
-  }
-}
-
 const nowIso = () => new Date().toISOString();
 
 function quotesFor(transactions: readonly Transaction[]) {
@@ -92,19 +88,23 @@ function quotesFor(transactions: readonly Transaction[]) {
 /** `?portfolioId=`: omitted or 'all' = every portfolio combined; unknown ids are a 404. */
 export type MockScope = string | undefined;
 
-function requirePortfolio(portfolioId: string): Portfolio {
+export function requirePortfolio(portfolioId: string): Portfolio {
   const p = state.portfolios.find((x) => x.portfolioId === portfolioId);
   if (!p) throw new MockHttpError(404, 'NOT_FOUND', `Portfolio ${portfolioId} not found`);
   return p;
 }
 
-function scoped(scope: MockScope): Transaction[] {
+export function scoped(scope: MockScope): Transaction[] {
   if (scope === undefined || scope === ALL_PORTFOLIOS) return state.transactions;
   requirePortfolio(scope);
   return state.transactions.filter((t) => t.portfolioId === scope);
 }
 
-function portfolio(scope: MockScope) {
+/** Management scope (cash-tracking portfolios, custom assets) for a read scope; 'all' = every portfolio. */
+const managementFor = (scope: MockScope) => managementScope(scope === ALL_PORTFOLIOS ? undefined : scope);
+
+/** Holdings and summary of a scope, including cash (when tracked) and custom assets, like the API. */
+export function portfolio(scope: MockScope) {
   const transactions = scoped(scope);
   const result = calculatePortfolio({
     transactions,
@@ -114,8 +114,11 @@ function portfolio(scope: MockScope) {
     fxHistory: state.seed.fxHistory,
   });
   for (const h of result.holdings) if (STALE_SYMBOLS.has(h.symbol)) h.priceStale = true;
-  return result;
+  const { fx, fxHistory, today } = state.seed;
+  return applyManagement(result, { transactions, ...managementFor(scope), fx, fxHistory, today });
 }
+
+export const getSeed = (): MockSeed => state.seed;
 
 export const getPortfolio = (scope?: MockScope): GetPortfolioResponse => portfolio(scope).summary;
 
@@ -134,7 +137,7 @@ export function getHistory(range: HistoryRange, scope?: MockScope): GetHistoryRe
   return {
     range,
     baseCurrency: BASE_CURRENCY,
-    points: buildValueHistory(sorted, state.seed.eod, state.seed.fx, from, today, state.seed.fxHistory),
+    points: buildValueHistory(sorted, state.seed.eod, state.seed.fx, from, today, state.seed.fxHistory, managementHistoryExtra({ transactions: sorted, ...managementFor(scope) })),
   };
 }
 
@@ -229,6 +232,7 @@ export function deletePortfolio(portfolioId: string, force = false): void {
   }
   state.transactions = state.transactions.filter((t) => t.portfolioId !== portfolioId);
   state.portfolios = state.portfolios.filter((x) => x.portfolioId !== portfolioId);
+  deleteManagementData(portfolioId);
 }
 
 // --- Transactions & imports -------------------------------------------------------------------------

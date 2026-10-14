@@ -1,6 +1,7 @@
 import {
   ALL_PORTFOLIOS,
   type AllocationDimension,
+  type CategoryAllocationResponse,
   type ApiError as ApiErrorBody,
   type CreateImportRequest,
   type CreateImportResponse,
@@ -100,7 +101,7 @@ function toApiError(res: Response, data: unknown): ApiError {
 export type Scope = string;
 
 /** `?portfolioId=` for one portfolio; omitted for the combined view. */
-const scopeQuery = (scope: Scope) => (scope === ALL_PORTFOLIOS ? {} : { portfolioId: scope });
+export const scopeQuery = (scope: Scope) => (scope === ALL_PORTFOLIOS ? {} : { portfolioId: scope });
 
 export const api = {
   listPortfolios: (signal?: AbortSignal) => request<ListPortfoliosResponse>('GET', '/portfolios', { signal }),
@@ -113,8 +114,8 @@ export const api = {
     request<GetPortfolioResponse>('GET', '/portfolio', { query: scopeQuery(scope), signal }),
   getHoldings: (scope: Scope, signal?: AbortSignal) =>
     request<GetHoldingsResponse>('GET', '/holdings', { query: scopeQuery(scope), signal }),
-  getAllocation: (scope: Scope, by: AllocationDimension, signal?: AbortSignal) =>
-    request<GetAllocationResponse>('GET', '/allocation', { query: { ...scopeQuery(scope), by }, signal }),
+  getAllocation: (scope: Scope, by: AllocationDimension | 'category', signal?: AbortSignal) =>
+    request<GetAllocationResponse | CategoryAllocationResponse>('GET', '/allocation', { query: { ...scopeQuery(scope), by }, signal }),
   getHistory: (scope: Scope, range: HistoryRange, signal?: AbortSignal) =>
     request<GetHistoryResponse>('GET', '/history', { query: { ...scopeQuery(scope), range }, signal }),
   getDividends: (scope: Scope, signal?: AbortSignal) =>

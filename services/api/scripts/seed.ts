@@ -10,8 +10,16 @@ import {
   DEFAULT_PORTFOLIO_ID,
   DEFAULT_PORTFOLIO_NAME,
   ENTITY,
+  MANAGEMENT_ENTITY,
+  cashSymbol,
   keys,
+  managementKeys,
   type AssetClass,
+  type Category,
+  type CategoryAssignment,
+  type CustomAsset,
+  type PortfolioSettings,
+  type WatchlistEntry,
   type DividendEvent,
   type EodPrice,
   type FxDay,
@@ -47,6 +55,17 @@ const INSTRUMENTS: InstrumentSeed[] = [
   { profile: { symbol: 'VWRL.AS', name: 'Vanguard FTSE All-World UCITS ETF', assetClass: 'ETF', sector: 'Diversified', country: 'Global', exchange: 'Euronext Amsterdam', currency: 'EUR' }, p0: 105, drift: 0.09, sigma: 0.008 },
   { profile: { symbol: 'IWDA.AS', name: 'iShares Core MSCI World UCITS ETF', assetClass: 'ETF', sector: 'Diversified', country: 'Global', exchange: 'Euronext Amsterdam', currency: 'EUR' }, p0: 82, drift: 0.09, sigma: 0.008 },
   { profile: { symbol: 'BTC-EUR', name: 'Bitcoin', assetClass: 'CRYPTO' as AssetClass, sector: 'Crypto', country: 'Global', exchange: 'CCC', currency: 'EUR' }, p0: 40000, drift: 0.25, sigma: 0.03, crypto: true },
+  // Watchlist-only symbols (no transactions): they get quotes and history like any tracked ticker.
+  { profile: { symbol: 'NVDA', name: 'NVIDIA Corp.', assetClass: 'STOCK', sector: 'Technology', country: 'United States', exchange: 'NASDAQ', currency: 'USD' }, p0: 480, drift: 0.2, sigma: 0.02 },
+  { profile: { symbol: 'SAP.DE', name: 'SAP SE', assetClass: 'STOCK', sector: 'Technology', country: 'Germany', exchange: 'XETRA', currency: 'EUR' }, p0: 150, drift: 0.1, sigma: 0.015 },
+  { profile: { symbol: 'ETH-EUR', name: 'Ethereum', assetClass: 'CRYPTO' as AssetClass, sector: 'Crypto', country: 'Global', exchange: 'CCC', currency: 'EUR' }, p0: 2300, drift: 0.2, sigma: 0.035, crypto: true },
+];
+
+/** Symbols on the demo user's watchlist (days ago they were added). */
+export const SEED_WATCHLIST: [string, number][] = [
+  ['NVDA', 30],
+  ['SAP.DE', 20],
+  ['ETH-EUR', 10],
 ];
 
 export const TRADING_212_PORTFOLIO_ID = 'trading-212';
@@ -63,7 +82,7 @@ const TXNS: [number, TransactionType, string, number, number, number?][] = [
   [540, 'BUY', 'AAPL', 10, 1],
   [520, 'BUY', 'VWRL.AS', 40, 2],
   [500, 'BUY', 'MSFT', 5, 1],
-  [470, 'BUY', 'ASML.AS', 4, 2],
+  [470, 'BUY', 'ASML.AS', 2, 2],
   [440, 'BUY', 'IWDA.AS', 50, 2],
   [400, 'BUY', 'BTC-EUR', 0.05, 5],
   [360, 'BUY', 'VWRL.AS', 20, 2],
@@ -75,6 +94,28 @@ const TXNS: [number, TransactionType, string, number, number, number?][] = [
   [150, 'BUY', 'ASML.AS', 2, 2],
   [90, 'BUY', 'BTC-EUR', 0.03, 3],
   [45, 'BUY', 'VWRL.AS', 15, 2],
+  // Appended (ids seed-16..): a 2:1 split of ASML, whose first purchase (seed-04) was recorded for 2 pre-split shares
+  // at the unadjusted price (2x the split-adjusted EOD close), so the position and cost basis are unchanged.
+  [465, 'SPLIT', 'ASML.AS', 2, 0],
+];
+
+/** Seed transaction ids recorded at a pre-split price: factor between the unadjusted trade price and the adjusted EOD close. */
+const PRE_SPLIT_PRICE_FACTOR: Record<string, number> = { 'seed-04': 2 };
+
+/** Cash movements of the main portfolio (cash tracking is on there): [daysAgo, type, amount in EUR]. */
+export const SEED_CASH_TXNS: [number, 'DEPOSIT' | 'WITHDRAWAL' | 'INTEREST' | 'FEE', number][] = [
+  [545, 'DEPOSIT', 20000],
+  [300, 'DEPOSIT', 10000],
+  [60, 'WITHDRAWAL', 500],
+  [30, 'INTEREST', 12.4],
+  [20, 'FEE', 4.5],
+];
+
+const SEED_CATEGORIES: { id: string; name: string; color: string; targetWeight: number; symbols: string[] }[] = [
+  { id: 'seed-cat-core', name: 'Core ETFs', color: '#2563eb', targetWeight: 55, symbols: ['VWRL.AS', 'IWDA.AS'] },
+  { id: 'seed-cat-stocks', name: 'Single stocks', color: '#16a34a', targetWeight: 15, symbols: ['ASML.AS'] },
+  { id: 'seed-cat-crypto', name: 'Crypto', color: '#f59e0b', targetWeight: 10, symbols: ['BTC-EUR'] },
+  { id: 'seed-cat-other', name: 'Savings & private', color: '#9333ea', targetWeight: 15, symbols: [] },
 ];
 
 /** [symbol, exDate offset (days from today), payDate offset, amount] */
@@ -225,6 +266,103 @@ export interface SeedOptions {
   log?: (msg: string) => void;
 }
 
+function cashTransactions(userId: string, today: string): Transaction[] {
+  return SEED_CASH_TXNS.map(([daysAgo, type, amount], i) => {
+    const date = toWeekday(addDays(today, -daysAgo));
+    return {
+      id: `seed-cash-${String(i + 1).padStart(2, '0')}`,
+      userId,
+      portfolioId: DEFAULT_PORTFOLIO_ID,
+      date,
+      type,
+      symbol: cashSymbol('EUR'),
+      quantity: amount,
+      price: 1,
+      fee: 0,
+      currency: 'EUR',
+      note: 'Demo seed',
+      createdAt: `${date}T08:00:00.000Z`,
+    };
+  });
+}
+
+/** Cash tracking, withholding tax, categories with targets, custom assets and the watchlist (all idempotent puts). */
+function managementItems(userId: string, today: string, closeOn: (symbol: string, date: string) => number): Record<string, unknown>[] {
+  const now = new Date().toISOString();
+  const items: Record<string, unknown>[] = [];
+  const put = (key: { PK: string; SK: string }, entityType: string, item: object) => items.push({ ...key, entityType, ...item });
+
+  const settings: PortfolioSettings = { portfolioId: DEFAULT_PORTFOLIO_ID, userId, trackCash: true, withholdingTaxRate: 15, updatedAt: now };
+  put(managementKeys.settings(userId, DEFAULT_PORTFOLIO_ID), MANAGEMENT_ENTITY.settings, settings);
+
+  const ts = `${addDays(today, -540)}T00:00:00.000Z`;
+  SEED_CATEGORIES.forEach((c, i) => {
+    const category: Category = {
+      categoryId: c.id,
+      userId,
+      portfolioId: DEFAULT_PORTFOLIO_ID,
+      name: c.name,
+      color: c.color,
+      targetWeight: c.targetWeight,
+      createdAt: `${ts.slice(0, 19)}.00${i}Z`,
+      updatedAt: ts,
+    };
+    put(managementKeys.category(userId, DEFAULT_PORTFOLIO_ID, c.id), MANAGEMENT_ENTITY.category, category);
+    for (const symbol of c.symbols) {
+      const assignment: CategoryAssignment = { userId, portfolioId: DEFAULT_PORTFOLIO_ID, symbol, categoryId: c.id };
+      put(managementKeys.assignment(userId, DEFAULT_PORTFOLIO_ID, symbol), MANAGEMENT_ENTITY.categoryAssignment, assignment);
+    }
+  });
+
+  const assets: CustomAsset[] = [
+    {
+      assetId: 'seed-asset-savings',
+      userId,
+      portfolioId: DEFAULT_PORTFOLIO_ID,
+      name: 'Savings account',
+      assetClass: 'DEPOSIT',
+      currency: 'EUR',
+      costBasis: 5000,
+      growthRate: 2.5,
+      valuations: [{ date: addDays(today, -400), value: 5000 }],
+      createdAt: ts,
+      updatedAt: ts,
+    },
+    {
+      assetId: 'seed-asset-startup',
+      userId,
+      portfolioId: DEFAULT_PORTFOLIO_ID,
+      name: 'Private equity stake',
+      assetClass: 'OTHER',
+      currency: 'EUR',
+      costBasis: 2500,
+      valuations: [
+        { date: addDays(today, -300), value: 2500 },
+        { date: addDays(today, -120), value: 2900 },
+      ],
+      createdAt: ts,
+      updatedAt: ts,
+    },
+  ];
+  for (const a of assets) put(managementKeys.customAsset(userId, a.portfolioId, a.assetId), MANAGEMENT_ENTITY.customAsset, a);
+  for (const a of assets) {
+    const assignment: CategoryAssignment = { userId, portfolioId: DEFAULT_PORTFOLIO_ID, symbol: `CUSTOM:${a.assetId}`, categoryId: 'seed-cat-other' };
+    put(managementKeys.assignment(userId, DEFAULT_PORTFOLIO_ID, assignment.symbol), MANAGEMENT_ENTITY.categoryAssignment, assignment);
+  }
+
+  for (const [symbol, daysAgo] of SEED_WATCHLIST) {
+    closeOn(symbol, today); // fails loudly when the watchlist symbol has no seeded prices
+    const entry: WatchlistEntry = { userId, symbol, addedAt: `${addDays(today, -daysAgo)}T10:00:00.000Z` };
+    put(managementKeys.watchlist(userId, symbol), MANAGEMENT_ENTITY.watchlist, entry);
+  }
+  return items;
+}
+
+const seedPrice = (type: TransactionType, dividend: number | undefined, close: () => number): number => {
+  if (type === 'SPLIT') return 0;
+  return type === 'DIVIDEND' ? dividend! : round(close(), 4);
+};
+
 export async function seed({ doc, tableName, userId = 'demo', today = iso(new Date()), log = console.log }: SeedOptions) {
   const firstTxnDate = addDays(today, -Math.max(...TXNS.map((t) => t[0])));
   const eodFrom = addDays(today, -Math.max(MIN_EOD_DAYS, daysBetween(firstTxnDate, today) + 10));
@@ -275,7 +413,7 @@ export async function seed({ doc, tableName, userId = 'demo', today = iso(new Da
       type,
       symbol,
       quantity,
-      price: type === 'DIVIDEND' ? dividend! : closeOn(symbol, date),
+      price: seedPrice(type, dividend, () => closeOn(symbol, date) * (PRE_SPLIT_PRICE_FACTOR[id] ?? 1)),
       fee,
       currency,
       note: brokerFx ? 'Demo seed (broker FX rate)' : 'Demo seed',
@@ -285,6 +423,7 @@ export async function seed({ doc, tableName, userId = 'demo', today = iso(new Da
     if (brokerFx) t.fxRate = round(fxOn(currency, date) * (type === 'BUY' ? 1 - BROKER_FX_SPREAD : 1 + BROKER_FX_SPREAD), 4);
     return t;
   });
+  transactions.push(...cashTransactions(userId, today));
   for (const t of transactions) items.push({ ...keys.transaction(userId, t.portfolioId, t.date, t.id), entityType: ENTITY.transaction, ...t });
 
   // Fixed, ordered createdAt so the default portfolio is listed first and re-seeding does not reorder them.
@@ -293,6 +432,8 @@ export async function seed({ doc, tableName, userId = 'demo', today = iso(new Da
     return { portfolioId, userId, name, createdAt: ts, updatedAt: ts };
   });
   for (const p of portfolios) items.push({ ...keys.portfolio(userId, p.portfolioId), entityType: ENTITY.portfolio, ...p });
+
+  items.push(...managementItems(userId, today, closeOn));
 
   for (const [symbol, exOff, payOff, amount] of DIV_EVENTS) {
     const inst = INSTRUMENTS.find((x) => x.profile.symbol === symbol)!;

@@ -15,6 +15,7 @@ import type { Deps } from '../deps.js';
 import type { EventPublisher } from '../events.js';
 import type { UploadUrlSigner } from '../presigner.js';
 import type { Repository } from '../repository.js';
+import { InMemoryManagementRepository } from './management-fakes.js';
 
 export class InMemoryRepository implements Repository {
   portfolios: Portfolio[] = [];
@@ -98,8 +99,8 @@ export class InMemoryRepository implements Repository {
     this.users.add(userId);
     return Promise.resolve();
   }
-  trackTickers(tickers: { symbol: string; currency: string }[]) {
-    for (const t of tickers) this.tracked.set(t.symbol, t.currency);
+  trackTickers(tickers: { symbol: string; currency?: string }[]) {
+    for (const t of tickers) this.tracked.set(t.symbol, t.currency ?? '');
     return Promise.resolve();
   }
   putImport(status: ImportStatus) {
@@ -127,10 +128,12 @@ export class FakeSigner implements UploadUrlSigner {
 
 export function fakeDeps(overrides: Partial<Deps> = {}) {
   const repo = new InMemoryRepository();
+  const mgmt = new InMemoryManagementRepository();
   const events = new RecordingPublisher();
   let n = 0;
   const deps: Deps = {
     repo,
+    mgmt,
     events,
     signer: new FakeSigner(),
     config: { baseCurrency: 'EUR', authMode: 'demo', demoUserId: 'demo', corsAllowedOrigin: 'http://localhost:5173' },
@@ -138,7 +141,7 @@ export function fakeDeps(overrides: Partial<Deps> = {}) {
     uuid: () => `uuid-${++n}`,
     ...overrides,
   };
-  return { deps, repo, events };
+  return { deps, repo, mgmt, events };
 }
 
 const serializeBody = (body: unknown): string | undefined => {

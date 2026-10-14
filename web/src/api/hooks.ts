@@ -6,7 +6,7 @@ export const queryKeys = {
   portfolios: ['portfolios'] as const,
   portfolio: (scope: Scope) => ['portfolio', scope] as const,
   holdings: (scope: Scope) => ['holdings', scope] as const,
-  allocation: (scope: Scope, by: AllocationDimension) => ['allocation', scope, by] as const,
+  allocation: (scope: Scope, by: AllocationDimension | 'category') => ['allocation', scope, by] as const,
   history: (scope: Scope, range: HistoryRange) => ['history', scope, range] as const,
   dividends: (scope: Scope) => ['dividends', scope] as const,
   transactions: (scope: Scope) => ['transactions', scope] as const,
@@ -14,7 +14,7 @@ export const queryKeys = {
 };
 
 /** Root keys of everything derived from transactions; the second key segment is the scope. */
-const PORTFOLIO_ROOT_KEYS = ['portfolio', 'holdings', 'allocation', 'history', 'dividends', 'transactions', 'analytics'] as const;
+const PORTFOLIO_ROOT_KEYS = ['portfolio', 'holdings', 'allocation', 'history', 'dividends', 'transactions', 'analytics', 'rebalance'] as const;
 
 /**
  * Invalidates transaction-derived queries. With a portfolio id only that portfolio's queries and the
@@ -41,7 +41,7 @@ export const usePortfolio = (scope: Scope, { enabled = true }: ReadOptions = {})
 export const useHoldings = (scope: Scope, { enabled = true }: ReadOptions = {}) =>
   useQuery({ queryKey: queryKeys.holdings(scope), queryFn: ({ signal }) => api.getHoldings(scope, signal), enabled });
 
-export const useAllocation = (scope: Scope, by: AllocationDimension, { enabled = true }: ReadOptions = {}) =>
+export const useAllocation = (scope: Scope, by: AllocationDimension | 'category', { enabled = true }: ReadOptions = {}) =>
   useQuery({
     queryKey: queryKeys.allocation(scope, by),
     queryFn: ({ signal }) => api.getAllocation(scope, by, signal),

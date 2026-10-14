@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ALL_PORTFOLIOS, type Portfolio, type Transaction } from '@portfolio/shared';
+import { ALL_PORTFOLIOS, isCashTransactionType, type Portfolio, type Transaction } from '@portfolio/shared';
 import { useDeleteTransaction, useTransactions } from '../api/hooks';
 import { errorMessage, type Scope } from '../api/client';
 import { PageHeader } from '../components/Layout';
@@ -10,19 +10,31 @@ import { EmptyState } from '../components/EmptyState';
 import { LoadingRegion, Skeleton } from '../components/Skeleton';
 import { TransactionForm } from '../features/transactions/TransactionForm';
 import { CsvImport } from '../features/transactions/CsvImport';
+import { PortfolioSettingsDialog } from '../features/management/PortfolioSettingsDialog';
+import { downloadFile } from '../features/management/form';
+import { managementApi } from '../api/management-client';
 import { portfolioName, usePortfolioScope } from '../features/portfolios/usePortfolioScope';
 import { BASE_CURRENCY, formatDate, formatFxRate, formatMoney, formatQuantity } from '../lib/format';
 
-type Action = 'add' | 'import' | null;
+type Action = 'add' | 'import' | 'settings' | null;
 
+const CASH_STYLE = 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100';
 const TYPE_STYLE: Record<Transaction['type'], string> = {
   BUY: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200',
   SELL: 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200',
   DIVIDEND: 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-200',
+  DEPOSIT: CASH_STYLE,
+  WITHDRAWAL: CASH_STYLE,
+  FEE: CASH_STYLE,
+  INTEREST: CASH_STYLE,
+  SPLIT: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
 };
 
 const total = (t: Transaction) =>
   t.type === 'BUY' ? t.quantity * t.price + t.fee : t.quantity * t.price - t.fee;
+
+/** Splits and cash movements have no unit price or fee of their own. */
+const hasUnitPrice = (t: Transaction) => t.type !== 'SPLIT' && !isCashTransactionType(t.type);
 
 interface TableProps {
   transactions: Transaction[];
@@ -59,11 +71,11 @@ function TransactionsTable({ transactions, portfolios, onDelete }: Readonly<Tabl
                 <span className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${TYPE_STYLE[t.type]}`}>{t.type}</span>
               </td>
               <td className="px-3 py-2.5 font-medium">{t.symbol}</td>
-              <td className="px-3 py-2.5 text-right tabular-nums">{formatQuantity(t.quantity)}</td>
-              <td className="px-3 py-2.5 text-right tabular-nums">{formatMoney(t.price, t.currency, { maxDigits: t.price < 1 ? 6 : 2 })}</td>
-              <td className="hidden px-3 py-2.5 text-right tabular-nums sm:table-cell">{formatMoney(t.fee, t.currency)}</td>
+              <td className="px-3 py-2.5 text-right tabular-nums">{t.type === 'SPLIT' ? `×${formatQuantity(t.quantity)}` : formatQuantity(t.quantity)}</td>
+              <td className="px-3 py-2.5 text-right tabular-nums">{hasUnitPrice(t) ? formatMoney(t.price, t.currency, { maxDigits: t.price < 1 ? 6 : 2 }) : '—'}</td>
+              <td className="hidden px-3 py-2.5 text-right tabular-nums sm:table-cell">{hasUnitPrice(t) ? formatMoney(t.fee, t.currency) : '—'}</td>
               <td className="px-3 py-2.5 text-right tabular-nums">
-                <span className="block font-medium">{formatMoney(total(t), t.currency)}</span>
+                <span className="block font-medium">{t.type === 'SPLIT' ? '—' : formatMoney(total(t), t.currency)}</span>
                 {t.fxRate !== undefined && t.currency !== BASE_CURRENCY && (
                   <span className="muted block text-xs whitespace-nowrap" title={`Broker FX rate: ${formatFxRate(t.fxRate)} ${t.currency} per 1 ${BASE_CURRENCY}`}>
                     ≈ {formatMoney(total(t) / t.fxRate, BASE_CURRENCY)} · FX {formatFxRate(t.fxRate)}
@@ -100,7 +112,7 @@ function addedNotice(t: Transaction, scope: Scope, portfolios: readonly Portfoli
 
 export function TransactionsPage() {
   const [params, setParams] = useSearchParams();
-  const action = (['add', 'import'] as const).find((a) => a === params.get('action')) ?? null;
+  const action = (['add', 'import', 'settings'] as const).find((a) => a === params.get('action')) ?? null;
   const setAction = (a: Action) =>
     setParams(
       (p) => {
@@ -118,6 +130,7 @@ export function TransactionsPage() {
   const del = useDeleteTransaction();
   const [toDelete, setToDelete] = useState<Transaction | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const confirmDelete = () => {
     if (!toDelete) return;
@@ -129,8 +142,25 @@ export function TransactionsPage() {
     });
   };
 
+  const exportCsv = async () => {
+    try {
+      downloadFile(`transactions-${scope}.csv`, await managementApi.exportTransactionsCsv(scope), 'text/csv');
+    } catch (err) {
+      setNotice(null);
+      setExportError(errorMessage(err));
+    }
+  };
+
   const actions = (
     <>
+      {current && (
+        <button type="button" className="btn-secondary" onClick={() => setAction('settings')}>
+          Settings
+        </button>
+      )}
+      <button type="button" className="btn-secondary" onClick={() => void exportCsv()}>
+        Export CSV
+      </button>
       <button type="button" className="btn-secondary" onClick={() => setAction('import')}>
         Import CSV
       </button>
@@ -188,7 +218,17 @@ export function TransactionsPage() {
         )}
       </div>
 
+      {exportError && (
+        <p role="alert" className="mb-4 text-sm text-red-700 dark:text-red-300">
+          {exportError}
+        </p>
+      )}
+
       {body}
+
+      {action === 'settings' && current && (
+        <PortfolioSettingsDialog portfolioId={current.portfolioId} portfolioName={current.name} onClose={() => setAction(null)} />
+      )}
 
       <Dialog open={action === 'add'} onClose={() => setAction(null)} title="Add transaction" size="lg">
         <TransactionForm

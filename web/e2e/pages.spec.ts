@@ -60,13 +60,13 @@ test.describe('GitHub Pages build (demo mode under /portfolio-tracker/)', () => 
     await nav.getByRole('link', { name: 'Holdings' }).click();
     await expect(page).toHaveURL(new RegExp(`${BASE}holdings$`));
     await expect(page.getByRole('heading', { level: 1, name: 'Holdings' })).toBeVisible();
-    await expect(page.getByRole('table').getByRole('rowheader')).toHaveCount(8);
+    await expect(page.getByRole('table').getByRole('rowheader')).toHaveCount(12);
 
     // Hard reload on the deep link: Pages has no /holdings file, so it answers 404 with 404.html (= the SPA).
     const reloaded = await page.reload();
     expect(reloaded?.status()).toBe(404);
     await expect(page.getByRole('heading', { level: 1, name: 'Holdings' })).toBeVisible();
-    await expect(page.getByRole('table').getByRole('rowheader')).toHaveCount(8);
+    await expect(page.getByRole('table').getByRole('rowheader')).toHaveCount(12);
     await expectDemoBanner(page);
 
     // The router basename has no trailing slash, so the dashboard link is /portfolio-tracker (Pages 301s it to the

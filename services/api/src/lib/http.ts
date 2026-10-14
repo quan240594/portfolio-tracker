@@ -16,12 +16,21 @@ export class HttpError extends Error {
 export interface RouteResult {
   statusCode: number;
   body: unknown;
+  /** When set, `body` is a string sent as-is with this content type (e.g. `text/csv`) instead of JSON. */
+  contentType?: string;
+  /** Extra response headers (e.g. `content-disposition` for downloads). */
+  headers?: Record<string, string>;
 }
 
 export const ok = (body: unknown, statusCode = 200): RouteResult => ({ statusCode, body });
 
 export function errorBody(code: string, message: string, details?: unknown): ApiError {
   return { error: details === undefined ? { code, message } : { code, message, details } };
+}
+
+function serializeBody(result: RouteResult): string {
+  if (result.body === undefined) return '';
+  return result.contentType && typeof result.body === 'string' ? result.body : JSON.stringify(result.body);
 }
 
 export function toResponse(
@@ -31,13 +40,15 @@ export function toResponse(
   return {
     statusCode: result.statusCode,
     headers: {
-      'content-type': 'application/json',
+      'content-type': result.contentType ?? 'application/json',
       'access-control-allow-origin': corsOrigin,
-      'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+      'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
       'access-control-allow-headers': 'content-type,authorization',
+      'access-control-expose-headers': 'content-disposition',
       'cache-control': 'no-store',
+      ...result.headers,
     },
-    body: result.body === undefined ? '' : JSON.stringify(result.body),
+    body: serializeBody(result),
   };
 }
 

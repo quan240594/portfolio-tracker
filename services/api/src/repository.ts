@@ -53,7 +53,8 @@ export interface Repository {
   getEod(symbol: string, from: string, to: string): Promise<EodPrice[]>;
   getDividendEvents(symbol: string): Promise<DividendEvent[]>;
   registerUser(userId: string): Promise<void>;
-  trackTickers(tickers: { symbol: string; currency: string }[]): Promise<void>;
+  /** `currency` may be omitted when unknown (watchlist symbols). */
+  trackTickers(tickers: { symbol: string; currency?: string }[]): Promise<void>;
   putImport(status: ImportStatus): Promise<void>;
   getImport(userId: string, importId: string): Promise<ImportStatus | null>;
 }
@@ -265,7 +266,7 @@ export class DynamoRepository implements Repository {
     await this.doc.send(new UpdateCommand(registerUserUpdate(this.tableName, userId, new Date().toISOString())));
   }
 
-  async trackTickers(tickers: { symbol: string; currency: string }[]): Promise<void> {
+  async trackTickers(tickers: { symbol: string; currency?: string }[]): Promise<void> {
     const updates = trackTickerUpdates(this.tableName, tickers, new Date().toISOString());
     await Promise.all(updates.map((input) => this.doc.send(new UpdateCommand(input))));
   }

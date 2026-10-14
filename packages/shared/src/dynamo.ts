@@ -4,6 +4,7 @@
  * inputs in their own `UpdateCommand` and send them with their own document client.
  */
 import { ENTITY, keys } from './keys.js';
+import { isMarketSymbol } from './management-api.js';
 import type { Transaction } from './types.js';
 
 const KEY_ATTRS = new Set(['PK', 'SK', 'entityType']);
@@ -38,16 +39,25 @@ export const registerUserUpdate = (tableName: string, userId: string, now: strin
   ExpressionAttributeValues: { ':t': ENTITY.user, ':u': userId, ':now': now },
 });
 
-/** One upsert per ticker, preserving `currency` and `createdAt` on later writes. */
+/**
+ * One upsert per ticker, preserving `currency` and `createdAt` on later writes. Cash (`CASH.*`) and custom (`CUSTOM:*`)
+ * symbols have no price feed and are never registered. `currency` may be omitted (watchlist symbols).
+ */
 export const trackTickerUpdates = (
   tableName: string,
-  tickers: readonly { symbol: string; currency: string }[],
+  tickers: readonly { symbol: string; currency?: string }[],
   now: string,
 ): UpdateInput[] =>
-  tickers.map((t) => ({
-    TableName: tableName,
-    Key: keys.trackedTicker(t.symbol),
-    UpdateExpression:
-      'SET entityType = :t, symbol = :s, currency = if_not_exists(currency, :c), updatedAt = :now, createdAt = if_not_exists(createdAt, :now)',
-    ExpressionAttributeValues: { ':t': ENTITY.trackedTicker, ':s': t.symbol, ':c': t.currency, ':now': now },
-  }));
+  tickers
+    .filter((t) => isMarketSymbol(t.symbol))
+    .map((t) => ({
+      TableName: tableName,
+      Key: keys.trackedTicker(t.symbol),
+      UpdateExpression: `SET entityType = :t, symbol = :s, ${t.currency ? 'currency = if_not_exists(currency, :c), ' : ''}updatedAt = :now, createdAt = if_not_exists(createdAt, :now)`,
+      ExpressionAttributeValues: {
+        ':t': ENTITY.trackedTicker,
+        ':s': t.symbol,
+        ...(t.currency ? { ':c': t.currency } : {}),
+        ':now': now,
+      },
+    }));

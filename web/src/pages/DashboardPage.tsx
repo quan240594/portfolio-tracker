@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { HISTORY_RANGES, type AllocationDimension, type GetPortfolioResponse, type HistoryRange } from '@portfolio/shared';
+import { ALL_PORTFOLIOS, HISTORY_RANGES, type AllocationDimension, type GetPortfolioResponse, type HistoryRange } from '@portfolio/shared';
 import { useAllocation, useHistory, useHoldings, usePortfolio } from '../api/hooks';
 import { KpiCard } from '../components/KpiCard';
 import { Change } from '../components/Change';
@@ -12,17 +12,21 @@ import { PageHeader } from '../components/Layout';
 import { ValueChart } from '../components/charts/ValueChart';
 import { AllocationDonut } from '../components/charts/AllocationDonut';
 import { StaleBadge } from '../features/holdings/HoldingsTable';
+import { WatchlistWidget } from '../features/watchlist/WatchlistWidget';
 import { usePortfolioScope } from '../features/portfolios/usePortfolioScope';
 import { AnalyticsKpis } from '../features/analytics/AnalyticsKpis';
 import { InsightsSection } from '../features/analytics/InsightsSection';
 import { MoversSection } from '../features/analytics/MoversSection';
 import { BASE_CURRENCY, formatDate, formatMoney, formatPercent, formatWeight } from '../lib/format';
 
-const ALLOCATION_TABS: { value: Exclude<AllocationDimension, 'symbol'>; label: string }[] = [
+type AllocationTab = Exclude<AllocationDimension, 'symbol'> | 'category';
+
+const ALLOCATION_TABS: { value: AllocationTab; label: string }[] = [
   { value: 'assetClass', label: 'Asset class' },
   { value: 'sector', label: 'Sector' },
   { value: 'country', label: 'Country' },
   { value: 'currency', label: 'Currency' },
+  { value: 'category', label: 'Category' },
 ];
 
 const RANGE_OPTIONS = HISTORY_RANGES.map((r) => ({ value: r, label: r }));
@@ -67,6 +71,12 @@ function KpiGrid() {
         change={data && <Change pct={data.totalReturnPct} value={data.totalReturn} />}
         hint={data && `Incl. ${formatMoney(data.realizedPnl, ccy, { signed: true })} realized, ${formatMoney(data.dividendsReceived, ccy)} dividends`}
       />
+      {data?.cashValue !== undefined && (
+        <KpiCard label="Cash" value={formatMoney(data.cashValue, ccy)} hint={`Included in total value. Interest and fees: ${formatMoney(data.cashIncome ?? 0, ccy, { signed: true })}`} />
+      )}
+      {data?.customAssetsValue !== undefined && (
+        <KpiCard label="Custom assets" value={formatMoney(data.customAssetsValue, ccy)} hint="Real estate, savings and other manually valued assets. Included in total value." />
+      )}
       <KpiCard
         loading={isPending}
         label="Dividends received"
@@ -129,8 +139,11 @@ function PerformanceCard() {
 }
 
 function AllocationCard() {
-  const [by, setBy] = useState<Exclude<AllocationDimension, 'symbol'>>('assetClass');
+  const [selected, setBy] = useState<AllocationTab>('assetClass');
   const { scope, ready } = usePortfolioScope();
+  // Categories belong to one portfolio, so that tab only exists outside the combined view.
+  const tabs = scope === ALL_PORTFOLIOS ? ALLOCATION_TABS.filter((t) => t.value !== 'category') : ALLOCATION_TABS;
+  const by = tabs.some((t) => t.value === selected) ? selected : 'assetClass';
   const { data, isPending, isError, error, refetch } = useAllocation(scope, by, { enabled: ready });
   const panelId = 'allocation-panel';
 
@@ -153,7 +166,7 @@ function AllocationCard() {
       <h2 id="alloc-title" className="mb-3 font-semibold">
         Allocation
       </h2>
-      <SegmentedControl variant="tabs" label="Allocation by" options={ALLOCATION_TABS} value={by} onChange={setBy} panelId={panelId} idPrefix="alloc-tab" />
+      <SegmentedControl variant="tabs" label="Allocation by" options={tabs} value={by} onChange={setBy} panelId={panelId} idPrefix="alloc-tab" />
       <div id={panelId} role="tabpanel" aria-labelledby={`alloc-tab-${by}`} className="mt-4">
         {body}
       </div>
@@ -253,7 +266,10 @@ export function DashboardPage() {
             <PerformanceCard />
             <AllocationCard />
           </div>
-          <TopHoldingsCard />
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <TopHoldingsCard />
+            <WatchlistWidget />
+          </div>
           <MoversSection />
           {portfolio.data && (
             <p className="muted text-xs">

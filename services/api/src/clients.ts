@@ -6,6 +6,7 @@ import type { Config } from './config.js';
 import type { Deps } from './deps.js';
 import { EventBridgePublisher } from './events.js';
 import { createPresignS3Client, S3UploadUrlSigner } from './presigner.js';
+import { DynamoManagementRepository } from './management-repository.js';
 import { DynamoRepository } from './repository.js';
 
 export function createAwsDeps(config: Config): Deps {
@@ -16,6 +17,7 @@ export function createAwsDeps(config: Config): Deps {
   const s3 = createPresignS3Client(common);
   return {
     repo: new DynamoRepository(doc, config.tableName),
+    mgmt: new DynamoManagementRepository(doc, config.tableName),
     events: new EventBridgePublisher(new EventBridgeClient(common), config.eventBusName),
     signer: new S3UploadUrlSigner(s3, config.importBucket),
     config,

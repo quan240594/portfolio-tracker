@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { BatchWriteCommand, DynamoDBDocumentClient, QueryCommand } from '@aws-sdk/lib-dynamodb';
-import { calculatePortfolio, type FxDay, type FxRates, type InstrumentProfile, type Quote, type Transaction } from '@portfolio/shared';
+import { buildPositions, calculatePortfolio, cashBalances, type FxDay, type FxRates, type InstrumentProfile, type Quote, type Transaction } from '@portfolio/shared';
 import { generateFxDays, isEcbBusinessDay, seed } from './seed.js';
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
@@ -75,7 +75,7 @@ describe('seed', () => {
     expect(items).toEqual(portfolios.map((p) => ({ PK: 'USER#demo', SK: `PORTFOLIO#${p.portfolioId}`, entityType: 'PORTFOLIO', ...p })));
 
     const symbolsOf = (id: string) => [...new Set(transactions.filter((t) => t.portfolioId === id).map((t) => t.symbol))].sort();
-    expect(symbolsOf('default')).toEqual(['ASML.AS', 'BTC-EUR', 'IWDA.AS', 'VWRL.AS']);
+    expect(symbolsOf('default')).toEqual(['ASML.AS', 'BTC-EUR', 'CASH.EUR', 'IWDA.AS', 'VWRL.AS']);
     expect(symbolsOf('trading-212')).toEqual(['AAPL', 'MSFT']);
     expect(transactions.filter((t) => t.fxRate !== undefined).every((t) => t.portfolioId === 'trading-212')).toBe(true);
     for (const t of written().filter((i) => i.entityType === 'TRANSACTION')) {
@@ -147,7 +147,7 @@ describe('seed', () => {
   it('keeps full English country names on profiles', async () => {
     await seed({ doc, tableName: 'tbl', today: TODAY, log: () => {} });
     const countries = new Set(written().filter((i) => i.entityType === 'PROFILE').map((i) => i.country));
-    expect([...countries].sort()).toEqual(['Global', 'Netherlands', 'United States']);
+    expect([...countries].sort()).toEqual(['Germany', 'Global', 'Netherlands', 'United States']);
   });
 
   it('yields a negative currency effect on USD holdings as EUR strengthens', async () => {
@@ -168,5 +168,36 @@ describe('seed', () => {
     expect(aapl.currencyEffect).toBeLessThan(0);
     expect(holdings.find((h) => h.symbol === 'VWRL.AS')!.currencyEffect).toBe(0);
     expect(summary.currencyEffect).toBeLessThan(0);
+  });
+
+  it('seeds cash, a split, categories with targets, custom assets, settings and a watchlist', async () => {
+    const { transactions } = await seed({ doc, tableName: 'tbl', today: TODAY, log: () => {} });
+    const items = written();
+    const of = <T>(type: string) => items.filter((i) => i.entityType === type) as unknown as T[];
+
+    expect(transactions.filter((t) => t.type === 'SPLIT')).toMatchObject([{ symbol: 'ASML.AS', quantity: 2, price: 0, fee: 0 }]);
+    expect(transactions.filter((t) => t.symbol === 'CASH.EUR').map((t) => t.type)).toEqual(['DEPOSIT', 'DEPOSIT', 'WITHDRAWAL', 'INTEREST', 'FEE']);
+    expect(transactions.every((t) => t.id.startsWith('seed-'))).toBe(true);
+
+    expect(of('PORTFOLIO_SETTINGS')).toMatchObject([{ SK: 'PSETTINGS#default', trackCash: true, withholdingTaxRate: 15 }]);
+    const categories = of<{ SK: string; targetWeight: number }>('CATEGORY');
+    expect(categories.map((c) => c.SK)).toEqual(['CATEGORY#default#seed-cat-core', 'CATEGORY#default#seed-cat-stocks', 'CATEGORY#default#seed-cat-crypto', 'CATEGORY#default#seed-cat-other']);
+    expect(categories.reduce((s, c) => s + c.targetWeight, 0)).toBe(95);
+    expect(of<{ SK: string }>('CATEGORY_ASSIGNMENT').map((a) => a.SK)).toContain('CATASSIGN#default#CUSTOM:seed-asset-savings');
+    expect(of<{ assetId: string }>('CUSTOM_ASSET').map((a) => a.assetId)).toEqual(['seed-asset-savings', 'seed-asset-startup']);
+    expect(of<{ SK: string }>('WATCHLIST').map((w) => w.SK)).toEqual(['WATCH#NVDA', 'WATCH#SAP.DE', 'WATCH#ETH-EUR']);
+    // Watchlist symbols have prices; custom and cash symbols are never registered as tracked tickers
+    const tracked = of<{ symbol: string }>('TRACKED_TICKER').map((t) => t.symbol);
+    expect(tracked).toEqual(expect.arrayContaining(['NVDA', 'SAP.DE', 'ETH-EUR']));
+    expect(tracked.some((s) => s.startsWith('CASH.') || s.startsWith('CUSTOM:'))).toBe(false);
+  });
+
+  it('keeps the ASML position as before the split (6 shares) and the cash balance positive', async () => {
+    await seed({ doc, tableName: 'tbl', today: TODAY, log: () => {} });
+    const txns = written().filter((i) => i.entityType === 'TRANSACTION') as unknown as Transaction[];
+    const asml = buildPositions(txns.filter((t) => t.portfolioId === 'default')).get('ASML.AS')!;
+    expect(asml.quantity).toBe(6); // 2 pre-split shares x 2 + 2 bought later
+    const cash = cashBalances(txns, new Set(['default']));
+    expect(cash.get('EUR')!).toBeGreaterThan(0);
   });
 });

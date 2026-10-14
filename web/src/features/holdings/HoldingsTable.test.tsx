@@ -87,7 +87,7 @@ describe('HoldingsTable', () => {
   it('loads holdings from the API on the holdings page', async () => {
     renderWithProviders(<HoldingsPage />);
     const table = await screen.findByRole('table');
-    expect(within(table).getAllByRole('rowheader')).toHaveLength(8);
+    expect(within(table).getAllByRole('rowheader')).toHaveLength(12);
     expect(within(table).getByText('BTC-EUR')).toBeInTheDocument();
   });
 

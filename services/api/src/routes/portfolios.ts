@@ -152,6 +152,7 @@ export async function deletePortfolio(ctx: RouteContext): Promise<RouteResult> {
   }
   // Transactions first: if the cascade fails halfway the portfolio still exists and the delete can be retried.
   if (transactions.length > 0) await repo.deleteTransactions(transactions);
+  await ctx.deps.mgmt.deletePortfolioData(ctx.userId, id);
   await repo.deletePortfolio(ctx.userId, id);
   if (transactions.length > 0) {
     await publishChange(ctx, id, [...new Set(transactions.map((t) => t.symbol))].sort((a, b) => a.localeCompare(b)), 'DELETED');
