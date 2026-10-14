@@ -20,7 +20,8 @@ mock_provider "aws" {
 }
 
 variables {
-  env = "dev"
+  env         = "dev"
+  enable_auth = false # non-prod must choose explicitly (see plan.tftest.hcl)
 }
 
 run "broker_sync_defaults" {
