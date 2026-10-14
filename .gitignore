@@ -29,3 +29,6 @@ __pycache__/
 # Python coverage report consumed by Sonar
 coverage.xml
 .coverage
+
+# Coverage hand-off between CI jobs
+coverage-node.tar

@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -33,6 +34,16 @@ jobs:
       - run: pnpm -r --if-present typecheck
       - run: pnpm -r --if-present lint
       - run: pnpm -r --if-present test:coverage # enforces the 95% thresholds
+      - name: Collect coverage for SonarCloud
+        run: |
+          scripts/fix-lcov-paths.sh
+          find packages services web -path '*/node_modules' -prune -o -path '*/coverage/lcov.info' -print | tar -cf coverage-node.tar -T -
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-node
+          path: coverage-node.tar
+          if-no-files-found: error
+          retention-days: 1
       - run: pnpm -r --if-present build
       - name: Package Lambda artifacts
         run: |
@@ -66,7 +77,13 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: ruff check .
       - run: ruff format --check .
-      - run: pytest -q --cov=prices # fail_under = 95 in pyproject.toml
+      - run: pytest -q --cov=prices --cov-report=term --cov-report=xml:coverage.xml # fail_under = 95 in pyproject.toml
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-python
+          path: services/prices/coverage.xml
+          if-no-files-found: error
+          retention-days: 1
       - name: Package Lambda artifact
         run: bash scripts/package.sh
       - uses: actions/upload-artifact@v7
@@ -170,3 +187,31 @@ jobs:
             web/test-results
           if-no-files-found: ignore
           retention-days: 7
+
+  sonar:
+    name: SonarCloud analysis
+    # Runs last, on the coverage already produced above (no tests are re-run). Skipped for fork PRs, which get no secrets.
+    needs: [node, python, integration, e2e]
+    if: github.event.pull_request.head.repo.fork != true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history so Sonar can compute accurate blame/new-code diffs.
+          fetch-depth: 0
+      # SonarCloud's JS/TS analyzer needs a current Node LTS.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: coverage-node
+      - run: tar -xf coverage-node.tar && rm coverage-node.tar
+      - uses: actions/download-artifact@v8
+        with:
+          name: coverage-python
+          path: services/prices
+      - uses: SonarSource/sonarqube-scan-action@v8
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

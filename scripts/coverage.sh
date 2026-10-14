@@ -8,11 +8,7 @@ cd "$(dirname "$0")/.."
 echo "coverage: TypeScript packages (vitest)..."
 pnpm test:coverage
 
-# Vitest writes SF: paths relative to each package; Sonar resolves them from the
-# repo root, so prefix them with the package dir (idempotent).
-for pkg in packages/shared services/api services/ingest web; do
-  perl -pi -e "s|^SF:(?!\Q$pkg/\E)|SF:$pkg/|" "$pkg/coverage/lcov.info"
-done
+scripts/fix-lcov-paths.sh
 
 echo "coverage: services/prices (pytest)..."
 cd services/prices
