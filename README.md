@@ -64,10 +64,12 @@ scripts/coverage.sh                                   # all coverage reports use
 
 Configured in [sonar-project.properties](sonar-project.properties) (project `quan240594_portfolio-tracker`).
 
-- CI: the `sonar` job at the end of [.github/workflows/ci.yml](.github/workflows/ci.yml) runs after the Node, Python,
-  integration and e2e jobs and analyses the coverage they already produced (nothing is re-run). It runs on PRs (except
-  forks, which get no secrets), pushes to `main` and manual runs; needs repo secret `SONAR_TOKEN`
+- CI: all jobs in [.github/workflows/ci.yml](.github/workflows/ci.yml) start immediately and run in parallel. The `sonar` job
+  waits only for the two jobs that produce its coverage reports (Node tests and Python) and analyses that coverage
+  (nothing is re-run) while build, integration, e2e and terraform are still running. It runs on PRs (except forks, which
+  get no secrets), pushes to `main` and manual runs; needs repo secret `SONAR_TOKEN`
   (keep *Automatic Analysis* disabled in SonarCloud so the CI-based analysis with coverage is used).
+  Deploy ([deploy.yml](.github/workflows/deploy.yml)) is a separate manual workflow and does not depend on CI or Sonar.
 - Local: one-time token setup as described in [scripts/sonar-scan.sh](scripts/sonar-scan.sh), then `scripts/sonar-scan.sh --coverage`.
 - Pre-push hook: `git config core.hooksPath .githooks` — every push runs coverage + a Sonar scan on a clean tree
   (`SKIP_SONAR=1 git push` to bypass in an emergency).
