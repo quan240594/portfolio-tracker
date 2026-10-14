@@ -5,7 +5,7 @@
  */
 import { DeleteMessageBatchCommand, GetQueueUrlCommand, ReceiveMessageCommand, SQSClient, type Message } from '@aws-sdk/client-sqs';
 import type { SQSEvent, SQSRecord } from 'aws-lambda';
-import { drain, retryAttempts, sequentially } from './async.js';
+import { drain, retryAttempts, sequentially } from '@portfolio/shared';
 
 const LOCAL_ENV: Record<string, string> = {
   TABLE_NAME: 'portfolio-tracker-local',

@@ -71,7 +71,7 @@ export class InMemoryRepository implements Repository {
     return Promise.resolve();
   }
   async deleteTransactions(txns: readonly Transaction[]) {
-    for (const t of txns) await this.deleteTransaction(t);
+    await Promise.all(txns.map((t) => this.deleteTransaction(t)));
   }
   getQuotes(symbols: string[]) {
     return Promise.resolve(Object.fromEntries(symbols.filter((s) => this.quotes[s]).map((s) => [s, this.quotes[s]!])));
