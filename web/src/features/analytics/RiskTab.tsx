@@ -13,7 +13,7 @@ const BENCHMARK_OPTIONS = BENCHMARK_SYMBOLS.map((s) => ({ value: s, label: s }))
 const drawdownText = (d: AnalyticsRiskResponse['maxDrawdown']): string => (d ? formatPercent(d.depthPct) : '—');
 
 function drawdownDetail(d: AnalyticsRiskResponse['maxDrawdown']): string {
-  if (!d || d.peakDate === null || d.troughDate === null) return 'No decline since you started.';
+  if (d?.peakDate == null || d.troughDate == null) return 'No decline since you started.';
   const recovery = d.recoveryDate ? `recovered ${formatDate(d.recoveryDate)}` : 'not yet recovered';
   return `Peak ${formatDate(d.peakDate)}, low ${formatDate(d.troughDate)}, ${recovery}.`;
 }

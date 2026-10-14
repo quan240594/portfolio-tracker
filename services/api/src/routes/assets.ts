@@ -46,7 +46,8 @@ export async function listAssets(ctx: RouteContext): Promise<RouteResult> {
   const portfolioId = await requirePathPortfolio(ctx);
   const [assets, fx] = await Promise.all([ctx.deps.mgmt.listCustomAssets(ctx.userId, portfolioId), latestFx(ctx)]);
   const today = isoDay(ctx.deps.now());
-  return ok({ baseCurrency: fx.base, assets: assets.sort(byCreatedAt).map((a) => withValue(a, fx, today)) } satisfies ListAssetsResponse);
+  const sortedAssets = [...assets].sort(byCreatedAt);
+  return ok({ baseCurrency: fx.base, assets: sortedAssets.map((a) => withValue(a, fx, today)) } satisfies ListAssetsResponse);
 }
 
 export async function createAsset(ctx: RouteContext): Promise<RouteResult> {
