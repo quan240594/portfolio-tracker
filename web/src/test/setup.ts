@@ -35,8 +35,10 @@ if (!window.matchMedia) {
     }) as MediaQueryList;
 }
 
-// Async queries (findBy*/waitFor) get extra headroom for slow, contended CI runners.
-configure({ asyncUtilTimeout: 3000 });
+// Async queries (findBy*/waitFor) get generous headroom: the first test of a file pays for lazily loaded chunks
+// (sign-in screens, analytics page), which is slow when several packages run their coverage in parallel.
+// A longer limit only matters when something is actually wrong, so passing tests are not slowed down.
+configure({ asyncUtilTimeout: 10_000 });
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
