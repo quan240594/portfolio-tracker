@@ -1,0 +1,57 @@
+name: Pages
+
+# Public demo of the SPA on GitHub Pages: https://quan240594.github.io/portfolio-tracker/
+# Built in mock/demo mode (MSW in the browser, sample data) — it never talks to a real API.
+on:
+  push:
+    branches: [main]
+    paths:
+      - web/**
+      - packages/shared/**
+      - pnpm-lock.yaml
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; let an in-progress deployment finish instead of cancelling it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  build:
+    name: Build (demo mode)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6 # version from package.json "packageManager"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @portfolio/web build:pages # VITE_USE_MOCKS=true, base /portfolio-tracker/
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: web/dist
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

@@ -49,7 +49,7 @@ describe('App routing', () => {
     expect(link).toHaveAttribute('href', 'https://www.coingecko.com');
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
-    expect(screen.queryByText('Demo data')).not.toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Demo mode' })).not.toBeInTheDocument();
   });
 
   it('toggles dark mode from the header and persists it', async () => {
@@ -69,6 +69,24 @@ describe('App routing', () => {
     expect(toggle).toHaveAttribute('aria-pressed', 'false');
     expect(document.documentElement).not.toHaveClass('dark');
     expect(localStorage.getItem('pt-theme')).toBe('light');
+  });
+
+  it('works under a sub-path basename (GitHub Pages): links, active state, title', async () => {
+    const user = userEvent.setup();
+    const { router } = renderApp('/portfolio-tracker/holdings', { basename: '/portfolio-tracker' });
+    expect(await screen.findByRole('heading', { level: 1, name: 'Holdings' })).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe('Holdings · Portfolio Tracker'));
+
+    const nav = screen.getByRole('navigation', { name: 'Main' });
+    expect(within(nav).getByRole('link', { name: 'Holdings' })).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByRole('link', { name: 'Holdings' })).toHaveAttribute('href', '/portfolio-tracker/holdings');
+    expect(within(nav).getByRole('link', { name: 'Dashboard' })).toHaveAttribute('href', '/portfolio-tracker');
+    expect(screen.getByRole('link', { name: 'Portfolio Tracker' })).toHaveAttribute('href', '/portfolio-tracker');
+
+    await user.click(within(nav).getByRole('link', { name: 'Transactions' }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Transactions' })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/portfolio-tracker/transactions');
+    expect(document.title).toBe('Transactions · Portfolio Tracker');
   });
 
   it('boots the real App with a browser router at "/"', async () => {

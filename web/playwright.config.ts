@@ -4,6 +4,7 @@ const PORT = 5174;
 
 export default defineConfig({
   testDir: './e2e',
+  testIgnore: 'pages.spec.ts', // runs against the Pages build via playwright.pages.config.ts
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

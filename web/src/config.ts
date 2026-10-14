@@ -8,3 +8,12 @@ export const API_BASE_URL: string = trimTrailingSlashes(import.meta.env.VITE_API
 
 export const USE_MOCKS: boolean =
   import.meta.env.VITE_USE_MOCKS === 'true' || import.meta.env.MODE === 'mock';
+
+/**
+ * React Router basename derived from Vite's `BASE_URL` (set via `VITE_BASE_PATH`):
+ * "/portfolio-tracker/" → "/portfolio-tracker", "/" (or a relative base) → undefined.
+ */
+export function routerBasename(baseUrl: string = import.meta.env.BASE_URL): string | undefined {
+  const trimmed = baseUrl.replace(/\/+$/, '');
+  return trimmed.startsWith('/') ? trimmed : undefined;
+}
