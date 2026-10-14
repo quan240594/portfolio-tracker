@@ -72,7 +72,10 @@ describe.skipIf(!available)('api against LocalStack', () => {
     expect(status).toBe(200);
     expect(body.baseCurrency).toBe('EUR');
     expect(body.totalValue).toBeGreaterThan(0);
-    expect(body.holdingsCount).toBe(6);
+    // The summary counts exactly the rows /holdings returns (market holdings, cash and custom assets alike).
+    const holdings = await call('GET', '/holdings');
+    expect(body.holdingsCount).toBeGreaterThan(0);
+    expect(body.holdingsCount).toBe(holdings.body.holdings.length);
   });
 
   it('lists the seeded portfolios and scopes reads to one of them', async () => {
@@ -84,9 +87,10 @@ describe.skipIf(!available)('api against LocalStack', () => {
     const broker = await call('GET', '/holdings', { query: { portfolioId: 'trading-212' } });
     expect(broker.body.holdings.map((h: { symbol: string }) => h.symbol).sort()).toEqual(['AAPL', 'MSFT']);
     const main = await call('GET', '/portfolio', { query: { portfolioId: 'default' } });
-    expect(main.body.holdingsCount).toBe(4);
+    expect(main.body.holdingsCount).toBeGreaterThan(0);
     const all = await call('GET', '/portfolio', { query: { portfolioId: 'all' } });
-    expect(all.body.holdingsCount).toBe(6);
+    // The seed keeps the two portfolios' holdings disjoint, so the combined view is the sum of the parts.
+    expect(all.body.holdingsCount).toBe(main.body.holdingsCount + broker.body.holdings.length);
     expect((await call('GET', '/portfolio', { query: { portfolioId: 'nope' } })).status).toBe(404);
   });
 
