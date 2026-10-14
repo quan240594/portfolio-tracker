@@ -151,47 +151,9 @@ describe('uploadCsv', () => {
     expect(body).toBe('via text()');
   });
 
-  it('falls back to FileReader when Blob.text() is missing', async () => {
-    let body = '';
-    server.use(
-      http.put(URL_, async ({ request: req }) => {
-        body = await req.text();
-        return new HttpResponse(null, { status: 200 });
-      }),
-    );
-    const blob = new Blob(['via FileReader']);
-    Object.defineProperty(blob, 'text', { value: undefined });
-    await uploadCsv(URL_, blob);
-    expect(body).toBe('via FileReader');
-  });
-
   it('maps unreadable files to FILE_READ_FAILED', async () => {
     const rejecting = { text: () => Promise.reject(new Error('io')) } as unknown as Blob;
     await expect(uploadCsv(URL_, rejecting)).rejects.toMatchObject({ code: 'FILE_READ_FAILED', message: 'The selected file could not be read.' });
-
-    const blob = new Blob(['x']);
-    Object.defineProperty(blob, 'text', { value: undefined });
-    vi.spyOn(FileReader.prototype, 'readAsText').mockImplementation(function (this: FileReader) {
-      this.onerror?.(new ProgressEvent('error') as ProgressEvent<FileReader>);
-    });
-    await expect(uploadCsv(URL_, blob)).rejects.toMatchObject({ code: 'FILE_READ_FAILED' });
-  });
-
-  it('resolves an empty string when FileReader yields no result', async () => {
-    let body: string | null = null;
-    server.use(
-      http.put(URL_, async ({ request: req }) => {
-        body = await req.text();
-        return new HttpResponse(null, { status: 200 });
-      }),
-    );
-    const blob = new Blob(['ignored']);
-    Object.defineProperty(blob, 'text', { value: undefined });
-    vi.spyOn(FileReader.prototype, 'readAsText').mockImplementation(function (this: FileReader) {
-      this.onload?.(new ProgressEvent('load') as ProgressEvent<FileReader>);
-    });
-    await uploadCsv(URL_, blob);
-    expect(body).toBe('');
   });
 
   it('reports HTTP failures from storage', async () => {

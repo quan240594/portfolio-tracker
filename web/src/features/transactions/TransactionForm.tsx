@@ -34,31 +34,35 @@ export const needsFxRate = (currency: string) => {
   return /^[A-Z]{3}$/.test(c) && c !== BASE_CURRENCY;
 };
 
+const REQUIRED_MESSAGES: Partial<Record<FieldName, string>> = {
+  date: 'Date is required',
+  symbol: 'Symbol is required',
+  quantity: 'Quantity is required',
+  price: 'Price is required',
+};
+
+const NUMBER_RANGE_MESSAGES: Partial<Record<FieldName, string>> = {
+  quantity: 'Quantity must be greater than 0',
+  price: 'Price cannot be negative',
+  fee: 'Fee cannot be negative',
+  fxRate: 'FX rate must be greater than 0',
+};
+
+const STATIC_MESSAGES: Partial<Record<FieldName, string>> = {
+  date: 'Enter a date as YYYY-MM-DD',
+  currency: 'Use a 3-letter currency code (e.g. EUR)',
+  note: 'Note is too long (max 500 characters)',
+};
+
 function friendlyMessage(field: FieldName, issue: ZodIssue, raw: string): string {
-  const empty = raw.trim() === '';
-  switch (field) {
-    case 'date':
-      return empty ? 'Date is required' : 'Enter a date as YYYY-MM-DD';
-    case 'symbol':
-      if (empty) return 'Symbol is required';
-      return issue.code === 'too_big' ? 'Symbol is too long (max 20 characters)' : 'Use letters, digits and . - : ^ = only (e.g. AAPL, VWRL.AS)';
-    case 'quantity':
-      if (empty) return 'Quantity is required';
-      return issue.code === 'invalid_type' ? 'Enter a valid number' : 'Quantity must be greater than 0';
-    case 'price':
-      if (empty) return 'Price is required';
-      return issue.code === 'invalid_type' ? 'Enter a valid number' : 'Price cannot be negative';
-    case 'fee':
-      return issue.code === 'invalid_type' ? 'Enter a valid number' : 'Fee cannot be negative';
-    case 'currency':
-      return 'Use a 3-letter currency code (e.g. EUR)';
-    case 'fxRate':
-      return issue.code === 'invalid_type' ? 'Enter a valid number' : 'FX rate must be greater than 0';
-    case 'note':
-      return 'Note is too long (max 500 characters)';
-    default:
-      return issue.message;
+  const required = REQUIRED_MESSAGES[field];
+  if (required && raw.trim() === '') return required;
+  const range = NUMBER_RANGE_MESSAGES[field];
+  if (range) return issue.code === 'invalid_type' ? 'Enter a valid number' : range;
+  if (field === 'symbol') {
+    return issue.code === 'too_big' ? 'Symbol is too long (max 20 characters)' : 'Use letters, digits and . - : ^ = only (e.g. AAPL, VWRL.AS)';
   }
+  return STATIC_MESSAGES[field] ?? issue.message;
 }
 
 const decimalOrUndefined = (raw: string) => (raw.trim() === '' ? undefined : normalizeDecimalInput(raw));
@@ -93,7 +97,7 @@ interface Props {
   onCancel?: () => void;
 }
 
-export function TransactionForm({ onSuccess, onCancel }: Props) {
+export function TransactionForm({ onSuccess, onCancel }: Readonly<Props>) {
   const [values, setValues] = useState<Values>(initialValues);
   const [errors, setErrors] = useState<Errors>({});
   const formRef = useRef<HTMLFormElement>(null);

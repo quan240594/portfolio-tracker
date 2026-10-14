@@ -75,6 +75,25 @@ class EodhdProvider:
                 ) from None
             raise
 
+    def _quote_from_raw(self, raw: Any, mapping: dict[str, str]) -> Quote | None:
+        if not isinstance(raw, dict):
+            return None
+        canonical = mapping.get(str(raw.get("code", "")))
+        price = as_float(raw.get("close"))
+        if canonical is None or price is None:
+            return None
+        prev = as_float(raw.get("previousClose"))
+        ts = as_float(raw.get("timestamp"))
+        as_of = datetime.fromtimestamp(int(ts), UTC) if ts else self._now()
+        return Quote(
+            symbol=canonical,
+            price=price,
+            previous_close=prev if prev is not None else price,
+            currency=price_currency_for(canonical),
+            as_of=iso_datetime(as_of),
+            source=self.name,
+        )
+
     def get_quotes(self, symbols: Sequence[str]) -> dict[str, Quote]:
         out: dict[str, Quote] = {}
         for batch in chunks(list(symbols), MAX_BATCH):
@@ -87,23 +106,9 @@ class EodhdProvider:
                 log.warning("eodhd quote not found", extra={"symbols": batch, "error": str(exc)})
                 continue
             for raw in data if isinstance(data, list) else [data]:
-                if not isinstance(raw, dict):
-                    continue
-                canonical = mapping.get(str(raw.get("code", "")))
-                price = as_float(raw.get("close"))
-                if canonical is None or price is None:
-                    continue
-                prev = as_float(raw.get("previousClose"))
-                ts = as_float(raw.get("timestamp"))
-                as_of = datetime.fromtimestamp(int(ts), UTC) if ts else self._now()
-                out[canonical] = Quote(
-                    symbol=canonical,
-                    price=price,
-                    previousClose=prev if prev is not None else price,
-                    currency=price_currency_for(canonical),
-                    asOf=iso_datetime(as_of),
-                    source=self.name,
-                )
+                quote = self._quote_from_raw(raw, mapping)
+                if quote is not None:
+                    out[quote.symbol] = quote
         return out
 
     def get_eod_history(self, symbol: str, start: date, end: date) -> list[EodPrice]:
@@ -143,7 +148,7 @@ class EodhdProvider:
         return InstrumentProfile(
             symbol=symbol,
             name=match.get("Name") or symbol,
-            assetClass=asset_class_from_type(match.get("Type")),
+            asset_class=asset_class_from_type(match.get("Type")),
             currency=(match.get("Currency") or currency_for(symbol)).upper(),
             country=match.get("Country")
             if match.get("Country") not in (None, "", "USA")
@@ -168,8 +173,8 @@ class EodhdProvider:
             pay = str(row.get("paymentDate") or "")[:10] or None
             out[ex] = DividendEvent(
                 symbol=symbol,
-                exDate=ex,
-                payDate=pay,
+                ex_date=ex,
+                pay_date=pay,
                 amount=amount,
                 currency=normalize_currency(row.get("currency"), price_currency_for(symbol)),
             )

@@ -63,8 +63,8 @@ def test_twelvedata_batches_quotes_by_8(opener: FakeOpener, http_factory: Callab
     assert opener.requests[0].get_header("Authorization") == f"apikey {KEY}"
     assert slept, "token bucket should throttle after 8 credits"
     q = quotes["S0"]
-    assert (q.price, q.previousClose, q.currency, q.source) == (10.5, 10.0, "USD", "twelvedata")
-    assert q.asOf == datetime.fromtimestamp(1792000000, UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    assert (q.price, q.previous_close, q.currency, q.source) == (10.5, 10.0, "USD", "twelvedata")
+    assert q.as_of == datetime.fromtimestamp(1792000000, UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     assert "BRK-B" not in quotes and quotes["S8"].price == 1.0
 
 
@@ -147,9 +147,9 @@ def test_twelvedata_profile_falls_back_to_reference(
     )
     provider = td(http_factory, bucket=free_bucket())
     spy = provider.get_profile("SPY")
-    assert (spy.assetClass, spy.country, spy.name) == ("ETF", "United States", "SPDR S&P 500")
+    assert (spy.asset_class, spy.country, spy.name) == ("ETF", "United States", "SPDR S&P 500")
     aapl = provider.get_profile("AAPL")
-    assert (aapl.assetClass, aapl.exchange, aapl.currency) == ("STOCK", "NASDAQ", "USD")
+    assert (aapl.asset_class, aapl.exchange, aapl.currency) == ("STOCK", "NASDAQ", "USD")
     assert sum("/profile" in u for u in opener.urls) == 1, "unsupported /profile is not retried"
 
 
@@ -166,7 +166,7 @@ def test_twelvedata_profile_endpoint(opener: FakeOpener, http_factory: Callable[
         },
     )
     p = td(http_factory, bucket=free_bucket()).get_profile("MSFT")
-    assert (p.sector, p.assetClass) == ("Technology", "STOCK")
+    assert (p.sector, p.asset_class) == ("Technology", "STOCK")
 
 
 def test_twelvedata_profile_unknown(opener: FakeOpener, http_factory: Callable[[str], Any]) -> None:
@@ -237,7 +237,7 @@ def test_eodhd_realtime_batch(opener: FakeOpener, http_factory: Callable[[str], 
     assert "s=SAP.XETRA" in url and f"api_token={KEY}" in url and "fmt=json" in url
     assert list(quotes) == ["ASML.AS"]
     q = quotes["ASML.AS"]
-    assert (q.price, q.previousClose, q.currency, q.source) == (701.2, 690.0, "EUR", "eodhd")
+    assert (q.price, q.previous_close, q.currency, q.source) == (701.2, 690.0, "EUR", "eodhd")
 
 
 def test_eodhd_single_and_not_found(opener: FakeOpener, http_factory: Callable[[str], Any]) -> None:
@@ -245,7 +245,7 @@ def test_eodhd_single_and_not_found(opener: FakeOpener, http_factory: Callable[[
     opener.add("/real-time/NOPE.AS", 404)
     p = eod(http_factory)
     q = p.get_quotes(["SAP.DE"])["SAP.DE"]
-    assert q.previousClose == 230 and q.asOf == "2026-10-13T12:00:00.000Z"
+    assert q.previous_close == 230 and q.as_of == "2026-10-13T12:00:00.000Z"
     assert p.get_quotes(["NOPE.AS"]) == {}
 
 
@@ -281,7 +281,7 @@ def test_eodhd_eod_and_dividends(opener: FakeOpener, http_factory: Callable[[str
     ]
     assert "from=2026-01-01" in opener.urls[0] and "to=2026-10-13" in opener.urls[0]
     divs = p.get_dividends("AAPL", date(2024, 10, 13), date(2027, 10, 13))
-    assert [(d.exDate, d.payDate, d.amount, d.currency) for d in divs] == [
+    assert [(d.ex_date, d.pay_date, d.amount, d.currency) for d in divs] == [
         ("2026-08-11", "2026-08-14", 0.26, "USD"),
         ("2026-11-10", None, 0.27, "USD"),
     ]
@@ -308,7 +308,7 @@ def test_eodhd_profile_search(opener: FakeOpener, http_factory: Callable[[str], 
     )
     p = eod(http_factory)
     profile = p.get_profile("ASML.AS")
-    assert (profile.name, profile.assetClass, profile.exchange, profile.country) == (
+    assert (profile.name, profile.asset_class, profile.exchange, profile.country) == (
         "ASML Holding NV",
         "STOCK",
         "Euronext Amsterdam",
@@ -337,9 +337,9 @@ def test_coingecko_quotes(opener: FakeOpener, http_factory: Callable[[str], Any]
     req = opener.requests[0]
     assert req.get_header("X-cg-demo-api-key") == KEY and KEY not in req.full_url
     assert "ids=bitcoin,ethereum" in req.full_url and "vs_currencies=eur,usd" in req.full_url
-    assert quotes["BTC-EUR"].previousClose == pytest.approx(60000.0)
+    assert quotes["BTC-EUR"].previous_close == pytest.approx(60000.0)
     assert quotes["BTC-EUR"].currency == "EUR"
-    assert quotes["ETH-USD"].previousClose == 3000 and quotes["ETH-USD"].asOf == "2026-10-13T12:00:00.000Z"
+    assert quotes["ETH-USD"].previous_close == 3000 and quotes["ETH-USD"].as_of == "2026-10-13T12:00:00.000Z"
     assert "WAT-EUR" not in quotes
 
 
@@ -410,7 +410,7 @@ def test_alphavantage_overview(opener: FakeOpener, http_factory: Callable[[str],
     )
     p = av(http_factory)
     profile = p.get_profile("AAPL")
-    assert (profile.name, profile.sector, profile.country, profile.assetClass) == (
+    assert (profile.name, profile.sector, profile.country, profile.asset_class) == (
         "Apple Inc",
         "Technology",
         "United States",
@@ -441,7 +441,7 @@ def test_frankfurter(opener: FakeOpener, http_factory: Callable[[str], Any]) -> 
     )
     fx = FrankfurterFx(http=http_factory("frankfurter")).get_latest("EUR")
     assert fx.base == "EUR" and fx.rates == {"USD": 1.0841, "JPY": 162.0}
-    assert fx.asOf == "2026-10-13T14:00:00.000Z"  # 16:00 CEST
+    assert fx.as_of == "2026-10-13T14:00:00.000Z"  # 16:00 CEST
     assert opener.urls[0] == "https://api.frankfurter.dev/v1/latest?base=EUR"
     with pytest.raises(ProviderError):
         FrankfurterFx(http=http_factory("frankfurter")).get_latest("EUR")

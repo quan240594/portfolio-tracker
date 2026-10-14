@@ -103,7 +103,7 @@ def test_dispatch_by_symbol_type() -> None:
 def test_profile_fallback_to_twelvedata() -> None:
     td = Fake("twelvedata", profile=InstrumentProfile("SPY", "SPDR", "ETF", "USD"))
     r = RoutingProvider(twelvedata=td, alphavantage=Fake("alphavantage", profile=None))
-    assert r.get_profile("SPY").assetClass == "ETF"
+    assert r.get_profile("SPY").asset_class == "ETF"
     r2 = RoutingProvider(twelvedata=td, alphavantage=Fake("alphavantage", fail=RateLimitError("x")))
     assert r2.get_profile("SPY").name == "SPDR"
     r3 = RoutingProvider(alphavantage=Fake("alphavantage", fail=RateLimitError("x")))

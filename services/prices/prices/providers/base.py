@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
@@ -82,4 +83,4 @@ def as_float(value: object) -> float | None:
         f = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
-    return f if f == f and f not in (float("inf"), float("-inf")) else None
+    return f if math.isfinite(f) else None

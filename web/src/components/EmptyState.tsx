@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-export function EmptyState({ title, description, actions }: { title: string; description?: string; actions?: ReactNode }) {
+export function EmptyState({ title, description, actions }: Readonly<{ title: string; description?: string; actions?: ReactNode }>) {
   return (
     <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-slate-300 px-6 py-10 text-center dark:border-slate-700">
       <svg aria-hidden="true" viewBox="0 0 24 24" className="h-10 w-10 text-brand-500" fill="none" stroke="currentColor" strokeWidth="1.5">

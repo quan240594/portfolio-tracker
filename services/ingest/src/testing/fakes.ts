@@ -19,54 +19,68 @@ export class InMemoryIngestStore implements IngestStore {
   imp(userId: string, importId: string) {
     return this.imports.get(`${userId}/${importId}`);
   }
-  async getImport(userId: string, importId: string) {
+  getImport(userId: string, importId: string) {
     const i = this.imp(userId, importId);
-    return i ? { ...i } : null;
+    return Promise.resolve(i ? { ...i } : null);
   }
-  async markProcessing(userId: string, importId: string) {
+  markProcessing(userId: string, importId: string) {
     const i = this.imp(userId, importId);
-    if (!i || (i.status !== 'PENDING' && i.status !== 'PROCESSING')) return false;
+    if (!i || (i.status !== 'PENDING' && i.status !== 'PROCESSING')) return Promise.resolve(false);
     i.status = 'PROCESSING';
-    return true;
+    return Promise.resolve(true);
   }
-  async markFailed(userId: string, importId: string, rowCount: number, errors: { row: number; message: string }[]) {
-    Object.assign(this.imp(userId, importId)!, { status: 'FAILED', rowCount, importedCount: 0, errors });
+  markFailed(userId: string, importId: string, rowCount: number, errors: { row: number; message: string }[]) {
+    return this.settle(() => Object.assign(this.imp(userId, importId)!, { status: 'FAILED', rowCount, importedCount: 0, errors }));
   }
-  async markCompleted(userId: string, importId: string, rowCount: number, importedCount: number) {
-    Object.assign(this.imp(userId, importId)!, { status: 'COMPLETED', rowCount, importedCount });
+  markCompleted(userId: string, importId: string, rowCount: number, importedCount: number) {
+    return this.settle(() => Object.assign(this.imp(userId, importId)!, { status: 'COMPLETED', rowCount, importedCount }));
   }
-  async listTransactions(userId: string) {
-    return this.transactions.filter((t) => t.userId === userId);
+  listTransactions(userId: string) {
+    return Promise.resolve(this.transactions.filter((t) => t.userId === userId));
   }
-  async putTransactions(txns: Transaction[]) {
-    this.writes++;
-    for (const t of txns) {
-      this.transactions = this.transactions.filter((x) => x.id !== t.id);
-      this.transactions.push(t);
+  putTransactions(txns: Transaction[]) {
+    return this.settle(() => {
+      this.writes++;
+      for (const t of txns) {
+        this.transactions = this.transactions.filter((x) => x.id !== t.id);
+        this.transactions.push(t);
+      }
+    });
+  }
+  registerUser(userId: string) {
+    return this.settle(() => this.users.add(userId));
+  }
+  trackTickers(tickers: { symbol: string; currency: string }[]) {
+    return this.settle(() => {
+      for (const t of tickers) this.tracked.set(t.symbol, t.currency);
+    });
+  }
+  /** Runs `fn` and converts a synchronous throw into a rejected promise, like an async method would. */
+  private settle(fn: () => unknown): Promise<void> {
+    try {
+      fn();
+      return Promise.resolve();
+    } catch (err) {
+      return Promise.reject(err instanceof Error ? err : new Error(String(err)));
     }
-  }
-  async registerUser(userId: string) {
-    this.users.add(userId);
-  }
-  async trackTickers(tickers: { symbol: string; currency: string }[]) {
-    for (const t of tickers) this.tracked.set(t.symbol, t.currency);
   }
 }
 
 export class FakeReader implements ObjectReader {
   objects = new Map<string, string>();
-  async readText(bucket: string, key: string, maxBytes: number): Promise<ReadResult> {
+  readText(bucket: string, key: string, maxBytes: number): Promise<ReadResult> {
     const content = this.objects.get(`${bucket}/${key}`);
-    if (content === undefined) return { ok: false, reason: 'Uploaded file not found' };
-    if (Buffer.byteLength(content) > maxBytes) return { ok: false, reason: 'File too large' };
-    return { ok: true, content };
+    if (content === undefined) return Promise.resolve({ ok: false, reason: 'Uploaded file not found' });
+    if (Buffer.byteLength(content) > maxBytes) return Promise.resolve({ ok: false, reason: 'File too large' });
+    return Promise.resolve({ ok: true, content });
   }
 }
 
 export class RecordingPublisher implements EventPublisher {
   published: TransactionsChangedDetail[] = [];
-  async transactionsChanged(detail: TransactionsChangedDetail) {
+  transactionsChanged(detail: TransactionsChangedDetail) {
     this.published.push(detail);
+    return Promise.resolve();
   }
 }
 

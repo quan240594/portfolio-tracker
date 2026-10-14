@@ -24,7 +24,8 @@ MAX_BATCH = 8
 CREDITS_PER_MINUTE = 8
 CREDITS_PER_DAY = 800
 
-COUNTRY_NAMES = {"USA": "United States", "US": "United States", "United States of America": "United States"}
+UNITED_STATES = "United States"
+COUNTRY_NAMES = {"USA": UNITED_STATES, "US": UNITED_STATES, "United States of America": UNITED_STATES}
 
 
 def to_provider_symbol(symbol: str) -> str:
@@ -93,11 +94,23 @@ class TwelveDataProvider:
         return Quote(
             symbol=symbol,
             price=price,
-            previousClose=prev if prev is not None else price,
+            previous_close=prev if prev is not None else price,
             currency=normalize_currency(raw.get("currency"), "USD"),
-            asOf=iso_datetime(as_of),
+            as_of=iso_datetime(as_of),
             source=self.name,
         )
+
+    def _quote_from_entry(self, canonical: str, raw: dict[str, Any]) -> Quote | None:
+        """Parse one batch entry; per-symbol errors are logged and skipped, except rate limiting."""
+        if raw.get("status") != "error":
+            return self._parse_quote(canonical, raw)
+        log.warning(
+            "twelvedata quote error",
+            extra={"symbol": canonical, "code": raw.get("code"), "error": raw.get("message")},
+        )
+        if int(raw.get("code") or 0) == 429:
+            raise RateLimitError(f"{self.name}: 429 in batch", provider=self.name, symbol=canonical)
+        return None
 
     def get_quotes(self, symbols: Sequence[str]) -> dict[str, Quote]:
         out: dict[str, Quote] = {}
@@ -113,17 +126,7 @@ class TwelveDataProvider:
                 canonical = mapping.get(provider_symbol)
                 if canonical is None or not isinstance(raw, dict):
                     continue
-                if raw.get("status") == "error":
-                    log.warning(
-                        "twelvedata quote error",
-                        extra={"symbol": canonical, "code": raw.get("code"), "error": raw.get("message")},
-                    )
-                    if int(raw.get("code") or 0) == 429:
-                        raise RateLimitError(
-                            f"{self.name}: 429 in batch", provider=self.name, symbol=canonical
-                        )
-                    continue
-                quote = self._parse_quote(canonical, raw)
+                quote = self._quote_from_entry(canonical, raw)
                 if quote:
                     out[canonical] = quote
         return out
@@ -156,24 +159,28 @@ class TwelveDataProvider:
             items = [d for d in (data.get("data") or []) if isinstance(d, dict)]
             if not items:
                 continue
-            us = [d for d in items if d.get("country") in ("United States", "USA")]
+            us = [d for d in items if d.get("country") in (UNITED_STATES, "USA")]
             chosen = dict((us or items)[0])
             chosen.setdefault("type", "ETF" if path == "/etfs" else "Common Stock")
             return chosen
         return None
 
+    def _profile_raw(self, symbol: str) -> dict[str, Any] | None:
+        if not self._profile_endpoint_supported:
+            return None
+        try:
+            return self._get("/profile", {"symbol": to_provider_symbol(symbol)}, symbol=symbol)
+        except SymbolNotFoundError:
+            return None
+        except ProviderError as exc:
+            if exc.retryable:
+                raise
+            log.info("twelvedata /profile unavailable, using reference data", extra={"error": str(exc)})
+            self._profile_endpoint_supported = False
+            return None
+
     def get_profile(self, symbol: str) -> InstrumentProfile | None:
-        raw: dict[str, Any] | None = None
-        if self._profile_endpoint_supported:
-            try:
-                raw = self._get("/profile", {"symbol": to_provider_symbol(symbol)}, symbol=symbol)
-            except SymbolNotFoundError:
-                raw = None
-            except ProviderError as exc:
-                if exc.retryable:
-                    raise
-                log.info("twelvedata /profile unavailable, using reference data", extra={"error": str(exc)})
-                self._profile_endpoint_supported = False
+        raw = self._profile_raw(symbol)
         if not raw or not raw.get("name"):
             raw = self._reference(symbol)
         if not raw:
@@ -182,7 +189,7 @@ class TwelveDataProvider:
         return InstrumentProfile(
             symbol=symbol,
             name=raw.get("name") or symbol,
-            assetClass=asset_class_from_type(raw.get("type")),
+            asset_class=asset_class_from_type(raw.get("type")),
             currency=normalize_currency(raw.get("currency"), "USD"),
             sector=raw.get("sector") or None,
             country=COUNTRY_NAMES.get(country, country) if country else None,

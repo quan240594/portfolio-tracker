@@ -8,7 +8,7 @@ import { LoadingRegion, Skeleton } from '../components/Skeleton';
 import { DividendBarChart } from '../components/charts/DividendBarChart';
 import { BASE_CURRENCY, formatDate, formatMoney } from '../lib/format';
 
-function PaymentsTable({ payments, currency, caption }: { payments: DividendPayment[]; currency: string; caption: string }) {
+function PaymentsTable({ payments, currency, caption }: Readonly<{ payments: DividendPayment[]; currency: string; caption: string }>) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -36,6 +36,42 @@ function PaymentsTable({ payments, currency, caption }: { payments: DividendPaym
   );
 }
 
+/** `upcoming` is undefined while the dividends are still loading. */
+function UpcomingList({ upcoming, currency }: Readonly<{ upcoming?: DividendPayment[]; currency: string }>) {
+  if (!upcoming) return <Skeleton className="h-40 w-full" />;
+  if (upcoming.length === 0) return <p className="muted text-sm">No announced dividends for your current holdings.</p>;
+  return (
+    <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+      {upcoming.map((p, i) => (
+        <li key={`${p.symbol}-${p.date}-${i}`} className="flex items-center gap-3 py-2.5 text-sm">
+          <div className="flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-lg bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+            <span className="text-[10px] leading-none uppercase">{formatDate(p.date, { month: 'short' })}</span>
+            <span className="font-semibold leading-tight">{formatDate(p.date, { day: 'numeric' })}</span>
+          </div>
+          <div className="flex-1">
+            <div className="font-medium">{p.symbol}</div>
+            <div className="muted text-xs">
+              {formatMoney(p.perShareLocal, p.currency, { maxDigits: 4 })} per share · pays {formatDate(p.date)}
+            </div>
+          </div>
+          <div className="font-medium tabular-nums">{formatMoney(p.amount, currency)}</div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** `received` is undefined while the dividends are still loading. */
+function ReceivedList({ received, currency }: Readonly<{ received?: DividendPayment[]; currency: string }>) {
+  if (!received) return <Skeleton className="h-40 w-full" />;
+  if (received.length === 0) return <p className="muted text-sm">No dividends received yet.</p>;
+  return (
+    <div className="max-h-96 overflow-y-auto">
+      <PaymentsTable payments={[...received].reverse()} currency={currency} caption="Received dividends, newest first" />
+    </div>
+  );
+}
+
 export function DividendsPage() {
   const { data, isPending, isError, error, refetch } = useDividends();
   const ccy = data?.baseCurrency ?? BASE_CURRENCY;
@@ -49,7 +85,7 @@ export function DividendsPage() {
     );
   }
 
-  const empty = data && data.received.length === 0 && data.upcoming.length === 0;
+  const empty = data?.received.length === 0 && data.upcoming.length === 0;
 
   return (
     <>
@@ -82,42 +118,12 @@ export function DividendsPage() {
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
               <section className="card p-4" aria-labelledby="div-upcoming">
                 <h2 id="div-upcoming" className="mb-3 font-semibold">Upcoming</h2>
-                {isPending ? (
-                  <Skeleton className="h-40 w-full" />
-                ) : data.upcoming.length === 0 ? (
-                  <p className="muted text-sm">No announced dividends for your current holdings.</p>
-                ) : (
-                  <ul className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {data.upcoming.map((p, i) => (
-                      <li key={`${p.symbol}-${p.date}-${i}`} className="flex items-center gap-3 py-2.5 text-sm">
-                        <div className="flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-lg bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
-                          <span className="text-[10px] leading-none uppercase">{formatDate(p.date, { month: 'short' })}</span>
-                          <span className="font-semibold leading-tight">{formatDate(p.date, { day: 'numeric' })}</span>
-                        </div>
-                        <div className="flex-1">
-                          <div className="font-medium">{p.symbol}</div>
-                          <div className="muted text-xs">
-                            {formatMoney(p.perShareLocal, p.currency, { maxDigits: 4 })} per share · pays {formatDate(p.date)}
-                          </div>
-                        </div>
-                        <div className="font-medium tabular-nums">{formatMoney(p.amount, ccy)}</div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <UpcomingList upcoming={data?.upcoming} currency={ccy} />
               </section>
 
               <section className="card p-4" aria-labelledby="div-received">
                 <h2 id="div-received" className="mb-3 font-semibold">Received</h2>
-                {isPending ? (
-                  <Skeleton className="h-40 w-full" />
-                ) : data.received.length === 0 ? (
-                  <p className="muted text-sm">No dividends received yet.</p>
-                ) : (
-                  <div className="max-h-96 overflow-y-auto">
-                    <PaymentsTable payments={[...data.received].reverse()} currency={ccy} caption="Received dividends, newest first" />
-                  </div>
-                )}
+                <ReceivedList received={data?.received} currency={ccy} />
               </section>
             </div>
           </>

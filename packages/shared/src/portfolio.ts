@@ -2,7 +2,6 @@ import { FxTimeline } from './fx.js';
 import type {
   AllocationDimension,
   AllocationSlice,
-  Currency,
   DividendEvent,
   DividendOverview,
   DividendPayment,
@@ -11,7 +10,6 @@ import type {
   FxRates,
   Holding,
   InstrumentProfile,
-  IsoDate,
   PortfolioSummary,
   Quote,
   Transaction,
@@ -39,7 +37,7 @@ export function sortTransactions(txns: readonly Transaction[]): Transaction[] {
  */
 export interface Position {
   symbol: string;
-  currency: Currency;
+  currency: string;
   quantity: number;
   costLocal: number;
   costBase: number;
@@ -61,7 +59,7 @@ function txRate(t: Transaction, fx?: FxTimeline): number {
 }
 
 /** Replays transactions up to and including `asOfDate`, throws on overselling. */
-export function buildPositions(txns: readonly Transaction[], asOfDate?: IsoDate, fx?: FxTimeline): Map<string, Position> {
+export function buildPositions(txns: readonly Transaction[], asOfDate?: string, fx?: FxTimeline): Map<string, Position> {
   const positions = new Map<string, Position>();
   for (const t of sortTransactions(txns)) {
     if (asOfDate && t.date > asOfDate) break;
@@ -251,11 +249,42 @@ export function calculateAllocation(holdings: readonly Holding[], by: Allocation
     .sort((a, b) => b.value - a.value);
 }
 
-const addDays = (date: IsoDate, days: number): IsoDate => {
+const addDays = (date: string, days: number): string => {
   const d = new Date(`${date}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 };
+
+/** Closes before `start`: the latest one per symbol seeds the carry-forward. */
+function seedLastClose(eod: Readonly<Record<string, readonly EodPrice[]>>, start: string): Map<string, number> {
+  const lastClose = new Map<string, number>();
+  for (const [symbol, prices] of Object.entries(eod)) {
+    const prior = prices.filter((p) => p.date < start).sort((a, b) => a.date.localeCompare(b.date)).at(-1);
+    if (prior) lastClose.set(symbol, prior.close);
+  }
+  return lastClose;
+}
+
+/** Market value and cost basis (base currency) of the open positions on `date`; updates `lastClose`. */
+function valuePositionsOn(
+  positions: ReadonlyMap<string, Position>,
+  closeIndex: ReadonlyMap<string, ReadonlyMap<string, number>>,
+  lastClose: Map<string, number>,
+  timeline: FxTimeline,
+  date: string,
+): { value: number; invested: number } {
+  let value = 0;
+  let invested = 0;
+  for (const p of positions.values()) {
+    const close = closeIndex.get(p.symbol)?.get(date);
+    if (close !== undefined) lastClose.set(p.symbol, close);
+    if (p.quantity <= 0) continue;
+    const price = lastClose.get(p.symbol) ?? p.costLocal / p.quantity;
+    value += timeline.toBase(p.quantity * price, p.currency, date);
+    invested += p.costBase;
+  }
+  return { value, invested };
+}
 
 /**
  * Daily portfolio value series between `from` and `to` (inclusive) in the base currency.
@@ -267,8 +296,8 @@ export function buildValueHistory(
   transactions: readonly Transaction[],
   eod: Readonly<Record<string, readonly EodPrice[]>>,
   fx: FxRates,
-  from: IsoDate,
-  to: IsoDate,
+  from: string,
+  to: string,
   fxHistory?: readonly FxDay[],
 ): ValuePoint[] {
   const sorted = sortTransactions(transactions);
@@ -276,33 +305,18 @@ export function buildValueHistory(
   const timeline = new FxTimeline(fx, fxHistory);
   const start = from < sorted[0]!.date ? sorted[0]!.date : from;
 
-  const closeIndex = new Map<string, Map<IsoDate, number>>();
+  const closeIndex = new Map<string, Map<string, number>>();
   for (const [symbol, prices] of Object.entries(eod)) {
     closeIndex.set(symbol, new Map(prices.map((p) => [p.date, p.close])));
   }
 
-  const lastClose = new Map<string, number>();
-  // Seed carry-forward closes from before `start`.
-  for (const [symbol, prices] of Object.entries(eod)) {
-    const prior = prices.filter((p) => p.date < start).sort((a, b) => a.date.localeCompare(b.date)).at(-1);
-    if (prior) lastClose.set(symbol, prior.close);
-  }
-
+  const lastClose = seedLastClose(eod, start);
   const points: ValuePoint[] = [];
   const positions = new Map<string, Position>();
   let next = 0;
   for (let date = start; date <= to; date = addDays(date, 1)) {
     while (next < sorted.length && sorted[next]!.date <= date) applyTransaction(positions, sorted[next++]!, timeline);
-    let value = 0;
-    let invested = 0;
-    for (const p of positions.values()) {
-      const close = closeIndex.get(p.symbol)?.get(date);
-      if (close !== undefined) lastClose.set(p.symbol, close);
-      if (p.quantity <= 0) continue;
-      const price = lastClose.get(p.symbol) ?? p.costLocal / p.quantity;
-      value += timeline.toBase(p.quantity * price, p.currency, date);
-      invested += p.costBase;
-    }
+    const { value, invested } = valuePositionsOn(positions, closeIndex, lastClose, timeline, date);
     points.push({ date, value: round(value), invested: round(invested) });
   }
   return points;
@@ -317,7 +331,7 @@ export function calculateDividends(
   transactions: readonly Transaction[],
   events: readonly DividendEvent[],
   fx: FxRates,
-  today: IsoDate = new Date().toISOString().slice(0, 10),
+  today: string = new Date().toISOString().slice(0, 10),
   fxHistory?: readonly FxDay[],
 ): DividendOverview {
   const timeline = new FxTimeline(fx, fxHistory);
@@ -372,7 +386,7 @@ export function calculateDividends(
   };
 }
 
-export function historyRangeStart(range: '1M' | '3M' | '6M' | 'YTD' | '1Y' | 'ALL', today: IsoDate, firstTxnDate?: IsoDate): IsoDate {
+export function historyRangeStart(range: '1M' | '3M' | '6M' | 'YTD' | '1Y' | 'ALL', today: string, firstTxnDate?: string): string {
   switch (range) {
     case '1M': return addDays(today, -30);
     case '3M': return addDays(today, -91);

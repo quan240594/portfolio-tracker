@@ -9,7 +9,7 @@ from dataclasses import asdict
 from decimal import Decimal
 from typing import Any
 
-from .models import DividendEvent, EodPrice, FxDay, FxRates, InstrumentProfile, Quote
+from .models import WIRE_NAMES, DividendEvent, EodPrice, FxDay, FxRates, InstrumentProfile, Quote
 
 ENTITY_TRACKED_TICKER = "TRACKED_TICKER"
 ENTITY_QUOTE = "QUOTE"
@@ -76,7 +76,8 @@ def to_decimal(value: float | int | Decimal) -> Decimal:
 
 def _flat(obj: Any) -> dict[str, Any]:
     out: dict[str, Any] = {}
-    for k, v in asdict(obj).items():
+    for attr, v in asdict(obj).items():
+        k = WIRE_NAMES.get(attr, attr)
         if v is None:
             continue
         if isinstance(v, bool):
@@ -114,7 +115,7 @@ def profile_item(p: InstrumentProfile) -> dict[str, Any]:
 
 
 def dividend_item(d: DividendEvent) -> dict[str, Any]:
-    return {**dividend_key(d.symbol, d.exDate), "entityType": ENTITY_DIVIDEND_EVENT, **_flat(d)}
+    return {**dividend_key(d.symbol, d.ex_date), "entityType": ENTITY_DIVIDEND_EVENT, **_flat(d)}
 
 
 def fx_item(fx: FxRates) -> dict[str, Any]:
@@ -140,8 +141,8 @@ def quote_from_item(item: dict[str, Any]) -> Quote:
     return Quote(
         symbol=item["symbol"],
         price=float(item["price"]),
-        previousClose=float(item["previousClose"]),
+        previous_close=float(item["previousClose"]),
         currency=item["currency"],
-        asOf=item["asOf"],
+        as_of=item["asOf"],
         source=item.get("source", ""),
     )

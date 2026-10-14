@@ -52,8 +52,7 @@ export function Footer() {
           Market data: Twelve Data, EODHD,{' '}
           <a href="https://www.coingecko.com" target="_blank" rel="noopener noreferrer" className="underline hover:text-brand-600">
             CoinGecko
-          </a>
-          , ECB via Frankfurter. Prices may be delayed. Not investment advice.
+          </a>, ECB via Frankfurter. Prices may be delayed. Not investment advice.
         </p>
       </div>
     </footer>
@@ -111,7 +110,7 @@ export function Layout() {
   );
 }
 
-export function PageHeader({ title, description, actions }: { title: string; description?: string; actions?: React.ReactNode }) {
+export function PageHeader({ title, description, actions }: Readonly<{ title: string; description?: string; actions?: React.ReactNode }>) {
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>

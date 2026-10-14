@@ -3,20 +3,18 @@
  * ends at a fixed "current" price on today's date, so values are realistic but stable within a day.
  */
 import type {
-  Currency,
   DividendEvent,
   EodPrice,
   FxDay,
   FxRates,
   InstrumentProfile,
-  IsoDate,
   Quote,
   Transaction,
 } from '@portfolio/shared';
 import { FxTimeline, buildPositions } from '@portfolio/shared';
 
 export const MOCK_USER_ID = 'demo';
-export const BASE_CURRENCY: Currency = 'EUR';
+export const BASE_CURRENCY: string = 'EUR';
 
 interface InstrumentSeed extends InstrumentProfile {
   price: number;
@@ -50,31 +48,33 @@ export const USD_PER_EUR_END = 1.17;
 /** Broker FX spread on top of the ECB fixing (the broker gives fewer USD per EUR). */
 const BROKER_FX_SPREAD = 0.0025;
 
+/** Wraps to a signed 32-bit integer (what `| 0` does), which Math.trunc would not. */
+const toInt32 = (n: number) => Math.imul(n, 1);
+
 function mulberry32(seed: number) {
-  let a = seed;
+  let a = toInt32(seed);
   return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
+    a = toInt32(a + 0x6d2b79f5);
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
-const hash = (s: string) => [...s].reduce((h, c) => (Math.imul(h, 31) + c.charCodeAt(0)) | 0, 7);
+const hash = (s: string) => [...s].reduce((h, c) => toInt32(Math.imul(h, 31) + (c.codePointAt(0) ?? 0)), 7);
 
-export const isoDay = (d: Date): IsoDate => d.toISOString().slice(0, 10);
-export const addDays = (date: IsoDate, days: number): IsoDate => {
+export const isoDay = (d: Date): string => d.toISOString().slice(0, 10);
+export const addDays = (date: string, days: number): string => {
   const d = new Date(`${date}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return isoDay(d);
 };
-const isWeekend = (date: IsoDate) => {
+const isWeekend = (date: string) => {
   const day = new Date(`${date}T00:00:00Z`).getUTCDay();
   return day === 0 || day === 6;
 };
 /** Nearest trading day on or before `date`. */
-const tradingDay = (date: IsoDate): IsoDate => {
+const tradingDay = (date: string): string => {
   let d = date;
   while (isWeekend(d)) d = addDays(d, -1);
   return d;
@@ -83,7 +83,7 @@ const tradingDay = (date: IsoDate): IsoDate => {
 const round = (n: number, dp: number) => Math.round(n * 10 ** dp) / 10 ** dp;
 
 export interface MockMarket {
-  today: IsoDate;
+  today: string;
   /** Latest rates (equal to the most recent day in `fxHistory`). */
   fx: FxRates;
   /** Daily ECB-style fixings over the full history window (business days only). */
@@ -98,7 +98,7 @@ export interface MockSeed extends MockMarket {
   transactions: Transaction[];
 }
 
-function buildEod(seed: InstrumentSeed, today: IsoDate): EodPrice[] {
+function buildEod(seed: InstrumentSeed, today: string): EodPrice[] {
   const rnd = mulberry32(hash(seed.symbol));
   const dpDigits = seed.price > 1000 ? 0 : 2;
   const prices: EodPrice[] = [];
@@ -115,7 +115,7 @@ function buildEod(seed: InstrumentSeed, today: IsoDate): EodPrice[] {
 }
 
 /** Seeded daily EUR/USD fixings with a linear trend plus small noise; weekends are skipped like the ECB. */
-export function buildFxHistory(today: IsoDate): FxDay[] {
+export function buildFxHistory(today: string): FxDay[] {
   const rnd = mulberry32(hash('EURUSD'));
   const days: FxDay[] = [];
   for (let i = HISTORY_DAYS; i >= 0; i--) {
@@ -128,7 +128,7 @@ export function buildFxHistory(today: IsoDate): FxDay[] {
   return days;
 }
 
-export function closeOn(eod: readonly EodPrice[], date: IsoDate): number {
+export function closeOn(eod: readonly EodPrice[], date: string): number {
   let close = eod[0]?.close ?? 0;
   for (const p of eod) {
     if (p.date > date) break;

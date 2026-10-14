@@ -7,7 +7,7 @@ interface Props {
   className?: string;
 }
 
-export function ErrorState({ error, onRetry, title = 'Could not load data', className = '' }: Props) {
+export function ErrorState({ error, onRetry, title = 'Could not load data', className = '' }: Readonly<Props>) {
   return (
     <div role="alert" className={`flex flex-col items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm dark:border-red-900/60 dark:bg-red-950/40 ${className}`}>
       <div>

@@ -66,7 +66,9 @@ export function formatFxRate(rate: number): string {
   return new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(rate);
 }
 
-export function formatDate(iso: string, opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' }): string {
+const DEFAULT_DATE_OPTIONS: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' };
+
+export function formatDate(iso: string, opts: Intl.DateTimeFormatOptions = DEFAULT_DATE_OPTIONS): string {
   // Calendar dates (YYYY-MM-DD) are rendered as-is; timestamps in the user's local time zone.
   const dateOnly = iso.length === 10;
   const d = new Date(dateOnly ? `${iso}T00:00:00Z` : iso);
@@ -82,12 +84,16 @@ export function formatMonth(yyyyMm: string): string {
  * Dutch "1.234,56" / "0,25" as well as "1234.56". The right-most "," or "." is taken as the decimal mark.
  */
 export function normalizeDecimalInput(raw: string): string {
-  const s = raw.trim().replace(/\s/g, '');
+  const s = raw.trim().replaceAll(/\s/g, '');
   const comma = s.lastIndexOf(',');
   if (comma === -1) return s;
-  if (comma > s.lastIndexOf('.')) return s.replace(/\./g, '').replace(/,/g, '.');
-  return s.replace(/,/g, '');
+  if (comma > s.lastIndexOf('.')) return s.replaceAll('.', '').replaceAll(',', '.');
+  return s.replaceAll(',', '');
 }
 
 export type Trend = 'up' | 'down' | 'flat';
-export const trendOf = (value: number): Trend => (value > 0.000001 ? 'up' : value < -0.000001 ? 'down' : 'flat');
+export const trendOf = (value: number): Trend => {
+  if (value > 0.000001) return 'up';
+  if (value < -0.000001) return 'down';
+  return 'flat';
+};

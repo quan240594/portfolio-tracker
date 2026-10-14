@@ -67,33 +67,38 @@ class FrankfurterFx:
             raise ProviderError(f"{self.name}: empty rates for base {base}", provider=self.name)
         day = str(data["date"]) if data.get("date") else None
         as_of = _ecb_publication(day) if day else datetime.now(UTC)
-        return FxRates(base=resolved, rates=rates, asOf=iso_datetime(as_of), date=day)
+        return FxRates(base=resolved, rates=rates, as_of=iso_datetime(as_of), date=day)
+
+    def _fetch_chunk(self, lo: date, hi: date, base: str) -> dict[str, FxDay]:
+        """Fixings for one year-bounded range; empty when the provider has none."""
+        try:
+            data = self._http.get_json(f"{BASE_URL}/{lo.isoformat()}..{hi.isoformat()}", {"base": base})
+        except SymbolNotFoundError:  # range without any fixing (e.g. only TARGET holidays)
+            return {}
+        if not isinstance(data, dict):
+            raise ProviderError(f"{self.name}: malformed time series {lo}..{hi}", provider=self.name)
+        if str(data.get("base") or base).upper() != base:
+            raise ProviderError(f"{self.name}: unexpected base {data.get('base')!r}", provider=self.name)
+        series = data.get("rates") or {}
+        if not isinstance(series, dict):
+            raise ProviderError(f"{self.name}: malformed time series {lo}..{hi}", provider=self.name)
+        lo_s, hi_s = lo.isoformat(), hi.isoformat()
+        out: dict[str, FxDay] = {}
+        for day, raw in series.items():
+            day = str(day)
+            # Frankfurter snaps a non-business start date back to the previous fixing; drop it.
+            if not lo_s <= day <= hi_s:
+                continue
+            rates = _parse_rates(raw, base)
+            if rates:
+                out[day] = FxDay(base=base, date=day, rates=rates)
+        return out
 
     def get_history(self, base: str, start: date, end: date) -> list[FxDay]:
         """Daily fixings for ECB business days in [start, end], ascending, one request per calendar year."""
         base = base.upper()
         by_date: dict[str, FxDay] = {}
         for lo, hi in year_chunks(start, end):
-            if not has_weekday(lo, hi):
-                continue
-            try:
-                data = self._http.get_json(f"{BASE_URL}/{lo.isoformat()}..{hi.isoformat()}", {"base": base})
-            except SymbolNotFoundError:  # range without any fixing (e.g. only TARGET holidays)
-                continue
-            if not isinstance(data, dict):
-                raise ProviderError(f"{self.name}: malformed time series {lo}..{hi}", provider=self.name)
-            if str(data.get("base") or base).upper() != base:
-                raise ProviderError(f"{self.name}: unexpected base {data.get('base')!r}", provider=self.name)
-            series = data.get("rates") or {}
-            if not isinstance(series, dict):
-                raise ProviderError(f"{self.name}: malformed time series {lo}..{hi}", provider=self.name)
-            lo_s, hi_s = lo.isoformat(), hi.isoformat()
-            for day, raw in series.items():
-                day = str(day)
-                # Frankfurter snaps a non-business start date back to the previous fixing; drop it.
-                if not lo_s <= day <= hi_s:
-                    continue
-                rates = _parse_rates(raw, base)
-                if rates:
-                    by_date[day] = FxDay(base=base, date=day, rates=rates)
+            if has_weekday(lo, hi):
+                by_date.update(self._fetch_chunk(lo, hi, base))
         return [by_date[d] for d in sorted(by_date)]

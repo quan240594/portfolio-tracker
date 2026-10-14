@@ -11,6 +11,16 @@ class ResizeObserverStub {
 }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver;
 
+// jsdom's Blob has no text(); delegate to FileReader so code under test can use the standard API.
+Blob.prototype.text ??= function text(this: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(this);
+  });
+};
+
 if (!window.matchMedia) {
   window.matchMedia = (query: string) =>
     ({

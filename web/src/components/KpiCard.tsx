@@ -9,7 +9,7 @@ interface Props {
   loading?: boolean;
 }
 
-export function KpiCard({ label, value, change, hint, loading = false }: Props) {
+export function KpiCard({ label, value, change, hint, loading = false }: Readonly<Props>) {
   return (
     <section className="card flex flex-col gap-1.5 p-4" aria-label={label} aria-busy={loading || undefined}>
       <h3 className="muted text-xs font-medium tracking-wide uppercase">{label}</h3>

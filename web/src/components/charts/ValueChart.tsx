@@ -10,7 +10,7 @@ interface Props {
   currency: string;
 }
 
-export function ValueChart({ points, currency }: Props) {
+export function ValueChart({ points, currency }: Readonly<Props>) {
   const { theme } = useTheme();
   const c = chartTheme(theme);
   const first = points[0];

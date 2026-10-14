@@ -70,36 +70,36 @@ def test_prices_stay_sensible() -> None:
 )
 def test_quote_currency(symbol: str, currency: str) -> None:
     q = provider().get_quotes([symbol])[symbol]
-    assert q.currency == currency and q.source == "mock" and q.price > 0 and q.previousClose > 0
+    assert q.currency == currency and q.source == "mock" and q.price > 0 and q.previous_close > 0
 
 
 def test_weekend_quote_uses_last_trading_day() -> None:
     q = provider(SATURDAY).get_quotes(["AAPL"])["AAPL"]
-    assert q.asOf == "2026-10-16T20:00:00.000Z"
+    assert q.as_of == "2026-10-16T20:00:00.000Z"
     p = provider(SATURDAY)
     assert q.price == p.price_on("AAPL", date(2026, 10, 16))
-    assert q.previousClose == p.price_on("AAPL", date(2026, 10, 15))
+    assert q.previous_close == p.price_on("AAPL", date(2026, 10, 15))
     crypto = provider(SATURDAY).get_quotes(["BTC-EUR"])["BTC-EUR"]
-    assert crypto.asOf == "2026-10-17T12:00:00.000Z"
+    assert crypto.as_of == "2026-10-17T12:00:00.000Z"
 
 
 def test_profiles() -> None:
     p = provider()
-    assert p.get_profile("VWRL.AS").assetClass == "ETF"
-    assert p.get_profile("BTC-EUR").assetClass == "CRYPTO"
+    assert p.get_profile("VWRL.AS").asset_class == "ETF"
+    assert p.get_profile("BTC-EUR").asset_class == "CRYPTO"
     assert p.get_profile("SAP.DE").country == "Germany"
     generic = p.get_profile("FOO.PA")
     assert (
-        generic.assetClass == "STOCK" and generic.currency == "EUR" and generic.exchange == "Euronext Paris"
+        generic.asset_class == "STOCK" and generic.currency == "EUR" and generic.exchange == "Euronext Paris"
     )
-    assert p.get_profile("DOGE-USD").assetClass == "CRYPTO"
+    assert p.get_profile("DOGE-USD").asset_class == "CRYPTO"
 
 
 def test_dividends() -> None:
     p = provider()
     aapl = p.get_dividends("AAPL", date(2024, 10, 13), date(2027, 10, 13))
     assert len(aapl) == 12 and all(d.amount == 0.26 and d.currency == "USD" for d in aapl)
-    assert aapl[0].exDate == "2024-11-10" and aapl[0].payDate == "2024-11-14"
+    assert aapl[0].ex_date == "2024-11-10" and aapl[0].pay_date == "2024-11-14"
     assert len(p.get_dividends("SAP.DE", date(2025, 1, 1), date(2026, 12, 31))) == 2
     assert p.get_dividends("BTC-EUR", date(2024, 1, 1), date(2027, 1, 1)) == []
     assert p.get_dividends("IWDA.AS", date(2024, 1, 1), date(2027, 1, 1)) == []
@@ -111,7 +111,7 @@ def test_dividends() -> None:
 def test_mock_fx() -> None:
     fx = MockFx(now=lambda: NOW).get_latest("EUR")
     assert fx.base == "EUR" and fx.rates["USD"] == pytest.approx(1.085, rel=0.07) and "EUR" not in fx.rates
-    assert fx.asOf == "2026-10-13T12:00:00.000Z" and fx.date == "2026-10-13"
+    assert fx.as_of == "2026-10-13T12:00:00.000Z" and fx.date == "2026-10-13"
     assert MockFx(now=lambda: SATURDAY).get_latest("EUR").date == "2026-10-16"
     usd = MockFx(now=lambda: NOW).get_latest("USD")
     assert usd.rates["EUR"] == pytest.approx(1 / fx.rates["USD"], rel=1e-5) and "USD" not in usd.rates

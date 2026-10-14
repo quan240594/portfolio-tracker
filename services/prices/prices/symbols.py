@@ -96,13 +96,13 @@ def minimal_profile(symbol: str) -> InstrumentProfile:
         return InstrumentProfile(
             symbol=symbol,
             name=crypto_parts(symbol)[0],
-            assetClass="CRYPTO",
+            asset_class="CRYPTO",
             currency=currency_for(symbol),
         )
     return InstrumentProfile(
         symbol=symbol,
         name=symbol,
-        assetClass="OTHER",
+        asset_class="OTHER",
         currency=currency_for(symbol),
         country=country_for(symbol),
         exchange=exchange_for(symbol),

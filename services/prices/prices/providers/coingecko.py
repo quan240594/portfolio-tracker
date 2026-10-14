@@ -116,9 +116,9 @@ class CoinGeckoProvider:
             out[symbol] = Quote(
                 symbol=symbol,
                 price=price,
-                previousClose=round(prev, 8),
+                previous_close=round(prev, 8),
                 currency=vs.upper(),
-                asOf=iso_datetime(as_of),
+                as_of=iso_datetime(as_of),
                 source=self.name,
             )
         return out
@@ -144,9 +144,10 @@ class CoinGeckoProvider:
         return InstrumentProfile(
             symbol=symbol,
             name=COIN_NAMES.get(coin_id, coin_id.replace("-", " ").title()),
-            assetClass="CRYPTO",
+            asset_class="CRYPTO",
             currency=vs.upper(),
         )
 
     def get_dividends(self, symbol: str, start: date, end: date) -> list[DividendEvent]:
+        log.debug("coingecko has no dividends", extra={"symbol": symbol, "start": start, "end": end})
         return []

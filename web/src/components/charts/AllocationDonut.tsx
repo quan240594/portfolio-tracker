@@ -21,7 +21,7 @@ function topSlices(slices: AllocationSlice[]): AllocationSlice[] {
 const prettyLabel = (label: string) =>
   /^[A-Z]+$/.test(label) && label.length > 3 ? label.charAt(0) + label.slice(1).toLowerCase() : label;
 
-export function AllocationDonut({ slices, currency }: { slices: AllocationSlice[]; currency: string }) {
+export function AllocationDonut({ slices, currency }: Readonly<{ slices: AllocationSlice[]; currency: string }>) {
   const { theme } = useTheme();
   const c = chartTheme(theme);
   const data = topSlices(slices).map((s, i) => ({ ...s, label: prettyLabel(s.label), color: SERIES_COLORS[i % SERIES_COLORS.length]! }));

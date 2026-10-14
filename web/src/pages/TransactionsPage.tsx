@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { Transaction } from '@portfolio/shared';
 import { useDeleteTransaction, useTransactions } from '../api/hooks';
@@ -63,6 +63,86 @@ export function TransactionsPage() {
     </>
   );
 
+  let body: ReactNode;
+  if (isError) {
+    body = <ErrorState error={error} onRetry={() => void refetch()} title="Could not load transactions" />;
+  } else if (isPending) {
+    body = (
+      <LoadingRegion label="Loading transactions">
+        <div className="card space-y-3 p-4">
+          {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-9 w-full" />)}
+        </div>
+      </LoadingRegion>
+    );
+  } else if (data.transactions.length === 0) {
+    body = (
+      <EmptyState
+        title="No transactions yet"
+        description="Record your first trade manually or import a CSV file exported from your broker."
+        actions={actions}
+      />
+    );
+  } else {
+    body = (
+    <div className="card overflow-x-auto">
+      <table className="w-full text-sm">
+        <caption className="sr-only">Transactions, newest first</caption>
+        <thead>
+          <tr className="muted border-b border-slate-200 text-left text-xs dark:border-slate-800">
+            <th scope="col" className="px-3 py-2.5 font-medium">Date</th>
+            <th scope="col" className="px-3 py-2.5 font-medium">Type</th>
+            <th scope="col" className="px-3 py-2.5 font-medium">Symbol</th>
+            <th scope="col" className="px-3 py-2.5 text-right font-medium">Quantity</th>
+            <th scope="col" className="px-3 py-2.5 text-right font-medium">Price</th>
+            <th scope="col" className="hidden px-3 py-2.5 text-right font-medium sm:table-cell">Fee</th>
+            <th scope="col" className="px-3 py-2.5 text-right font-medium">Total</th>
+            <th scope="col" className="hidden px-3 py-2.5 font-medium lg:table-cell">Note</th>
+            <th scope="col" className="px-3 py-2.5"><span className="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.transactions.map((t) => (
+            <tr key={t.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800/60">
+              <td className="px-3 py-2.5 whitespace-nowrap">{formatDate(t.date)}</td>
+              <td className="px-3 py-2.5">
+                <span className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${TYPE_STYLE[t.type]}`}>{t.type}</span>
+              </td>
+              <td className="px-3 py-2.5 font-medium">{t.symbol}</td>
+              <td className="px-3 py-2.5 text-right tabular-nums">{formatQuantity(t.quantity)}</td>
+              <td className="px-3 py-2.5 text-right tabular-nums">{formatMoney(t.price, t.currency, { maxDigits: t.price < 1 ? 6 : 2 })}</td>
+              <td className="hidden px-3 py-2.5 text-right tabular-nums sm:table-cell">{formatMoney(t.fee, t.currency)}</td>
+              <td className="px-3 py-2.5 text-right tabular-nums">
+                <span className="block font-medium">{formatMoney(total(t), t.currency)}</span>
+                {t.fxRate !== undefined && t.currency !== BASE_CURRENCY && (
+                  <span className="muted block text-xs whitespace-nowrap" title={`Broker FX rate: ${formatFxRate(t.fxRate)} ${t.currency} per 1 ${BASE_CURRENCY}`}>
+                    ≈ {formatMoney(total(t) / t.fxRate, BASE_CURRENCY)} · FX {formatFxRate(t.fxRate)}
+                  </span>
+                )}
+              </td>
+              <td className="muted hidden max-w-[14rem] truncate px-3 py-2.5 lg:table-cell" title={t.note}>
+                {t.note ?? (t.importId ? 'Imported' : '')}
+              </td>
+              <td className="px-3 py-2.5 text-right">
+                <button
+                  type="button"
+                  className="rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                  aria-label={`Delete ${t.type.toLowerCase()} ${t.symbol} on ${formatDate(t.date)}`}
+                  onClick={() => {
+                    del.reset();
+                    setToDelete(t);
+                  }}
+                >
+                  Delete
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+    );
+  }
+
   return (
     <>
       <PageHeader title="Transactions" description="Buys, sells and dividends — the source for every number in the app." actions={actions} />
@@ -75,78 +155,7 @@ export function TransactionsPage() {
         )}
       </div>
 
-      {isError ? (
-        <ErrorState error={error} onRetry={() => void refetch()} title="Could not load transactions" />
-      ) : isPending ? (
-        <LoadingRegion label="Loading transactions">
-          <div className="card space-y-3 p-4">
-            {Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="h-9 w-full" />)}
-          </div>
-        </LoadingRegion>
-      ) : data.transactions.length === 0 ? (
-        <EmptyState
-          title="No transactions yet"
-          description="Record your first trade manually or import a CSV file exported from your broker."
-          actions={actions}
-        />
-      ) : (
-        <div className="card overflow-x-auto">
-          <table className="w-full text-sm">
-            <caption className="sr-only">Transactions, newest first</caption>
-            <thead>
-              <tr className="muted border-b border-slate-200 text-left text-xs dark:border-slate-800">
-                <th scope="col" className="px-3 py-2.5 font-medium">Date</th>
-                <th scope="col" className="px-3 py-2.5 font-medium">Type</th>
-                <th scope="col" className="px-3 py-2.5 font-medium">Symbol</th>
-                <th scope="col" className="px-3 py-2.5 text-right font-medium">Quantity</th>
-                <th scope="col" className="px-3 py-2.5 text-right font-medium">Price</th>
-                <th scope="col" className="hidden px-3 py-2.5 text-right font-medium sm:table-cell">Fee</th>
-                <th scope="col" className="px-3 py-2.5 text-right font-medium">Total</th>
-                <th scope="col" className="hidden px-3 py-2.5 font-medium lg:table-cell">Note</th>
-                <th scope="col" className="px-3 py-2.5"><span className="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.transactions.map((t) => (
-                <tr key={t.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800/60">
-                  <td className="px-3 py-2.5 whitespace-nowrap">{formatDate(t.date)}</td>
-                  <td className="px-3 py-2.5">
-                    <span className={`rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${TYPE_STYLE[t.type]}`}>{t.type}</span>
-                  </td>
-                  <td className="px-3 py-2.5 font-medium">{t.symbol}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{formatQuantity(t.quantity)}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{formatMoney(t.price, t.currency, { maxDigits: t.price < 1 ? 6 : 2 })}</td>
-                  <td className="hidden px-3 py-2.5 text-right tabular-nums sm:table-cell">{formatMoney(t.fee, t.currency)}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">
-                    <span className="block font-medium">{formatMoney(total(t), t.currency)}</span>
-                    {t.fxRate !== undefined && t.currency !== BASE_CURRENCY && (
-                      <span className="muted block text-xs whitespace-nowrap" title={`Broker FX rate: ${formatFxRate(t.fxRate)} ${t.currency} per 1 ${BASE_CURRENCY}`}>
-                        ≈ {formatMoney(total(t) / t.fxRate, BASE_CURRENCY)} · FX {formatFxRate(t.fxRate)}
-                      </span>
-                    )}
-                  </td>
-                  <td className="muted hidden max-w-[14rem] truncate px-3 py-2.5 lg:table-cell" title={t.note}>
-                    {t.note ?? (t.importId ? 'Imported' : '')}
-                  </td>
-                  <td className="px-3 py-2.5 text-right">
-                    <button
-                      type="button"
-                      className="rounded-md px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
-                      aria-label={`Delete ${t.type.toLowerCase()} ${t.symbol} on ${formatDate(t.date)}`}
-                      onClick={() => {
-                        del.reset();
-                        setToDelete(t);
-                      }}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {body}
 
       <Dialog open={action === 'add'} onClose={() => setAction(null)} title="Add transaction" size="lg">
         <TransactionForm

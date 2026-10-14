@@ -188,21 +188,28 @@ describe('DynamoIngestStore.putTransactions', () => {
   });
 
   it('backs off exponentially (capped at 5s) and gives up after 8 attempts', async () => {
-    vi.spyOn(Math, 'random').mockReturnValue(1);
     ddbMock.on(BatchWriteCommand).callsFake((input) => ({ UnprocessedItems: input.RequestItems }));
     const sleep = vi.fn(async (_ms: number) => {});
-    const err = await new DynamoIngestStore(doc, 'tbl', sleep).putTransactions(txns(30)).catch((e: Error) => e);
+    const err = await new DynamoIngestStore(doc, 'tbl', sleep, () => 1).putTransactions(txns(30)).catch((e: Error) => e);
     expect(err).toMatchObject({ name: 'UnprocessedItemsError', message: 'BatchWrite: 25 unprocessed items after 8 attempts' });
     expect(ddbMock.commandCalls(BatchWriteCommand)).toHaveLength(8);
     expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([100, 200, 400, 800, 1600, 3200, 5000]);
   });
 
   it('applies jitter of down to half the backoff', async () => {
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+    ddbMock.on(BatchWriteCommand).callsFakeOnce((input) => ({ UnprocessedItems: input.RequestItems })).resolves({});
+    const sleep = vi.fn(async (_ms: number) => {});
+    await new DynamoIngestStore(doc, 'tbl', sleep, () => 0).putTransactions(txns(1));
+    expect(sleep).toHaveBeenCalledWith(50);
+  });
+
+  it('uses a secure random jitter within [50%, 100%) of the backoff by default', async () => {
     ddbMock.on(BatchWriteCommand).callsFakeOnce((input) => ({ UnprocessedItems: input.RequestItems })).resolves({});
     const sleep = vi.fn(async (_ms: number) => {});
     await new DynamoIngestStore(doc, 'tbl', sleep).putTransactions(txns(1));
-    expect(sleep).toHaveBeenCalledWith(50);
+    const ms = sleep.mock.calls[0]![0];
+    expect(ms).toBeGreaterThanOrEqual(50);
+    expect(ms).toBeLessThan(100);
   });
 
   it('propagates BatchWrite errors', async () => {
@@ -212,10 +219,9 @@ describe('DynamoIngestStore.putTransactions', () => {
 
   it('waits with a real timer by default', async () => {
     vi.useFakeTimers();
-    vi.spyOn(Math, 'random').mockReturnValue(0);
     ddbMock.on(BatchWriteCommand).callsFakeOnce((input) => ({ UnprocessedItems: input.RequestItems })).resolves({});
     let done = false;
-    const p = new DynamoIngestStore(doc, 'tbl').putTransactions(txns(1)).then(() => (done = true));
+    const p = new DynamoIngestStore(doc, 'tbl', undefined, () => 0).putTransactions(txns(1)).then(() => (done = true));
     await vi.advanceTimersByTimeAsync(49);
     expect(done).toBe(false);
     expect(ddbMock.commandCalls(BatchWriteCommand)).toHaveLength(1);

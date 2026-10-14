@@ -23,6 +23,9 @@ const safeParseKey = (key: string) => {
   }
 };
 
+/** The user owning an uploaded object, or null when the key is outside the imports/ layout. */
+export const importOwner = (key: string): string | null => safeParseKey(key)?.userId ?? null;
+
 /** Maps an oversell PortfolioError ("Cannot sell Q SYM on DATE: ...") back to the offending CSV row, if it came from this file. */
 function rowForPortfolioError(err: PortfolioError, rows: ParsedRow[]): number {
   const m = /^Cannot sell (\S+) (\S+) on (\d{4}-\d{2}-\d{2})/.exec(err.message);
@@ -111,7 +114,7 @@ export async function processImportObject(deps: IngestDeps, ref: S3ObjectRef): P
   await deps.store.registerUser(userId);
   const tickers = new Map(imported.map((t) => [t.symbol, t.currency]));
   await deps.store.trackTickers([...tickers].map(([symbol, currency]) => ({ symbol, currency })));
-  await deps.events.transactionsChanged({ userId, symbols: [...tickers.keys()].sort(), reason: 'IMPORTED', importId });
+  await deps.events.transactionsChanged({ userId, symbols: [...tickers.keys()].sort((a, b) => a.localeCompare(b)), reason: 'IMPORTED', importId });
   await deps.store.markCompleted(userId, importId, parsed.rowCount, imported.length);
   log.info('Import completed', { rowCount: parsed.rowCount, importedCount: imported.length });
   return 'COMPLETED';

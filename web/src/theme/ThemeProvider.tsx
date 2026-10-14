@@ -29,8 +29,8 @@ function initialTheme(): Theme {
   return readStored() ?? (mediaQuery()?.matches ? 'dark' : 'light');
 }
 
-export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(initialTheme);
+export function ThemeProvider({ children }: Readonly<{ children: ReactNode }>) {
+  const [theme, setTheme] = useState<Theme>(initialTheme);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
@@ -41,14 +41,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const mq = mediaQuery();
     if (!mq) return;
     const onChange = (e: MediaQueryListEvent) => {
-      if (!readStored()) setThemeState(e.matches ? 'dark' : 'light');
+      if (!readStored()) setTheme(e.matches ? 'dark' : 'light');
     };
     mq.addEventListener?.('change', onChange);
     return () => mq.removeEventListener?.('change', onChange);
   }, []);
 
-  const setTheme = useCallback((t: Theme) => {
-    setThemeState(t);
+  const selectTheme = useCallback((t: Theme) => {
+    setTheme(t);
     try {
       localStorage.setItem(THEME_STORAGE_KEY, t);
     } catch {
@@ -57,8 +57,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<ThemeContextValue>(
-    () => ({ theme, setTheme, toggleTheme: () => setTheme(theme === 'dark' ? 'light' : 'dark') }),
-    [theme, setTheme],
+    () => ({ theme, setTheme: selectTheme, toggleTheme: () => selectTheme(theme === 'dark' ? 'light' : 'dark') }),
+    [theme, selectTheme],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

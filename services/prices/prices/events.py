@@ -51,7 +51,7 @@ class EventPublisher:
             try:
                 resp = aws.client("events").put_events(Entries=entries[i : i + 10])
             except (ClientError, BotoCoreError) as exc:
-                log.error("PutEvents failed", extra={"error": str(exc), "bus": self.bus_name})
+                log.exception("PutEvents failed", extra={"error": str(exc), "bus": self.bus_name})
                 ok = False
                 continue
             if resp.get("FailedEntryCount"):

@@ -173,31 +173,34 @@ export function getImport(importId: string): ImportStatus {
   return imp.status;
 }
 
-export function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
-  for (const line of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    const cells: string[] = [];
-    let cur = '';
-    let quoted = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i]!;
-      if (quoted) {
-        if (ch === '"' && line[i + 1] === '"') {
-          cur += '"';
-          i++;
-        } else if (ch === '"') quoted = false;
-        else cur += ch;
-      } else if (ch === '"') quoted = true;
-      else if (ch === ',') {
-        cells.push(cur.trim());
-        cur = '';
-      } else cur += ch;
-    }
-    cells.push(cur.trim());
-    rows.push(cells);
+function parseCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let cur = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]!;
+    if (quoted) {
+      if (ch === '"' && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else if (ch === '"') quoted = false;
+      else cur += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ',') {
+      cells.push(cur.trim());
+      cur = '';
+    } else cur += ch;
   }
-  return rows;
+  cells.push(cur.trim());
+  return cells;
+}
+
+export function parseCsv(text: string): string[][] {
+  return text
+    .replace(/^\uFEFF/, '')
+    .split(/\r?\n/)
+    .filter((line) => line.trim())
+    .map(parseCsvLine);
 }
 
 const REQUIRED = ['date', 'type', 'symbol', 'quantity', 'price', 'fee', 'currency'];

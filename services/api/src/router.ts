@@ -9,7 +9,7 @@ export type RouteHandler = (ctx: RouteContext) => Promise<RouteResult>;
 type RouteName = keyof typeof API_ROUTES;
 
 const handlers: Record<RouteName, RouteHandler> = {
-  health: async () => ({ statusCode: 200, body: { status: 'ok' } }),
+  health: () => Promise.resolve({ statusCode: 200, body: { status: 'ok' } }),
   portfolio: portfolio.getPortfolio,
   holdings: portfolio.getHoldings,
   allocation: portfolio.getAllocation,
@@ -33,7 +33,7 @@ interface CompiledRoute {
 const compiled: CompiledRoute[] = (Object.entries(API_ROUTES) as [RouteName, string][]).map(([name, spec]) => {
   const [method, path] = spec.split(' ') as [string, string];
   const params: string[] = [];
-  const pattern = path.replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{(\w+)\}/g, (_m, param: string) => {
+  const pattern = path.replace(/[.*+?^$()|[\]\\]/g, String.raw`\$&`).replace(/\{(\w+)\}/g, (_m, param: string) => {
     params.push(param);
     return '([^/]+)';
   });
@@ -42,7 +42,9 @@ const compiled: CompiledRoute[] = (Object.entries(API_ROUTES) as [RouteName, str
 
 /** Normalises the raw path: strips trailing slashes and an optional `/api` prefix (CloudFront path routing). */
 export function normalisePath(rawPath: string): string {
-  let p = rawPath.replace(/\/+$/, '') || '/';
+  let end = rawPath.length;
+  while (end > 0 && rawPath[end - 1] === '/') end--;
+  let p = rawPath.slice(0, end) || '/';
   if (p === '/api') p = '/';
   else if (p.startsWith('/api/')) p = p.slice(4);
   return p;

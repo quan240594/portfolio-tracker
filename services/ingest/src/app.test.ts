@@ -143,6 +143,73 @@ describe('ingest handler', () => {
     expect(store.imp('demo', 'imp1')!.rowCount).toBe(150);
   });
 
+  describe('refs within one message', () => {
+    const multiBody = (...keys: string[]) =>
+      JSON.stringify({
+        Records: keys.map((key) => ({ eventName: 'ObjectCreated:Put', s3: { bucket: { name: BUCKET }, object: { key } } })),
+      });
+    const csvFor = (symbol: string) => `${HEADER}\n2025-01-02,BUY,${symbol},1,10,0,USD,\n`;
+
+    function multiSetup(refs: [userId: string, importId: string][]) {
+      const ctx = fakeIngestDeps();
+      for (const [userId, importId] of refs) {
+        ctx.store.addImport(userId, importId);
+        ctx.reader.objects.set(`${BUCKET}/imports/${userId}/${importId}.csv`, csvFor('AAPL'));
+      }
+      const handler = createHandler(() => ctx.deps);
+      const body = multiBody(...refs.map(([u, i]) => `imports/${u}/${i}.csv`));
+      return { ...ctx, handler, body };
+    }
+
+    it('processes the refs of one user strictly in order while other users run concurrently', async () => {
+      const { handler, reader, body, store } = multiSetup([['alice', 'a1'], ['alice', 'a2'], ['bob', 'b1']]);
+      const trace: string[] = [];
+      const gates = new Map<string, () => void>();
+      const original = reader.readText.bind(reader);
+      reader.readText = async (bucket, key, max) => {
+        trace.push(`start ${key}`);
+        // alice's first import only finishes after bob's has started, proving the groups overlap.
+        if (key.endsWith('alice/a1.csv')) await new Promise<void>((resolve) => gates.set('a1', resolve));
+        if (key.endsWith('bob/b1.csv')) gates.get('a1')!();
+        const res = await original(bucket, key, max);
+        trace.push(`end ${key}`);
+        return res;
+      };
+      const res = await handler(sqsEvent(body));
+      expect(res.batchItemFailures).toEqual([]);
+      const idx = (entry: string) => trace.indexOf(entry);
+      expect(idx('start imports/bob/b1.csv')).toBeLessThan(idx('end imports/alice/a1.csv'));
+      expect(idx('end imports/alice/a1.csv')).toBeLessThan(idx('start imports/alice/a2.csv'));
+      for (const [u, i] of [['alice', 'a1'], ['alice', 'a2'], ['bob', 'b1']]) expect(store.imp(u!, i!)!.status).toBe('COMPLETED');
+    });
+
+    it('stops a user group at its first failure but lets other groups finish, then retries the message', async () => {
+      const { handler, store, body } = multiSetup([['alice', 'a1'], ['alice', 'a2'], ['bob', 'b1']]);
+      const original = store.markProcessing.bind(store);
+      store.markProcessing = async (userId, importId) => {
+        if (importId === 'a1') throw Object.assign(new Error('Rate exceeded'), { name: 'ThrottlingException' });
+        return original(userId, importId);
+      };
+      const error = vi.spyOn(logger, 'error');
+      const res = await handler(sqsEvent(body, eventBridgeBody(BUCKET, 'other/x.csv')));
+      expect(res.batchItemFailures).toEqual([{ itemIdentifier: 'm1' }]);
+      expect(error).toHaveBeenCalledWith('Transient failure; message will be retried', { messageId: 'm1', error: expect.objectContaining({ message: 'Rate exceeded' }) });
+      expect(store.imp('alice', 'a1')!.status).toBe('PENDING');
+      expect(store.imp('alice', 'a2')!.status).toBe('PENDING');
+      expect(store.imp('bob', 'b1')!.status).toBe('COMPLETED');
+      error.mockRestore();
+    });
+
+    it('reports the first failure in message order when several groups fail', async () => {
+      const { handler, store, body } = multiSetup([['alice', 'a1'], ['bob', 'b1']]);
+      store.markProcessing = (userId) => Promise.reject(new Error(`boom ${userId}`));
+      const error = vi.spyOn(logger, 'error');
+      await handler(sqsEvent(body));
+      expect(error).toHaveBeenCalledWith(expect.any(String), { messageId: 'm1', error: expect.objectContaining({ message: 'boom alice' }) });
+      error.mockRestore();
+    });
+  });
+
   describe('logging context and acknowledgement', () => {
     afterEach(() => vi.restoreAllMocks());
 

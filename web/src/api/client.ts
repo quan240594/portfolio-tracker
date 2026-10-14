@@ -65,21 +65,26 @@ export async function request<T>(
   }
 
   if (res.status === 204) return undefined as T;
-  const text = await res.text();
-  let data: unknown = undefined;
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      if (res.ok) throw new ApiError(res.status, 'INVALID_RESPONSE', 'The server returned an invalid response.');
-    }
-  }
+  const data = await parseBody(res);
 
-  if (!res.ok) {
-    if (isErrorBody(data)) throw new ApiError(res.status, data.error.code, data.error.message, data.error.details);
-    throw new ApiError(res.status, `HTTP_${res.status}`, res.statusText || `Request failed with status ${res.status}`);
-  }
+  if (!res.ok) throw toApiError(res, data);
   return data as T;
+}
+
+async function parseBody(res: Response): Promise<unknown> {
+  const text = await res.text();
+  if (!text) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    if (res.ok) throw new ApiError(res.status, 'INVALID_RESPONSE', 'The server returned an invalid response.');
+    return undefined;
+  }
+}
+
+function toApiError(res: Response, data: unknown): ApiError {
+  if (isErrorBody(data)) return new ApiError(res.status, data.error.code, data.error.message, data.error.details);
+  return new ApiError(res.status, `HTTP_${res.status}`, res.statusText || `Request failed with status ${res.status}`);
 }
 
 export const api = {
@@ -99,22 +104,12 @@ export const api = {
     request<GetImportResponse>('GET', `/imports/${encodeURIComponent(id)}`, { signal }),
 };
 
-function readText(blob: Blob): Promise<string> {
-  if (typeof blob.text === 'function') return blob.text();
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ''));
-    reader.onerror = () => reject(reader.error ?? new Error('Could not read file'));
-    reader.readAsText(blob);
-  });
-}
-
 /** Upload raw CSV to the presigned S3 URL returned by POST /imports. */
 export async function uploadCsv(uploadUrl: string, file: Blob): Promise<void> {
   let body: string;
   try {
     // Send the text (files are capped at 1 MB) so the body is serialised identically across runtimes.
-    body = await readText(file);
+    body = await file.text();
   } catch {
     throw new ApiError(0, 'FILE_READ_FAILED', 'The selected file could not be read.');
   }

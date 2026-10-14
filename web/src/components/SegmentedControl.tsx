@@ -18,7 +18,7 @@ interface Props<T extends string> {
 }
 
 /** Roving-tabindex segmented control with arrow/Home/End keyboard support. */
-export function SegmentedControl<T extends string>({ options, value, onChange, label, variant = 'radio', panelId, idPrefix, size = 'sm' }: Props<T>) {
+export function SegmentedControl<T extends string>({ options, value, onChange, label, variant = 'radio', panelId, idPrefix, size = 'sm' }: Readonly<Props<T>>) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const isTabs = variant === 'tabs';
 

@@ -103,6 +103,15 @@ class DailyQuota:
 Opener = Callable[..., Any]
 
 
+class _RetryAttemptError(Exception):
+    """A failed attempt that may be retried (carries the final error and any Retry-After header)."""
+
+    def __init__(self, error: ProviderError, retry_after: str | None) -> None:
+        super().__init__(str(error))
+        self.error = error
+        self.retry_after = retry_after
+
+
 class HttpClient:
     def __init__(
         self,
@@ -130,7 +139,64 @@ class HttpClient:
             except ValueError:
                 pass
         delay = min(self.backoff_max, self.backoff_base * (2**attempt))
-        return delay / 2 + random.uniform(0, delay / 2)  # noqa: S311 - jitter, not crypto
+        # jitter, not crypto
+        return delay / 2 + random.uniform(0, delay / 2)  # noqa: S311
+
+    def _parse_body(self, body: bytes, safe_url: str, symbol: str | None) -> Any:
+        try:
+            return json.loads(body) if body else None
+        except ValueError as exc:
+            raise ProviderError(
+                f"{self.provider}: invalid JSON from {safe_url}", provider=self.provider, symbol=symbol
+            ) from exc
+
+    def _http_failure(
+        self, exc: urllib.error.HTTPError, safe_url: str, symbol: str | None
+    ) -> _RetryAttemptError:
+        """Raises for 404 / non-retryable statuses; otherwise returns the retryable failure."""
+        status = exc.code
+        retry_after = exc.headers.get("Retry-After") if exc.headers else None
+        exc.close()
+        if status == 404:
+            raise SymbolNotFoundError(
+                f"{self.provider}: 404 for {safe_url}", provider=self.provider, symbol=symbol, status=404
+            ) from None
+        message = f"{self.provider}: HTTP {status} for {safe_url}"
+        if status not in RETRY_STATUSES:
+            raise ProviderError(message, provider=self.provider, symbol=symbol, status=status) from None
+        cls = RateLimitError if status == 429 else RetryableProviderError
+        return _RetryAttemptError(
+            cls(message, provider=self.provider, symbol=symbol, status=status), retry_after
+        )
+
+    def _attempt(self, full: str, headers: Mapping[str, str], safe_url: str, symbol: str | None) -> Any:
+        """One request. Returns the parsed JSON; raises ProviderError (terminal) or _RetryAttemptError."""
+        started = time.monotonic()
+        try:
+            request = urllib.request.Request(full, headers=dict(headers), method="GET")  # noqa: S310
+            with self._opener(request, timeout=self.timeout) as resp:
+                body = resp.read()
+            log.debug(
+                "http ok",
+                extra={
+                    "provider": self.provider,
+                    "url": safe_url,
+                    "ms": int((time.monotonic() - started) * 1000),
+                },
+            )
+            return self._parse_body(body, safe_url, symbol)
+        except urllib.error.HTTPError as exc:
+            raise self._http_failure(exc, safe_url, symbol) from None
+        except OSError as exc:  # URLError, TimeoutError and ConnectionError are all OSError subclasses
+            reason = getattr(exc, "reason", exc)
+            raise _RetryAttemptError(
+                RetryableProviderError(
+                    f"{self.provider}: network error for {safe_url}: {type(reason).__name__}",
+                    provider=self.provider,
+                    symbol=symbol,
+                ),
+                None,
+            ) from None
 
     def get_json(
         self,
@@ -149,72 +215,22 @@ class HttpClient:
         last_error: ProviderError | None = None
 
         for attempt in range(self.max_retries + 1):
-            retry_after: str | None = None
-            started = time.monotonic()
             try:
-                request = urllib.request.Request(full, headers=req_headers, method="GET")  # noqa: S310
-                with self._opener(request, timeout=self.timeout) as resp:
-                    body = resp.read()
-                log.debug(
-                    "http ok",
-                    extra={
-                        "provider": self.provider,
-                        "url": safe_url,
-                        "ms": int((time.monotonic() - started) * 1000),
-                    },
-                )
-                try:
-                    return json.loads(body) if body else None
-                except ValueError as exc:
-                    raise ProviderError(
-                        f"{self.provider}: invalid JSON from {safe_url}",
-                        provider=self.provider,
-                        symbol=symbol,
-                    ) from exc
-            except urllib.error.HTTPError as exc:
-                status = exc.code
-                retry_after = exc.headers.get("Retry-After") if exc.headers else None
-                exc.close()
-                if status == 404:
-                    raise SymbolNotFoundError(
-                        f"{self.provider}: 404 for {safe_url}",
-                        provider=self.provider,
-                        symbol=symbol,
-                        status=404,
-                    ) from None
-                if status not in RETRY_STATUSES:
-                    raise ProviderError(
-                        f"{self.provider}: HTTP {status} for {safe_url}",
-                        provider=self.provider,
-                        symbol=symbol,
-                        status=status,
-                    ) from None
-                cls = RateLimitError if status == 429 else RetryableProviderError
-                last_error = cls(
-                    f"{self.provider}: HTTP {status} for {safe_url}",
-                    provider=self.provider,
-                    symbol=symbol,
-                    status=status,
-                )
-            except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
-                reason = getattr(exc, "reason", exc)
-                last_error = RetryableProviderError(
-                    f"{self.provider}: network error for {safe_url}: {type(reason).__name__}",
-                    provider=self.provider,
-                    symbol=symbol,
-                )
-            if attempt < self.max_retries:
-                delay = self._backoff(attempt, retry_after)
-                log.warning(
-                    "http retry",
-                    extra={
-                        "provider": self.provider,
-                        "url": safe_url,
-                        "attempt": attempt + 1,
-                        "delaySeconds": round(delay, 2),
-                        "error": str(last_error),
-                    },
-                )
-                self._sleep(delay)
+                return self._attempt(full, req_headers, safe_url, symbol)
+            except _RetryAttemptError as failure:
+                last_error = failure.error
+                if attempt < self.max_retries:
+                    delay = self._backoff(attempt, failure.retry_after)
+                    log.warning(
+                        "http retry",
+                        extra={
+                            "provider": self.provider,
+                            "url": safe_url,
+                            "attempt": attempt + 1,
+                            "delaySeconds": round(delay, 2),
+                            "error": str(last_error),
+                        },
+                    )
+                    self._sleep(delay)
         assert last_error is not None
         raise last_error

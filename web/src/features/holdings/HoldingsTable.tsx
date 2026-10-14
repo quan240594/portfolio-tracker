@@ -28,10 +28,13 @@ const COLUMNS: Column[] = [
   { key: 'weight', label: 'Weight', align: 'right' },
 ];
 
+const sortLabel = (dir: SortDir) => (dir === 'asc' ? 'ascending' : 'descending');
+const sortArrow = (dir: SortDir) => (dir === 'asc' ? '▲' : '▼');
+
 const unitDigits = (price: number) => (price < 1 ? 6 : 2);
 
 /** Per-unit amount in the base currency, with the trading-currency amount underneath for foreign holdings. */
-function UnitAmount({ base, local, holding, currency }: { base: number; local: number; holding: Holding; currency: string }) {
+function UnitAmount({ base, local, holding, currency }: Readonly<{ base: number; local: number; holding: Holding; currency: string }>) {
   return (
     <>
       <span className="block">{formatMoney(base, currency, { maxDigits: unitDigits(holding.priceBase) })}</span>
@@ -44,7 +47,7 @@ function UnitAmount({ base, local, holding, currency }: { base: number; local: n
   );
 }
 
-function CurrencyEffect({ holding, currency }: { holding: Holding; currency: string }) {
+function CurrencyEffect({ holding, currency }: Readonly<{ holding: Holding; currency: string }>) {
   if (holding.currency === currency) {
     return (
       <span className="muted" title={`No currency effect: ${holding.symbol} trades in ${currency}`}>
@@ -74,7 +77,7 @@ export function StaleBadge() {
   );
 }
 
-function WeightBar({ weight }: { weight: number }) {
+function WeightBar({ weight }: Readonly<{ weight: number }>) {
   return (
     <div className="flex items-center justify-end gap-2">
       <div className="hidden h-1.5 w-16 overflow-hidden rounded-full bg-slate-200 lg:block dark:bg-slate-800" aria-hidden="true">
@@ -90,7 +93,7 @@ interface Props {
   currency: string;
 }
 
-export function HoldingsTable({ holdings, currency }: Props) {
+export function HoldingsTable({ holdings, currency }: Readonly<Props>) {
   const hintId = useId();
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'marketValue', dir: 'desc' });
   const sorted = useMemo(() => sortHoldings(holdings, sort.key, sort.dir), [holdings, sort]);
@@ -103,7 +106,7 @@ export function HoldingsTable({ holdings, currency }: Props) {
       {/* Desktop / tablet */}
       <div className="card hidden overflow-x-auto md:block">
         <table className="w-full text-sm">
-          <caption className="sr-only">Holdings, sorted by {COLUMNS.find((c) => c.key === sort.key)?.label} {sort.dir === 'asc' ? 'ascending' : 'descending'}</caption>
+          <caption className="sr-only">Holdings, sorted by {COLUMNS.find((c) => c.key === sort.key)?.label} {sortLabel(sort.dir)}</caption>
           <thead>
             <tr className="border-b border-slate-200 dark:border-slate-800">
               {COLUMNS.map((col) => {
@@ -112,7 +115,7 @@ export function HoldingsTable({ holdings, currency }: Props) {
                   <th
                     key={col.key}
                     scope="col"
-                    aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                    aria-sort={active ? sortLabel(sort.dir) : 'none'}
                     className={`px-3 py-2.5 font-medium whitespace-nowrap ${col.align === 'right' ? 'text-right' : 'text-left'}`}
                   >
                     <button
@@ -124,7 +127,7 @@ export function HoldingsTable({ holdings, currency }: Props) {
                     >
                       {col.label}
                       <span aria-hidden="true" className={`text-[10px] ${active ? '' : 'opacity-30'}`}>
-                        {active ? (sort.dir === 'asc' ? '▲' : '▼') : '▲▼'}
+                        {active ? sortArrow(sort.dir) : '▲▼'}
                       </span>
                     </button>
                   </th>

@@ -23,13 +23,19 @@ MEAN_REVERSION = 0.02
 EQUITY_VOL = 0.012
 CRYPTO_VOL = 0.03
 
+ASML = "ASML.AS"
+VWRL = "VWRL.AS"
+IWDA = "IWDA.AS"
+SAP = "SAP.DE"
+EURONEXT_AMSTERDAM = "Euronext Amsterdam"
+
 BASE_PRICES: dict[str, float] = {
     "AAPL": 230.0,
     "MSFT": 420.0,
-    "ASML.AS": 700.0,
-    "VWRL.AS": 120.0,
-    "IWDA.AS": 95.0,
-    "SAP.DE": 230.0,
+    ASML: 700.0,
+    VWRL: 120.0,
+    IWDA: 95.0,
+    SAP: 230.0,
     "BTC-EUR": 60000.0,
     "BTC-USD": 65000.0,
     "ETH-EUR": 3000.0,
@@ -44,27 +50,27 @@ PROFILES: dict[str, InstrumentProfile] = {
             "MSFT", "Microsoft Corporation", "STOCK", "USD", "Technology", "United States", "NASDAQ"
         ),
         InstrumentProfile(
-            "ASML.AS", "ASML Holding N.V.", "STOCK", "EUR", "Technology", "Netherlands", "Euronext Amsterdam"
+            ASML, "ASML Holding N.V.", "STOCK", "EUR", "Technology", "Netherlands", EURONEXT_AMSTERDAM
         ),
         InstrumentProfile(
-            "VWRL.AS",
+            VWRL,
             "Vanguard FTSE All-World UCITS ETF",
             "ETF",
             "EUR",
             "Diversified",
             "Global",
-            "Euronext Amsterdam",
+            EURONEXT_AMSTERDAM,
         ),
         InstrumentProfile(
-            "IWDA.AS",
+            IWDA,
             "iShares Core MSCI World UCITS ETF",
             "ETF",
             "EUR",
             "Diversified",
             "Global",
-            "Euronext Amsterdam",
+            EURONEXT_AMSTERDAM,
         ),
-        InstrumentProfile("SAP.DE", "SAP SE", "STOCK", "EUR", "Technology", "Germany", "XETRA"),
+        InstrumentProfile(SAP, "SAP SE", "STOCK", "EUR", "Technology", "Germany", "XETRA"),
         InstrumentProfile("BTC-EUR", "Bitcoin", "CRYPTO", "EUR"),
     )
 }
@@ -73,11 +79,11 @@ PROFILES: dict[str, InstrumentProfile] = {
 DIVIDEND_SCHEDULES: dict[str, tuple[tuple[int, ...], int, float, int]] = {
     "AAPL": ((2, 5, 8, 11), 10, 0.26, 4),
     "MSFT": ((2, 5, 8, 11), 15, 0.83, 28),
-    "ASML.AS": ((2, 4, 7, 10), 28, 1.60, 7),
-    "VWRL.AS": ((3, 6, 9, 12), 18, 0.45, 14),
-    "SAP.DE": ((5,), 15, 2.35, 4),
+    ASML: ((2, 4, 7, 10), 28, 1.60, 7),
+    VWRL: ((3, 6, 9, 12), 18, 0.45, 14),
+    SAP: ((5,), 15, 2.35, 4),
 }
-NON_PAYERS = frozenset({"IWDA.AS"})
+NON_PAYERS = frozenset({IWDA})
 
 MOCK_FX_RATES: dict[str, float] = {
     "USD": 1.085,
@@ -152,9 +158,9 @@ class MockProvider:
             out[symbol] = Quote(
                 symbol=symbol,
                 price=self.price_on(symbol, last),
-                previousClose=self.price_on(symbol, prev),
+                previous_close=self.price_on(symbol, prev),
                 currency=currency_for(symbol),
-                asOf=iso_datetime(as_of),
+                as_of=iso_datetime(as_of),
                 source=self.name,
             )
         return out
@@ -179,11 +185,11 @@ class MockProvider:
         if symbol in PROFILES:
             return PROFILES[symbol]
         profile = minimal_profile(symbol)
-        if profile.assetClass == "OTHER":
+        if profile.asset_class == "OTHER":
             return InstrumentProfile(
                 symbol=symbol,
                 name=f"{symbol} (mock)",
-                assetClass="STOCK",
+                asset_class="STOCK",
                 currency=profile.currency,
                 sector="Unknown",
                 country=profile.country,
@@ -215,8 +221,8 @@ class MockProvider:
                     out.append(
                         DividendEvent(
                             symbol=symbol,
-                            exDate=ex.isoformat(),
-                            payDate=(ex + timedelta(days=pay_delay)).isoformat(),
+                            ex_date=ex.isoformat(),
+                            pay_date=(ex + timedelta(days=pay_delay)).isoformat(),
                             amount=amount,
                             currency=currency,
                         )
@@ -266,7 +272,7 @@ class MockFx:
     def get_latest(self, base: str) -> FxRates:
         now = self._now()
         day = _last_business_day(now.astimezone(UTC).date())
-        return FxRates(base=base, rates=self._rates(base, day), asOf=iso_datetime(now), date=day.isoformat())
+        return FxRates(base=base, rates=self._rates(base, day), as_of=iso_datetime(now), date=day.isoformat())
 
     def get_history(self, base: str, start: date, end: date) -> list[FxDay]:
         end = min(end, self._now().astimezone(UTC).date())

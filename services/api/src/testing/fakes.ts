@@ -27,62 +27,70 @@ export class InMemoryRepository implements Repository {
   tracked = new Map<string, string>();
   imports = new Map<string, ImportStatus>();
 
-  async listTransactions(userId: string) {
-    return this.transactions.filter((t) => t.userId === userId).map((t) => ({ ...t }));
+  listTransactions(userId: string) {
+    return Promise.resolve(this.transactions.filter((t) => t.userId === userId).map((t) => ({ ...t })));
   }
-  async findTransaction(userId: string, id: string) {
-    return this.transactions.find((t) => t.userId === userId && t.id === id) ?? null;
+  findTransaction(userId: string, id: string) {
+    return Promise.resolve(this.transactions.find((t) => t.userId === userId && t.id === id) ?? null);
   }
-  async putTransaction(txn: Transaction) {
+  putTransaction(txn: Transaction) {
     this.transactions.push(txn);
+    return Promise.resolve();
   }
-  async deleteTransaction(txn: Transaction) {
+  deleteTransaction(txn: Transaction) {
     this.transactions = this.transactions.filter((t) => !(t.userId === txn.userId && t.id === txn.id));
+    return Promise.resolve();
   }
-  async getQuotes(symbols: string[]) {
-    return Object.fromEntries(symbols.filter((s) => this.quotes[s]).map((s) => [s, this.quotes[s]!]));
+  getQuotes(symbols: string[]) {
+    return Promise.resolve(Object.fromEntries(symbols.filter((s) => this.quotes[s]).map((s) => [s, this.quotes[s]!])));
   }
-  async getProfiles(symbols: string[]) {
-    return Object.fromEntries(symbols.filter((s) => this.profiles[s]).map((s) => [s, this.profiles[s]!]));
+  getProfiles(symbols: string[]) {
+    return Promise.resolve(Object.fromEntries(symbols.filter((s) => this.profiles[s]).map((s) => [s, this.profiles[s]!])));
   }
-  async getFx(base: string) {
-    return this.fx && this.fx.base === base ? this.fx : null;
+  getFx(base: string) {
+    return Promise.resolve(this.fx?.base === base ? this.fx : null);
   }
-  async getFxHistory(base: string, from: string, to: string) {
-    return this.fxDays
-      .filter((d) => d.base === base && d.date >= from && d.date <= to)
-      .sort((a, b) => a.date.localeCompare(b.date));
+  getFxHistory(base: string, from: string, to: string) {
+    return Promise.resolve(
+      this.fxDays
+        .filter((d) => d.base === base && d.date >= from && d.date <= to)
+        .sort((a, b) => a.date.localeCompare(b.date)),
+    );
   }
-  async getEod(symbol: string, from: string, to: string) {
-    return this.eod.filter((e) => e.symbol === symbol && e.date >= from && e.date <= to);
+  getEod(symbol: string, from: string, to: string) {
+    return Promise.resolve(this.eod.filter((e) => e.symbol === symbol && e.date >= from && e.date <= to));
   }
-  async getDividendEvents(symbol: string) {
-    return this.dividendEvents.filter((e) => e.symbol === symbol);
+  getDividendEvents(symbol: string) {
+    return Promise.resolve(this.dividendEvents.filter((e) => e.symbol === symbol));
   }
-  async registerUser(userId: string) {
+  registerUser(userId: string) {
     this.users.add(userId);
+    return Promise.resolve();
   }
-  async trackTickers(tickers: { symbol: string; currency: string }[]) {
+  trackTickers(tickers: { symbol: string; currency: string }[]) {
     for (const t of tickers) this.tracked.set(t.symbol, t.currency);
+    return Promise.resolve();
   }
-  async putImport(status: ImportStatus) {
+  putImport(status: ImportStatus) {
     this.imports.set(`${status.userId}/${status.importId}`, status);
+    return Promise.resolve();
   }
-  async getImport(userId: string, importId: string) {
-    return this.imports.get(`${userId}/${importId}`) ?? null;
+  getImport(userId: string, importId: string) {
+    return Promise.resolve(this.imports.get(`${userId}/${importId}`) ?? null);
   }
 }
 
 export class RecordingPublisher implements EventPublisher {
   published: TransactionsChangedDetail[] = [];
-  async transactionsChanged(detail: TransactionsChangedDetail) {
+  transactionsChanged(detail: TransactionsChangedDetail) {
     this.published.push(detail);
+    return Promise.resolve();
   }
 }
 
 export class FakeSigner implements UploadUrlSigner {
-  async signCsvUpload(key: string, expiresInSeconds: number) {
-    return `https://bucket.example/${key}?X-Amz-Expires=${expiresInSeconds}`;
+  signCsvUpload(key: string, expiresInSeconds: number) {
+    return Promise.resolve(`https://bucket.example/${key}?X-Amz-Expires=${expiresInSeconds}`);
   }
 }
 
@@ -102,6 +110,11 @@ export function fakeDeps(overrides: Partial<Deps> = {}) {
   return { deps, repo, events };
 }
 
+const serializeBody = (body: unknown): string | undefined => {
+  if (body === undefined) return undefined;
+  return typeof body === 'string' ? body : JSON.stringify(body);
+};
+
 export function apiEvent(
   method: string,
   path: string,
@@ -114,7 +127,7 @@ export function apiEvent(
     rawQueryString: new URLSearchParams(opts.query ?? {}).toString(),
     headers: { 'content-type': 'application/json' },
     queryStringParameters: opts.query,
-    body: opts.body === undefined ? undefined : typeof opts.body === 'string' ? opts.body : JSON.stringify(opts.body),
+    body: serializeBody(opts.body),
     isBase64Encoded: false,
     requestContext: {
       accountId: '1',

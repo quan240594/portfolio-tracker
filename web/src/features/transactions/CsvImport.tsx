@@ -6,7 +6,7 @@ interface Props extends CsvImportOptions {
   onDone?: () => void;
 }
 
-export function CsvImport({ onDone, ...options }: Props) {
+export function CsvImport({ onDone, ...options }: Readonly<Props>) {
   const { state, start, reset } = useCsvImport(options);
   const [file, setFile] = useState<File | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);

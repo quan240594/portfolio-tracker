@@ -105,10 +105,10 @@ def _refresh_fx(deps: Deps) -> FxRates | None:
     try:
         fx = deps.fx.get_latest(deps.settings.base_currency)
         deps.repo.put_fx(fx)
-        log.info("fx refreshed", extra={"base": fx.base, "currencies": len(fx.rates), "asOf": fx.asOf})
+        log.info("fx refreshed", extra={"base": fx.base, "currencies": len(fx.rates), "asOf": fx.as_of})
         return fx
     except (ProviderError, ClientError, BotoCoreError) as exc:
-        log.error("fx refresh failed", extra={"error": str(exc)})
+        log.exception("fx refresh failed", extra={"error": str(exc)})
         return None
 
 
@@ -151,13 +151,11 @@ def _store_fx_days(deps: Deps, latest: FxRates | None, today: date) -> tuple[int
         return 0, False
 
 
-def run_scheduled_refresh(deps: Deps, now: datetime) -> dict[str, Any]:
-    symbols = deps.repo.list_tracked()
-    latest_fx = _refresh_fx(deps)
-    fx_ok = latest_fx is not None
-    fx_days_written, fx_history_ok = _store_fx_days(deps, latest_fx, now.astimezone(UTC).date())
-
-    in_eu_window = amsterdam_hour(now) in deps.settings.eu_refresh_hours
+def _select_due_symbols(
+    deps: Deps, symbols: list[str], now: datetime, in_eu_window: bool
+) -> tuple[list[str], list[str]]:
+    """Split tracked symbols into (due, skipped). Exchange-listed symbols only refresh inside the EU
+    window, or when their latest quote is missing/stale."""
     skipped: list[str] = []
     due = [s for s in symbols if not has_exchange_suffix(s)]
     listed = [s for s in symbols if has_exchange_suffix(s)]
@@ -167,30 +165,46 @@ def run_scheduled_refresh(deps: Deps, now: datetime) -> dict[str, Any]:
         latest = deps.repo.latest_quotes(listed)
         for s in listed:
             q = latest.get(s)
-            if q is None or now - parse_iso_datetime(q.asOf) > STALE_AFTER:
+            if q is None or now - parse_iso_datetime(q.as_of) > STALE_AFTER:
                 due.append(s)
             else:
                 skipped.append(s)
+    return due, skipped
 
+
+def _refresh_quotes(deps: Deps, due: list[str], skipped: list[str]) -> tuple[list[str], dict[str, str]]:
+    """Fetch & store quotes for `due`; appends provider-unavailable symbols to `skipped`."""
     failed: dict[str, str] = {}
     refreshed: list[str] = []
-    if due:
+    if not due:
+        return refreshed, failed
+    try:
+        batch = fetch_quotes(deps.provider, due)
+    except Exception as exc:
+        log.exception("quote fetch crashed")
+        failed.update({s: str(exc) for s in due})
+        return refreshed, failed
+    skipped.extend(batch.unavailable)
+    failed.update({s: str(e) for s, e in batch.failed.items()})
+    for symbol, quote in batch.quotes.items():
         try:
-            batch = fetch_quotes(deps.provider, due)
-        except Exception as exc:
-            log.exception("quote fetch crashed")
-            batch = None
-            failed.update({s: str(exc) for s in due})
-        if batch is not None:
-            skipped.extend(batch.unavailable)
-            failed.update({s: str(e) for s, e in batch.failed.items()})
-            for symbol, quote in batch.quotes.items():
-                try:
-                    deps.repo.put_quote(quote)
-                    deps.repo.put_eods([eod_from_quote(quote)])
-                    refreshed.append(symbol)
-                except (ClientError, BotoCoreError) as exc:
-                    failed[symbol] = str(exc)
+            deps.repo.put_quote(quote)
+            deps.repo.put_eods([eod_from_quote(quote)])
+            refreshed.append(symbol)
+        except (ClientError, BotoCoreError) as exc:
+            failed[symbol] = str(exc)
+    return refreshed, failed
+
+
+def run_scheduled_refresh(deps: Deps, now: datetime) -> dict[str, Any]:
+    symbols = deps.repo.list_tracked()
+    latest_fx = _refresh_fx(deps)
+    fx_ok = latest_fx is not None
+    fx_days_written, fx_history_ok = _store_fx_days(deps, latest_fx, now.astimezone(UTC).date())
+
+    in_eu_window = amsterdam_hour(now) in deps.settings.eu_refresh_hours
+    due, skipped = _select_due_symbols(deps, symbols, now, in_eu_window)
+    refreshed, failed = _refresh_quotes(deps, due, skipped)
     for symbol, error in sorted(failed.items()):
         log.warning("symbol refresh failed", extra={"symbol": symbol, "error": error})
 
@@ -214,7 +228,7 @@ def run_scheduled_refresh(deps: Deps, now: datetime) -> dict[str, Any]:
 
 
 def eod_from_quote(quote: Quote) -> EodPrice:
-    day = parse_iso_datetime(quote.asOf).astimezone(UTC).date().isoformat()
+    day = parse_iso_datetime(quote.as_of).astimezone(UTC).date().isoformat()
     return EodPrice(symbol=quote.symbol, date=day, close=quote.price, currency=quote.currency)
 
 
@@ -318,27 +332,11 @@ def enrich_symbol(deps: Deps, symbol: str, now: datetime) -> bool:
     return True
 
 
-def run_enrichment(deps: Deps, event: dict[str, Any], now: datetime) -> dict[str, Any]:
-    by_message: dict[str, list[str]] = {}
-    for record in event.get("Records") or []:
-        message_id = record.get("messageId", "")
-        try:
-            by_message[message_id] = parse_symbols(record.get("body") or "")
-        except (ValueError, TypeError, AttributeError) as exc:
-            log.error("malformed message; acking", extra={"messageId": message_id, "error": str(exc)})
-
-    unique = sorted({s for symbols in by_message.values() for s in symbols})
+def _enrich_symbols(deps: Deps, symbols: list[str], now: datetime) -> tuple[list[str], set[str]]:
+    """Enrich each symbol; returns (enriched, symbols to retry)."""
     retry: set[str] = set()
     enriched: list[str] = []
-    try:
-        existing = deps.repo.symbols_with_profile(unique) if unique else set()
-    except (ClientError, BotoCoreError) as exc:
-        log.error("profile lookup failed; retrying batch", extra={"error": str(exc)})
-        return {"batchItemFailures": [{"itemIdentifier": m} for m in by_message if by_message[m]]}
-
-    for symbol in unique:
-        if symbol in existing:
-            continue
+    for symbol in symbols:
         try:
             if enrich_symbol(deps, symbol, now):
                 enriched.append(symbol)
@@ -348,7 +346,26 @@ def run_enrichment(deps: Deps, event: dict[str, Any], now: datetime) -> dict[str
         except Exception:
             log.exception("unexpected enrichment failure", extra={"symbol": symbol})
             retry.add(symbol)
+    return enriched, retry
 
+
+def run_enrichment(deps: Deps, event: dict[str, Any], now: datetime) -> dict[str, Any]:
+    by_message: dict[str, list[str]] = {}
+    for record in event.get("Records") or []:
+        message_id = record.get("messageId", "")
+        try:
+            by_message[message_id] = parse_symbols(record.get("body") or "")
+        except (ValueError, TypeError, AttributeError) as exc:
+            log.exception("malformed message; acking", extra={"messageId": message_id, "error": str(exc)})
+
+    unique = sorted({s for symbols in by_message.values() for s in symbols})
+    try:
+        existing = deps.repo.symbols_with_profile(unique) if unique else set()
+    except (ClientError, BotoCoreError) as exc:
+        log.exception("profile lookup failed; retrying batch", extra={"error": str(exc)})
+        return {"batchItemFailures": [{"itemIdentifier": m} for m in by_message if by_message[m]]}
+
+    enriched, retry = _enrich_symbols(deps, [s for s in unique if s not in existing], now)
     if enriched:
         deps.publisher.prices_updated(enriched, iso_datetime(now), "enrichment")
     failures = [{"itemIdentifier": m} for m, symbols in by_message.items() if retry.intersection(symbols)]

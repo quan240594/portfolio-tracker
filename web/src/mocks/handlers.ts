@@ -20,7 +20,7 @@ const errorResponse = (status: number, code: string, message: string, details?: 
   HttpResponse.json<ApiError>({ error: { code, message, ...(details !== undefined ? { details } : {}) } }, { status });
 
 async function latency() {
-  if (import.meta.env.MODE !== 'test') await delay(150 + Math.random() * 250);
+  if (import.meta.env.MODE !== 'test') await delay(150 + (crypto.getRandomValues(new Uint32Array(1))[0]! / 2 ** 32) * 250);
 }
 
 function guard<T>(fn: () => T | Promise<T>) {

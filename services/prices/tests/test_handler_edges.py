@@ -90,7 +90,7 @@ class FakeProvider:
 
 def deps(repo: FakeRepo, provider: FakeProvider) -> Any:
     fx = SimpleNamespace(
-        get_latest=lambda base: FxRates(base=base, asOf="t", rates={"USD": 1.1}),
+        get_latest=lambda base: FxRates(base=base, as_of="t", rates={"USD": 1.1}),
         get_history=lambda base, start, end: [],
     )
     publisher = SimpleNamespace(prices_updated=lambda *a: True)
@@ -114,7 +114,7 @@ def test_refresh_with_only_us_symbols_outside_window_and_storage_failure() -> No
 def test_quote_from_history_handles_empty_and_single_row() -> None:
     assert handlers._quote_from_history("A", [], "fake") is None
     q = handlers._quote_from_history("A", [EodPrice("A", "2026-10-12", 5.0, "EUR")], "fake")
-    assert q is not None and (q.price, q.previousClose, q.source) == (5.0, 5.0, "fake-eod")
+    assert q is not None and (q.price, q.previous_close, q.source) == (5.0, 5.0, "fake-eod")
 
 
 def test_enrich_unknown_profile_falls_back_and_no_quote_or_history_is_fine() -> None:

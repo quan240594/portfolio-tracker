@@ -23,7 +23,7 @@ export function fillMonths(monthly: Monthly): Monthly {
   return out;
 }
 
-export function DividendBarChart({ monthly: raw, currency }: { monthly: Monthly; currency: string }) {
+export function DividendBarChart({ monthly: raw, currency }: Readonly<{ monthly: Monthly; currency: string }>) {
   const monthly = fillMonths(raw);
   const { theme } = useTheme();
   const c = chartTheme(theme);

@@ -54,7 +54,7 @@ def test_scheduled_refresh_writes_exact_items_and_emits_event(infra: Infra) -> N
         "entityType": "QUOTE",
         "symbol": "AAPL",
         "price": Decimal(repr(expected["AAPL"].price)),
-        "previousClose": Decimal(repr(expected["AAPL"].previousClose)),
+        "previousClose": Decimal(repr(expected["AAPL"].previous_close)),
         "currency": "USD",
         "asOf": "2026-10-13T16:30:00.000Z",
         "source": "mock",

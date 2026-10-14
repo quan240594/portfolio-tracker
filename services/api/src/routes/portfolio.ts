@@ -16,7 +16,6 @@ import {
   type GetHistoryResponse,
   type GetHoldingsResponse,
   type GetPortfolioResponse,
-  type IsoDate,
   type Transaction,
   type ValuePoint,
 } from '@portfolio/shared';
@@ -29,8 +28,8 @@ const EOD_LOOKBACK_DAYS = 14;
 /** Days of ECB fixings loaded before the first transaction, so a trade on a weekend/holiday still has a prior fixing. */
 export const FX_LOOKBACK_DAYS = 7;
 
-const isoDay = (d: Date): IsoDate => d.toISOString().slice(0, 10);
-const addDays = (date: IsoDate, days: number): IsoDate => {
+const isoDay = (d: Date): string => d.toISOString().slice(0, 10);
+const addDays = (date: string, days: number): string => {
   const d = new Date(`${date}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return isoDay(d);
@@ -58,7 +57,7 @@ async function loadFx(deps: Deps, transactions: readonly Transaction[]): Promise
   const today = isoDay(deps.now());
   // Base-currency-only portfolios never convert anything, so they skip the history query.
   const needsHistory = transactions.some((t) => t.currency !== base);
-  const first = transactions.reduce<IsoDate>((min, t) => (t.date < min ? t.date : min), today);
+  const first = transactions.reduce<string>((min, t) => (t.date < min ? t.date : min), today);
   const [latest, fxHistory] = await Promise.all([
     deps.repo.getFx(base),
     needsHistory ? deps.repo.getFxHistory(base, addDays(first, -FX_LOOKBACK_DAYS), today) : [],

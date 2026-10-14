@@ -14,7 +14,7 @@ interface Props {
 }
 
 /** Gain/loss indicator: colour + arrow + explicit sign, so colour is never the only signal. */
-export function Change({ value, amount, pct, currency = BASE_CURRENCY, className = '' }: Props) {
+export function Change({ value, amount, pct, currency = BASE_CURRENCY, className = '' }: Readonly<Props>) {
   const trend = trendOf(value ?? amount ?? pct ?? 0);
   return (
     <span className={`inline-flex items-center gap-1 whitespace-nowrap font-medium tabular-nums ${trendClass[trend]} ${className}`}>

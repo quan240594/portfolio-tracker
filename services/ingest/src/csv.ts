@@ -3,8 +3,8 @@ import { CSV_COLUMNS, csvRowSchema, type TransactionInput } from '@portfolio/sha
 
 export const MAX_ROWS = 5000;
 export const MAX_ERRORS = 100;
-const OPTIONAL_COLUMNS: readonly string[] = ['note', 'fxRate'];
-const REQUIRED_COLUMNS = CSV_COLUMNS.filter((c) => !OPTIONAL_COLUMNS.includes(c));
+const OPTIONAL_COLUMNS: ReadonlySet<string> = new Set(['note', 'fxRate']);
+const REQUIRED_COLUMNS = CSV_COLUMNS.filter((c) => !OPTIONAL_COLUMNS.has(c));
 /** Lower-cased header name -> canonical column name (e.g. `fxrate` -> `fxRate`). */
 const CANONICAL_COLUMNS = new Map<string, string>(CSV_COLUMNS.map((c) => [c.toLowerCase(), c]));
 const canonicalColumn = (name: string) => {

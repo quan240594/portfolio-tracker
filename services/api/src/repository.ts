@@ -63,30 +63,29 @@ export class DynamoRepository implements Repository {
     private readonly tableName: string,
   ) {}
 
-  private async queryAll(input: Omit<QueryCommandInput, 'TableName'>): Promise<Record<string, unknown>[]> {
-    const items: Record<string, unknown>[] = [];
-    let ExclusiveStartKey: Record<string, unknown> | undefined;
-    do {
-      const res = await this.doc.send(new QueryCommand({ ...input, TableName: this.tableName, ExclusiveStartKey }));
-      items.push(...((res.Items ?? []) as Record<string, unknown>[]));
-      ExclusiveStartKey = res.LastEvaluatedKey;
-    } while (ExclusiveStartKey);
-    return items;
+  private async queryAll(
+    input: Omit<QueryCommandInput, 'TableName'>,
+    ExclusiveStartKey?: Record<string, unknown>,
+  ): Promise<Record<string, unknown>[]> {
+    const res = await this.doc.send(new QueryCommand({ ...input, TableName: this.tableName, ExclusiveStartKey }));
+    const items = (res.Items ?? []) as Record<string, unknown>[];
+    // Pages depend on the previous page's cursor, so they are fetched sequentially.
+    return res.LastEvaluatedKey ? [...items, ...(await this.queryAll(input, res.LastEvaluatedKey))] : items;
   }
 
   private async batchGet(keyList: { PK: string; SK: string }[]): Promise<Record<string, unknown>[]> {
-    const out: Record<string, unknown>[] = [];
-    for (const part of chunk(keyList, 100)) {
-      let pending: Record<string, unknown>[] | undefined = part;
-      for (let attempt = 0; pending && pending.length > 0; attempt++) {
-        if (attempt > 8) throw new Error('BatchGet: unprocessed keys remain after retries');
-        if (attempt > 0) await sleep(Math.min(50 * 2 ** attempt, 2000));
-        const res = await this.doc.send(new BatchGetCommand({ RequestItems: { [this.tableName]: { Keys: pending } } }));
-        out.push(...((res.Responses?.[this.tableName] ?? []) as Record<string, unknown>[]));
-        pending = res.UnprocessedKeys?.[this.tableName]?.Keys as Record<string, unknown>[] | undefined;
-      }
-    }
-    return out;
+    const parts = await Promise.all(chunk(keyList, 100).map((part) => this.batchGetChunk(part)));
+    return parts.flat();
+  }
+
+  /** Retries unprocessed keys with exponential backoff; each retry depends on the previous response. */
+  private async batchGetChunk(pending: Record<string, unknown>[], attempt = 0): Promise<Record<string, unknown>[]> {
+    if (attempt > 8) throw new Error('BatchGet: unprocessed keys remain after retries');
+    if (attempt > 0) await sleep(Math.min(50 * 2 ** attempt, 2000));
+    const res = await this.doc.send(new BatchGetCommand({ RequestItems: { [this.tableName]: { Keys: pending } } }));
+    const out = (res.Responses?.[this.tableName] ?? []) as Record<string, unknown>[];
+    const unprocessed = res.UnprocessedKeys?.[this.tableName]?.Keys as Record<string, unknown>[] | undefined;
+    return unprocessed && unprocessed.length > 0 ? [...out, ...(await this.batchGetChunk(unprocessed, attempt + 1))] : out;
   }
 
   async listTransactions(userId: string): Promise<Transaction[]> {
@@ -187,17 +186,19 @@ export class DynamoRepository implements Repository {
 
   async trackTickers(tickers: { symbol: string; currency: string }[]): Promise<void> {
     const now = new Date().toISOString();
-    for (const t of tickers) {
-      await this.doc.send(
-        new UpdateCommand({
-          TableName: this.tableName,
-          Key: keys.trackedTicker(t.symbol),
-          UpdateExpression:
-            'SET entityType = :t, symbol = :s, currency = if_not_exists(currency, :c), updatedAt = :now, createdAt = if_not_exists(createdAt, :now)',
-          ExpressionAttributeValues: { ':t': ENTITY.trackedTicker, ':s': t.symbol, ':c': t.currency, ':now': now },
-        }),
-      );
-    }
+    await Promise.all(
+      tickers.map((t) =>
+        this.doc.send(
+          new UpdateCommand({
+            TableName: this.tableName,
+            Key: keys.trackedTicker(t.symbol),
+            UpdateExpression:
+              'SET entityType = :t, symbol = :s, currency = if_not_exists(currency, :c), updatedAt = :now, createdAt = if_not_exists(createdAt, :now)',
+            ExpressionAttributeValues: { ':t': ENTITY.trackedTicker, ':s': t.symbol, ':c': t.currency, ':now': now },
+          }),
+        ),
+      ),
+    );
   }
 
   async putImport(status: ImportStatus): Promise<void> {

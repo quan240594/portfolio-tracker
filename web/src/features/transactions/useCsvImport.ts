@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { createImportSchema, type ImportStatus } from '@portfolio/shared';
 import { ApiError, api, errorMessage, uploadCsv } from '../../api/client';
 import { invalidatePortfolioData } from '../../api/hooks';
@@ -20,6 +20,48 @@ export interface CsvImportOptions {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function fileError(file: File): string | undefined {
+  const nameCheck = createImportSchema.safeParse({ fileName: file.name });
+  if (!nameCheck.success) return nameCheck.error.issues[0]?.message ?? 'Invalid file name';
+  if (file.size > MAX_CSV_BYTES) return 'The file is larger than 1 MB.';
+  return undefined;
+}
+
+interface PollContext extends Required<CsvImportOptions> {
+  importId: string;
+  fileName: string;
+  alive: () => boolean;
+  setState: (state: ImportState) => void;
+  qc: QueryClient;
+}
+
+async function pollImport({ importId, fileName, alive, setState, qc, pollIntervalMs, timeoutMs }: PollContext): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (alive()) {
+    await sleep(pollIntervalMs);
+    if (!alive()) return;
+    const status = await api.getImport(importId);
+    if (!alive()) return;
+    if (status.status === 'COMPLETED') {
+      setState({ phase: 'completed', result: status });
+      await invalidatePortfolioData(qc);
+      return;
+    }
+    if (status.status === 'FAILED') {
+      setState({ phase: 'failed', result: status });
+      return;
+    }
+    if (Date.now() >= deadline) {
+      setState({
+        phase: 'error',
+        message: 'The import is taking longer than expected. It may still complete — check your transactions in a minute.',
+      });
+      return;
+    }
+    setState({ phase: 'processing', fileName, importId, status: status.status });
+  }
+}
 
 /** POST /imports → PUT file to presigned URL → poll GET /imports/{id} until COMPLETED/FAILED. */
 export function useCsvImport({ pollIntervalMs = 1500, timeoutMs = 60_000 }: CsvImportOptions = {}) {
@@ -44,13 +86,9 @@ export function useCsvImport({ pollIntervalMs = 1500, timeoutMs = 60_000 }: CsvI
       const id = ++runId.current;
       const alive = () => runId.current === id;
 
-      const nameCheck = createImportSchema.safeParse({ fileName: file.name });
-      if (!nameCheck.success) {
-        setState({ phase: 'error', message: nameCheck.error.issues[0]?.message ?? 'Invalid file name' });
-        return;
-      }
-      if (file.size > MAX_CSV_BYTES) {
-        setState({ phase: 'error', message: 'The file is larger than 1 MB.' });
+      const invalid = fileError(file);
+      if (invalid) {
+        setState({ phase: 'error', message: invalid });
         return;
       }
 
@@ -62,30 +100,7 @@ export function useCsvImport({ pollIntervalMs = 1500, timeoutMs = 60_000 }: CsvI
         if (!alive()) return;
         setState({ phase: 'processing', fileName: file.name, importId });
 
-        const deadline = Date.now() + timeoutMs;
-        while (alive()) {
-          await sleep(pollIntervalMs);
-          if (!alive()) return;
-          const status = await api.getImport(importId);
-          if (!alive()) return;
-          if (status.status === 'COMPLETED') {
-            setState({ phase: 'completed', result: status });
-            await invalidatePortfolioData(qc);
-            return;
-          }
-          if (status.status === 'FAILED') {
-            setState({ phase: 'failed', result: status });
-            return;
-          }
-          if (Date.now() >= deadline) {
-            setState({
-              phase: 'error',
-              message: 'The import is taking longer than expected. It may still complete — check your transactions in a minute.',
-            });
-            return;
-          }
-          setState({ phase: 'processing', fileName: file.name, importId, status: status.status });
-        }
+        await pollImport({ importId, fileName: file.name, alive, setState, qc, pollIntervalMs, timeoutMs });
       } catch (err) {
         if (alive()) setState({ phase: 'error', message: err instanceof ApiError ? err.message : errorMessage(err) });
       }

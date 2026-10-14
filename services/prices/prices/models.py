@@ -1,9 +1,18 @@
-"""Domain models mirroring packages/shared/src/types.ts (field names are the camelCase TS names)."""
+"""Domain models mirroring packages/shared/src/types.ts (snake_case attrs; `WIRE_NAMES` maps TS names)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
+
+# snake_case attribute -> camelCase name used in DynamoDB items / TS types.
+WIRE_NAMES = {
+    "previous_close": "previousClose",
+    "as_of": "asOf",
+    "asset_class": "assetClass",
+    "ex_date": "exDate",
+    "pay_date": "payDate",
+}
 
 ASSET_CLASSES = ("STOCK", "ETF", "CRYPTO", "BOND", "CASH", "OTHER")
 
@@ -49,28 +58,28 @@ def _rescale_minor_units(obj: object, *fields: str) -> None:
 class Quote:
     symbol: str
     price: float
-    previousClose: float  # noqa: N815 - mirrors TS field name
+    previous_close: float
     currency: str
-    asOf: str  # noqa: N815
+    as_of: str
     source: str
 
     def __post_init__(self) -> None:
-        _rescale_minor_units(self, "price", "previousClose")
+        _rescale_minor_units(self, "price", "previous_close")
 
 
 @dataclass(frozen=True)
 class InstrumentProfile:
     symbol: str
     name: str
-    assetClass: str  # noqa: N815
+    asset_class: str
     currency: str
     sector: str | None = None
     country: str | None = None
     exchange: str | None = None
 
     def __post_init__(self) -> None:
-        if self.assetClass not in ASSET_CLASSES:
-            raise ValueError(f"invalid assetClass {self.assetClass!r}")
+        if self.asset_class not in ASSET_CLASSES:
+            raise ValueError(f"invalid assetClass {self.asset_class!r}")
 
 
 @dataclass(frozen=True)
@@ -87,10 +96,10 @@ class EodPrice:
 @dataclass(frozen=True)
 class DividendEvent:
     symbol: str
-    exDate: str  # noqa: N815
+    ex_date: str
     amount: float
     currency: str
-    payDate: str | None = None  # noqa: N815
+    pay_date: str | None = None
 
     def __post_init__(self) -> None:
         _rescale_minor_units(self, "amount")
@@ -99,7 +108,7 @@ class DividendEvent:
 @dataclass(frozen=True)
 class FxRates:
     base: str
-    asOf: str  # noqa: N815
+    as_of: str
     rates: dict[str, float] = field(default_factory=dict)
     # ECB fixing date (YYYY-MM-DD) the rates belong to; not part of the `FX#{base}`/`LATEST` item.
     date: str | None = None

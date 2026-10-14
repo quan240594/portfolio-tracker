@@ -1,9 +1,3 @@
-/** ISO-4217 currency code, e.g. "EUR", "USD". */
-export type Currency = string;
-/** Calendar date in YYYY-MM-DD. */
-export type IsoDate = string;
-/** Full ISO-8601 timestamp. */
-export type IsoDateTime = string;
 
 export const ASSET_CLASSES = ['STOCK', 'ETF', 'CRYPTO', 'BOND', 'CASH', 'OTHER'] as const;
 export type AssetClass = (typeof ASSET_CLASSES)[number];
@@ -19,13 +13,13 @@ export type TransactionType = (typeof TRANSACTION_TYPES)[number];
 export interface Transaction {
   id: string;
   userId: string;
-  date: IsoDate;
+  date: string;
   type: TransactionType;
   symbol: string;
   quantity: number;
   price: number;
   fee: number;
-  currency: Currency;
+  currency: string;
   note?: string;
   /**
    * FX rate the broker applied at execution: units of `currency` per 1 unit of the portfolio base
@@ -34,15 +28,15 @@ export interface Transaction {
    */
   fxRate?: number;
   importId?: string;
-  createdAt: IsoDateTime;
+  createdAt: string;
 }
 
 export interface Quote {
   symbol: string;
   price: number;
   previousClose: number;
-  currency: Currency;
-  asOf: IsoDateTime;
+  currency: string;
+  asOf: string;
   source: string;
 }
 
@@ -53,37 +47,37 @@ export interface InstrumentProfile {
   sector?: string;
   country?: string;
   exchange?: string;
-  currency: Currency;
+  currency: string;
 }
 
 export interface EodPrice {
   symbol: string;
-  date: IsoDate;
+  date: string;
   close: number;
-  currency: Currency;
+  currency: string;
 }
 
 /** A corporate dividend event announced for an instrument (per-share amounts). */
 export interface DividendEvent {
   symbol: string;
-  exDate: IsoDate;
-  payDate?: IsoDate;
+  exDate: string;
+  payDate?: string;
   amount: number;
-  currency: Currency;
+  currency: string;
 }
 
 /** ECB convention: `rates[C]` = units of C per 1 unit of `base`. `rates[base]` is implicitly 1. */
 export interface FxRates {
-  base: Currency;
-  rates: Record<Currency, number>;
-  asOf: IsoDateTime;
+  base: string;
+  rates: Record<string, number>;
+  asOf: string;
 }
 
 /** Daily ECB reference rates (business days only), same convention as FxRates. */
 export interface FxDay {
-  base: Currency;
-  date: IsoDate;
-  rates: Record<Currency, number>;
+  base: string;
+  date: string;
+  rates: Record<string, number>;
 }
 
 /** All monetary fields on Holding/Summary are in the portfolio base currency unless suffixed `Local`. */
@@ -93,7 +87,7 @@ export interface Holding {
   assetClass: AssetClass;
   sector: string;
   country: string;
-  currency: Currency;
+  currency: string;
   quantity: number;
   averageCostLocal: number;
   priceLocal: number;
@@ -117,7 +111,7 @@ export interface Holding {
 }
 
 export interface PortfolioSummary {
-  baseCurrency: Currency;
+  baseCurrency: string;
   totalValue: number;
   totalCost: number;
   unrealizedPnl: number;
@@ -132,7 +126,7 @@ export interface PortfolioSummary {
   dayChange: number;
   dayChangePct: number;
   holdingsCount: number;
-  asOf: IsoDateTime;
+  asOf: string;
 }
 
 export const ALLOCATION_DIMENSIONS = ['assetClass', 'sector', 'country', 'currency', 'symbol'] as const;
@@ -146,23 +140,23 @@ export interface AllocationSlice {
 }
 
 export interface ValuePoint {
-  date: IsoDate;
+  date: string;
   value: number;
   invested: number;
 }
 
 export interface DividendPayment {
   symbol: string;
-  date: IsoDate;
+  date: string;
   perShareLocal: number;
-  currency: Currency;
+  currency: string;
   /** Net amount in base currency. */
   amount: number;
   status: 'RECEIVED' | 'UPCOMING';
 }
 
 export interface DividendOverview {
-  baseCurrency: Currency;
+  baseCurrency: string;
   totalReceived: number;
   last12Months: number;
   projectedNext12Months: number;
@@ -183,14 +177,14 @@ export interface ImportStatus {
   rowCount?: number;
   importedCount?: number;
   errors?: { row: number; message: string }[];
-  createdAt: IsoDateTime;
-  updatedAt: IsoDateTime;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** Registry item listing every symbol any user holds; drives the scheduled price refresh. */
 export interface TrackedTicker {
   symbol: string;
-  currency?: Currency;
-  createdAt: IsoDateTime;
-  updatedAt: IsoDateTime;
+  currency?: string;
+  createdAt: string;
+  updatedAt: string;
 }

@@ -49,7 +49,7 @@ def test_symbol_helpers() -> None:
 def test_minimal_profile() -> None:
     assert minimal_profile("BTC-EUR") == InstrumentProfile("BTC-EUR", "BTC", "CRYPTO", "EUR")
     p = minimal_profile("XYZ.AS")
-    assert (p.assetClass, p.currency, p.exchange, p.country) == (
+    assert (p.asset_class, p.currency, p.exchange, p.country) == (
         "OTHER",
         "EUR",
         "Euronext Amsterdam",
@@ -103,7 +103,7 @@ def test_item_shapes() -> None:
         "assetClass": "CRYPTO",
         "currency": "EUR",
     }
-    div = keys.dividend_item(DividendEvent("AAPL", "2026-02-10", 0.26, "USD", payDate="2026-02-14"))
+    div = keys.dividend_item(DividendEvent("AAPL", "2026-02-10", 0.26, "USD", pay_date="2026-02-14"))
     assert div["entityType"] == "DIVIDEND_EVENT" and div["SK"] == "DIV#2026-02-10"
     assert (
         div["amount"] == Decimal("0.26") and div["payDate"] == "2026-02-14" and div["exDate"] == "2026-02-10"
@@ -150,11 +150,11 @@ def test_minor_unit_prices_are_rescaled_to_major_currency() -> None:
     from prices.models import DividendEvent, EodPrice, Quote, normalize_currency
     from prices.symbols import price_currency_for
 
-    q = Quote(symbol="VOD.L", price=7250.0, previousClose=7100.0, currency="GBp", asOf="t", source="x")
-    assert (q.price, q.previousClose, q.currency) == (72.5, 71.0, "GBP")
+    q = Quote(symbol="VOD.L", price=7250.0, previous_close=7100.0, currency="GBp", as_of="t", source="x")
+    assert (q.price, q.previous_close, q.currency) == (72.5, 71.0, "GBP")
     e = EodPrice(symbol="VOD.L", date="2026-01-02", close=7250.0, currency="GBX")
     assert (e.close, e.currency) == (72.5, "GBP")
-    d = DividendEvent(symbol="VOD.L", exDate="2026-01-02", amount=4.5, currency="GBX")
+    d = DividendEvent(symbol="VOD.L", ex_date="2026-01-02", amount=4.5, currency="GBX")
     assert (d.amount, d.currency) == (0.045, "GBP")
     assert EodPrice(symbol="AAPL", date="2026-01-02", close=10.0, currency="USD").close == 10.0
     assert normalize_currency("GBp", "USD") == "GBp"

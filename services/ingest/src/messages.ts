@@ -25,23 +25,24 @@ export function extractS3Objects(body: string): S3ObjectRef[] {
 
   const detail = msg.detail;
   if (isObj(detail) && isObj(detail.bucket) && isObj(detail.object)) {
-    const detailType = msg['detail-type'];
-    if (detailType !== undefined && detailType !== 'Object Created') return [];
-    const { name } = detail.bucket;
-    const { key } = detail.object;
-    return typeof name === 'string' && typeof key === 'string' ? [{ bucket: name, key }] : [];
+    return fromEventBridge(msg, detail.bucket, detail.object);
   }
-
-  if (Array.isArray(msg.Records)) {
-    const out: S3ObjectRef[] = [];
-    for (const r of msg.Records as unknown[]) {
-      if (!isObj(r) || !isObj(r.s3) || !isObj(r.s3.bucket) || !isObj(r.s3.object)) continue;
-      if (typeof r.eventName === 'string' && !r.eventName.startsWith('ObjectCreated')) continue;
-      const { name } = r.s3.bucket;
-      const { key } = r.s3.object;
-      if (typeof name === 'string' && typeof key === 'string') out.push({ bucket: name, key: key.replace(/\+/g, '%20') });
-    }
-    return out;
-  }
+  if (Array.isArray(msg.Records)) return (msg.Records as unknown[]).flatMap(fromS3Record);
   return [];
+}
+
+function fromEventBridge(msg: Json, bucket: Json, object: Json): S3ObjectRef[] {
+  const detailType = msg['detail-type'];
+  if (detailType !== undefined && detailType !== 'Object Created') return [];
+  const { name } = bucket;
+  const { key } = object;
+  return typeof name === 'string' && typeof key === 'string' ? [{ bucket: name, key }] : [];
+}
+
+function fromS3Record(r: unknown): S3ObjectRef[] {
+  if (!isObj(r) || !isObj(r.s3) || !isObj(r.s3.bucket) || !isObj(r.s3.object)) return [];
+  if (typeof r.eventName === 'string' && !r.eventName.startsWith('ObjectCreated')) return [];
+  const { name } = r.s3.bucket;
+  const { key } = r.s3.object;
+  return typeof name === 'string' && typeof key === 'string' ? [{ bucket: name, key: key.replaceAll('+', '%20') }] : [];
 }

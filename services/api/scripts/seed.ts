@@ -106,7 +106,9 @@ const daysBetween = (a: string, b: string) => Math.round((Date.parse(`${b}T00:00
 const isWeekend = (date: string) => [0, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay());
 const toWeekday = (date: string) => {
   const dow = new Date(`${date}T00:00:00Z`).getUTCDay();
-  return dow === 6 ? addDays(date, -1) : dow === 0 ? addDays(date, -2) : date;
+  if (dow === 6) return addDays(date, -1);
+  if (dow === 0) return addDays(date, -2);
+  return date;
 };
 const round = (n: number, dp: number) => Math.round(n * 10 ** dp) / 10 ** dp;
 
@@ -148,7 +150,7 @@ function mulberry32(seed: number) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-const hash = (s: string) => [...s].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0, 2166136261);
+const hash = (s: string) => [...s].reduce((h, c) => Math.imul(h ^ c.codePointAt(0)!, 16777619) >>> 0, 2166136261);
 
 /**
  * Deterministic per calendar date (independent of the day the seed runs): the walk always starts
@@ -181,7 +183,10 @@ export function generateFxDays(from: string, to: string): FxDay[] {
     const gauss = () => Math.sqrt(-2 * Math.log(rand() || 1e-12)) * Math.cos(2 * Math.PI * rand());
     const noise: number[] = [];
     let x = 0;
-    for (let t = 0; t <= total; t++) noise.push((x = x * 0.985 + fx.sigma * gauss()));
+    for (let t = 0; t <= total; t++) {
+      x = x * 0.985 + fx.sigma * gauss();
+      noise.push(x);
+    }
     return { fx, noise };
   });
   const days: FxDay[] = [];
@@ -229,8 +234,10 @@ export async function seed({ doc, tableName, userId = 'demo', today = iso(new Da
 
   for (const inst of INSTRUMENTS) {
     const { symbol, currency } = inst.profile;
-    items.push({ ...keys.profile(symbol), entityType: ENTITY.profile, ...inst.profile });
-    items.push({ ...keys.trackedTicker(symbol), entityType: ENTITY.trackedTicker, symbol, currency, createdAt: now, updatedAt: now });
+    items.push(
+      { ...keys.profile(symbol), entityType: ENTITY.profile, ...inst.profile },
+      { ...keys.trackedTicker(symbol), entityType: ENTITY.trackedTicker, symbol, currency, createdAt: now, updatedAt: now },
+    );
     const series = [...closes.get(symbol)!.entries()];
     for (const [date, close] of series) {
       const eod: EodPrice = { symbol, date, close, currency };
@@ -277,8 +284,10 @@ export async function seed({ doc, tableName, userId = 'demo', today = iso(new Da
   // LATEST mirrors the newest daily fixing so market values and history agree.
   const lastFx = fxDays.at(-1)!;
   const fx: FxRates = { base: 'EUR', rates: lastFx.rates, asOf: `${lastFx.date}T15:00:00.000Z` };
-  items.push({ ...keys.fx('EUR'), entityType: ENTITY.fx, ...fx });
-  items.push({ ...keys.userRegistry(userId), entityType: ENTITY.user, userId, createdAt: now, updatedAt: now });
+  items.push(
+    { ...keys.fx('EUR'), entityType: ENTITY.fx, ...fx },
+    { ...keys.userRegistry(userId), entityType: ENTITY.user, userId, createdAt: now, updatedAt: now },
+  );
 
   // Seed transaction dates are relative to today: remove earlier seed runs so re-seeding never duplicates.
   const stale = await querySeedTransactionKeys(doc, tableName, userId);
@@ -291,42 +300,47 @@ export async function seed({ doc, tableName, userId = 'demo', today = iso(new Da
   return { transactions, fxDays, itemCount: items.length };
 }
 
-async function querySeedTransactionKeys(doc: DynamoDBDocumentClient, tableName: string, userId: string) {
-  const out: { PK: string; SK: string }[] = [];
-  let ExclusiveStartKey: Record<string, unknown> | undefined;
-  do {
-    const res = await doc.send(
-      new QueryCommand({
-        TableName: tableName,
-        KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
-        FilterExpression: 'begins_with(id, :seed)',
-        ExpressionAttributeValues: { ':pk': keys.user(userId).PK, ':sk': keys.transactionPrefix, ':seed': 'seed-' },
-        ProjectionExpression: 'PK, SK',
-        ExclusiveStartKey,
-      }),
-    );
-    out.push(...((res.Items ?? []) as { PK: string; SK: string }[]));
-    ExclusiveStartKey = res.LastEvaluatedKey;
-  } while (ExclusiveStartKey);
-  return out;
+async function querySeedTransactionKeys(
+  doc: DynamoDBDocumentClient,
+  tableName: string,
+  userId: string,
+  ExclusiveStartKey?: Record<string, unknown>,
+): Promise<{ PK: string; SK: string }[]> {
+  const res = await doc.send(
+    new QueryCommand({
+      TableName: tableName,
+      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+      FilterExpression: 'begins_with(id, :seed)',
+      ExpressionAttributeValues: { ':pk': keys.user(userId).PK, ':sk': keys.transactionPrefix, ':seed': 'seed-' },
+      ProjectionExpression: 'PK, SK',
+      ExclusiveStartKey,
+    }),
+  );
+  const page = (res.Items ?? []) as { PK: string; SK: string }[];
+  // Each page needs the previous page's cursor, so pages are fetched sequentially.
+  return res.LastEvaluatedKey ? [...page, ...(await querySeedTransactionKeys(doc, tableName, userId, res.LastEvaluatedKey))] : page;
 }
 
 type WriteRequest = { PutRequest?: { Item: Record<string, unknown> }; DeleteRequest?: { Key: Record<string, unknown> } };
+
+/** Writes one batch, retrying unprocessed items with exponential backoff (each retry depends on the previous response). */
+async function writeChunk(doc: DynamoDBDocumentClient, tableName: string, pending: WriteRequest[], attempt = 0): Promise<void> {
+  if (attempt > 8) throw new Error('BatchWrite: unprocessed items remain after retries');
+  if (attempt > 0) await new Promise((r) => setTimeout(r, Math.min(100 * 2 ** attempt, 3000)));
+  const res = await doc.send(new BatchWriteCommand({ RequestItems: { [tableName]: pending } }));
+  const unprocessed = (res.UnprocessedItems?.[tableName] ?? []) as WriteRequest[];
+  if (unprocessed.length > 0) await writeChunk(doc, tableName, unprocessed, attempt + 1);
+}
 
 async function batchWrite(doc: DynamoDBDocumentClient, tableName: string, requests: WriteRequest[], concurrency = 8) {
   const chunks: WriteRequest[][] = [];
   for (let i = 0; i < requests.length; i += 25) chunks.push(requests.slice(i, i + 25));
   let next = 0;
-  const worker = async () => {
-    while (next < chunks.length) {
-      let pending = chunks[next++]!;
-      for (let attempt = 0; pending.length > 0; attempt++) {
-        if (attempt > 8) throw new Error('BatchWrite: unprocessed items remain after retries');
-        if (attempt > 0) await new Promise((r) => setTimeout(r, Math.min(100 * 2 ** attempt, 3000)));
-        const res = await doc.send(new BatchWriteCommand({ RequestItems: { [tableName]: pending } }));
-        pending = (res.UnprocessedItems?.[tableName] ?? []) as WriteRequest[];
-      }
-    }
+  // Workers drain a shared queue so at most `concurrency` batches are in flight.
+  const worker = async (): Promise<void> => {
+    if (next >= chunks.length) return;
+    await writeChunk(doc, tableName, chunks[next++]!);
+    return worker();
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, chunks.length) }, worker));
 }
@@ -351,8 +365,10 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((err) => {
+  try {
+    await main();
+  } catch (err) {
     console.error(err);
     process.exit(1);
-  });
+  }
 }

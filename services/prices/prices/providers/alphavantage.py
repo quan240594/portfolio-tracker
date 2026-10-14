@@ -59,7 +59,7 @@ class AlphaVantageProvider:
         return InstrumentProfile(
             symbol=symbol,
             name=data.get("Name") or symbol,
-            assetClass=asset_class_from_type(data.get("AssetType")),
+            asset_class=asset_class_from_type(data.get("AssetType")),
             currency=(data.get("Currency") or "USD").upper(),
             sector=_title(data.get("Sector")),
             country=COUNTRY_NAMES.get(country, country) if country else None,
