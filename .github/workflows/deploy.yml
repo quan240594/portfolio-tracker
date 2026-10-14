@@ -26,7 +26,7 @@ env:
 jobs:
   deploy:
     name: Deploy ${{ inputs.env }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     # GitHub environment (dev/prod) — configure protection rules/reviewers for prod.
     # Required: secret AWS_DEPLOY_ROLE_ARN, variables TF_STATE_BUCKET, TF_LOCK_TABLE.
@@ -44,11 +44,11 @@ jobs:
       TF_VAR_enable_auth: ${{ vars.ENABLE_AUTH || 'false' }}
       TF_VAR_market_data_provider: ${{ vars.MARKET_DATA_PROVIDER || 'mock' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # ---- Build Lambda artifacts --------------------------------------------
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -57,19 +57,19 @@ jobs:
         run: |
           pnpm --filter @portfolio/api package
           pnpm --filter @portfolio/ingest package
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Package prices Lambda
         run: bash services/prices/scripts/package.sh
 
       # ---- Terraform -----------------------------------------------------------
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           role-session-name: gha-deploy-${{ inputs.env }}-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
