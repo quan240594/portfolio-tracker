@@ -46,8 +46,14 @@ Errors use `{ error: { code, message, details? } }`: `VALIDATION_ERROR` 400, `NO
 
 ## Environment
 
-`TABLE_NAME`, `EVENT_BUS_NAME`, `IMPORT_BUCKET`, `BASE_CURRENCY` (EUR), `DEMO_USER_ID` (demo),
-`CORS_ALLOWED_ORIGIN`, `LOG_LEVEL` (INFO), `AWS_ENDPOINT_URL` (local only).
+`TABLE_NAME`, `EVENT_BUS_NAME`, `IMPORT_BUCKET`, `BASE_CURRENCY` (EUR), `AUTH_MODE` (`cognito` when unset;
+`pnpm dev` sets `demo`), `DEMO_USER_ID` (demo, `AUTH_MODE=demo` only), `CORS_ALLOWED_ORIGIN`, `LOG_LEVEL` (INFO), `AWS_ENDPOINT_URL` (local only).
+
+## Authentication
+
+In `AUTH_MODE=cognito` the user id is the API Gateway JWT authorizer's `sub` claim; requests without it get
+`401 UNAUTHENTICATED` (`src/lib/auth.ts`). `AUTH_MODE=demo` (local dev/tests) falls back to `DEMO_USER_ID`.
+Handlers must only use `ctx.userId`. See docs/architecture.md "Authentication".
 
 ## Scripts
 

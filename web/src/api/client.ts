@@ -18,6 +18,7 @@ import {
   type PortfolioResponse,
 } from '@portfolio/shared';
 import { API_BASE_URL } from '../config';
+import { authorizationHeaders, notifyUnauthorized } from '../features/auth/tokenHooks';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -58,7 +59,11 @@ export async function request<T>(
   try {
     res = await fetch(apiUrl(path, opts.query), {
       method,
-      headers: { Accept: 'application/json', ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+      headers: {
+        Accept: 'application/json',
+        ...(await authorizationHeaders()),
+        ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      },
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
       signal: opts.signal,
     });
@@ -70,6 +75,7 @@ export async function request<T>(
   if (res.status === 204) return undefined as T;
   const data = await parseBody(res);
 
+  if (res.status === 401) notifyUnauthorized();
   if (!res.ok) throw toApiError(res, data);
   return data as T;
 }

@@ -54,11 +54,23 @@ output "market_data_api_key_params" {
 }
 
 output "cognito_user_pool_id" {
-  value = var.enable_auth ? aws_cognito_user_pool.main[0].id : null
+  description = "Cognito user pool id (VITE_COGNITO_USER_POOL_ID); empty when auth is disabled."
+  value       = try(aws_cognito_user_pool.main[0].id, "")
 }
 
 output "cognito_user_pool_client_id" {
-  value = var.enable_auth ? aws_cognito_user_pool_client.web[0].id : null
+  description = "Cognito SPA app client id (VITE_COGNITO_CLIENT_ID); empty when auth is disabled."
+  value       = try(aws_cognito_user_pool_client.web[0].id, "")
+}
+
+output "cognito_region" {
+  description = "Region of the Cognito user pool (VITE_COGNITO_REGION); empty when auth is disabled."
+  value       = local.auth_enabled ? local.region : ""
+}
+
+output "auth_mode" {
+  description = "AUTH_MODE of the API Lambda (cognito | demo)."
+  value       = local.auth_mode
 }
 
 output "github_deploy_role_arn" {

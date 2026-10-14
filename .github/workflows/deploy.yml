@@ -30,7 +30,8 @@ jobs:
     timeout-minutes: 45
     # GitHub environment (dev/prod) — configure protection rules/reviewers for prod.
     # Required: secret AWS_DEPLOY_ROLE_ARN, variables TF_STATE_BUCKET, TF_LOCK_TABLE.
-    # Optional variables: AWS_REGION, ALARM_EMAIL, ENABLE_AUTH, MARKET_DATA_PROVIDER.
+    # Optional variables: AWS_REGION, ALARM_EMAIL, ENABLE_AUTH (default true = Cognito login; false is rejected for prod),
+    # MARKET_DATA_PROVIDER.
     environment: ${{ inputs.env }}
     env:
       TF_IN_AUTOMATION: "1"
@@ -41,7 +42,7 @@ jobs:
       TF_VAR_github_repo: ${{ github.repository }}
       TF_VAR_create_github_oidc_provider: ${{ vars.CREATE_GITHUB_OIDC_PROVIDER || 'true' }}
       TF_VAR_alarm_email: ${{ vars.ALARM_EMAIL || '' }}
-      TF_VAR_enable_auth: ${{ vars.ENABLE_AUTH || 'false' }}
+      TF_VAR_enable_auth: ${{ vars.ENABLE_AUTH || 'true' }}
       TF_VAR_market_data_provider: ${{ vars.MARKET_DATA_PROVIDER || 'mock' }}
     steps:
       - uses: actions/checkout@v7
@@ -97,12 +98,20 @@ jobs:
             echo "web_bucket=$(terraform output -raw web_bucket)"
             echo "distribution_id=$(terraform output -raw cloudfront_distribution_id)"
             echo "web_url=$(terraform output -raw web_url)"
+            echo "cognito_user_pool_id=$(terraform output -raw cognito_user_pool_id)"
+            echo "cognito_client_id=$(terraform output -raw cognito_user_pool_client_id)"
+            echo "cognito_region=$(terraform output -raw cognito_region)"
           } >> "$GITHUB_OUTPUT"
 
       # ---- Web -----------------------------------------------------------------
       - name: Build web
         env:
           VITE_API_BASE_URL: ${{ steps.tf.outputs.api_url }}
+          # Cognito sign-in (empty outputs when enable_auth=false -> build without a login screen).
+          VITE_AUTH_MODE: ${{ steps.tf.outputs.cognito_user_pool_id != '' && 'cognito' || 'none' }}
+          VITE_COGNITO_USER_POOL_ID: ${{ steps.tf.outputs.cognito_user_pool_id }}
+          VITE_COGNITO_CLIENT_ID: ${{ steps.tf.outputs.cognito_client_id }}
+          VITE_COGNITO_REGION: ${{ steps.tf.outputs.cognito_region }}
         run: pnpm --filter @portfolio/web build
       - name: Upload web to S3
         env:

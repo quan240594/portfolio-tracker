@@ -1,0 +1,57 @@
+import { useEffect, useId, useRef, useState } from 'react';
+import { useAuth } from './AuthContext';
+
+/** Header account menu (signed-in email + sign out). Renders nothing when auth is off. */
+export function AccountMenu() {
+  const { enabled, status, email, signOut } = useAuth();
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const panelId = useId();
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: Event) => {
+      const outside = event instanceof MouseEvent && !rootRef.current?.contains(event.target as Node);
+      if (outside || (event instanceof KeyboardEvent && event.key === 'Escape')) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', close);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', close);
+    };
+  }, [open]);
+
+  if (!enabled || status !== 'signedIn') return null;
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-controls={panelId}
+        aria-label="Account"
+        onClick={() => setOpen((v) => !v)}
+        className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+      >
+        <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <circle cx="12" cy="8" r="4" />
+          <path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" strokeLinecap="round" />
+        </svg>
+      </button>
+      {open && (
+        <div id={panelId} className="card absolute right-0 z-40 mt-2 w-64 space-y-3 p-3 shadow-lg">
+          <div>
+            <p className="muted text-xs">Signed in as</p>
+            <p className="truncate text-sm font-medium" title={email}>
+              {email}
+            </p>
+          </div>
+          <button type="button" className="btn-secondary w-full" onClick={() => void signOut()}>
+            Sign out
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

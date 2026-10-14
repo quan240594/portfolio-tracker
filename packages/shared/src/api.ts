@@ -1,7 +1,8 @@
 /**
  * REST API contract (API Gateway HTTP API, JSON). All responses are JSON.
  * Errors: { error: { code: string; message: string; details?: unknown } } with 4xx/5xx status.
- * User identity: JWT `sub` claim when an authorizer is configured, otherwise the DEMO_USER_ID.
+ * User identity: the JWT `sub` claim of the API Gateway authorizer (AUTH_MODE=cognito; 401 UNAUTHENTICATED without
+ * it). AUTH_MODE=demo (local dev/tests only) falls back to the DEMO_USER_ID.
  *
  * Portfolios:
  * - GET /portfolios creates DEFAULT_PORTFOLIO_ID ("Main portfolio") if the user has none (idempotent).

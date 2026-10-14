@@ -20,7 +20,8 @@ mock_provider "aws" {
 }
 
 variables {
-  env = "dev"
+  env         = "dev"
+  enable_auth = false # non-prod must choose explicitly; see run "dev_requires_explicit_auth_choice"
 }
 
 run "dev_defaults" {
@@ -82,8 +83,18 @@ run "dev_defaults" {
   }
 
   assert {
-    condition     = length(aws_cognito_user_pool.main) == 0 && aws_apigatewayv2_route.default.authorization_type == "NONE"
-    error_message = "auth must be disabled by default"
+    condition     = length(aws_cognito_user_pool.main) == 0 && aws_apigatewayv2_route.default.authorization_type == "NONE" && output.auth_mode == "demo"
+    error_message = "enable_auth=false must give a demo-mode API without Cognito"
+  }
+
+  assert {
+    condition     = output.cognito_user_pool_id == "" && output.cognito_user_pool_client_id == "" && output.cognito_region == ""
+    error_message = "cognito outputs must be empty when auth is disabled"
+  }
+
+  assert {
+    condition     = contains(aws_apigatewayv2_api.http.cors_configuration[0].allow_headers, "authorization")
+    error_message = "API CORS must allow the Authorization header"
   }
 
   assert {
@@ -108,8 +119,13 @@ run "prod_with_auth_and_github" {
   }
 
   assert {
-    condition     = aws_apigatewayv2_route.default.authorization_type == "JWT"
-    error_message = "JWT authorizer expected when enable_auth"
+    condition     = aws_apigatewayv2_route.default.authorization_type == "JWT" && output.auth_mode == "cognito"
+    error_message = "JWT authorizer and AUTH_MODE=cognito expected when enable_auth"
+  }
+
+  assert {
+    condition     = aws_cognito_user_pool.main[0].deletion_protection == "ACTIVE"
+    error_message = "prod Cognito pool must have deletion protection"
   }
 
   assert {
@@ -139,4 +155,97 @@ run "rejects_invalid_env" {
   }
 
   expect_failures = [var.env]
+}
+
+run "dev_requires_explicit_auth_choice" {
+  command = plan
+
+  variables {
+    enable_auth = null
+  }
+
+  expect_failures = [terraform_data.auth_guard]
+}
+
+run "prod_rejects_demo_mode" {
+  command = plan
+
+  variables {
+    env         = "prod"
+    enable_auth = false
+  }
+
+  expect_failures = [terraform_data.auth_guard]
+}
+
+run "prod_defaults_to_cognito" {
+  command = plan
+
+  variables {
+    env         = "prod"
+    enable_auth = null
+  }
+
+  assert {
+    condition     = length(aws_cognito_user_pool.main) == 1 && aws_apigatewayv2_route.default.authorization_type == "JWT" && output.auth_mode == "cognito"
+    error_message = "prod must default to Cognito auth"
+  }
+}
+
+run "cognito_pool_is_locked_down" {
+  command = plan
+
+  variables {
+    enable_auth = true
+  }
+
+  assert {
+    condition = (
+      aws_cognito_user_pool.main[0].mfa_configuration == "ON" &&
+      aws_cognito_user_pool.main[0].software_token_mfa_configuration[0].enabled &&
+      length(aws_cognito_user_pool.main[0].sms_configuration) == 0 &&
+      aws_cognito_user_pool.main[0].sms_authentication_message == null
+    )
+    error_message = "MFA must be ON with TOTP (software token) only and no SMS"
+  }
+
+  assert {
+    condition = (
+      aws_cognito_user_pool.main[0].admin_create_user_config[0].allow_admin_create_user_only &&
+      aws_cognito_user_pool.main[0].deletion_protection == "INACTIVE" &&
+      aws_cognito_user_pool.main[0].user_pool_add_ons[0].advanced_security_mode == "OFF" &&
+      aws_cognito_user_pool.main[0].password_policy[0].minimum_length == 12 &&
+      aws_cognito_user_pool.main[0].password_policy[0].require_symbols &&
+      contains(aws_cognito_user_pool.main[0].username_attributes, "email") &&
+      [for m in aws_cognito_user_pool.main[0].account_recovery_setting[0].recovery_mechanism : m.name] == ["verified_email"]
+    )
+    error_message = "self sign-up must be disabled, password policy strong, advanced security off, recovery by email"
+  }
+
+  assert {
+    condition = (
+      !aws_cognito_user_pool_client.web[0].generate_secret &&
+      aws_cognito_user_pool_client.web[0].prevent_user_existence_errors == "ENABLED" &&
+      toset(aws_cognito_user_pool_client.web[0].explicit_auth_flows) == toset(["ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]) &&
+      aws_cognito_user_pool_client.web[0].refresh_token_validity == 30 &&
+      aws_cognito_user_pool_client.web[0].id_token_validity <= 60
+    )
+    error_message = "SPA client: no secret, SRP + refresh flows only, short-lived tokens, no user-existence leaks"
+  }
+
+  assert {
+    condition = (
+      aws_apigatewayv2_authorizer.jwt[0].authorizer_type == "JWT" &&
+      contains(aws_apigatewayv2_authorizer.jwt[0].identity_sources, "$request.header.Authorization") &&
+      startswith(aws_apigatewayv2_authorizer.jwt[0].jwt_configuration[0].issuer, "https://cognito-idp.eu-west-1.amazonaws.com/") &&
+      length(aws_apigatewayv2_authorizer.jwt[0].jwt_configuration[0].audience) == 1 &&
+      aws_apigatewayv2_route.default.authorization_type == "JWT"
+    )
+    error_message = "the default route must use the Cognito JWT authorizer (issuer + client id audience)"
+  }
+
+  assert {
+    condition     = output.auth_mode == "cognito" && output.cognito_region == "eu-west-1"
+    error_message = "AUTH_MODE=cognito and region output expected"
+  }
 }

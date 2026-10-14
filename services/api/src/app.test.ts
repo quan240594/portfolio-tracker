@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { MissingFxRateError, PortfolioError } from '@portfolio/shared';
-import { createHandler, errorToResult, resolveUserId } from './app.js';
+import { createHandler, errorToResult } from './app.js';
 import { HttpError } from './lib/http.js';
 import { logger } from './lib/logger.js';
 import { apiEvent, fakeDeps, portfolio, txn } from './testing/fakes.js';
@@ -273,25 +273,6 @@ describe('imports', () => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-});
-
-describe('resolveUserId', () => {
-  const withClaims = (claims: Record<string, unknown> | undefined) => {
-    const event = apiEvent('GET', '/portfolio');
-    (event.requestContext as unknown as { authorizer: unknown }).authorizer = { jwt: { claims } };
-    return event;
-  };
-
-  it('prefers a non-empty string sub claim', () => {
-    expect(resolveUserId(withClaims({ sub: 'user-123' }), 'demo')).toBe('user-123');
-  });
-
-  it('falls back to the demo user without an authorizer, claims, or a usable sub', () => {
-    expect(resolveUserId(apiEvent('GET', '/portfolio'), 'demo')).toBe('demo');
-    expect(resolveUserId(withClaims(undefined), 'demo')).toBe('demo');
-    expect(resolveUserId(withClaims({ sub: '' }), 'demo')).toBe('demo');
-    expect(resolveUserId(withClaims({ sub: 42 }), 'demo')).toBe('demo');
-  });
 });
 
 describe('errorToResult', () => {

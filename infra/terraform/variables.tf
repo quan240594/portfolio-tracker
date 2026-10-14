@@ -50,7 +50,7 @@ variable "base_currency" {
 }
 
 variable "demo_user_id" {
-  description = "DEMO_USER_ID env var (api); used when no JWT claim is present."
+  description = "DEMO_USER_ID env var (api); only used when auth is disabled (AUTH_MODE=demo, never in prod)."
   type        = string
   default     = "demo"
 }
@@ -102,9 +102,9 @@ variable "extra_cors_origins" {
 }
 
 variable "enable_auth" {
-  description = "Create a Cognito user pool + app client and protect the API with a JWT authorizer."
+  description = "Cognito user pool + JWT authorizer (AUTH_MODE=cognito). null = true for env=prod; any other env must choose explicitly. false (demo user, no login) is rejected for prod."
   type        = bool
-  default     = false
+  default     = null
 }
 
 variable "api_throttle_burst_limit" {

@@ -14,6 +14,8 @@ const LOCAL_ENV: Record<string, string> = {
   AWS_ACCESS_KEY_ID: 'test',
   AWS_SECRET_ACCESS_KEY: 'test',
   CORS_ALLOWED_ORIGIN: '*',
+  // LocalStack's free tier has no Cognito: local dev always runs as the demo user. Never set this in AWS.
+  AUTH_MODE: 'demo',
 };
 for (const [k, v] of Object.entries(LOCAL_ENV)) process.env[k] ??= v;
 

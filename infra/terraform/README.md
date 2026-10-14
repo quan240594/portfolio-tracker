@@ -62,7 +62,8 @@ terraform output
 ```
 
 Key variables: `env` (dev|prod), `market_data_provider` (`mock`|`live`), `market_data_api_key_params`,
-`price_refresh_cron` (Europe/Amsterdam), `extra_cors_origins`, `enable_auth` (Cognito JWT authorizer),
+`price_refresh_cron` (Europe/Amsterdam), `extra_cors_origins`, `enable_auth` (Cognito JWT authorizer; unset = on for prod,
+must be set explicitly for dev, `false` is rejected for prod),
 `alarm_email` (SNS for DLQ alarms), `github_repo` (OIDC deploy role).
 
 `prod` enables DynamoDB / Cognito deletion protection and keeps the imports bucket non-force-destroyable.
@@ -107,7 +108,9 @@ builds and uploads the web app and invalidates CloudFront, authenticating with G
    (repository/environment variable `CREATE_GITHUB_OIDC_PROVIDER=false`).
 2. Create GitHub environments `dev` / `prod` with secret `AWS_DEPLOY_ROLE_ARN`
    (= `terraform output -raw github_deploy_role_arn`) and variables `TF_STATE_BUCKET`, `TF_LOCK_TABLE`
-   (optional: `AWS_REGION`, `ALARM_EMAIL`, `ENABLE_AUTH`, `MARKET_DATA_PROVIDER`).
+   (optional: `AWS_REGION`, `ALARM_EMAIL`, `ENABLE_AUTH` — defaults to `true`; prod refuses `false` — `MARKET_DATA_PROVIDER`).
+   The workflow builds the web app with `VITE_AUTH_MODE` / `VITE_COGNITO_*` taken from the Terraform outputs
+   `cognito_user_pool_id`, `cognito_user_pool_client_id`, `cognito_region`.
 
 The deploy role trusts `repo:<repo>:environment:<env>` and `repo:<repo>:ref:refs/heads/main`, and its
 permissions are scoped to `portfolio-tracker-*` resources where the AWS APIs allow it.
@@ -121,6 +124,39 @@ terraform destroy -var-file=dev.tfvars
 For `prod`, deletion protection blocks destroy: first disable it on the DynamoDB table (and Cognito
 user pool if `enable_auth`) via the console/CLI, and empty the imports and access-logs buckets (`aws s3 rm --recursive`).
 SSM parameters and log groups are destroyed too.
+
+## 8. Users and sign-in (Cognito)
+
+With `enable_auth = true` (default for prod) Terraform creates a Cognito user pool, a SPA app client and a JWT
+authorizer on the HTTP API, and runs the API Lambda with `AUTH_MODE=cognito`. The pool has **self sign-up disabled**
+(personal app on a public repo) and **mandatory TOTP MFA** (software token only, no SMS).
+
+Create the first user (admin bootstrap, once per environment; the pool id is a Terraform output):
+
+```bash
+POOL_ID=$(terraform output -raw cognito_user_pool_id)
+aws cognito-idp admin-create-user --user-pool-id "$POOL_ID" --username you@example.com \
+  --user-attributes Name=email,Value=you@example.com Name=email_verified,Value=true \
+  --temporary-password 'Temp-Passw0rd!change-me' --message-action SUPPRESS
+```
+
+(`--message-action SUPPRESS` skips the invitation email; the temporary password must satisfy the pool policy — 12+
+characters with upper/lower case, a number and a symbol — and is valid for 7 days.) Never commit the temporary password.
+
+First sign-in in the web app (`terraform output web_url`):
+1. Sign in with the email and temporary password → the app asks for a new password.
+2. The app shows a QR code (and a manual key) → add it to an authenticator app (1Password, Google Authenticator, Authy…)
+   and enter the 6-digit code. MFA is now enrolled; every later sign-in asks for the code.
+3. Lost authenticator? Cognito has no admin call that removes a registered TOTP device, so keep the manual key in a
+   password manager (or enrol the same secret on two devices). The fallback is to delete and re-create the user —
+   which gets a **new `sub`**, i.e. a new `USER#<sub>` partition: re-key the old items (or note that the old data
+   stays under the old `sub`) before deleting.
+
+Forgot password: "Forgot password?" on the sign-in screen sends a code by email (Cognito's default email sender,
+~50 emails/day). To force a user out: `aws cognito-idp admin-user-global-sign-out --user-pool-id "$POOL_ID" --username …`.
+
+`terraform test` covers the pool (MFA ON/TOTP only, sign-up disabled, password policy), the authorizer and the
+prod preconditions. The Cognito/API Gateway integration itself can only be verified in a real deployment.
 
 ## Local development
 

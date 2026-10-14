@@ -7,7 +7,7 @@ export interface Deps {
   repo: Repository;
   events: EventPublisher;
   signer: UploadUrlSigner;
-  config: Pick<Config, 'baseCurrency' | 'demoUserId' | 'corsAllowedOrigin'>;
+  config: Pick<Config, 'baseCurrency' | 'authMode' | 'demoUserId' | 'corsAllowedOrigin'>;
   now: () => Date;
   uuid: () => string;
 }

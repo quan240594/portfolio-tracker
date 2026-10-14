@@ -51,7 +51,8 @@ Every SQS queue has a DLQ (`maxReceiveCount = 3`). SQS-triggered Lambdas use
 | `EVENT_BUS_NAME` | api, ingest, prices | |
 | `IMPORT_BUCKET` | api, ingest | |
 | `BASE_CURRENCY` | api, prices | default `EUR` |
-| `DEMO_USER_ID` | api | default `demo`; used when no JWT authorizer claim |
+| `AUTH_MODE` | api | `cognito` (default; JWT `sub` required, else 401) or `demo` (local dev/tests only) — see [Authentication](#authentication) |
+| `DEMO_USER_ID` | api | default `demo`; only used with `AUTH_MODE=demo` |
 | `CORS_ALLOWED_ORIGIN` | api | |
 | `LOG_LEVEL` | all | default `INFO` |
 | `MARKET_DATA_PROVIDER` | prices | `mock` or a real provider id (see services/prices README) |
@@ -144,4 +145,55 @@ instrument currency. Daily fixings come from Frankfurter (ECB reference rates) a
 
 ## Known limitations
 
-- Single demo user unless a JWT authorizer (Cognito) is enabled.
+- Single demo user in local development and the GitHub Pages demo; deployed environments use Cognito users (see Authentication).
+
+## Authentication
+
+Deployed environments authenticate every API call with an Amazon Cognito user pool; local development and the
+GitHub Pages demo run without login.
+
+```
+Browser (SPA)                         Cognito user pool                 API Gateway (HTTP API)        api Lambda
+  SRP sign-in ───────────────────────► new password / TOTP challenge
+  ◄──────────── ID + access + refresh tokens
+  Authorization: Bearer <ID token> ─────────────────────────────────────► JWT authorizer (issuer + client id)
+                                                                           └─ claims.sub ───────────────► resolveUserId()
+```
+
+- **Pool** (`infra/terraform/auth.tf`): self sign-up disabled (users are created with `admin-create-user`),
+  email username, 12+ character password with upper/lower/number/symbol, **MFA `ON` with software-token (TOTP)
+  only — SMS is not configured**, account recovery by verified email, advanced security off (cost), deletion
+  protection in prod. App client: no secret, `ALLOW_USER_SRP_AUTH` + `ALLOW_REFRESH_TOKEN_AUTH`, 30-minute
+  ID/access tokens, 30-day refresh token, token revocation on, user-existence errors hidden.
+- **Fail closed.** `enable_auth` (Terraform) is `true` for `env=prod` when unset, must be chosen explicitly
+  for other environments, and `false` is rejected for prod (`terraform_data.auth_guard` preconditions). With auth on the
+  Lambda gets `AUTH_MODE=cognito`: `resolveUserId` (`services/api/src/lib/auth.ts`) requires
+  `requestContext.authorizer.jwt.claims.sub` (also validated against `^[A-Za-z0-9._-]{1,128}$`) and answers
+  `401 UNAUTHENTICATED` otherwise — evaluated before routing, so even unknown routes and `/health` need a token
+  (CORS preflight is answered by API Gateway). An unset `AUTH_MODE` means `cognito`; unknown values fail at cold start.
+  `AUTH_MODE=demo` (the `pnpm --filter @portfolio/api dev` default, tests) serves requests without claims as
+  `DEMO_USER_ID`, and still honours a validated `sub` when present.
+- **User isolation.** The user id is derived in exactly one place and handed to handlers as `RouteContext.userId`.
+  DynamoDB keys (`USER#<sub>`) and S3 import keys (`imports/<sub>/<importId>.csv`) are built from it only; the
+  request body and query string are never consulted (`services/api/src/auth.test.ts` proves it with two users
+  across transactions, portfolios, imports and upload keys).
+- **Web** (`web/src/features/auth/`): `amazon-cognito-identity-js` (SRP, the password is never sent). Screens:
+  sign in, new-password challenge (first login with the temporary password), TOTP enrolment (QR code rendered locally
+  as inline SVG + manual key; the secret never leaves the page), TOTP code entry, forgot password (emailed code).
+  `AuthGate` guards every route; the API client sends `Authorization: Bearer <ID token>`, refreshes silently when
+  the token expired (concurrent requests share one refresh) and the app signs out automatically on a `401`
+  (clearing the React Query cache). Tokens: ID/access tokens in memory only; the refresh token + "last user" pointer in
+  `localStorage` so reloads and new tabs stay signed in. Trade-off: localStorage is readable by any script on the
+  origin, mitigated by the CloudFront CSP (`script-src 'self'`, `connect-src` limited to the API, S3 and
+  `cognito-idp.<region>.amazonaws.com`), a 30-day lifetime and server-side revocation on sign-out; sessionStorage would
+  force a full password + TOTP sign-in in every tab.
+- **Build-time switches**: `VITE_AUTH_MODE=cognito|none`, `VITE_COGNITO_USER_POOL_ID`, `VITE_COGNITO_CLIENT_ID`,
+  `VITE_COGNITO_REGION`. Mock mode (`pnpm dev:mock`, GitHub Pages) always runs with auth off. `VITE_AUTH_MODE=cognito`
+  with missing settings renders an error screen instead of the app.
+- **Local development**: LocalStack's free tier has no Cognito, so the local API runs `AUTH_MODE=demo` and the SPA
+  with `VITE_AUTH_MODE=none`. There is deliberately no token-minting shim and no bypass in the deployed path.
+- **Other services**: the ingest Lambda is event-driven and takes the user id from the S3 key written by the API.
+  Any new API route must use `ctx.userId` and nothing else for identity; per-user data (e.g. secrets) must be keyed by it.
+- **Existing demo data.** Environments that ran before auth stored everything under `USER#demo` (and
+  `imports/demo/…`). A Cognito user has a new `sub`, so that data is not visible after switching; re-key it
+  (copy the items to `USER#<sub>`) if it should be kept.

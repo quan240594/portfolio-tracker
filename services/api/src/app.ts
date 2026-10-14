@@ -1,17 +1,10 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2, Context } from 'aws-lambda';
 import { MissingFxRateError, PortfolioError } from '@portfolio/shared';
 import { errorBody, HttpError, toResponse, type RouteResult } from './lib/http.js';
+import { resolveUserId } from './lib/auth.js';
 import { logger } from './lib/logger.js';
 import { matchRoute } from './router.js';
 import type { Deps } from './deps.js';
-
-type JwtAuthorizer = { jwt?: { claims?: Record<string, unknown> } };
-
-export function resolveUserId(event: APIGatewayProxyEventV2, demoUserId: string): string {
-  const authorizer = (event.requestContext as { authorizer?: JwtAuthorizer }).authorizer;
-  const sub = authorizer?.jwt?.claims?.sub;
-  return typeof sub === 'string' && sub.length > 0 ? sub : demoUserId;
-}
 
 export function errorToResult(err: unknown): RouteResult {
   if (err instanceof HttpError) {
@@ -44,11 +37,13 @@ export function createHandler(getDeps: () => Deps): ApiHandler {
       if (method === 'OPTIONS') {
         result = { statusCode: 204, body: undefined };
       } else {
+        // Authenticate before routing so unauthenticated callers learn nothing about which routes exist.
+        const userId = resolveUserId(event, deps.config);
         const matched = matchRoute(method, event.rawPath);
         route = matched.route;
         result = await matched.handler({
           deps,
-          userId: resolveUserId(event, deps.config.demoUserId),
+          userId,
           pathParams: matched.pathParams,
           query: event.queryStringParameters ?? {},
           body: event.body,

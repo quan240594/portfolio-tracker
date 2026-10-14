@@ -28,6 +28,7 @@ describe.skipIf(!available)('api against LocalStack', () => {
     EVENT_BUS_NAME: BUS,
     AWS_ENDPOINT_URL: LOCALSTACK_ENDPOINT,
     AWS_REGION: 'eu-west-1',
+    AUTH_MODE: 'demo',
   });
   const handler = createHandler(() => createAwsDeps(config));
   const call = async (...args: Parameters<typeof apiEvent>) => {

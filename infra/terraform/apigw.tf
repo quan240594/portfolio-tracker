@@ -23,8 +23,8 @@ resource "aws_apigatewayv2_route" "default" {
   api_id             = aws_apigatewayv2_api.http.id
   route_key          = "$default"
   target             = "integrations/${aws_apigatewayv2_integration.api.id}"
-  authorization_type = var.enable_auth ? "JWT" : "NONE"
-  authorizer_id      = var.enable_auth ? aws_apigatewayv2_authorizer.jwt[0].id : null
+  authorization_type = local.auth_enabled ? "JWT" : "NONE"
+  authorizer_id      = local.auth_enabled ? aws_apigatewayv2_authorizer.jwt[0].id : null
 }
 
 resource "aws_cloudwatch_log_group" "api_access" {
@@ -68,69 +68,4 @@ resource "aws_lambda_permission" "apigw" {
   function_name = module.api_lambda.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.http.execution_arn}/*"
-}
-
-# ---------------------------------------------------------------------------
-# Optional Cognito JWT auth (var.enable_auth)
-# ---------------------------------------------------------------------------
-resource "aws_cognito_user_pool" "main" {
-  count = var.enable_auth ? 1 : 0
-
-  name                     = local.name
-  username_attributes      = ["email"]
-  auto_verified_attributes = ["email"]
-  deletion_protection      = var.env == "prod" ? "ACTIVE" : "INACTIVE"
-
-  admin_create_user_config {
-    allow_admin_create_user_only = true
-  }
-
-  password_policy {
-    minimum_length                   = 12
-    require_lowercase                = true
-    require_uppercase                = true
-    require_numbers                  = true
-    require_symbols                  = false
-    temporary_password_validity_days = 7
-  }
-
-  account_recovery_setting {
-    recovery_mechanism {
-      name     = "verified_email"
-      priority = 1
-    }
-  }
-}
-
-resource "aws_cognito_user_pool_client" "web" {
-  count = var.enable_auth ? 1 : 0
-
-  name                          = "${local.name}-web"
-  user_pool_id                  = aws_cognito_user_pool.main[0].id
-  generate_secret               = false
-  prevent_user_existence_errors = "ENABLED"
-  explicit_auth_flows           = ["ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
-  access_token_validity         = 60
-  id_token_validity             = 60
-  refresh_token_validity        = 30
-
-  token_validity_units {
-    access_token  = "minutes"
-    id_token      = "minutes"
-    refresh_token = "days"
-  }
-}
-
-resource "aws_apigatewayv2_authorizer" "jwt" {
-  count = var.enable_auth ? 1 : 0
-
-  api_id           = aws_apigatewayv2_api.http.id
-  name             = "cognito"
-  authorizer_type  = "JWT"
-  identity_sources = ["$request.header.Authorization"]
-
-  jwt_configuration {
-    issuer   = "https://cognito-idp.${local.region}.amazonaws.com/${aws_cognito_user_pool.main[0].id}"
-    audience = [aws_cognito_user_pool_client.web[0].id]
-  }
 }
