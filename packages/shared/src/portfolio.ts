@@ -53,7 +53,7 @@ export interface Position {
  * FX rate for a transaction: the broker-reported `fxRate` wins, then the ECB fixing for the trade
  * date, then the latest rate. Without a timeline (e.g. pure oversell validation) base == local.
  */
-function txRate(t: Transaction, fx?: FxTimeline): number {
+export function txRate(t: Transaction, fx?: FxTimeline): number {
   if (!fx || t.currency === fx.base) return 1;
   return t.fxRate && t.fxRate > 0 ? t.fxRate : fx.rate(t.currency, t.date);
 }

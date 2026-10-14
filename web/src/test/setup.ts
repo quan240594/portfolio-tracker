@@ -44,5 +44,6 @@ afterEach(() => {
   server.resetHandlers();
   resetDb();
   localStorage.clear();
+  sessionStorage.clear();
 });
 afterAll(() => server.close());

@@ -40,7 +40,7 @@ export function heldSymbols(transactions: readonly Transaction[]): string[] {
   return [...buildPositions(transactions).values()].filter((p) => p.quantity > 0).map((p) => p.symbol);
 }
 
-interface FxContext {
+export interface FxContext {
   /** Latest rates: market values and upcoming dividends are converted at these. */
   fx: FxRates;
   /** Daily ECB fixings from FX_LOOKBACK_DAYS before the first transaction until today, oldest first. */
@@ -53,7 +53,7 @@ interface FxContext {
  * fixing stands in. With neither, an empty rate table still works for base-currency-only portfolios;
  * any other currency raises MissingFxRateError (-> 503 FX_UNAVAILABLE).
  */
-async function loadFx(deps: Deps, transactions: readonly Transaction[]): Promise<FxContext> {
+export async function loadFx(deps: Deps, transactions: readonly Transaction[]): Promise<FxContext> {
   const base = deps.config.baseCurrency;
   const today = isoDay(deps.now());
   // Base-currency-only portfolios never convert anything, so they skip the history query.

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { Suspense, lazy, useEffect } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createBrowserRouter, RouterProvider, useLocation, type RouteObject } from 'react-router-dom';
 import { ThemeProvider } from './theme/ThemeProvider';
@@ -8,16 +8,21 @@ import { HoldingsPage } from './pages/HoldingsPage';
 import { DividendsPage } from './pages/DividendsPage';
 import { TransactionsPage } from './pages/TransactionsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { LoadingRegion, Skeleton } from './components/Skeleton';
 import { ApiError } from './api/client';
 import { routerBasename } from './config';
 import { AuthGate } from './features/auth/AuthGate';
 import { AuthProvider } from './features/auth/AuthProvider';
+
+// Charts and calculators of the analytics page stay out of the main bundle until it is visited.
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
 
 const TITLES: Record<string, string> = {
   '/': 'Dashboard',
   '/holdings': 'Holdings',
   '/dividends': 'Dividends',
   '/transactions': 'Transactions',
+  '/analytics': 'Analytics',
 };
 
 /** Updates the document title and moves focus to <main> on navigation (screen-reader friendly). */
@@ -51,6 +56,14 @@ export const routes: RouteObject[] = [
       { path: 'holdings', element: <HoldingsPage /> },
       { path: 'dividends', element: <DividendsPage /> },
       { path: 'transactions', element: <TransactionsPage /> },
+      {
+        path: 'analytics',
+        element: (
+          <Suspense fallback={<LoadingRegion label="Loading analytics"><Skeleton className="h-96 w-full" /></LoadingRegion>}>
+            <AnalyticsPage />
+          </Suspense>
+        ),
+      },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

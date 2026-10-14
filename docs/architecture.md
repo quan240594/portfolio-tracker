@@ -197,3 +197,62 @@ Browser (SPA)                         Cognito user pool                 API Gate
 - **Existing demo data.** Environments that ran before auth stored everything under `USER#demo` (and
   `imports/demo/…`). A Cognito user has a new `sub`, so that data is not visible after switching; re-key it
   (copy the items to `USER#<sub>`) if it should be kept.
+
+- Single demo user unless a JWT authorizer (Cognito) is enabled.
+
+## Analytics
+
+Read-only performance, risk and income analysis. The maths is pure and lives in `packages/shared`
+(`analytics.ts` XIRR/TWR/risk/drawdown/beta/goal simulation, `analytics-income.ts` passive income and dividend
+growth, `analytics-insights.ts` rules, `analytics-compute.ts` response builders, `analytics-api.ts` contract and
+query schemas). The Lambda (`services/api/src/routes/analytics.ts`) loads transactions, quotes, FX, end-of-day
+prices and dividend events and calls the same builders as the web demo's MSW handlers
+(`web/src/mocks/analyticsHandlers.ts`), so the GitHub Pages demo shows real numbers. No new tables, IAM or
+infrastructure: the paths are covered by the API Gateway `$default` route, and the data comes from the existing
+`TXN#`, `QUOTE#LATEST`, `EOD#`, `DIV#`, `PROFILE` and `FX#` items.
+
+| Endpoint (all accept `?portfolioId=`) | Content |
+|---|---|
+| `GET /analytics/summary` | IRR, TWR (+ annualised), passive income, top 5 day gainers/losers, insights |
+| `GET /analytics/returns?period=year\|quarter\|month` | TWR per calendar period (+ IRR per year) |
+| `GET /analytics/risk?benchmark=` | volatility, Sharpe, Sortino, max drawdown (+ dates), beta, correlation |
+| `GET /analytics/benchmark?benchmark=&range=` | portfolio vs a benchmark ETF replayed with the same cash flows |
+| `GET /analytics/dividend-growth` | year-over-year dividends by year, month and per share |
+| `GET /analytics/goal?targetIncome=&…` | passive-income goal projection (cautious / base / optimistic) |
+
+Malformed query parameters return `400 VALIDATION_ERROR` in the standard error envelope.
+
+Definitions:
+
+- **XIRR** solves Σ cf / (1+r)^(days/365) = 0 over dated cash flows (buys negative, sells, dividends and the
+  terminal market value positive) with Newton's method and a bisection fallback; `null` without both signs.
+  For less than a year of history the period return is shown instead of an annualised figure (`irrAnnualised`).
+- **TWR** chains daily returns of the daily value history, removing buys and sells as external flows (dividends count
+  as return). Sub-period (year/quarter/month) returns are chained from the same daily series.
+- **Risk** uses weekday returns: annualised volatility (√252), Sharpe and Sortino against a constant 2.5% risk-free
+  rate (`DEFAULT_RISK_FREE_RATE`), max drawdown from the wealth index, beta/correlation against the benchmark's daily
+  returns. Fewer than `MIN_RISK_OBSERVATIONS` (20) returns yields `null` metrics.
+- **Benchmark**: default `IWDA.AS` (also `VWRL.AS`) from the tracked end-of-day prices. Without prices the response
+  has `benchmark.available = false` and a `message` instead of an error.
+- **Passive income**: next 12 months = declared events (ex-date ahead × quantity) + estimated payments implied by the
+  holding's payment frequency (1/2/4/12 per year from the gaps of its last payments), net of observed withholding tax.
+  Yield on value = income / market value, yield on cost = income / cost basis.
+- **Goal projection**: monthly simulation of the income run-rate; existing income grows at the dividend growth rate and
+  each month the contribution (and reinvested dividends) buys income at the yield on new money. Cautious/optimistic
+  shift growth by ∓2 points and the new-money yield by ∓0.5 points; `yearsToGoal` is `null` beyond the horizon.
+
+Insight thresholds (`INSIGHT_THRESHOLDS`, a rule fires when the measure is strictly above, except dead weight):
+
+| Rule | Threshold |
+|---|---|
+| Top holding | > 25% of portfolio value |
+| Sector | > 40% (Diversified/unknown ignored) |
+| Country | > 50% (Global/unknown ignored) |
+| Single non-EUR currency | > 40% |
+| Non-EUR share | > 50% |
+| Dead weight | return below −15% and weight below 2% |
+| Income concentration | one holding > 40% of forward income |
+
+Web: dashboard widgets (`features/analytics/`) read `GET /analytics/summary`; insights can be dismissed for the
+browser session (`sessionStorage`, per scope). `/analytics` is lazy-loaded and has tabs Returns, Risk, Benchmark,
+Dividend growth and Income goal (`?tab=`); everything follows the active portfolio scope. Not investment advice.

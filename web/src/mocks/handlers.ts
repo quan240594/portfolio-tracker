@@ -14,6 +14,7 @@ import {
 } from '@portfolio/shared';
 import { API_BASE_URL } from '../config';
 import * as db from './db';
+import { analyticsHandlers } from './analyticsHandlers';
 
 /** Resolve handler URLs the same way the client does (relative to the page origin). */
 const origin = () => globalThis.location?.origin ?? 'http://localhost';
@@ -47,6 +48,7 @@ function guard<T>(fn: () => T | Promise<T>) {
 }
 
 export const handlers: HttpHandler[] = [
+  ...analyticsHandlers,
   http.get(api('/health'), () => HttpResponse.json({ status: 'ok' })),
 
   http.get(api('/portfolios'), async () => {

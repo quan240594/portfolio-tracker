@@ -7,3 +7,8 @@ export * from './events.js';
 export * from './fx.js';
 export * from './portfolio.js';
 export * from './auth.js';
+export * from './analytics.js';
+export * from './analytics-income.js';
+export * from './analytics-insights.js';
+export * from './analytics-api.js';
+export * from './analytics-compute.js';
