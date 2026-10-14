@@ -13,6 +13,9 @@ import { ValueChart } from '../components/charts/ValueChart';
 import { AllocationDonut } from '../components/charts/AllocationDonut';
 import { StaleBadge } from '../features/holdings/HoldingsTable';
 import { usePortfolioScope } from '../features/portfolios/usePortfolioScope';
+import { AnalyticsKpis } from '../features/analytics/AnalyticsKpis';
+import { InsightsSection } from '../features/analytics/InsightsSection';
+import { MoversSection } from '../features/analytics/MoversSection';
 import { BASE_CURRENCY, formatDate, formatMoney, formatPercent, formatWeight } from '../lib/format';
 
 const ALLOCATION_TABS: { value: Exclude<AllocationDimension, 'symbol'>; label: string }[] = [
@@ -244,11 +247,14 @@ export function DashboardPage() {
       ) : (
         <div className="space-y-6">
           <KpiGrid />
+          <AnalyticsKpis />
+          <InsightsSection />
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             <PerformanceCard />
             <AllocationCard />
           </div>
           <TopHoldingsCard />
+          <MoversSection />
           {portfolio.data && (
             <p className="muted text-xs">
               Total return {formatPercent(portfolio.data.totalReturnPct, { signed: true })} on amount invested, including realized gains and dividends.

@@ -65,6 +65,8 @@ export default defineConfig(({ mode }) => ({
     include: ['src/**/*.test.{ts,tsx}'],
     css: false,
     restoreMocks: true,
+    // Must exceed the async query timeout in src/test/setup.ts, or the test is killed before the query gives up.
+    testTimeout: 20_000,
     coverage: {
       provider: 'v8',
       include: ['src/**'],

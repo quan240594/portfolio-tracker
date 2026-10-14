@@ -15,6 +15,7 @@ import {
   historyRangeStart,
   sortTransactions,
   type AllocationDimension,
+  type AnalyticsData,
   type GetAllocationResponse,
   type GetDividendsResponse,
   type GetHistoryResponse,
@@ -139,6 +140,22 @@ export function getHistory(range: HistoryRange, scope?: MockScope): GetHistoryRe
 
 export const getDividends = (scope?: MockScope): GetDividendsResponse =>
   calculateDividends(scoped(scope), state.seed.dividendEvents, state.seed.fx, state.seed.today, state.seed.fxHistory);
+
+/** Everything the shared analytics calculators need, for one scope (see mocks/analyticsHandlers.ts). */
+export function getAnalyticsData(scope?: MockScope): AnalyticsData {
+  const transactions = scoped(scope);
+  const { seed } = state;
+  return {
+    transactions,
+    quotes: quotesFor(transactions),
+    profiles: seed.profiles,
+    fx: seed.fx,
+    fxHistory: seed.fxHistory,
+    eod: seed.eod,
+    dividendEvents: seed.dividendEvents,
+    today: seed.today,
+  };
+}
 
 export const listTransactions = (scope?: MockScope): Transaction[] => sortTransactions(scoped(scope)).reverse();
 

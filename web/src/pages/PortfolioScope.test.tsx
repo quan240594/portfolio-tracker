@@ -25,7 +25,13 @@ describe('portfolio-scoped pages', () => {
     expect(within(top).getByRole('link', { name: 'View all →' })).toHaveAttribute('href', '/holdings?portfolio=trading-212');
     await waitFor(() =>
       expect(new Set(params)).toEqual(
-        new Set(['/api/portfolio?trading-212', '/api/holdings?trading-212', '/api/allocation?trading-212', '/api/history?trading-212']),
+        new Set([
+          '/api/portfolio?trading-212',
+          '/api/holdings?trading-212',
+          '/api/allocation?trading-212',
+          '/api/history?trading-212',
+          '/api/analytics/summary?trading-212',
+        ]),
       ),
     );
   });

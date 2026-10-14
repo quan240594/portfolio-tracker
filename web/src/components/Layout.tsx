@@ -10,6 +10,7 @@ const NAV = [
   { to: '/holdings', label: 'Holdings' },
   { to: '/dividends', label: 'Dividends' },
   { to: '/transactions', label: 'Transactions' },
+  { to: '/analytics', label: 'Analytics' },
 ];
 
 function Logo() {

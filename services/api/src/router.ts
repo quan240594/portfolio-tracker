@@ -1,15 +1,18 @@
-import { API_ROUTES } from '@portfolio/shared';
+import { ANALYTICS_ROUTES, API_ROUTES } from '@portfolio/shared';
 import { HttpError, type RouteResult } from './lib/http.js';
 import type { RouteContext } from './deps.js';
 import * as portfolio from './routes/portfolio.js';
 import * as portfolios from './routes/portfolios.js';
 import * as transactions from './routes/transactions.js';
 import * as imports from './routes/imports.js';
+import { analyticsHandlers } from './routes/analytics.js';
 
 export type RouteHandler = (ctx: RouteContext) => Promise<RouteResult>;
-type RouteName = keyof typeof API_ROUTES;
+const ROUTES = { ...API_ROUTES, ...ANALYTICS_ROUTES };
+type RouteName = keyof typeof ROUTES;
 
 const handlers: Record<RouteName, RouteHandler> = {
+  ...analyticsHandlers,
   health: () => Promise.resolve({ statusCode: 200, body: { status: 'ok' } }),
   listPortfolios: portfolios.listPortfolios,
   createPortfolio: portfolios.createPortfolio,
@@ -35,7 +38,7 @@ interface CompiledRoute {
   handler: RouteHandler;
 }
 
-const compiled: CompiledRoute[] = (Object.entries(API_ROUTES) as [RouteName, string][]).map(([name, spec]) => {
+const compiled: CompiledRoute[] = (Object.entries(ROUTES) as [RouteName, string][]).map(([name, spec]) => {
   const [method, path] = spec.split(' ') as [string, string];
   const params: string[] = [];
   const pattern = path.replace(/[.*+?^$()|[\]\\]/g, String.raw`\$&`).replace(/\{(\w+)\}/g, (_m, param: string) => {
@@ -70,7 +73,7 @@ export function matchRoute(method: string, rawPath: string): MatchedRoute {
     if (!m) continue;
     const pathParams: Record<string, string> = {};
     r.params.forEach((p, i) => (pathParams[p] = decodeURIComponent(m[i + 1]!)));
-    return { name: r.name, route: API_ROUTES[r.name], handler: r.handler, pathParams };
+    return { name: r.name, route: ROUTES[r.name], handler: r.handler, pathParams };
   }
   throw new HttpError(404, 'NOT_FOUND', `Route not found: ${method.toUpperCase()} ${path}`);
 }

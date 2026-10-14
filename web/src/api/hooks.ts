@@ -14,7 +14,7 @@ export const queryKeys = {
 };
 
 /** Root keys of everything derived from transactions; the second key segment is the scope. */
-const PORTFOLIO_ROOT_KEYS = ['portfolio', 'holdings', 'allocation', 'history', 'dividends', 'transactions'] as const;
+const PORTFOLIO_ROOT_KEYS = ['portfolio', 'holdings', 'allocation', 'history', 'dividends', 'transactions', 'analytics'] as const;
 
 /**
  * Invalidates transaction-derived queries. With a portfolio id only that portfolio's queries and the
