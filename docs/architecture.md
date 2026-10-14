@@ -57,6 +57,8 @@ Every SQS queue has a DLQ (`maxReceiveCount = 3`). SQS-triggered Lambdas use
 | `LOG_LEVEL` | all | default `INFO` |
 | `MARKET_DATA_PROVIDER` | prices | `mock` or a real provider id (see services/prices README) |
 | `*_API_KEY_PARAM` | prices | SSM parameter name(s) holding provider API keys |
+| `BROKER_SECRET_PREFIX` | api, broker-sync | Secrets Manager prefix of the per-user Trading 212 credentials (see "Trading 212 sync") |
+| `BROKER_SYNC_FUNCTION` | api | name of the broker-sync Lambda; unset locally (sync runs in-process) |
 | `AWS_ENDPOINT_URL` | all (local only) | `http://localhost:4566` (LocalStack); both AWS SDK v3 and boto3 honour it |
 
 ## Build artifacts (consumed by Terraform)
@@ -65,6 +67,7 @@ Every SQS queue has a DLQ (`maxReceiveCount = 3`). SQS-triggered Lambdas use
 |---|---|---|---|---|
 | `services/api` | `pnpm --filter @portfolio/api package` | `services/api/dist/api.zip` | `index.handler` | nodejs22.x, arm64 |
 | `services/ingest` | `pnpm --filter @portfolio/ingest package` | `services/ingest/dist/ingest.zip` | `index.handler` | nodejs22.x, arm64 |
+| `services/broker-sync` | `pnpm --filter @portfolio/broker-sync package` | `services/broker-sync/dist/broker-sync.zip` | `index.handler` | nodejs22.x, arm64 |
 | `services/prices` | `services/prices/scripts/package.sh` | `services/prices/dist/prices.zip` | `prices.handlers.scheduled_refresh` / `prices.handlers.on_transactions_changed` | python3.12, arm64 |
 
 TS bundles: esbuild, ESM (`index.mjs`), `--platform=node --target=node22`, AWS SDK v3 **bundled** (pinned version; the presign fix `requestChecksumCalculation` needs a recent SDK).
@@ -378,3 +381,141 @@ The MSW mock (`web/src/mocks/management-db.ts`, `management-handlers.ts`) implem
 calculators. The seed has cash tracking on in the main portfolio (deposits, withdrawal, interest, fee, 15% default
 withholding), a 2-for-1 JNJ split, five categories whose targets drift from the holdings, three custom assets and a
 three-symbol watchlist.
+
+## Trading 212 sync
+
+Automatic, **read-only** import of the owner's own Trading 212 account (Invest / Stocks ISA) into one portfolio.
+Trading 212's API terms only allow access to the account holder's own account, so this is a single-owner feature,
+not a multi-tenant one: every user stores one credential set and can only ever sync their own account. The browser
+(and the GitHub Pages demo) never calls Trading 212; CI never receives real credentials (fixtures only).
+
+```mermaid
+flowchart LR
+  W[Web /brokers] -- PUT/GET/DELETE/POST /brokers/trading212 --> API[api Lambda]
+  API -- validate key once --> T212[(Trading 212 API)]
+  API -- create/put/delete secret --> SM[(Secrets Manager<br/>per user)]
+  API -- async Invoke --> SYNC[broker-sync Lambda]
+  SCH[Scheduler daily] -- all:true --> SYNC
+  SYNC -- GetSecretValue --> SM
+  SYNC -- read-only GETs --> T212
+  SYNC -- TXN items, BROKER_STATE --> DDB[(DynamoDB)]
+  SYNC -- TransactionsChanged IMPORTED --> BUS[EventBridge bus]
+```
+
+### Endpoints (`packages/shared/src/broker.ts`, `api.ts`)
+
+| Route | Behaviour |
+|---|---|
+| `GET /brokers/trading212?portfolioId=` | Connection status of one portfolio (`connected: false` when none). Never contains credentials. |
+| `PUT /brokers/trading212` `{portfolioId, apiKey, apiSecret, environment}` | Calls Trading 212 `account/summary` once with the key; on success stores it in Secrets Manager under the caller's `userId` and records the connection → `204`. `422 T212_AUTH_REJECTED` for a rejected key, `409 BROKER_ALREADY_CONNECTED` when another portfolio of the user is connected (one credential set per user). The only place secrets are accepted; they are never logged or echoed. |
+| `DELETE /brokers/trading212` | Deletes the secret and the state items → `204`. Imported transactions stay. |
+| `POST /brokers/trading212/sync` `{portfolioId}` | Starts an asynchronous sync (Lambda `Event` invoke) → `202`. `404 NOT_CONNECTED` otherwise. |
+
+All handlers use `ctx.userId` only (never identity from the body or query). Without the sync wired (`deps.broker`
+absent) the routes answer `503 BROKER_UNAVAILABLE`.
+
+### Data
+
+| Entity | PK | SK | entityType |
+|---|---|---|---|
+| Broker sync state | `USER#{userId}` | `BROKER#trading212#{portfolioId}` | `BROKER_STATE` |
+
+State: `status` (`CONNECTED` / `RUNNING` / `SUCCEEDED` / `FAILED`), `environment`, `accountCurrency`, `lastSyncAt`,
+`lastSuccessAt`, `cursors` (newest processed timestamp per source), `counts`, `unmapped` (skipped instruments with a
+reason), `warnings`, `lastError` (`CODE: message`, never credentials). `RUNNING` is an optimistic lock (conditional
+update, taken over after 15 minutes).
+
+Credentials: Secrets Manager secret `/portfolio-tracker/{env}/broker/trading212/{userId}` with
+`{"apiKey","apiSecret","environment"}`. Terraform creates **no** secret or value (`infra/terraform/broker.tf`): the
+sync Lambda may only `GetSecretValue` under that prefix; the API may create/put/delete/describe (never read) and
+invoke the sync function. Synced transactions have deterministic ids (`t212-{orderId}-{fillId}`,
+`t212-div-{reference}`, `t212-split-{ticker}_{epochMs}`) and `importId = trading212`.
+
+### Sync run
+
+1. Take the run lock; read credentials; `account/summary` (account currency).
+2. Read orders, dividends and cash movements newest-first. First run: whole history. Later runs stop at the first
+   page older than `watermark - 7 days` (re-writes are idempotent). `--full` / `{full:true}` rebuilds.
+3. Map (below), then validate **before writing**: the merged transactions of the target portfolio must not oversell
+   and a symbol must keep one currency across all portfolios of the user (`VALIDATION_FAILED`, nothing written, error
+   recorded in the state). Only changed transactions are written; stored dividends are final unless `full`.
+4. Emit one `TransactionsChanged` (`reason: IMPORTED`, affected symbols) so prices are enriched; update tracked
+   tickers and the state. Deposits, withdrawals, fees and interest are **counted, not imported** (cash tracking is
+   a separate feature).
+
+Trading 212 rate limits (orders/dividends/transactions 20 requests/min, positions 1/s, instruments 1 per 50 s) are
+honoured with `x-ratelimit-*` headers, jittered retries on 429/5xx and a request timeout. A first sync of a large
+history therefore takes minutes (about 20 pages of 50 items per minute); the Lambda timeout is 15 minutes.
+
+### Mapping rules
+
+- **Orders:** filled `BUY`/`SELL` fills become BUY/SELL (price = fill price in the instrument currency, quantity
+  absolute, fee = `walletImpact.taxes[]` converted to the instrument currency). Cancelled/unfilled orders are
+  ignored. `GBX`/`ZAC`/`ILA` prices are divided by 100 and relabelled `GBP`/`ZAR`/`ILS`.
+- **Dividends:** DIVIDEND with quantity = eligible shares, price = `grossAmountPerShare`, fee = withholding tax
+  derived as gross − net (net converted at the rate of the nearest imported order of that currency, else the stored
+  ECB rate). The same rate is stored as `fxRate`, so the EUR amount received equals the amount Trading 212 reports.
+- **Corporate actions:** `SPIN_OFF` and other share distributions become a zero-cost BUY at the reported price. A
+  stock split (a SELL of the old and a BUY of the new shares at the same instant, both at market price) becomes
+  **one zero-cost BUY of the net share increase** (cost basis unchanged, average cost drops). Reverse splits and other
+  fill types (`EQUITY_RIGHTS`, …) are skipped and listed as `UNSUPPORTED_FILL_*`.
+- **FX convention:** Trading 212's `walletImpact.fxRate` (and the CSV "Exchange rate") is *instrument-currency units
+  per 1 unit of account currency*, which for a EUR account is exactly our `Transaction.fxRate` convention. It is only
+  stored when the account currency is EUR and the rate agrees with the trade amounts (within 5 %, direction-checked,
+  GBX pence normalised); otherwise it is omitted and the ECB fixing applies.
+- **Symbols:** `AAPL_US_EQ` → `AAPL`, `ASMLa_EQ` → `ASML.AS`, `VUSAl_EQ` → `VUSA.L`, `.DE`, `.PA`, `.MI`, … from the
+  ticker shape, then instrument/exchange metadata (only fetched when needed), then the ISIN country (never IE/LU),
+  and the result must have a currency that fits the venue. Share classes (`BRK/A`, `BF.B`) map to `BRK-A`, `BF-B`. A closed list of well-known renames that Trading 212 history
+  still reports under the old ticker is applied (`FB` → `META`, `DAI.DE` → `MBG.DE`); an override bypasses it.
+  `T212_SYMBOL_OVERRIDES` (JSON, ticker or ISIN → symbol) wins. **Nothing is guessed:** unmapped instruments are
+  skipped and shown as `UNMAPPED` (CLI, state, web card).
+
+### Errors
+
+`T212_AUTH_REJECTED` (HTTP 401/403): "Trading 212 rejected the credentials. Check the key/secret, that the key has
+the read scopes, that the environment (live/demo) matches, and — if the key has an IP allowlist — that this machine's
+public IP is on it." Surfaced in the CLI, `lastError` and the web card, and never retried in a loop. Other codes:
+`T212_RATE_LIMITED`, `T212_HTTP_ERROR`, `T212_NETWORK`, `T212_BAD_RESPONSE`, `NO_CREDENTIALS`, `VALIDATION_FAILED`.
+A key without the `history:transactions` scope only loses the cash counts (warning). The key may optionally be
+IP-restricted at Trading 212; leave it unrestricted for AWS Lambda (no fixed egress IP).
+
+### Local CLI
+
+```bash
+# credentials: T212_API_KEY / T212_API_SECRET / T212_ENV, or the gitignored .env.trading212.local (T212_ENV_FILE overrides)
+pnpm --filter @portfolio/broker-sync sync -- --whoami                    # public IPv4 only, no credentials sent
+pnpm --filter @portfolio/broker-sync sync -- --dry-run                   # counts, mapped symbols, UNMAPPED list; no AWS, no writes
+pnpm --filter @portfolio/broker-sync sync -- --user demo --portfolio trading-212 --reconcile   # real sync into LocalStack
+```
+
+`--reconcile` compares the open positions from `GET /equity/positions` with the positions replayed from the
+imported transactions. Use `AWS_ENDPOINT_URL`, dummy AWS keys, `TABLE_NAME`, `EVENT_BUS_NAME` for LocalStack (the
+compose file includes `secretsmanager` for connecting through the API locally).
+
+### Trading 212 CSV preset
+
+`convertTrading212Csv` (`packages/shared/src/broker-csv.ts`) turns a Trading 212 *History* export (`Action, Time
+(UTC), ISIN, Ticker, …, Exchange rate, Total, …`) into this app's import CSV. The web CSV import detects the export
+by its header and converts it in the browser, so the ingest service is unchanged. Trades and dividends are imported;
+deposits, withdrawals, interest, card actions and conversions are counted as ignored. The export only has bare
+tickers, so instruments are mapped by ISIN country and currency and the ambiguous ones (for example an EUR-quoted
+instrument with a US ISIN) are listed as not imported: use the API sync for those. "Exchange rate" has the same
+convention as the API's `walletImpact.fxRate` (instrument units per 1 unit of the account currency). That was verified
+against the live API only; the CSV column itself could not be checked against a real export, so the converter keeps the
+same sanity check (rate must agree with the row's amounts, otherwise it is dropped and the ECB fixing applies).
+
+### Verified API behaviour (against a live account)
+
+- `GET /equity/history/transactions` rejects `time` without `cursor` (HTTP 400), so there is no start-time filter:
+  cash history is paged newest-first and cut off at the watermark like the other sources.
+- Orders include `CANCELLED` ones without a fill; fills of sells carry a **negative** quantity; autoinvest orders are
+  fractional; split and spin-off fills have `type` `STOCK_SPLIT` / `SPIN_OFF`.
+- Dividends have no `tickerCurrency` in practice; the instrument currency is the currency of `grossAmountPerShare`.
+- Live run on a EUR account with thousands of orders, hundreds of dividends and thousands of cash movements (first
+  sync ≈ 8 minutes at the history rate limit; an incremental re-sync writes nothing and emits no event): the replayed positions matched
+  `GET /equity/positions` for every open instrument (and every closed one replays to zero); `walletImpact.fxRate` is in
+  the plausible range of instrument units per EUR for every USD/GBP fill (the instrument-vs-wallet amounts agree within
+  5 %, one fill without usable FX data falls back to the ECB fixing); our EUR cost basis (fees included) is 0.14-0.15 %
+  above Trading 212's `walletImpact.totalCost` for every open position, consistent with the 0.15 % currency-conversion fee, which
+  Trading 212 appears not to count as cost; dividend withholding derived as gross − net clusters around 15 % (US treaty rate),
+  with outliers only on cent-sized payments (rounding).

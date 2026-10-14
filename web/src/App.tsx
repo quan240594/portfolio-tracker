@@ -12,6 +12,7 @@ import { AssetsPage } from './pages/AssetsPage';
 import { WatchlistPage } from './pages/WatchlistPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { LoadingRegion, Skeleton } from './components/Skeleton';
+import { BrokerPage } from './features/broker/BrokerPage';
 import { ApiError } from './api/client';
 import { routerBasename } from './config';
 import { AuthGate } from './features/auth/AuthGate';
@@ -29,6 +30,7 @@ const TITLES: Record<string, string> = {
   '/rebalance': 'Rebalance',
   '/assets': 'Custom assets',
   '/watchlist': 'Watchlist',
+  '/brokers': 'Trading 212',
 };
 
 /** Updates the document title and moves focus to <main> on navigation (screen-reader friendly). */
@@ -73,6 +75,7 @@ export const routes: RouteObject[] = [
       { path: 'rebalance', element: <RebalancePage /> },
       { path: 'assets', element: <AssetsPage /> },
       { path: 'watchlist', element: <WatchlistPage /> },
+      { path: 'brokers', element: <BrokerPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

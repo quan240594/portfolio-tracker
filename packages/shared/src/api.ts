@@ -56,6 +56,10 @@ export const API_ROUTES = {
   deleteTransaction: 'DELETE /transactions/{id}',
   createImport: 'POST /imports',
   getImport: 'GET /imports/{id}',
+  brokerStatus: 'GET /brokers/trading212',
+  connectBroker: 'PUT /brokers/trading212',
+  disconnectBroker: 'DELETE /brokers/trading212',
+  syncBroker: 'POST /brokers/trading212/sync',
 } as const;
 
 export interface ApiError {

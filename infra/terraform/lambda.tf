@@ -20,6 +20,9 @@ module "api_lambda" {
     DEMO_USER_ID        = var.demo_user_id
     CORS_ALLOWED_ORIGIN = local.web_origin
     LOG_LEVEL           = var.log_level
+    # Trading 212 sync: where the API stores credentials and which function it starts (see broker.tf).
+    BROKER_SECRET_PREFIX = local.broker_secret_prefix
+    BROKER_SYNC_FUNCTION = local.broker_function_name
   }
 }
 

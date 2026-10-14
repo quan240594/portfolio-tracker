@@ -47,6 +47,7 @@ Terraform reads the zips listed in `docs/architecture.md` relative to `artifacts
 pnpm install --frozen-lockfile
 pnpm --filter @portfolio/api package      # services/api/dist/api.zip
 pnpm --filter @portfolio/ingest package   # services/ingest/dist/ingest.zip
+pnpm --filter @portfolio/broker-sync package   # services/broker-sync/dist/broker-sync.zip (Trading 212 sync, broker.tf)
 services/prices/scripts/package.sh        # services/prices/dist/prices.zip
 ```
 

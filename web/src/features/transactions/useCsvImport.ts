@@ -3,15 +3,19 @@ import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { createImportSchema, type ImportStatus } from '@portfolio/shared';
 import { ApiError, api, errorMessage, uploadCsv } from '../../api/client';
 import { invalidatePortfolioData } from '../../api/hooks';
+import { prepareImportFile, type PreparedCsv } from '../broker/trading212Csv';
 
 export const MAX_CSV_BYTES = 1024 * 1024;
+
+/** Present when the file was a Trading 212 export that was converted before the upload. */
+export type Conversion = PreparedCsv['conversion'];
 
 export type ImportState =
   | { phase: 'idle' }
   | { phase: 'uploading'; fileName: string }
   | { phase: 'processing'; fileName: string; importId: string; status?: ImportStatus['status'] }
-  | { phase: 'completed'; result: ImportStatus }
-  | { phase: 'failed'; result: ImportStatus }
+  | { phase: 'completed'; result: ImportStatus; conversion?: Conversion }
+  | { phase: 'failed'; result: ImportStatus; conversion?: Conversion }
   | { phase: 'error'; message: string };
 
 export interface CsvImportOptions {
@@ -39,9 +43,10 @@ interface PollContext extends Required<CsvImportOptions> {
   alive: () => boolean;
   setState: (state: ImportState) => void;
   qc: QueryClient;
+  conversion?: Conversion;
 }
 
-async function pollImport({ importId, portfolioId, fileName, alive, setState, qc, pollIntervalMs, timeoutMs }: PollContext): Promise<void> {
+async function pollImport({ importId, portfolioId, fileName, alive, setState, qc, pollIntervalMs, timeoutMs, conversion }: PollContext): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (alive()) {
     await sleep(pollIntervalMs);
@@ -49,12 +54,12 @@ async function pollImport({ importId, portfolioId, fileName, alive, setState, qc
     const status = await api.getImport(importId);
     if (!alive()) return;
     if (status.status === 'COMPLETED') {
-      setState({ phase: 'completed', result: status });
+      setState({ phase: 'completed', result: status, ...(conversion ? { conversion } : {}) });
       await invalidatePortfolioData(qc, portfolioId);
       return;
     }
     if (status.status === 'FAILED') {
-      setState({ phase: 'failed', result: status });
+      setState({ phase: 'failed', result: status, ...(conversion ? { conversion } : {}) });
       return;
     }
     if (Date.now() >= deadline) {
@@ -99,13 +104,19 @@ export function useCsvImport({ pollIntervalMs = 1500, timeoutMs = 60_000 }: CsvI
 
       try {
         setState({ phase: 'uploading', fileName: file.name });
+        const { file: prepared, conversion } = await prepareImportFile(file);
+        if (!alive()) return;
+        if (conversion && conversion.imported === 0) {
+          setState({ phase: 'error', message: 'This Trading 212 export contains no trades or dividends that could be imported.' });
+          return;
+        }
         const { importId, uploadUrl } = await api.createImport({ fileName: file.name, portfolioId });
         if (!alive()) return;
-        await uploadCsv(uploadUrl, file);
+        await uploadCsv(uploadUrl, prepared);
         if (!alive()) return;
         setState({ phase: 'processing', fileName: file.name, importId });
 
-        await pollImport({ importId, portfolioId, fileName: file.name, alive, setState, qc, pollIntervalMs, timeoutMs });
+        await pollImport({ importId, portfolioId, fileName: file.name, alive, setState, qc, pollIntervalMs, timeoutMs, conversion });
       } catch (err) {
         if (alive()) setState({ phase: 'error', message: err instanceof ApiError ? err.message : errorMessage(err) });
       }

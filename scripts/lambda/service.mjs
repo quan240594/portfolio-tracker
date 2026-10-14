@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const SERVICES = { api: 'services/api', ingest: 'services/ingest' };
+const SERVICES = { api: 'services/api', ingest: 'services/ingest', 'broker-sync': 'services/broker-sync' };
 
 export function resolveService(serviceArg) {
   // Take name and directory from the constant, never from the argument itself.

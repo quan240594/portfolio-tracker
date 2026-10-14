@@ -7,7 +7,7 @@ Routes are the `API_ROUTES` contract in `@portfolio/shared`; calculations come f
 src/index.ts        Lambda entry (index.handler) – creates AWS clients once per container
 src/app.ts          request → router → route handler, error mapping, CORS, structured logging
 src/router.ts       matches API_ROUTES (strips trailing slash and an optional /api prefix)
-src/routes/*        portfolios (CRUD + read scope) | portfolio | holdings | allocation | history | dividends | transactions | imports
+src/routes/*        portfolios (CRUD + read scope) | portfolio | holdings | allocation | history | dividends | transactions | imports | brokers (Trading 212 connect/status/sync/disconnect, see docs/architecture.md)
 src/repository.ts   DynamoDB single-table access (DocumentClient)
 src/events.ts       EventBridge TransactionsChanged publisher (source portfolio.api)
 src/presigner.ts    S3 presigned PUT URLs for CSV imports

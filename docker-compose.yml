@@ -9,7 +9,7 @@ services:
     ports:
       - "127.0.0.1:4566:4566"
     environment:
-      SERVICES: dynamodb,s3,sqs,events,ssm
+      SERVICES: dynamodb,s3,sqs,events,ssm,secretsmanager
       AWS_DEFAULT_REGION: eu-west-1
       DEFAULT_REGION: eu-west-1
       EAGER_SERVICE_LOADING: "1"

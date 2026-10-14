@@ -11,6 +11,7 @@ import {
   type ListPortfoliosResponse,
   type ListTransactionsResponse,
 } from '@portfolio/shared';
+import { brokerHandlers } from './broker';
 import * as db from './db';
 import { analyticsHandlers } from './analyticsHandlers';
 import { categoryAllocation, managementHandlers } from './management-handlers';
@@ -148,4 +149,5 @@ export const handlers: HttpHandler[] = [
   }),
 
   ...managementHandlers,
+  ...brokerHandlers,
 ];

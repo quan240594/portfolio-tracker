@@ -7,6 +7,7 @@ import * as transactions from './routes/transactions.js';
 import * as imports from './routes/imports.js';
 import { analyticsHandlers } from './routes/analytics.js';
 import { managementHandlers } from './routes/management.js';
+import * as brokers from './routes/brokers.js';
 
 export type RouteHandler = (ctx: RouteContext) => Promise<RouteResult>;
 const ROUTES = { ...API_ROUTES, ...ANALYTICS_ROUTES, ...MANAGEMENT_ROUTES };
@@ -30,6 +31,10 @@ const handlers: Record<RouteName, RouteHandler> = {
   deleteTransaction: transactions.deleteTransaction,
   createImport: imports.createImport,
   getImport: imports.getImport,
+  brokerStatus: brokers.brokerStatus,
+  connectBroker: brokers.connectBroker,
+  disconnectBroker: brokers.disconnectBroker,
+  syncBroker: brokers.syncBroker,
 };
 
 interface CompiledRoute {
