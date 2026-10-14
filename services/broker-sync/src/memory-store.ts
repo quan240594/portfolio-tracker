@@ -16,7 +16,7 @@ export class MemoryBrokerStore implements BrokerStore {
     for (const t of existing) this.transactions.set(`${t.userId}|${t.portfolioId}|${t.id}`, t);
   }
 
-  private static key = (userId: string, portfolioId: string) => `${userId}|${portfolioId}`;
+  private static readonly key = (userId: string, portfolioId: string) => `${userId}|${portfolioId}`;
 
   getState(userId: string, portfolioId: string): Promise<BrokerSyncState | null> {
     return Promise.resolve(this.states.get(MemoryBrokerStore.key(userId, portfolioId)) ?? null);

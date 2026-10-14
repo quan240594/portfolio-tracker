@@ -51,9 +51,8 @@ export function resolveFxRate({ reported, accountAmount, localAmount }: FxRateIn
   if (!reported || !Number.isFinite(reported) || reported <= 0) return undefined;
   if (!accountAmount || !Number.isFinite(accountAmount) || accountAmount <= 0 || localAmount <= 0) return undefined;
   const implied = localAmount / accountAmount;
-  const [best, error] = [reported, 1 / reported]
-    .map((candidate) => [candidate, Math.abs(candidate - implied) / implied] as const)
-    .reduce((a, b) => (b[1] < a[1] ? b : a));
+  const [direct, inverse] = [reported, 1 / reported].map((candidate) => [candidate, Math.abs(candidate - implied) / implied] as const);
+  const [best, error] = inverse![1] < direct![1] ? inverse! : direct!;
   return error <= FX_TOLERANCE ? roundTo(best, 6) : undefined;
 }
 

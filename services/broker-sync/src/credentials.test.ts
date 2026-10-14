@@ -95,6 +95,23 @@ describe('parseEnvFile', () => {
   });
 });
 
+describe('parseEnvFile edge cases', () => {
+  it('trims whitespace around keys and values and keeps inner spaces', () => {
+    expect(parseEnvFile('  K\t=  a b  \n_U1=\t')).toEqual({ K: 'a b', _U1: '' });
+  });
+
+  it('rejects values that contain a lone carriage return or unicode line separator', () => {
+    expect(parseEnvFile('A=x\ry\nB=x\u2028y\nC=x\u2029\nD=ok\u2028')).toEqual({ C: 'x', D: 'ok' });
+  });
+
+  it('only unwraps matching quotes and does not backtrack on long input', () => {
+    expect(parseEnvFile('A="x\'\nB=\'y\'')).toEqual({ A: '"x\'', B: 'y' });
+    const started = Date.now();
+    parseEnvFile(`K=${' '.repeat(50_000)}x${' '.repeat(50_000)}\n${' '.repeat(50_000)}=`);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+});
+
 describe('loadLocalCredentials', () => {
   const deps = (over: Partial<LocalCredentialDeps> & { file?: string } = {}): LocalCredentialDeps => ({
     env: {},

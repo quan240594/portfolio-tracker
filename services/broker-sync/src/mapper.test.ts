@@ -300,6 +300,12 @@ describe('RateBook / SkipLog', () => {
     expect(book.nearest('CHF', 1)).toBeUndefined();
   });
 
+  it('returns undefined instead of throwing when a currency has no observations left', () => {
+    const book = new RateBook();
+    (book as unknown as { rates: Map<string, unknown[]> }).rates.set('USD', []);
+    expect(book.nearest('USD', 1)).toBeUndefined();
+  });
+
   it('groups skips and keeps optional fields out when absent', () => {
     const log = new SkipLog();
     log.add({ ticker: 'X', currency: 'USD' }, 'R');

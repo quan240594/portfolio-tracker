@@ -51,10 +51,17 @@ export interface Trading212Credentials {
 
 /** Secrets Manager path of a user's credentials, e.g. `/portfolio-tracker/dev/broker/trading212/{userId}`. */
 export const T212_SECRET_PREFIX = (env: string): string => `/portfolio-tracker/${env}/broker/trading212`;
+/** Strips trailing slashes in linear time (a `/\/+$/` regex backtracks quadratically on long slash runs). */
+export function trimTrailingSlashes(path: string): string {
+  let end = path.length;
+  while (end > 0 && path[end - 1] === '/') end--;
+  return path.slice(0, end);
+}
+
 const SECRET_USER_ID = /^[A-Za-z0-9_.@-]{1,128}$/;
 export function t212SecretName(prefix: string, userId: string): string {
   if (!SECRET_USER_ID.test(userId)) throw new Error('User id cannot be used in a secret name');
-  return `${prefix.replace(/\/+$/, '')}/${userId}`;
+  return `${trimTrailingSlashes(prefix)}/${userId}`;
 }
 
 const credentialText = (max: number) => z.string().trim().min(1).max(max);

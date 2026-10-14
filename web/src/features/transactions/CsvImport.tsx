@@ -168,7 +168,7 @@ export function CsvImport({ onDone, ...options }: Readonly<Props>) {
 }
 
 /** What the Trading 212 converter left out, so a short import is never a surprise. */
-function ConversionNotes({ conversion }: Readonly<{ conversion: Conversion }>) {
+function ConversionNotes({ conversion }: Readonly<{ conversion: Conversion | undefined }>) {
   if (!conversion) return null;
   const ignored = conversion.ignored.reduce((sum, i) => sum + i.count, 0);
   return (

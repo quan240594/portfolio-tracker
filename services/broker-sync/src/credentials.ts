@@ -6,7 +6,7 @@ import {
   ResourceNotFoundException,
   type SecretsManagerClient,
 } from '@aws-sdk/client-secrets-manager';
-import { T212_ENVIRONMENTS, t212SecretName, trading212CredentialsSchema, type Trading212Credentials } from '@portfolio/shared';
+import { T212_ENVIRONMENTS, t212SecretName, trading212CredentialsSchema, trimTrailingSlashes, type Trading212Credentials } from '@portfolio/shared';
 import { BrokerError } from './errors.js';
 
 /** Where the sync gets a user's Trading 212 credentials from. */
@@ -86,9 +86,12 @@ export interface LocalCredentialDeps {
 export function parseEnvFile(content: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const line of content.split(/\r?\n/)) {
-    const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
+    const match = /^\s*([A-Za-z_]\w*)\s*=/.exec(line);
     if (!match) continue;
-    out[match[1]!] = match[2]!.replace(/^(['"])(.*)\1$/, '$2');
+    const value = line.slice(match[0].length).trim();
+    // Only trailing/leading whitespace may contain line terminators; a value that still has one is not a valid line.
+    if (/[\r\u2028\u2029]/.test(value)) continue;
+    out[match[1]!] = value.replace(/^(['"])(.*)\1$/, '$2');
   }
   return out;
 }
@@ -96,7 +99,7 @@ export function parseEnvFile(content: string): Record<string, string> {
 /** The file named by T212_ENV_FILE, else the nearest `.env.trading212.local` in the cwd or its parents. */
 function locateEnvFile(deps: LocalCredentialDeps): string | undefined {
   if (deps.env.T212_ENV_FILE) return deps.env.T212_ENV_FILE;
-  let dir = deps.cwd.replace(/\/+$/, '');
+  let dir = trimTrailingSlashes(deps.cwd);
   while (dir !== '') {
     const candidate = `${dir}/${ENV_FILE_NAME}`;
     if (deps.fileExists(candidate)) return candidate;
@@ -139,8 +142,8 @@ export function loadLocalCredentials(deps: LocalCredentialDeps): Trading212Crede
 export class LocalCredentialSource implements CredentialSource {
   constructor(private readonly deps: LocalCredentialDeps) {}
 
-  get(): Promise<Trading212Credentials> {
-    // Errors thrown while reading become rejections.
-    return new Promise((resolve) => resolve(loadLocalCredentials(this.deps)));
+  // async so errors thrown while reading become rejections.
+  async get(): Promise<Trading212Credentials> {
+    return loadLocalCredentials(this.deps);
   }
 }

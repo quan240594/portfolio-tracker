@@ -147,6 +147,12 @@ describe('Trading212Client errors', () => {
     expect(sleeps).toEqual([375, 750]);
   });
 
+  it('fails without calling the API when no attempt is allowed', async () => {
+    const { client, fetchFn } = setup([], { maxAttempts: 0 });
+    await expect(client.accountSummary()).rejects.toBeInstanceOf(Error);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
   it('gives up after maxAttempts with the last error', async () => {
     const { client, fetchFn } = setup([new Response('', { status: 502 }), new Response('', { status: 502 })], { maxAttempts: 2 });
     await expect(client.accountSummary()).rejects.toMatchObject({ code: 'T212_HTTP_ERROR', status: 502 });

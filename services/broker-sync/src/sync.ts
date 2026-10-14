@@ -3,6 +3,7 @@ import {
   PortfolioError,
   T212_IMPORT_ID,
   buildPositions,
+  sequentially,
   type BrokerSyncCounts,
   type BrokerSyncState,
   type CashMovementCounts,
@@ -89,7 +90,7 @@ async function collect<T>(
     const times = page.items.map(timeOf).filter((t): t is number => t !== undefined && !Number.isNaN(t));
     if (times.length === 0) continue;
     out.newest = Math.max(out.newest ?? -Infinity, ...times);
-    if (times[0]! < times[times.length - 1]!) descending = false;
+    if (times[0]! < times.at(-1)!) descending = false;
     if (descending && cutoff !== undefined && Math.max(...times) < cutoff) break;
   }
   return out;
@@ -392,10 +393,14 @@ export async function runSync(deps: SyncDeps, req: SyncRequest): Promise<SyncRes
 /** Scheduled run: every connected (user, portfolio), one after the other. A failing one does not stop the rest. */
 export async function runAll(deps: SyncDeps): Promise<SyncResult[]> {
   const results: SyncResult[] = [];
-  for (const userId of await deps.store.listUserIds()) {
-    for (const state of await deps.store.listStates(userId)) {
-      results.push(await runSync(deps, { userId, portfolioId: state.portfolioId }));
+  const runUser = async (userId: string): Promise<SyncResult[]> => {
+    const userResults: SyncResult[] = [];
+    const states = await deps.store.listStates(userId);
+    for await (const result of sequentially(states, (state) => runSync(deps, { userId, portfolioId: state.portfolioId }))) {
+      userResults.push(result);
     }
-  }
+    return userResults;
+  };
+  for await (const userResults of sequentially(await deps.store.listUserIds(), runUser)) results.push(...userResults);
   return results;
 }

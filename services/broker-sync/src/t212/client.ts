@@ -1,4 +1,4 @@
-import { T212_BASE_URLS, type Trading212Credentials } from '@portfolio/shared';
+import { T212_BASE_URLS, paginate, retryAttempts, type Trading212Credentials } from '@portfolio/shared';
 import type { z } from 'zod';
 import { AUTH_REJECTED_MESSAGE, BrokerError } from '../errors.js';
 import { redact } from '../redact.js';
@@ -100,7 +100,8 @@ export class Trading212Client implements Trading212Api {
   constructor(private readonly options: ClientOptions) {
     const { apiKey, apiSecret, environment } = options.credentials;
     this.origin = T212_BASE_URLS[environment];
-    this.authorization = `Basic ${Buffer.from(`${apiKey}:${apiSecret}`).toString('base64')}`;
+    const token = Buffer.from(`${apiKey}:${apiSecret}`).toString('base64');
+    this.authorization = `Basic ${token}`;
     this.fetchFn = options.fetchFn ?? fetch;
     this.sleep = options.sleep ?? defaultSleep;
     this.now = options.now ?? Date.now;
@@ -152,14 +153,16 @@ export class Trading212Client implements Trading212Api {
   }
 
   private async *pages<S extends z.ZodTypeAny>(firstPath: string, schema: S): AsyncGenerator<Page<z.output<S>>, void, undefined> {
-    let path: string | undefined = firstPath;
-    for (let n = 0; path !== undefined; n++) {
-      if (n >= this.maxPages) throw new BrokerError('T212_BAD_RESPONSE', 'Pagination did not terminate');
+    let fetched = 0;
+    // The cursor is the raw `nextPagePath`; it is validated when the following page is requested, i.e. after the previous page was yielded.
+    const pages = paginate<Page<z.output<S>>, string>(async (cursor) => {
+      const path = cursor === undefined ? firstPath : this.nextPath(cursor);
+      if (fetched++ >= this.maxPages) throw new BrokerError('T212_BAD_RESPONSE', 'Pagination did not terminate');
       const envelope = pageSchema.safeParse(await this.request(path));
       if (!envelope.success) throw new BrokerError('T212_BAD_RESPONSE', `Unexpected response shape from ${path.split('?')[0]}`);
-      yield validateItems(envelope.data.items, schema);
-      path = envelope.data.nextPagePath ? this.nextPath(envelope.data.nextPagePath) : undefined;
-    }
+      return { page: validateItems(envelope.data.items, schema), next: envelope.data.nextPagePath || undefined };
+    });
+    yield* pages;
   }
 
   /** `nextPagePath` must stay on the API host and under the equity API; anything else is not followed. */
@@ -173,19 +176,28 @@ export class Trading212Client implements Trading212Api {
 
   private async request(path: string): Promise<unknown> {
     const endpoint = path.split('?')[0]!;
-    let lastError: BrokerError | undefined;
-    for (let attempt = 0; attempt < this.maxAttempts; attempt++) {
-      await this.waitForLimit(endpoint);
-      const outcome = await this.attempt(path, endpoint);
+    let lastError = new BrokerError('T212_NETWORK', 'Could not reach Trading 212 (no attempt was made)');
+    let rateLimitWaitMs: number | undefined;
+    const attempts = retryAttempts(
+      async () => {
+        await this.waitForLimit(endpoint);
+        return this.attempt(path, endpoint);
+      },
+      {
+        maxAttempts: this.maxAttempts,
+        delayMs: (retry) => Math.min(rateLimitWaitMs ?? this.backoff(retry - 1), this.maxWaitMs),
+        sleep: (waitMs) => {
+          this.options.onEvent?.({ endpoint, waitMs });
+          return this.sleep(waitMs);
+        },
+      },
+    );
+    for await (const outcome of attempts) {
       if (outcome.done) return outcome.body;
       lastError = outcome.error;
-      if (attempt < this.maxAttempts - 1) {
-        const waitMs = Math.min(outcome.waitMs ?? this.backoff(attempt), this.maxWaitMs);
-        this.options.onEvent?.({ endpoint, waitMs });
-        await this.sleep(waitMs);
-      }
+      rateLimitWaitMs = outcome.waitMs;
     }
-    throw lastError!;
+    throw lastError;
   }
 
   private async waitForLimit(endpoint: string): Promise<void> {
@@ -241,7 +253,8 @@ export class Trading212Client implements Trading212Api {
   private async describe(res: Response, endpoint: string): Promise<string> {
     const text = await res.text().catch(() => '');
     const detail = redact(text.slice(0, 200), this.options.credentials).trim();
-    return `Trading 212 answered HTTP ${res.status} for ${endpoint}${detail ? `: ${detail}` : ''}`;
+    const suffix = detail ? `: ${detail}` : '';
+    return `Trading 212 answered HTTP ${res.status} for ${endpoint}${suffix}`;
   }
 }
 

@@ -77,10 +77,9 @@ async function main(): Promise<number> {
   return result.status === 'SUCCEEDED' ? 0 : 1;
 }
 
-main().then(
-  (code) => process.exit(code),
-  (err: unknown) => {
-    console.error(err instanceof BrokerError ? `${err.code}: ${err.message}` : `Unexpected error (${(err as Error).name})`);
-    process.exit(2);
-  },
-);
+try {
+  process.exit(await main());
+} catch (err: unknown) {
+  console.error(err instanceof BrokerError ? `${err.code}: ${err.message}` : `Unexpected error (${(err as Error).name})`);
+  process.exit(2);
+}

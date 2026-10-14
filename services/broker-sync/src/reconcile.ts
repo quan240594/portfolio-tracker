@@ -55,5 +55,6 @@ export async function reconcilePositions(
       if (a > 0) matched++;
     } else mismatched.push({ symbol, expected: e, actual: a });
   }
-  return { matched, mismatched, unmapped: unmapped.sort((x, y) => x.localeCompare(y)) };
+  const sortedUnmapped = [...unmapped].sort((x, y) => x.localeCompare(y));
+  return { matched, mismatched, unmapped: sortedUnmapped };
 }

@@ -28,7 +28,7 @@ const FEE_COLUMNS = [
 
 /** Minimal RFC 4180 parser: quoted fields, doubled quotes, CRLF/LF, blank lines skipped. */
 export function parseCsvText(input: string): string[][] {
-  const text = input.charCodeAt(0) === 0xfeff ? input.slice(1) : input;
+  const text = input.codePointAt(0) === 0xfeff ? input.slice(1) : input;
   const rows: string[][] = [];
   let row: string[] = [];
   let field = '';

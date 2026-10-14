@@ -7,7 +7,7 @@ export interface Secrets {
 
 /** Replaces the key, the secret, their Basic-auth encoding and any `Basic <token>` in `text`. */
 export function redact(text: string, { apiKey, apiSecret }: Secrets): string {
-  let out = text.replaceAll(/Basic\s+[A-Za-z0-9+/=_-]+/gi, `Basic ${REDACTED}`);
+  let out = text.replaceAll(/Basic\s+[a-z0-9+/=_-]+/gi, `Basic ${REDACTED}`);
   const encoded = Buffer.from(`${apiKey}:${apiSecret}`).toString('base64');
   for (const needle of [encoded, apiKey, apiSecret]) {
     if (needle.length > 0) out = out.replaceAll(needle, REDACTED);

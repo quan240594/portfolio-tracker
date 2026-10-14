@@ -12,9 +12,13 @@ import {
   BROKER_ENTITY,
   ENTITY,
   brokerKeys,
+  drain,
   fromItem,
   keys,
+  paginate,
   registerUserUpdate,
+  retryAttempts,
+  sequentially,
   trackTickerUpdates,
   transactionItem,
   type BrokerSyncState,
@@ -129,18 +133,29 @@ export class DynamoBrokerStore implements BrokerStore {
 
   /** BatchWrite in chunks of 25, retrying unprocessed items with backoff. Puts are idempotent (deterministic keys). */
   async putTransactions(txns: readonly Transaction[]): Promise<void> {
+    const chunks: unknown[][] = [];
     for (let i = 0; i < txns.length; i += BATCH_SIZE) {
-      await this.writeBatch(txns.slice(i, i + BATCH_SIZE).map((t) => ({ PutRequest: { Item: transactionItem(t) } })));
+      chunks.push(txns.slice(i, i + BATCH_SIZE).map((t) => ({ PutRequest: { Item: transactionItem(t) } })));
     }
+    await drain(sequentially(chunks, (items) => this.writeBatch(items)));
   }
 
   private async writeBatch(items: unknown[]): Promise<void> {
     let pending = items;
-    for (let attempt = 0; attempt < MAX_BATCH_ATTEMPTS; attempt++) {
-      if (attempt > 0) await this.sleep(Math.min(50 * 2 ** attempt, 5000) * (0.5 + this.random() / 2));
-      const res = await this.doc.send(new BatchWriteCommand({ RequestItems: { [this.tableName]: pending as never } }));
-      pending = res.UnprocessedItems?.[this.tableName] ?? [];
-      if (pending.length === 0) return;
+    const attempts = retryAttempts(
+      async () => {
+        const res = await this.doc.send(new BatchWriteCommand({ RequestItems: { [this.tableName]: pending as never } }));
+        return res.UnprocessedItems?.[this.tableName] ?? [];
+      },
+      {
+        maxAttempts: MAX_BATCH_ATTEMPTS,
+        delayMs: (retry) => Math.min(50 * 2 ** retry, 5000) * (0.5 + this.random() / 2),
+        sleep: this.sleep,
+      },
+    );
+    for await (const unprocessed of attempts) {
+      if (unprocessed.length === 0) return;
+      pending = unprocessed;
     }
     throw new Error(`BatchWrite: ${pending.length} unprocessed items after ${MAX_BATCH_ATTEMPTS} attempts`);
   }
@@ -176,9 +191,7 @@ export class DynamoBrokerStore implements BrokerStore {
   }
 
   private async queryPrefix(pk: string, skPrefix: string): Promise<Record<string, unknown>[]> {
-    const out: Record<string, unknown>[] = [];
-    let ExclusiveStartKey: Record<string, unknown> | undefined;
-    do {
+    const pages = paginate<Record<string, unknown>[], Record<string, unknown>>(async (ExclusiveStartKey) => {
       const res = await this.doc.send(
         new QueryCommand({
           TableName: this.tableName,
@@ -187,9 +200,10 @@ export class DynamoBrokerStore implements BrokerStore {
           ExclusiveStartKey,
         }),
       );
-      out.push(...(res.Items ?? []));
-      ExclusiveStartKey = res.LastEvaluatedKey;
-    } while (ExclusiveStartKey);
+      return { page: res.Items ?? [], next: res.LastEvaluatedKey };
+    });
+    const out: Record<string, unknown>[] = [];
+    for await (const items of pages) out.push(...items);
     return out;
   }
 }

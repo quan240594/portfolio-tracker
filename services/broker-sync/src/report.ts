@@ -15,7 +15,8 @@ export function formatResult(result: SyncResult): string {
     );
   }
   const symbols = Object.entries(result.symbols).sort(([a], [b]) => a.localeCompare(b));
-  if (symbols.length > 0) lines.push(`  symbols (${symbols.length}): ${symbols.map(([s, n]) => `${s}×${n}`).join(', ')}`);
+  const symbolList = symbols.map(([s, n]) => `${s}×${n}`).join(', ');
+  if (symbols.length > 0) lines.push(`  symbols (${symbols.length}): ${symbolList}`);
   if (result.unmapped.length > 0) {
     lines.push(`  UNMAPPED / skipped (${result.unmapped.length}):`);
     for (const u of result.unmapped) lines.push(`    ${u.ticker} [${u.reason}] ×${u.count}`);

@@ -111,11 +111,11 @@ export function exchangeSuffix(exchangeName: string): string | undefined {
 export interface T212InstrumentRef {
   /** `AAPL_US_EQ`, `VUSAl_EQ`, `SAP_EQ`, or the bare `AAPL` of the CSV export. */
   ticker: string;
-  isin?: string | undefined;
+  isin?: string;
   /** Instrument currency as quoted by Trading 212 (may be minor units such as GBX). */
   currency: string;
   /** Exchange name resolved from the instruments metadata, when available. */
-  exchange?: string | undefined;
+  exchange?: string;
 }
 
 export type SymbolMappingVia = 'override' | 'ticker' | 'exchange' | 'isin';

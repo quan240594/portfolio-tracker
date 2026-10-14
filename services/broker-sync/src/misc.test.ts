@@ -38,6 +38,10 @@ describe('redact', () => {
     expect(out).toBe(`key=${REDACTED} secret=${REDACTED} Authorization: Basic ${REDACTED} other Basic ${REDACTED} end`);
   });
 
+  it('matches the Basic scheme and token characters case-insensitively', () => {
+    expect(redact('x BASIC aB+/=_-9 y', secrets)).toBe(`x Basic ${REDACTED} y`);
+  });
+
   it('is a no-op for empty secrets and clean text', () => {
     expect(redact('plain', { apiKey: '', apiSecret: '' })).toBe('plain');
   });

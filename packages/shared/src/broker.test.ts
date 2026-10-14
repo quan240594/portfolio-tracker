@@ -15,6 +15,7 @@ import {
   resolveFxRate,
   roundTo,
   t212SecretName,
+  trimTrailingSlashes,
   toBrokerStatus,
   trading212CredentialsSchema,
   csvRowSchema,
@@ -41,6 +42,9 @@ describe('currency helpers', () => {
     });
     it('inverts a reported rate in the opposite direction', () => {
       expect(resolveFxRate({ ...base, reported: 0.9132 })).toBe(roundTo(1 / 0.9132, 6));
+    });
+    it('keeps the direct reading when both directions are equally close', () => {
+      expect(resolveFxRate({ accountAmount: 10, localAmount: 10, reported: 1 })).toBe(1);
     });
     it('rejects values inconsistent with the amounts', () => {
       expect(resolveFxRate({ ...base, reported: 1.4 })).toBeUndefined();
@@ -255,6 +259,14 @@ describe('contract', () => {
     expect(brokerKeys.statePrefix).toBe(BROKER_STATE_PREFIX);
     expect(t212SecretName('/portfolio-tracker/dev/broker/trading212/', 'u-1')).toBe('/portfolio-tracker/dev/broker/trading212/u-1');
     expect(() => t212SecretName('/x', 'a/b')).toThrow();
+  });
+
+  it('trims any run of trailing slashes in linear time', () => {
+    expect(trimTrailingSlashes('/a/b///')).toBe('/a/b');
+    expect(trimTrailingSlashes('/a//b')).toBe('/a//b');
+    expect(trimTrailingSlashes('///')).toBe('');
+    expect(trimTrailingSlashes('')).toBe('');
+    expect(t212SecretName('/p'.concat('/'.repeat(100_000)), 'u')).toBe('/p/u');
   });
 
   it('validates requests', () => {

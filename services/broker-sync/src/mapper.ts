@@ -31,8 +31,8 @@ export class RateBook {
 
   nearest(currency: string, at: number): number | undefined {
     const list = this.rates.get(currency);
-    if (!list) return undefined;
-    return list.reduce((best, r) => (Math.abs(r.at - at) < Math.abs(best.at - at) ? r : best)).rate;
+    if (!list?.length) return undefined;
+    return list.reduce((best, r) => (Math.abs(r.at - at) < Math.abs(best.at - at) ? r : best), list[0]!).rate;
   }
 }
 
