@@ -13,7 +13,7 @@ import {
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import type { ImportStatus, Portfolio, Transaction } from '@portfolio/shared';
-import { DynamoRepository, fromItem } from './repository.js';
+import { DynamoRepository } from './repository.js';
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
 const repo = new DynamoRepository(DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'eu-west-1' })), 'tbl');
@@ -38,12 +38,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
-});
-
-describe('fromItem', () => {
-  it('strips PK, SK and entityType but keeps everything else', () => {
-    expect(fromItem({ PK: 'a', SK: 'b', entityType: 'c', id: 1, nested: { PK: 'kept' } })).toEqual({ id: 1, nested: { PK: 'kept' } });
-  });
 });
 
 describe('DynamoRepository queries', () => {

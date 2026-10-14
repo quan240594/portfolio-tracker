@@ -1,12 +1,11 @@
-// Bundles the Lambda handler to dist/<name>/index.mjs (ESM, node22). The AWS SDK is bundled to pin its version.
-import { build } from 'esbuild';
-import { readFileSync, rmSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+// Bundles a service's Lambda handler to <service>/dist/<name>/index.mjs (ESM, node22). The AWS SDK is bundled to pin its version.
+// Usage: node scripts/lambda/build.mjs <service-dir>
+import { rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { resolveService } from './service.mjs';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const name = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).name.split('/').pop();
-const outdir = join(root, 'dist', name);
+const { root, srcDir: outdir, importFromService } = resolveService(process.argv[2]);
+const { build } = await importFromService('esbuild');
 rmSync(outdir, { recursive: true, force: true });
 
 await build({

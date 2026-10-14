@@ -1,12 +1,11 @@
-// Zips dist/<name>/ into dist/<name>.zip with index.mjs at the zip root (Lambda handler: index.handler).
-import { ZipArchive } from 'archiver';
-import { createWriteStream, existsSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+// Zips <service>/dist/<name>/ into <service>/dist/<name>.zip with index.mjs at the zip root (Lambda handler: index.handler).
+// Usage: node scripts/lambda/package.mjs <service-dir>
+import { createWriteStream, existsSync, rmSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { resolveService } from './service.mjs';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const name = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).name.split('/').pop();
-const srcDir = join(root, 'dist', name);
+const { root, name, srcDir, importFromService } = resolveService(process.argv[2]);
+const { ZipArchive } = await importFromService('archiver');
 const zipPath = join(root, 'dist', `${name}.zip`);
 if (!existsSync(join(srcDir, 'index.mjs'))) throw new Error(`${srcDir}/index.mjs not found — run build first`);
 rmSync(zipPath, { force: true });

@@ -11,7 +11,11 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import {
   ENTITY,
+  fromItem,
   keys,
+  registerUserUpdate,
+  trackTickerUpdates,
+  transactionItem,
   type DividendEvent,
   type EodPrice,
   type FxDay,
@@ -52,15 +56,6 @@ export interface Repository {
   trackTickers(tickers: { symbol: string; currency: string }[]): Promise<void>;
   putImport(status: ImportStatus): Promise<void>;
   getImport(userId: string, importId: string): Promise<ImportStatus | null>;
-}
-
-const KEY_ATTRS = new Set(['PK', 'SK', 'entityType']);
-
-/** Strips the single-table key attributes from an item. */
-export function fromItem<T>(item: Record<string, unknown>): T {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(item)) if (!KEY_ATTRS.has(k)) out[k] = v;
-  return out as T;
 }
 
 const chunk = <T>(arr: readonly T[], size: number): T[][] => {
@@ -197,7 +192,7 @@ export class DynamoRepository implements Repository {
     await this.doc.send(
       new PutCommand({
         TableName: this.tableName,
-        Item: { ...keys.transaction(txn.userId, txn.portfolioId, txn.date, txn.id), entityType: ENTITY.transaction, ...txn },
+        Item: transactionItem(txn),
         ConditionExpression: 'attribute_not_exists(PK)',
       }),
     );
@@ -267,32 +262,12 @@ export class DynamoRepository implements Repository {
   }
 
   async registerUser(userId: string): Promise<void> {
-    const now = new Date().toISOString();
-    await this.doc.send(
-      new UpdateCommand({
-        TableName: this.tableName,
-        Key: keys.userRegistry(userId),
-        UpdateExpression: 'SET entityType = :t, userId = :u, updatedAt = :now, createdAt = if_not_exists(createdAt, :now)',
-        ExpressionAttributeValues: { ':t': ENTITY.user, ':u': userId, ':now': now },
-      }),
-    );
+    await this.doc.send(new UpdateCommand(registerUserUpdate(this.tableName, userId, new Date().toISOString())));
   }
 
   async trackTickers(tickers: { symbol: string; currency: string }[]): Promise<void> {
-    const now = new Date().toISOString();
-    await Promise.all(
-      tickers.map((t) =>
-        this.doc.send(
-          new UpdateCommand({
-            TableName: this.tableName,
-            Key: keys.trackedTicker(t.symbol),
-            UpdateExpression:
-              'SET entityType = :t, symbol = :s, currency = if_not_exists(currency, :c), updatedAt = :now, createdAt = if_not_exists(createdAt, :now)',
-            ExpressionAttributeValues: { ':t': ENTITY.trackedTicker, ':s': t.symbol, ':c': t.currency, ':now': now },
-          }),
-        ),
-      ),
-    );
+    const updates = trackTickerUpdates(this.tableName, tickers, new Date().toISOString());
+    await Promise.all(updates.map((input) => this.doc.send(new UpdateCommand(input))));
   }
 
   async putImport(status: ImportStatus): Promise<void> {
