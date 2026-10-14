@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node ../../scripts/lambda/build.mjs .",
-    "package": "node ../../scripts/lambda/build.mjs . && node ../../scripts/lambda/package.mjs .",
+    "build": "node ../../scripts/lambda/build.mjs api",
+    "package": "node ../../scripts/lambda/build.mjs api && node ../../scripts/lambda/package.mjs api",
     "dev": "tsx watch src/local.ts",
     "seed": "tsx scripts/seed.ts",
     "typecheck": "tsc --noEmit",
