@@ -256,3 +256,125 @@ Insight thresholds (`INSIGHT_THRESHOLDS`, a rule fires when the measure is stric
 Web: dashboard widgets (`features/analytics/`) read `GET /analytics/summary`; insights can be dismissed for the
 browser session (`sessionStorage`, per scope). `/analytics` is lazy-loaded and has tabs Returns, Risk, Benchmark,
 Dividend growth and Income goal (`?tab=`); everything follows the active portfolio scope. Not investment advice.
+
+**Scope with cash tracking and custom assets.** Return figures (IRR, TWR, returns by period, benchmark) measure the
+*invested holdings*: only BUY, SELL and DIVIDEND transactions are flows, and the value they are measured against is the
+market value of the holdings. DEPOSIT, WITHDRAWAL, FEE, INTEREST and SPLIT are ignored as flows (a split changes units,
+not value; positions and value history still apply it), and the "since" date is the first investment transaction.
+Cash balances and custom assets are therefore not part of these returns yet. A cash-inclusive IRR would use
+`externalCashFlows()` (deposits/withdrawals for portfolios with cash tracking) against a terminal value that includes cash
+and custom assets; that is a follow-up.
+
+
+## Portfolio management
+
+Cash, splits, categories with target allocation and rebalancing, custom assets, a watchlist, a dividend
+withholding-tax helper and exports. Pure logic lives in `packages/shared` (`management.ts`, `rebalance.ts`,
+contract and routes in `management-api.ts`); the API wiring is in `services/api/src/routes/{categories,assets,watchlist,rebalance,export}.ts`
+with persistence in `management-repository.ts`; the web pages are `/rebalance`, `/assets`, `/watchlist` plus the
+settings/export actions on `/transactions`.
+
+### Transaction types
+
+`TRANSACTION_TYPES` = `BUY | SELL | DIVIDEND | DEPOSIT | WITHDRAWAL | SPLIT | FEE | INTEREST`.
+
+| Type | symbol | quantity | price | fee |
+|---|---|---|---|---|
+| `DEPOSIT`, `INTEREST` | `CASH.<ccy>` | amount | 1 | 0 |
+| `WITHDRAWAL`, `FEE` (account fee) | `CASH.<ccy>` | amount | 1 | 0 |
+| `SPLIT` | the held symbol | new shares per old share (`4` = 4:1, `0.1` = 1:10 reverse) | ignored (`0`) | 0 |
+
+Validation (`transactionInputSchema`, CSV rows, API, ingest — all-or-nothing as before): a cash symbol is
+`CASH.` + 3 letters and must match the transaction currency, `price > 0`, `fee` must be 0 for everything but
+BUY/SELL/DIVIDEND, `CASH.*` and `CUSTOM:*` symbols cannot be traded. A split needs an open position and a ratio `> 0`
+(`PortfolioError` → 422 / import row error).
+
+### Cash tracking
+
+Per-portfolio setting `trackCash` (default **off**: then the engine behaves exactly as before and cash movements
+are ignored). When on, every transaction of the portfolio moves the cash balance of its own currency:
+BUY `−(qty·price+fee)`, SELL/DIVIDEND `+(qty·price−fee)`, DEPOSIT/INTEREST `+amount`, WITHDRAWAL/FEE `−amount`
+(`cashDelta`). `applyManagement` adds one `CASH.<ccy>` holding per currency (asset class `CASH`, sector `Cash`, valued at
+the **latest** FX rate, cost = value so no P&L) to holdings, summary (`cashValue`, included in `totalValue`/`totalCost`),
+allocation and history (`managementHistoryExtra`, daily FX). Interest and account fees are part of `totalReturn`
+(`cashIncome`). Cash is allowed to go negative (no overdraft check). `externalCashFlows()` returns the money that
+crossed the portfolio boundary for later XIRR/TWR work: DEPOSIT (+) / WITHDRAWAL (−) for cash-tracking portfolios,
+BUY (+) / SELL and DIVIDEND (−) for the others, in EUR at the transaction's rate.
+
+### Stock splits
+
+`applyTransaction` multiplies the quantity by the ratio; total cost (local and base) is unchanged, so the average cost
+per share divides by the ratio. The same split entered in several portfolios counts once in the combined view
+(`dropDuplicateSplits`, key symbol+date+ratio). **Assumption:** provider EOD closes are *split-adjusted* (Yahoo-style:
+history is restated as if the latest share basis always applied). `buildValueHistory` therefore values units held before
+a later split at `units × ratio × adjusted close`, so the value line does not jump on the split date; the fallback
+price (average cost) uses the same basis. Quotes/day change are current and need no adjustment. If a provider returns
+unadjusted closes the history before the split would be understated.
+
+### Categories and rebalancing
+
+A portfolio has up to 20 categories (name, `#rrggbb`, target weight %; targets sum ≤ 100, the rest is "unallocated").
+A holding (market symbol, `CASH.<ccy>`, `CUSTOM:<id>`) is in at most one category (assigning moves it).
+`GET /allocation?by=category&portfolioId=` groups by category (+ "Uncategorized").
+`calculateRebalance({ holdings, categories, mode, amount?, wholeUnits?, minTrade? })` is pure:
+`buy-only` invests `amount` without selling, pro rata to each category's shortfall below target (scaled down when
+the budget is short); `full` also sells what is above target and uses the proceeds plus optional new money for the buys. Targets are computed on `portfolio value + amount`;
+within a category money is spread pro rata to current holding values. Cash and custom assets count towards their
+category but are never traded. Result: trades per holding (units, price, value), per-category drift before/after
+(percentage points and EUR), leftover cash (new money + proceeds − buys) and warnings (e.g. a category below target
+with nothing buyable). `wholeUnits` floors units and tops up leftover cash with single units where a category is still furthest below target;
+trades below `minTrade` are dropped.
+
+### Custom assets
+
+Real estate, savings, P2P loans, private equity: `CUSTOM:<assetId>` symbol (reserved prefix), own currency, `costBasis`,
+optional `growthRate` %/year and a list of valuation points. Value on a date = latest valuation on or before it,
+compounded at the growth rate for the days since (365-day year); 0 before the first valuation. Converted to EUR at the
+latest rate, included in totals, allocation (`ASSET_CLASSES` gained `REAL_ESTATE` and `DEPOSIT`) and history. `CASH.*` and
+`CUSTOM:*` are never written to `TRACKED` and never published in `TransactionsChanged` (`isMarketSymbol`,
+`trackTickerUpdates`, `publishChange`, ingest), so the prices service never fetches them.
+
+### Watchlist
+
+Per user. `GET /watchlist` joins the symbols with `QUOTE`/`PROFILE` items (price, day change). `POST /watchlist`
+stores the entry, registers the symbol in `TRACKED` and publishes the existing `TransactionsChanged` event with
+`portfolioId: "watchlist"`; `services/prices` `on_transactions_changed` only reads `detail.symbols`, so no change was
+needed there. A new symbol shows "Waiting for price…" until enrichment has run.
+
+### Withholding tax helper
+
+`PortfolioSettings.withholdingTaxRate` (%). The transaction form prefills a dividend's `fee` with
+`withholdingFee(quantity, price, rate)` until the user edits it; the API stores only the resulting `fee`.
+
+### Export
+
+`GET /export/transactions[?portfolioId=]` answers `text/csv` with the importer's header (`transactionsToCsv`, round-trip
+tested against the ingest parser). `GET /export/backup` answers one JSON document (`BackupResponse`: portfolios, settings,
+transactions, categories + assignments, custom assets, watchlist; no secrets).
+
+### Routes (`MANAGEMENT_ROUTES`)
+
+`GET|PUT /portfolios/{id}/settings` · `GET|POST /portfolios/{id}/categories` · `PATCH|DELETE /portfolios/{id}/categories/{cid}` ·
+`PUT /portfolios/{id}/categories/{cid}/holdings` · `GET /portfolios/{id}/rebalance?mode=&amount=&wholeUnits=&minTrade=` ·
+`GET|POST /portfolios/{id}/assets` · `PATCH|DELETE /portfolios/{id}/assets/{aid}` · `PUT /portfolios/{id}/assets/{aid}/valuations` ·
+`DELETE /portfolios/{id}/assets/{aid}/valuations/{date}` · `GET|POST /watchlist` · `DELETE /watchlist/{symbol}` ·
+`GET /export/transactions` · `GET /export/backup`. A malformed or unknown `{id}` is a 404.
+
+### DynamoDB items (single table, all under `PK = USER#{userId}`; keys in `managementKeys`)
+
+| Entity | SK | entityType |
+|---|---|---|
+| Portfolio settings | `PSETTINGS#{portfolioId}` | `PORTFOLIO_SETTINGS` |
+| Category | `CATEGORY#{portfolioId}#{categoryId}` | `CATEGORY` |
+| Category assignment | `CATASSIGN#{portfolioId}#{symbol}` | `CATEGORY_ASSIGNMENT` |
+| Custom asset | `ASSET#{portfolioId}#{assetId}` | `CUSTOM_ASSET` |
+| Watchlist entry | `WATCH#{symbol}` | `WATCHLIST` |
+
+Deleting a portfolio also removes its settings, categories, assignments and custom assets.
+
+### Demo mode
+
+The MSW mock (`web/src/mocks/management-db.ts`, `management-handlers.ts`) implements all of the above with the shared
+calculators. The seed has cash tracking on in the main portfolio (deposits, withdrawal, interest, fee, 15% default
+withholding), a 2-for-1 JNJ split, five categories whose targets drift from the holdings, three custom assets and a
+three-symbol watchlist.

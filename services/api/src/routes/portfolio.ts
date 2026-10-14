@@ -1,5 +1,6 @@
 import {
   allocationQuerySchema,
+  applyManagement,
   buildPositions,
   buildValueHistory,
   calculateAllocation,
@@ -7,6 +8,8 @@ import {
   calculatePortfolio,
   historyQuerySchema,
   historyRangeStart,
+  managementHistoryExtra,
+  marketSymbols,
   sortTransactions,
   type EodPrice,
   type FxDay,
@@ -21,7 +24,9 @@ import {
 } from '@portfolio/shared';
 import { ok, validate, type RouteResult } from '../lib/http.js';
 import type { Deps, RouteContext } from '../deps.js';
-import { scopedTransactions } from './portfolios.js';
+import { assertCategoryScope, categoryAllocation } from './categories.js';
+import { loadManagementScope } from './management-data.js';
+import { resolveScope } from './portfolios.js';
 
 export const MAX_HISTORY_POINTS = 400;
 /** Extra days of EOD loaded before the range start so carry-forward closes are seeded. */
@@ -71,16 +76,21 @@ export async function loadFx(deps: Deps, transactions: readonly Transaction[]): 
   return { fx, fxHistory };
 }
 
-async function computePortfolio(ctx: RouteContext) {
+/** Holdings and summary of the read scope, including cash (when tracked) and custom assets. `scope` undefined = all. */
+export async function computePortfolio(ctx: RouteContext) {
   const { repo } = ctx.deps;
-  const transactions = await scopedTransactions(ctx);
+  const scope = await resolveScope(ctx);
+  const transactions = await repo.listTransactions(ctx.userId, scope);
   const symbols = heldSymbols(transactions);
-  const [quotes, profiles, { fx, fxHistory }] = await Promise.all([
+  const [quotes, profiles, { fx, fxHistory }, management] = await Promise.all([
     symbols.length ? repo.getQuotes(symbols) : {},
     symbols.length ? repo.getProfiles(symbols) : {},
     loadFx(ctx.deps, transactions),
+    loadManagementScope(ctx, scope),
   ]);
-  return calculatePortfolio({ transactions, quotes, profiles, fx, fxHistory, now: ctx.deps.now() });
+  const result = calculatePortfolio({ transactions, quotes, profiles, fx, fxHistory, now: ctx.deps.now() });
+  const today = isoDay(ctx.deps.now());
+  return { ...applyManagement(result, { transactions, ...management, fx, fxHistory, today }), scope };
 }
 
 export async function getPortfolio(ctx: RouteContext): Promise<RouteResult> {
@@ -94,6 +104,10 @@ export async function getHoldings(ctx: RouteContext): Promise<RouteResult> {
 }
 
 export async function getAllocation(ctx: RouteContext): Promise<RouteResult> {
+  if (ctx.query.by === 'category') {
+    const { summary, holdings, scope } = await computePortfolio(ctx);
+    return ok(await categoryAllocation(ctx, assertCategoryScope(scope), summary.baseCurrency, holdings));
+  }
   const { by } = validate(allocationQuerySchema.safeParse(ctx.query), 'Invalid query parameters');
   const { summary, holdings } = await computePortfolio(ctx);
   return ok({ by, baseCurrency: summary.baseCurrency, slices: calculateAllocation(holdings, by) } satisfies GetAllocationResponse);
@@ -111,7 +125,8 @@ export function downsample(points: ValuePoint[], max = MAX_HISTORY_POINTS): Valu
 export async function getHistory(ctx: RouteContext): Promise<RouteResult> {
   const { range } = validate(historyQuerySchema.safeParse(ctx.query), 'Invalid query parameters');
   const { repo } = ctx.deps;
-  const transactions = sortTransactions(await scopedTransactions(ctx));
+  const scope = await resolveScope(ctx);
+  const transactions = sortTransactions(await repo.listTransactions(ctx.userId, scope));
   const { fx, fxHistory } = await loadFx(ctx.deps, transactions);
   const today = isoDay(ctx.deps.now());
   if (transactions.length === 0) {
@@ -119,17 +134,19 @@ export async function getHistory(ctx: RouteContext): Promise<RouteResult> {
   }
   const from = historyRangeStart(range, today, transactions[0]!.date);
   // All symbols ever traded matter for history (positions may have been closed inside the range).
-  const symbols = [...new Set(transactions.map((t) => t.symbol))];
+  const symbols = marketSymbols([...new Set(transactions.map((t) => t.symbol))]);
   const eodFrom = addDays(from, -EOD_LOOKBACK_DAYS);
   const series = await Promise.all(symbols.map((s) => repo.getEod(s, eodFrom, today)));
   const eod: Record<string, EodPrice[]> = Object.fromEntries(symbols.map((s, i) => [s, series[i]!]));
-  const points = downsample(buildValueHistory(transactions, eod, fx, from, today, fxHistory));
+  const management = await loadManagementScope(ctx, scope);
+  const extra = managementHistoryExtra({ transactions, ...management });
+  const points = downsample(buildValueHistory(transactions, eod, fx, from, today, fxHistory, extra));
   return ok({ range, baseCurrency: fx.base, points } satisfies GetHistoryResponse);
 }
 
 export async function getDividends(ctx: RouteContext): Promise<RouteResult> {
   const { repo } = ctx.deps;
-  const transactions = await scopedTransactions(ctx);
+  const transactions = await repo.listTransactions(ctx.userId, await resolveScope(ctx));
   const symbols = heldSymbols(transactions);
   const [events, { fx, fxHistory }] = await Promise.all([
     Promise.all(symbols.map((s) => repo.getDividendEvents(s))),

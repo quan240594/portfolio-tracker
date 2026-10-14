@@ -1,10 +1,12 @@
 import type { Config } from './config.js';
 import type { EventPublisher } from './events.js';
 import type { UploadUrlSigner } from './presigner.js';
+import type { ManagementRepository } from './management-repository.js';
 import type { Repository } from './repository.js';
 
 export interface Deps {
   repo: Repository;
+  mgmt: ManagementRepository;
   events: EventPublisher;
   signer: UploadUrlSigner;
   config: Pick<Config, 'baseCurrency' | 'authMode' | 'demoUserId' | 'corsAllowedOrigin'>;

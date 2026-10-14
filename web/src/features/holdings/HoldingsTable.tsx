@@ -1,8 +1,11 @@
 import { useId, useMemo, useState } from 'react';
-import type { Holding } from '@portfolio/shared';
+import { isCustomSymbol, type Holding } from '@portfolio/shared';
 import { Change } from '../../components/Change';
 import { formatMoney, formatPercent, formatQuantity, formatWeight } from '../../lib/format';
 import { sortHoldings, type SortDir, type SortKey } from './sortHoldings';
+
+/** Custom assets have an internal `CUSTOM:<id>` symbol; show a readable label instead. */
+const holdingLabel = (h: Holding) => (isCustomSymbol(h.symbol) ? 'Custom asset' : h.symbol);
 
 interface Column {
   key: SortKey;
@@ -140,7 +143,7 @@ export function HoldingsTable({ holdings, currency }: Readonly<Props>) {
               <tr key={h.symbol} className="border-b border-slate-100 last:border-0 hover:bg-slate-50 dark:border-slate-800/60 dark:hover:bg-slate-800/40">
                 <th scope="row" className="px-3 py-2.5 text-left font-normal">
                   <div className="flex items-center gap-2">
-                    <span className="font-semibold">{h.symbol}</span>
+                    <span className="font-semibold">{holdingLabel(h)}</span>
                     {h.priceStale && <StaleBadge />}
                   </div>
                   <div className="muted max-w-[16rem] truncate text-xs">{h.name}</div>
@@ -206,7 +209,7 @@ export function HoldingsTable({ holdings, currency }: Readonly<Props>) {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-semibold">{h.symbol}</span>
+                    <span className="font-semibold">{holdingLabel(h)}</span>
                     {h.priceStale && <StaleBadge />}
                   </div>
                   <div className="muted truncate text-xs">{h.name}</div>

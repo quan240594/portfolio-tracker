@@ -60,7 +60,7 @@ describe('PortfolioSwitcher', () => {
     expect(router.state.location.search).toBe('?portfolio=all');
     expect(localStorage.getItem(PORTFOLIO_STORAGE_KEY)).toBe('all');
     expect(navLink('Dividends')).toHaveAttribute('href', '/dividends?portfolio=all');
-    expect(await screen.findByText(/^All portfolios · 8 positions/)).toBeInTheDocument();
+    expect(await screen.findByText(/^All portfolios · 12 positions/)).toBeInTheDocument();
 
     // The back button restores the previous scope.
     await act(() => router.navigate(-1));
@@ -92,7 +92,7 @@ describe('PortfolioSwitcher', () => {
     await waitFor(() => expect(router.state.location.search).toBe(''));
     expect(switcher()).toHaveValue('all');
     expect(localStorage.getItem(PORTFOLIO_STORAGE_KEY)).toBe('all');
-    expect(await screen.findByText(/^All portfolios · 8 positions/)).toBeInTheDocument();
+    expect(await screen.findByText(/^All portfolios · 12 positions/)).toBeInTheDocument();
     // The unknown id is never queried.
     expect(seen.some((s) => s.portfolioId === 'deleted-one')).toBe(false);
   });

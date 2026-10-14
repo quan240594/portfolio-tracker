@@ -1,4 +1,4 @@
-import { buildPositions, parseImportObjectKey, PortfolioError, importObjectKey, type Transaction } from '@portfolio/shared';
+import { buildPositions, isMarketSymbol, parseImportObjectKey, PortfolioError, importObjectKey, type Transaction } from '@portfolio/shared';
 import { MAX_ERRORS, parseImportCsv, type ParsedRow, type RowError } from './csv.js';
 import type { EventPublisher } from './events.js';
 import { logger } from './logger.js';
@@ -27,15 +27,20 @@ const safeParseKey = (key: string) => {
 export const importOwner = (key: string): string | null => safeParseKey(key)?.userId ?? null;
 
 /**
- * Maps an oversell PortfolioError ("Cannot sell Q SYM on DATE: ...") back to the offending CSV row, if it came
- * from this file. Anything else (a later stored sell, or mixed currencies already present in stored data, since
- * the file's own currencies are checked beforehand) is a file-level error (row 0).
+ * Maps an oversell or invalid-split PortfolioError ("Cannot sell Q SYM on DATE: ..." / "Cannot split SYM on DATE: ...")
+ * back to the offending CSV row, if it came from this file. Anything else (a later stored sell, or mixed currencies
+ * already present in stored data, since the file's own currencies are checked beforehand) is a file-level error (row 0).
  */
 function rowForPortfolioError(err: PortfolioError, rows: ParsedRow[]): number {
-  const m = /^Cannot sell (\S+) (\S+) on (\d{4}-\d{2}-\d{2})/.exec(err.message);
-  if (m) {
-    const [, qty, symbol, date] = m;
+  const sell = /^Cannot sell (\S+) (\S+) on (\d{4}-\d{2}-\d{2})/.exec(err.message);
+  if (sell) {
+    const [, qty, symbol, date] = sell;
     const hit = rows.find((r) => r.input.type === 'SELL' && r.input.symbol === symbol && r.input.date === date && String(r.input.quantity) === qty);
+    if (hit) return hit.row;
+  }
+  const split = /^Cannot split (\S+) on (\d{4}-\d{2}-\d{2})/.exec(err.message);
+  if (split) {
+    const hit = rows.find((r) => r.input.type === 'SPLIT' && r.input.symbol === split[1] && r.input.date === split[2]);
     if (hit) return hit.row;
   }
   return 0;
@@ -133,15 +138,18 @@ export async function processImportObject(deps: IngestDeps, ref: S3ObjectRef): P
 
   await deps.store.putTransactions(imported);
   await deps.store.registerUser(userId);
-  const tickers = new Map(imported.map((t) => [t.symbol, t.currency]));
+  // Cash (CASH.*) rows have no price feed: only market symbols are tracked and announced for enrichment.
+  const tickers = new Map(imported.filter((t) => isMarketSymbol(t.symbol)).map((t) => [t.symbol, t.currency]));
   await deps.store.trackTickers([...tickers].map(([symbol, currency]) => ({ symbol, currency })));
-  await deps.events.transactionsChanged({
-    userId,
-    portfolioId,
-    symbols: [...tickers.keys()].sort((a, b) => a.localeCompare(b)),
-    reason: 'IMPORTED',
-    importId,
-  });
+  if (tickers.size > 0) {
+    await deps.events.transactionsChanged({
+      userId,
+      portfolioId,
+      symbols: [...tickers.keys()].sort((a, b) => a.localeCompare(b)),
+      reason: 'IMPORTED',
+      importId,
+    });
+  }
   await deps.store.markCompleted(userId, importId, parsed.rowCount, imported.length);
   log.info('Import completed', { portfolioId, rowCount: parsed.rowCount, importedCount: imported.length });
   return 'COMPLETED';

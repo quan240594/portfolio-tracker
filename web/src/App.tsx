@@ -7,6 +7,9 @@ import { DashboardPage } from './pages/DashboardPage';
 import { HoldingsPage } from './pages/HoldingsPage';
 import { DividendsPage } from './pages/DividendsPage';
 import { TransactionsPage } from './pages/TransactionsPage';
+import { RebalancePage } from './pages/RebalancePage';
+import { AssetsPage } from './pages/AssetsPage';
+import { WatchlistPage } from './pages/WatchlistPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { LoadingRegion, Skeleton } from './components/Skeleton';
 import { ApiError } from './api/client';
@@ -23,6 +26,9 @@ const TITLES: Record<string, string> = {
   '/dividends': 'Dividends',
   '/transactions': 'Transactions',
   '/analytics': 'Analytics',
+  '/rebalance': 'Rebalance',
+  '/assets': 'Custom assets',
+  '/watchlist': 'Watchlist',
 };
 
 /** Updates the document title and moves focus to <main> on navigation (screen-reader friendly). */
@@ -64,6 +70,9 @@ export const routes: RouteObject[] = [
           </Suspense>
         ),
       },
+      { path: 'rebalance', element: <RebalancePage /> },
+      { path: 'assets', element: <AssetsPage /> },
+      { path: 'watchlist', element: <WatchlistPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

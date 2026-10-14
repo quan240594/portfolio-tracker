@@ -12,6 +12,7 @@ import {
   chainReturns,
   annualiseReturn,
   dailyFlows,
+  isInvestmentFlow,
   daysBetween,
   downsampleEvenly,
   maxDrawdown,
@@ -80,7 +81,8 @@ interface Context {
 /** Daily value history, flows and flow-adjusted returns from the first transaction to today; null without transactions. */
 function buildContext(data: AnalyticsData): Context | null {
   const transactions = sortTransactions(data.transactions).filter((t) => t.date <= data.today);
-  const first = transactions[0];
+  // "Since" is the first investment transaction, not e.g. an earlier cash deposit.
+  const first = transactions.find(isInvestmentFlow);
   if (!first) return null;
   const timeline = new FxTimeline(data.fx, data.fxHistory);
   const history = buildValueHistory(transactions, data.eod, data.fx, first.date, data.today, data.fxHistory);

@@ -162,14 +162,19 @@ describe('CsvImport', () => {
     const onDone = vi.fn();
     let releaseUpload!: () => void;
     const uploadGate = new Promise<void>((r) => (releaseUpload = r));
+    // The status response is gated as well: otherwise "Processing…" is visible for a few ms only and a slow runner
+    // can miss it between two findBy polls.
+    let releaseStatus!: () => void;
+    const statusGate = new Promise<void>((r) => (releaseStatus = r));
     server.use(
       http.put('*/__mock-s3/imports/:importId', async () => {
         await uploadGate;
         return new HttpResponse(null, { status: 200 });
       }),
-      http.get('/api/imports/:id', ({ params }) =>
-        HttpResponse.json({ importId: String(params.id), userId: 'demo', fileName: 'trades.csv', status: 'COMPLETED', createdAt: '', updatedAt: '' }),
-      ),
+      http.get('/api/imports/:id', async ({ params }) => {
+        await statusGate;
+        return HttpResponse.json({ importId: String(params.id), userId: 'demo', fileName: 'trades.csv', status: 'COMPLETED', createdAt: '', updatedAt: '' });
+      }),
     );
     renderWithProviders(<CsvImport pollIntervalMs={20} onDone={onDone} />);
     await user.upload(screen.getByLabelText('CSV file'), csvFile(buildSampleCsv()));
@@ -181,6 +186,7 @@ describe('CsvImport', () => {
 
     releaseUpload();
     expect(await screen.findByText(/Processing trades\.csv… this usually takes a few seconds\./)).toBeInTheDocument();
+    releaseStatus();
     expect(await screen.findByText('✓ Import completed')).toBeInTheDocument();
     // Missing counts default to 0.
     expect(await screen.findByText('Imported 0 of 0 rows from trades.csv into Main portfolio.')).toBeInTheDocument();

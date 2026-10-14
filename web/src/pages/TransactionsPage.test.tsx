@@ -171,7 +171,7 @@ describe('TransactionsPage', () => {
 
       await user.click(trigger);
       const dialog = screen.getByRole('alertdialog', { name: 'Delete transaction?' });
-      expect(dialog).toHaveAccessibleDescription(/^This removes the dividend of 30 JNJ on .* Holdings and returns will be recalculated\.$/);
+      expect(dialog).toHaveAccessibleDescription(new RegExp(`^This removes the ${first.type.toLowerCase()} of .* ${first.symbol} on .* Holdings and returns will be recalculated\\.$`));
       expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus();
 
       await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
@@ -193,7 +193,7 @@ describe('TransactionsPage', () => {
       await user.click(screen.getByRole('button', { name: `Delete ${first.type.toLowerCase()} ${first.symbol} on ${formatDate(first.date)}` }));
       await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' }));
 
-      expect(await screen.findByText(`Deleted dividend of ${first.symbol} on ${formatDate(first.date)}.`)).toBeInTheDocument();
+      expect(await screen.findByText(`Deleted ${first.type.toLowerCase()} of ${first.symbol} on ${formatDate(first.date)}.`)).toBeInTheDocument();
       await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
       await waitFor(() => expect(rows()).toHaveLength(before - 1));
       expect(listTransactions().some((t) => t.id === first.id)).toBe(false);

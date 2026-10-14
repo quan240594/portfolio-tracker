@@ -358,8 +358,9 @@ describe('handler logging & request handling', () => {
     const expected = {
       'content-type': 'application/json',
       'access-control-allow-origin': 'http://localhost:5173',
-      'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+      'access-control-allow-methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
       'access-control-allow-headers': 'content-type,authorization',
+      'access-control-expose-headers': 'content-disposition',
       'cache-control': 'no-store',
     };
     for (const event of [apiEvent('GET', '/health'), apiEvent('GET', '/nope'), apiEvent('OPTIONS', '/anything')]) {

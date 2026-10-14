@@ -31,6 +31,24 @@ export function sortTransactions(txns: readonly Transaction[]): Transaction[] {
   return [...txns].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt));
 }
 
+/** Cash movements: they affect the cash ledger (management.ts) but never a position. */
+const CASH_ONLY_TYPES: ReadonlySet<string> = new Set(['DEPOSIT', 'WITHDRAWAL', 'FEE', 'INTEREST']);
+
+/**
+ * A split affects every holding of the symbol, so the same split (symbol, date, ratio) entered in several portfolios
+ * must count once when portfolios are combined. Expects chronologically sorted input.
+ */
+export function dropDuplicateSplits(sorted: readonly Transaction[]): Transaction[] {
+  const seen = new Set<string>();
+  return sorted.filter((t) => {
+    if (t.type !== 'SPLIT') return true;
+    const key = `${t.symbol}|${t.date}|${t.quantity}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /**
  * Per-symbol position state (average-cost method), tracked both in the instrument's local currency
  * and in the portfolio base currency at the FX rate of each transaction.
@@ -61,7 +79,7 @@ export function txRate(t: Transaction, fx?: FxTimeline): number {
 /** Replays transactions up to and including `asOfDate`, throws on overselling. */
 export function buildPositions(txns: readonly Transaction[], asOfDate?: string, fx?: FxTimeline): Map<string, Position> {
   const positions = new Map<string, Position>();
-  for (const t of sortTransactions(txns)) {
+  for (const t of dropDuplicateSplits(sortTransactions(txns))) {
     if (asOfDate && t.date > asOfDate) break;
     applyTransaction(positions, t, fx);
   }
@@ -70,7 +88,11 @@ export function buildPositions(txns: readonly Transaction[], asOfDate?: string, 
 
 /** Mutates `positions` by applying a single transaction (caller guarantees chronological order). */
 export function applyTransaction(positions: Map<string, Position>, t: Transaction, fx?: FxTimeline): void {
+  if (CASH_ONLY_TYPES.has(t.type)) return;
   let p = positions.get(t.symbol);
+  if (t.type === 'SPLIT' && (!p || p.quantity <= 0 || !(t.quantity > 0))) {
+    throw new PortfolioError(`Cannot split ${t.symbol} on ${t.date}: no position held or invalid ratio`);
+  }
   if (!p) {
     p = {
       symbol: t.symbol,
@@ -123,6 +145,11 @@ export function applyTransaction(positions: Map<string, Position>, t: Transactio
       const net = t.quantity * t.price - t.fee;
       p.dividendsLocal += net;
       p.dividendsBase += net / rate;
+      break;
+    }
+    case 'SPLIT': {
+      // Total cost is unchanged: only the unit count (and thus the per-share average cost) changes.
+      p.quantity *= t.quantity;
       break;
     }
   }
@@ -265,6 +292,26 @@ function seedLastClose(eod: Readonly<Record<string, readonly EodPrice[]>>, start
   return lastClose;
 }
 
+interface SplitEvent {
+  date: string;
+  ratio: number;
+}
+
+/** Splits per symbol, for restating historical quantities on the basis of the (split-adjusted) provider prices. */
+function splitsBySymbol(sorted: readonly Transaction[]): Map<string, SplitEvent[]> {
+  const out = new Map<string, SplitEvent[]>();
+  for (const t of sorted) {
+    if (t.type !== 'SPLIT') continue;
+    out.set(t.symbol, [...(out.get(t.symbol) ?? []), { date: t.date, ratio: t.quantity }]);
+  }
+  return out;
+}
+
+/** Product of the ratios of splits that happen after `date`: old units * factor = units on today's share basis. */
+function futureSplitFactor(splits: readonly SplitEvent[] | undefined, date: string): number {
+  return (splits ?? []).reduce((f, s) => (s.date > date ? f * s.ratio : f), 1);
+}
+
 /** Market value and cost basis (base currency) of the open positions on `date`; updates `lastClose`. */
 function valuePositionsOn(
   positions: ReadonlyMap<string, Position>,
@@ -272,6 +319,7 @@ function valuePositionsOn(
   lastClose: Map<string, number>,
   timeline: FxTimeline,
   date: string,
+  splits: ReadonlyMap<string, readonly SplitEvent[]>,
 ): { value: number; invested: number } {
   let value = 0;
   let invested = 0;
@@ -279,18 +327,26 @@ function valuePositionsOn(
     const close = closeIndex.get(p.symbol)?.get(date);
     if (close !== undefined) lastClose.set(p.symbol, close);
     if (p.quantity <= 0) continue;
-    const price = lastClose.get(p.symbol) ?? p.costLocal / p.quantity;
-    value += timeline.toBase(p.quantity * price, p.currency, date);
+    // Provider closes are split-adjusted (as if the latest share basis always applied), so units held before a
+    // later split are restated to today's basis; the fallback price (cost / units) uses the same basis.
+    const units = p.quantity * futureSplitFactor(splits.get(p.symbol), date);
+    const price = lastClose.get(p.symbol) ?? p.costLocal / units;
+    value += timeline.toBase(units * price, p.currency, date);
     invested += p.costBase;
   }
   return { value, invested };
 }
+
+/** Extra value/cost on a date that does not come from positions (cash balances, custom assets). */
+export type ValueHistoryExtra = (date: string, timeline: FxTimeline) => { value: number; invested: number };
 
 /**
  * Daily portfolio value series between `from` and `to` (inclusive) in the base currency.
  * Each day's value uses that day's ECB fixing (carried over weekends/holidays) when `fxHistory` is
  * given, else the latest rate; `invested` is the cost basis at the purchase-date rates.
  * Missing closes carry forward the last known close, falling back to the position's average cost.
+ * Assumption: EOD closes are split-adjusted (Yahoo-style), so quantities held before a SPLIT are shown multiplied by the
+ * split ratio; the value therefore does not jump on the split date. `extra` adds cash/custom-asset value and cost.
  */
 export function buildValueHistory(
   transactions: readonly Transaction[],
@@ -299,8 +355,9 @@ export function buildValueHistory(
   from: string,
   to: string,
   fxHistory?: readonly FxDay[],
+  extra?: ValueHistoryExtra,
 ): ValuePoint[] {
-  const sorted = sortTransactions(transactions);
+  const sorted = dropDuplicateSplits(sortTransactions(transactions));
   if (sorted.length === 0 || from > to) return [];
   const timeline = new FxTimeline(fx, fxHistory);
   const start = from < sorted[0]!.date ? sorted[0]!.date : from;
@@ -311,13 +368,15 @@ export function buildValueHistory(
   }
 
   const lastClose = seedLastClose(eod, start);
+  const splits = splitsBySymbol(sorted);
   const points: ValuePoint[] = [];
   const positions = new Map<string, Position>();
   let next = 0;
   for (let date = start; date <= to; date = addDays(date, 1)) {
     while (next < sorted.length && sorted[next]!.date <= date) applyTransaction(positions, sorted[next++]!, timeline);
-    const { value, invested } = valuePositionsOn(positions, closeIndex, lastClose, timeline, date);
-    points.push({ date, value: round(value), invested: round(invested) });
+    const held = valuePositionsOn(positions, closeIndex, lastClose, timeline, date, splits);
+    const added = extra?.(date, timeline) ?? { value: 0, invested: 0 };
+    points.push({ date, value: round(held.value + added.value), invested: round(held.invested + added.invested) });
   }
   return points;
 }

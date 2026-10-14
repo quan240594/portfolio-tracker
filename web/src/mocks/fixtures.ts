@@ -3,15 +3,20 @@
  * ends at a fixed "current" price on today's date, so values are realistic but stable within a day.
  */
 import type {
+  Category,
+  CategoryAssignment,
+  CustomAsset,
   DividendEvent,
   EodPrice,
   FxDay,
   FxRates,
   InstrumentProfile,
+  PortfolioSettings,
   Quote,
   Transaction,
+  WatchlistEntry,
 } from '@portfolio/shared';
-import { DEFAULT_PORTFOLIO_ID, FxTimeline, buildPositions } from '@portfolio/shared';
+import { DEFAULT_PORTFOLIO_ID, FxTimeline, buildPositions, cashSymbol, customSymbol } from '@portfolio/shared';
 
 export const MOCK_USER_ID = 'demo';
 /** Second demo portfolio: the US stocks live at "Trading 212", everything else in the default portfolio. */
@@ -37,6 +42,10 @@ export const INSTRUMENTS: InstrumentSeed[] = [
   { symbol: 'IWDA.AS', name: 'iShares Core MSCI World UCITS ETF (Acc)', assetClass: 'ETF', sector: 'Diversified', country: 'Global', exchange: 'Euronext Amsterdam', currency: 'EUR', price: 98.74, annualDrift: 0.16, dailyVol: 0.007 },
   { symbol: 'ASML.AS', name: 'ASML Holding N.V.', assetClass: 'STOCK', sector: 'Technology', country: 'Netherlands', exchange: 'Euronext Amsterdam', currency: 'EUR', price: 712.3, annualDrift: 0.02, dailyVol: 0.022 },
   { symbol: 'BTC-EUR', name: 'Bitcoin', assetClass: 'CRYPTO', sector: 'Digital Assets', country: 'Global', currency: 'EUR', price: 56_820, annualDrift: 0.55, dailyVol: 0.03, tradesWeekends: true },
+  // Watchlist-only instruments (no transactions).
+  { symbol: 'NVDA', name: 'NVIDIA Corporation', assetClass: 'STOCK', sector: 'Technology', country: 'United States', exchange: 'NASDAQ', currency: 'USD', price: 131.4, annualDrift: 0.35, dailyVol: 0.024 },
+  { symbol: 'SAP.DE', name: 'SAP SE', assetClass: 'STOCK', sector: 'Technology', country: 'Germany', exchange: 'XETRA', currency: 'EUR', price: 231.9, annualDrift: 0.12, dailyVol: 0.014 },
+  { symbol: 'ETH-EUR', name: 'Ethereum', assetClass: 'CRYPTO', sector: 'Digital Assets', country: 'Global', currency: 'EUR', price: 2_410, annualDrift: 0.3, dailyVol: 0.035, tradesWeekends: true },
 ];
 
 /** Symbols the mock API reports with `priceStale: true`, to exercise the UI indicator. */
@@ -99,8 +108,18 @@ export interface MockMarket {
   dividendEvents: DividendEvent[];
 }
 
+/** Portfolio-management data of the demo: cash tracking, categories with targets, custom assets, watchlist. */
+export interface ManagementSeed {
+  settings: PortfolioSettings[];
+  categories: Category[];
+  assignments: CategoryAssignment[];
+  assets: CustomAsset[];
+  watchlist: WatchlistEntry[];
+}
+
 export interface MockSeed extends MockMarket {
   transactions: Transaction[];
+  management: ManagementSeed;
 }
 
 function buildEod(seed: InstrumentSeed, today: string): EodPrice[] {
@@ -198,18 +217,30 @@ export function createSeed(now: Date = new Date()): MockSeed {
     });
   };
   /** `brokerFx` records the broker's FX rate (ECB fixing minus spread) on the transaction, as on a statement. */
-  const trade = (type: 'BUY' | 'SELL', symbol: string, daysAgo: number, quantity: number, fee: number, note?: string, brokerFx = false) => {
+  /** `unadjusted` multiplies the (split-adjusted) EOD close: the price actually paid before a later split. */
+  const trade = (type: 'BUY' | 'SELL', symbol: string, daysAgo: number, quantity: number, fee: number, note?: string, brokerFx = false, unadjusted = 1) => {
     const date = profiles[symbol]!.assetClass === 'CRYPTO' ? addDays(today, -daysAgo) : tradingDay(addDays(today, -daysAgo));
     const currency = profiles[symbol]!.currency;
     const fxRate = brokerFx ? round(timeline.rate(currency, date) * (1 - BROKER_FX_SPREAD), 4) : undefined;
-    push({ date, type, symbol, quantity, price: closeOn(eod[symbol]!, date), fee, currency, ...(note ? { note } : {}), ...(fxRate ? { fxRate } : {}) });
+    push({ date, type, symbol, quantity, price: round(closeOn(eod[symbol]!, date) * unadjusted, 2), fee, currency, ...(note ? { note } : {}), ...(fxRate ? { fxRate } : {}) });
   };
+  /** Cash movement of the main portfolio (cash tracking is on there). */
+  const cash = (type: 'DEPOSIT' | 'WITHDRAWAL' | 'INTEREST' | 'FEE', daysAgo: number, amount: number, note?: string) =>
+    push({ date: tradingDay(addDays(today, -daysAgo)), type, symbol: cashSymbol('EUR'), quantity: amount, price: 1, fee: 0, currency: 'EUR', ...(note ? { note } : {}) });
 
+  cash('DEPOSIT', 400, 30_000, 'Initial deposit');
+  cash('DEPOSIT', 270, 15_000);
+  cash('DEPOSIT', 100, 8_000, 'Extra savings');
+  cash('WITHDRAWAL', 45, 1_000, 'Holiday');
+  cash('INTEREST', 30, 14.2, 'Interest on cash');
+  cash('FEE', 12, 4.95, 'Account fee');
   trade('BUY', 'VWRL.AS', 378, 80, 2, 'Initial core position');
   trade('BUY', 'AAPL', 372, 25, 1, 'Broker FX rate', true);
   trade('BUY', 'MSFT', 365, 12, 1);
   trade('BUY', 'KO', 358, 60, 1);
-  trade('BUY', 'JNJ', 341, 30, 1);
+  // 2-for-1 split of JNJ shortly after the purchase: 15 pre-split shares at twice the adjusted price become 30.
+  trade('BUY', 'JNJ', 341, 15, 1, 'Bought before the 2-for-1 split', false, 2);
+  push({ date: tradingDay(addDays(today, -330)), type: 'SPLIT', symbol: 'JNJ', quantity: 2, price: 0, fee: 0, currency: 'USD', note: '2-for-1 stock split' });
   trade('BUY', 'BTC-EUR', 330, 0.15, 4.5);
   trade('BUY', 'IWDA.AS', 301, 100, 2);
   trade('BUY', 'ASML.AS', 279, 6, 2);
@@ -241,5 +272,86 @@ export function createSeed(now: Date = new Date()): MockSeed {
   }
   transactions.sort((a, b) => a.date.localeCompare(b.date));
 
-  return { today, fx, fxHistory, profiles, eod, quotes, dividendEvents, transactions };
+  return { today, fx, fxHistory, profiles, eod, quotes, dividendEvents, transactions, management: createManagementSeed(today, now) };
+}
+
+const SEED_CATEGORY_IDS = { core: 'cat-core', stocks: 'cat-stocks', crypto: 'cat-crypto', property: 'cat-property', private: 'cat-private' } as const;
+export const SAVINGS_ASSET_ID = 'asset-savings';
+export const PROPERTY_ASSET_ID = 'asset-property';
+export const PRIVATE_ASSET_ID = 'asset-private';
+
+/**
+ * Main portfolio: cash tracking on (15% dividend withholding), five categories whose targets add up to 100% with the
+ * demo holdings drifting away from them, and three custom assets. The watchlist holds three symbols that are not owned.
+ */
+export function createManagementSeed(today: string, now: Date): ManagementSeed {
+  const ts = now.toISOString();
+  const portfolioId = DEFAULT_PORTFOLIO_ID;
+  const cat = (categoryId: string, name: string, color: string, targetWeight: number, i: number): Category => ({
+    categoryId,
+    userId: MOCK_USER_ID,
+    portfolioId,
+    name,
+    color,
+    targetWeight,
+    createdAt: `${addDays(today, -400)}T00:00:0${i}.000Z`,
+    updatedAt: ts,
+  });
+  const asset = (p: Pick<CustomAsset, 'assetId' | 'name' | 'assetClass' | 'costBasis' | 'valuations'> & { growthRate?: number }): CustomAsset => ({
+    userId: MOCK_USER_ID,
+    portfolioId,
+    currency: 'EUR',
+    createdAt: `${addDays(today, -400)}T00:00:00.000Z`,
+    updatedAt: ts,
+    ...p,
+  });
+  const assign = (symbol: string, categoryId: string): CategoryAssignment => ({ userId: MOCK_USER_ID, portfolioId, symbol, categoryId });
+  const ids = SEED_CATEGORY_IDS;
+  return {
+    settings: [{ portfolioId, userId: MOCK_USER_ID, trackCash: true, withholdingTaxRate: 15, updatedAt: ts }],
+    categories: [
+      cat(ids.core, 'Core ETFs', '#6366f1', 45, 0),
+      cat(ids.stocks, 'Single stocks', '#14b8a6', 15, 1),
+      cat(ids.crypto, 'Crypto', '#f59e0b', 10, 2),
+      cat(ids.property, 'Property & savings', '#0ea5e9', 25, 3),
+      cat(ids.private, 'Private equity', '#ec4899', 5, 4),
+    ],
+    assignments: [
+      assign('VWRL.AS', ids.core),
+      assign('IWDA.AS', ids.core),
+      assign('ASML.AS', ids.stocks),
+      assign('BTC-EUR', ids.crypto),
+      assign(customSymbol(SAVINGS_ASSET_ID), ids.property),
+      assign(customSymbol(PROPERTY_ASSET_ID), ids.property),
+      assign(customSymbol(PRIVATE_ASSET_ID), ids.private),
+    ],
+    assets: [
+      asset({ assetId: SAVINGS_ASSET_ID, name: 'Savings account', assetClass: 'DEPOSIT', costBasis: 8_000, growthRate: 2, valuations: [{ date: addDays(today, -360), value: 8_000 }] }),
+      asset({
+        assetId: PROPERTY_ASSET_ID,
+        name: 'Rental property (share)',
+        assetClass: 'REAL_ESTATE',
+        costBasis: 22_000,
+        valuations: [
+          { date: addDays(today, -380), value: 22_000 },
+          { date: addDays(today, -150), value: 24_500 },
+        ],
+      }),
+      asset({
+        assetId: PRIVATE_ASSET_ID,
+        name: 'Start-up stake',
+        assetClass: 'OTHER',
+        costBasis: 3_000,
+        valuations: [
+          { date: addDays(today, -300), value: 3_000 },
+          { date: addDays(today, -90), value: 3_600 },
+        ],
+      }),
+    ],
+    watchlist: [
+      { userId: MOCK_USER_ID, symbol: 'NVDA', addedAt: `${addDays(today, -30)}T10:00:00.000Z` },
+      { userId: MOCK_USER_ID, symbol: 'SAP.DE', addedAt: `${addDays(today, -20)}T10:00:00.000Z` },
+      { userId: MOCK_USER_ID, symbol: 'ETH-EUR', addedAt: `${addDays(today, -10)}T10:00:00.000Z` },
+    ],
+  };
 }

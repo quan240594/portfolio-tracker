@@ -1,10 +1,12 @@
 import { useRef, useState, type FormEvent } from 'react';
-import { TRANSACTION_TYPES, transactionInputSchema, type Transaction, type TransactionInput } from '@portfolio/shared';
+import { TRANSACTION_TYPES, cashSymbol, isCashTransactionType, transactionInputSchema, withholdingFee, type Transaction, type TransactionInput } from '@portfolio/shared';
 import type { ZodIssue } from 'zod';
 import { useCreateTransaction } from '../../api/hooks';
+import { usePortfolioSettings } from '../../api/management-hooks';
 import { defaultTargetPortfolio, usePortfolioScope } from '../portfolios/usePortfolioScope';
 import { errorMessage } from '../../api/client';
 import { BASE_CURRENCY, normalizeDecimalInput } from '../../lib/format';
+import { parseNumber } from '../management/form';
 
 type FieldName = 'portfolioId' | 'date' | 'type' | 'symbol' | 'quantity' | 'price' | 'fee' | 'currency' | 'fxRate' | 'note';
 type Values = Record<FieldName, string>;
@@ -70,18 +72,25 @@ function friendlyMessage(field: FieldName, issue: ZodIssue, raw: string): string
 
 const decimalOrUndefined = (raw: string) => (raw.trim() === '' ? undefined : normalizeDecimalInput(raw));
 
+/** Cash movements have no symbol/price/fee of their own and a split has no price/fee: the form fixes those fields. */
+function fixedFields(type: string, currency: string): Partial<Values> {
+  if (isCashTransactionType(type)) return { symbol: cashSymbol(normalizedCurrency(currency)), price: '1', fee: '0' };
+  if (type === 'SPLIT') return { price: '0', fee: '0' };
+  return {};
+}
+
 /**
  * Validates raw form strings with the shared schema; empty numeric fields are reported as required.
  * Decimals may use a comma (Dutch input). The FX rate is optional and dropped for base-currency trades.
  */
 export function validateTransaction(values: Omit<Values, 'fxRate'> & { fxRate?: string }): { data?: TransactionInput; errors: Errors } {
-  const { fxRate = '', ...rest } = values;
+  const { fxRate = '', ...rest } = { ...values, ...fixedFields(values.type, values.currency) };
   const rate = needsFxRate(values.currency) ? decimalOrUndefined(fxRate) : undefined;
   const candidate = {
     ...rest,
-    quantity: decimalOrUndefined(values.quantity),
-    price: decimalOrUndefined(values.price),
-    fee: normalizeDecimalInput(values.fee),
+    quantity: decimalOrUndefined(rest.quantity),
+    price: decimalOrUndefined(rest.price),
+    fee: normalizeDecimalInput(rest.fee),
     note: values.note.trim() === '' ? undefined : values.note.trim(),
     ...(rate !== undefined ? { fxRate: rate } : {}),
   };
@@ -89,10 +98,40 @@ export function validateTransaction(values: Omit<Values, 'fxRate'> & { fxRate?: 
   if (res.success) return { data: res.data, errors: {} };
   const errors: Errors = {};
   for (const issue of res.error.issues) {
-    const field = issue.path[0] as FieldName | undefined;
+    // The symbol of a cash movement is derived from its currency, so that is where the user can fix it.
+    const raw = issue.path[0] as FieldName | undefined;
+    const field = raw === 'symbol' && isCashTransactionType(values.type) ? 'currency' : raw;
     if (field && !errors[field]) errors[field] = friendlyMessage(field, issue, values[field] ?? '');
   }
   return { errors };
+}
+
+const TYPE_LABELS: Record<(typeof TRANSACTION_TYPES)[number], string> = {
+  BUY: 'Buy',
+  SELL: 'Sell',
+  DIVIDEND: 'Dividend',
+  DEPOSIT: 'Cash deposit',
+  WITHDRAWAL: 'Cash withdrawal',
+  SPLIT: 'Stock split',
+  FEE: 'Account fee',
+  INTEREST: 'Interest',
+};
+
+const QUANTITY_LABELS: Partial<Record<string, string>> = {
+  DIVIDEND: 'Eligible units',
+  SPLIT: 'New shares per old share',
+  DEPOSIT: 'Amount',
+  WITHDRAWAL: 'Amount',
+  FEE: 'Amount',
+  INTEREST: 'Amount',
+};
+
+/** The fee field: the portfolio's default withholding rate applied to the gross dividend until the user edits it. */
+function dividendFee(values: Values, ratePct: number | undefined, auto: boolean): string {
+  if (!auto || ratePct === undefined) return values.fee;
+  const quantity = parseNumber(values.quantity);
+  const price = parseNumber(values.price);
+  return quantity === undefined || price === undefined ? values.fee : String(withholdingFee(quantity, price, ratePct));
 }
 
 interface Props {
@@ -107,18 +146,23 @@ export function TransactionForm({ onSuccess, onCancel }: Readonly<Props>) {
   const portfolioId =
     portfolios && !portfolios.some((p) => p.portfolioId === values.portfolioId) ? defaultTargetPortfolio(scope, portfolios) : values.portfolioId;
   const [errors, setErrors] = useState<Errors>({});
+  const [feeEdited, setFeeEdited] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const mutation = useCreateTransaction();
+  const withholdingRate = usePortfolioSettings(portfolioId).data?.withholdingTaxRate;
+  const isDividend = values.type === 'DIVIDEND';
+  const fee = dividendFee(values, withholdingRate, isDividend && !feeEdited);
 
   const set = (field: FieldName) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const v = e.target.value;
+    if (field === 'fee') setFeeEdited(true);
     setValues((s) => ({ ...s, [field]: v }));
     if (errors[field]) setErrors((s) => ({ ...s, [field]: undefined }));
   };
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    const { data, errors: errs } = validateTransaction({ ...values, portfolioId });
+    const { data, errors: errs } = validateTransaction({ ...values, fee, portfolioId });
     setErrors(errs);
     if (!data) {
       const first = FIELD_ORDER.find((f) => errs[f]);
@@ -128,9 +172,15 @@ export function TransactionForm({ onSuccess, onCancel }: Readonly<Props>) {
     mutation.mutate(data, {
       onSuccess: (txn) => {
         setValues(initialValues(txn.portfolioId));
+        setFeeEdited(false);
         onSuccess?.(txn);
       },
     });
+  };
+
+  const fieldValue = (name: FieldName) => {
+    if (name === 'portfolioId') return portfolioId;
+    return name === 'fee' ? fee : values[name];
   };
 
   const fieldProps = (name: FieldName, helpId?: string) => {
@@ -138,7 +188,7 @@ export function TransactionForm({ onSuccess, onCancel }: Readonly<Props>) {
     return {
       id: `txn-${name}`,
       name,
-      value: name === 'portfolioId' ? portfolioId : values[name],
+      value: fieldValue(name),
       onChange: set(name),
       'aria-invalid': errors[name] ? true : undefined,
       'aria-describedby': describedBy || undefined,
@@ -152,7 +202,8 @@ export function TransactionForm({ onSuccess, onCancel }: Readonly<Props>) {
       </p>
     ) : null;
 
-  const isDividend = values.type === 'DIVIDEND';
+  const isCash = isCashTransactionType(values.type);
+  const isSplit = values.type === 'SPLIT';
   const showFxRate = needsFxRate(values.currency);
 
   return (
@@ -183,17 +234,19 @@ export function TransactionForm({ onSuccess, onCancel }: Readonly<Props>) {
           <select className="input" {...fieldProps('type')}>
             {TRANSACTION_TYPES.map((t) => (
               <option key={t} value={t}>
-                {t.charAt(0) + t.slice(1).toLowerCase()}
+                {TYPE_LABELS[t]}
               </option>
             ))}
           </select>
           {fieldError('type')}
         </div>
-        <div>
-          <label className="label" htmlFor="txn-symbol">Symbol</label>
-          <input type="text" className="input uppercase" placeholder="e.g. VWRL.AS" autoComplete="off" spellCheck={false} required {...fieldProps('symbol')} />
-          {fieldError('symbol')}
-        </div>
+        {!isCash && (
+          <div>
+            <label className="label" htmlFor="txn-symbol">Symbol</label>
+            <input type="text" className="input uppercase" placeholder="e.g. VWRL.AS" autoComplete="off" spellCheck={false} required {...fieldProps('symbol')} />
+            {fieldError('symbol')}
+          </div>
+        )}
         <div>
           <label className="label" htmlFor="txn-currency">Currency</label>
           <input type="text" className="input uppercase" list="txn-currency-options" maxLength={3} required {...fieldProps('currency')} />
@@ -217,20 +270,31 @@ export function TransactionForm({ onSuccess, onCancel }: Readonly<Props>) {
           </div>
         )}
         <div>
-          <label className="label" htmlFor="txn-quantity">{isDividend ? 'Eligible units' : 'Quantity'}</label>
-          <input type="text" inputMode="decimal" className="input" required {...fieldProps('quantity')} />
+          <label className="label" htmlFor="txn-quantity">{QUANTITY_LABELS[values.type] ?? 'Quantity'}</label>
+          <input type="text" inputMode="decimal" className="input" required {...fieldProps('quantity', isSplit ? 'txn-quantity-help' : undefined)} />
+          {isSplit && <p id="txn-quantity-help" className="muted mt-1 text-xs">4 for a 4-for-1 split, 0,1 for a 1-for-10 reverse split. Total cost stays the same.</p>}
           {fieldError('quantity')}
         </div>
-        <div>
-          <label className="label" htmlFor="txn-price">{isDividend ? 'Gross dividend per unit' : 'Price per unit'}</label>
-          <input type="text" inputMode="decimal" className="input" required {...fieldProps('price')} />
-          {fieldError('price')}
-        </div>
-        <div>
-          <label className="label" htmlFor="txn-fee">{isDividend ? 'Withholding tax' : 'Fee'}</label>
-          <input type="text" inputMode="decimal" className="input" {...fieldProps('fee')} />
-          {fieldError('fee')}
-        </div>
+        {!isCash && !isSplit && (
+          <>
+            <div>
+              <label className="label" htmlFor="txn-price">{isDividend ? 'Gross dividend per unit' : 'Price per unit'}</label>
+              <input type="text" inputMode="decimal" className="input" required {...fieldProps('price')} />
+              {fieldError('price')}
+            </div>
+            <div>
+              <label className="label" htmlFor="txn-fee">{isDividend ? 'Withholding tax' : 'Fee'}</label>
+              <input type="text" inputMode="decimal" className="input" {...fieldProps('fee', isDividend && withholdingRate !== undefined ? 'txn-fee-help' : undefined)} />
+              {isDividend && withholdingRate !== undefined && (
+                <p id="txn-fee-help" className="muted mt-1 text-xs">Calculated at the portfolio&apos;s default {withholdingRate}% of the gross dividend; edit to override.</p>
+              )}
+              {fieldError('fee')}
+            </div>
+          </>
+        )}
+        {isCash && (
+          <p className="muted text-xs sm:col-span-2">Cash movements only count when cash tracking is switched on for the portfolio (Transactions → Settings).</p>
+        )}
         <div className="sm:col-span-2">
           <label className="label" htmlFor="txn-note">
             Note <span className="muted font-normal">(optional)</span>

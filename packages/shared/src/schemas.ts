@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { TRANSACTION_TYPES, ALLOCATION_DIMENSIONS } from './types.js';
+import { cashSymbol, isCashSymbol, isCashTransactionType, isCustomSymbol } from './management-api.js';
 
 const isoDate = z
   .string()
@@ -42,22 +43,42 @@ const transactionFields = z.object({
   // Empty/null means "not provided" (use the ECB fixing), not 0.
   fxRate: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number().positive().optional()),
 });
-export const transactionInputSchema = transactionFields.extend({ portfolioId: portfolioIdSchema });
+
+/**
+ * Cross-field rules of the management types: cash movements use `CASH.<currency>` with a positive amount, only
+ * BUY/SELL/DIVIDEND carry a fee, and the reserved cash/custom symbols are not tradable.
+ */
+function refineTransactionShape(t: z.infer<typeof transactionFields>, ctx: z.RefinementCtx): void {
+  const issue = (path: string, message: string) => ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message });
+  if (isCashTransactionType(t.type)) {
+    if (t.symbol !== cashSymbol(t.currency)) issue('symbol', `Cash movements use the symbol ${cashSymbol(t.currency)}`);
+    if (!(t.price > 0)) issue('price', 'Price must be greater than 0 (use 1 and put the amount in quantity)');
+  } else if (isCashSymbol(t.symbol) || isCustomSymbol(t.symbol)) {
+    issue('symbol', 'CASH.* and CUSTOM:* symbols are reserved');
+  }
+  if (!['BUY', 'SELL', 'DIVIDEND'].includes(t.type) && t.fee !== 0) issue('fee', `Fee is not applicable to ${t.type}`);
+}
+
+export const transactionInputSchema = transactionFields
+  .extend({ portfolioId: portfolioIdSchema })
+  .superRefine(refineTransactionShape);
 export type TransactionInput = z.infer<typeof transactionInputSchema>;
 
 /** CSV header (order-insensitive, case-insensitive): date,type,symbol,quantity,price,fee,currency[,note][,fxRate] */
 export const CSV_COLUMNS = ['date', 'type', 'symbol', 'quantity', 'price', 'fee', 'currency', 'note', 'fxRate'] as const;
 /** CSV rows carry no portfolioId: the whole import targets the portfolio chosen in POST /imports. */
-export const csvRowSchema = transactionFields.extend({
-  type: z
-    .string()
-    .trim()
-    .transform((s) => s.toUpperCase())
-    .pipe(z.enum(TRANSACTION_TYPES)),
-  fee: z.preprocess((v) => (v === '' || v == null ? 0 : v), z.coerce.number().nonnegative()),
-  note: z.preprocess((v) => (v === '' ? undefined : v), z.string().max(500).optional()),
-  fxRate: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number().positive().optional()),
-});
+export const csvRowSchema = transactionFields
+  .extend({
+    type: z
+      .string()
+      .trim()
+      .transform((s) => s.toUpperCase())
+      .pipe(z.enum(TRANSACTION_TYPES)),
+    fee: z.preprocess((v) => (v === '' || v == null ? 0 : v), z.coerce.number().nonnegative()),
+    note: z.preprocess((v) => (v === '' ? undefined : v), z.string().max(500).optional()),
+    fxRate: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.coerce.number().positive().optional()),
+  })
+  .superRefine(refineTransactionShape);
 
 /** Optional `?portfolioId=` on read endpoints; omitted or `all` = every portfolio combined. */
 export const portfolioScopeSchema = z.object({
@@ -85,3 +106,5 @@ export const createImportSchema = z.object({
     .max(200)
     .regex(/\.csv$/i, 'Only .csv files are supported'),
 });
+
+export { isoDate as isoDateSchema, symbol as symbolSchema, currency as currencySchema };

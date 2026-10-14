@@ -1,5 +1,6 @@
 import {
   buildPositions,
+  marketSymbols,
   transactionInputSchema,
   type CreateTransactionResponse,
   type ListTransactionsResponse,
@@ -41,7 +42,7 @@ export async function createTransaction(ctx: RouteContext): Promise<RouteResult>
 
   await repo.putTransaction(txn);
   await repo.registerUser(ctx.userId);
-  await repo.trackTickers([{ symbol: txn.symbol, currency: txn.currency }]);
+  await repo.trackTickers(marketSymbols([txn.symbol]).map((symbol) => ({ symbol, currency: txn.currency })));
   await publishChange(ctx, txn.portfolioId, [txn.symbol], 'CREATED');
   return ok(txn satisfies CreateTransactionResponse, 201);
 }
