@@ -10,10 +10,13 @@ import {
   type QueryCommandInput,
 } from '@aws-sdk/lib-dynamodb';
 import {
+  drain,
   ENTITY,
   fromItem,
   keys,
   registerUserUpdate,
+  retryAttempts,
+  sequentially,
   trackTickerUpdates,
   transactionItem,
   type DividendEvent,
@@ -65,7 +68,7 @@ const chunk = <T>(arr: readonly T[], size: number): T[][] => {
   return out;
 };
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 const isConditionalCheckFailure = (err: unknown) => (err as Error | undefined)?.name === 'ConditionalCheckFailedException';
 
@@ -103,16 +106,25 @@ export class DynamoRepository implements Repository {
     return unprocessed && unprocessed.length > 0 ? [...out, ...(await this.batchGetChunk(unprocessed, attempt + 1))] : out;
   }
 
+  /** Writes the requests in batches of 25, one batch after another, retrying unprocessed items with backoff. */
   private async batchWrite(requests: Record<string, unknown>[]): Promise<void> {
-    for (const part of chunk(requests, BATCH_WRITE_SIZE)) {
-      let pending: Record<string, unknown>[] | undefined = part;
-      for (let attempt = 0; pending && pending.length > 0; attempt++) {
-        if (attempt >= MAX_BATCH_ATTEMPTS) throw new Error('BatchWrite: unprocessed items remain after retries');
-        if (attempt > 0) await sleep(Math.min(50 * 2 ** attempt, 2000));
+    await drain(sequentially(chunk(requests, BATCH_WRITE_SIZE), (part) => this.writeBatch(part)));
+  }
+
+  private async writeBatch(requests: Record<string, unknown>[]): Promise<void> {
+    let pending = requests;
+    const attempts = retryAttempts(
+      async () => {
         const res = await this.doc.send(new BatchWriteCommand({ RequestItems: { [this.tableName]: pending as never } }));
-        pending = res.UnprocessedItems?.[this.tableName] as Record<string, unknown>[] | undefined;
-      }
+        return (res.UnprocessedItems?.[this.tableName] ?? []) as Record<string, unknown>[];
+      },
+      { maxAttempts: MAX_BATCH_ATTEMPTS, delayMs: (retry) => Math.min(50 * 2 ** retry, 2000), sleep },
+    );
+    for await (const unprocessed of attempts) {
+      if (unprocessed.length === 0) return;
+      pending = unprocessed;
     }
+    throw new Error('BatchWrite: unprocessed items remain after retries');
   }
 
   async listPortfolios(userId: string): Promise<Portfolio[]> {

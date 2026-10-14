@@ -7,15 +7,18 @@ import {
   type DynamoDBDocumentClient,
 } from '@aws-sdk/lib-dynamodb';
 import {
+  drain,
   fromItem,
   keys,
+  paginate,
   registerUserUpdate,
+  retryAttempts,
+  sequentially,
   trackTickerUpdates,
   transactionItem,
   type ImportStatus,
   type Transaction,
 } from '@portfolio/shared';
-import { drain, paginate, retryAttempts, sequentially } from './async.js';
 
 export interface IngestStore {
   getImport(userId: string, importId: string): Promise<ImportStatus | null>;

@@ -14,3 +14,4 @@ export * from './analytics-api.js';
 export * from './analytics-compute.js';
 export * from './management-api.js';
 export * from './management.js';
+export * from './async.js';

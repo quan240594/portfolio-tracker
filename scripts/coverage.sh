@@ -5,6 +5,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# shellcheck disable=SC1091
+. scripts/use-supported-node.sh
+
 echo "coverage: TypeScript packages (vitest)..."
 pnpm test:coverage
 
