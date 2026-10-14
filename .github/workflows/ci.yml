@@ -19,10 +19,10 @@ env:
   TERRAFORM_VERSION: "1.9.8"
 
 # Every job starts immediately and runs in parallel; the only dependency is `sonar`, which waits for the two jobs that
-# produce its coverage reports (test, python) and not for the slower integration/e2e/build jobs.
+# produce its coverage reports (test, python) and not for typecheck/lint or the slower integration/e2e/build jobs.
 jobs:
-  test:
-    name: Node tests (typecheck, lint, coverage)
+  check:
+    name: Node checks (typecheck, lint)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -35,6 +35,19 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r --if-present typecheck
       - run: pnpm -r --if-present lint
+
+  test:
+    name: Node tests (coverage)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6 # version from package.json "packageManager"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - run: pnpm -r --if-present test:coverage # enforces the 95% thresholds
       - name: Collect coverage for SonarCloud
         run: |

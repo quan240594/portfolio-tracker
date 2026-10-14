@@ -66,7 +66,7 @@ Configured in [sonar-project.properties](sonar-project.properties) (project `qua
 
 - CI: all jobs in [.github/workflows/ci.yml](.github/workflows/ci.yml) start immediately and run in parallel. The `sonar` job
   waits only for the two jobs that produce its coverage reports (Node tests and Python) and analyses that coverage
-  (nothing is re-run) while build, integration, e2e and terraform are still running. It runs on PRs (except forks, which
+  (nothing is re-run) while typecheck/lint, build, integration, e2e and terraform are still running. It runs on PRs (except forks, which
   get no secrets), pushes to `main` and manual runs; needs repo secret `SONAR_TOKEN`
   (keep *Automatic Analysis* disabled in SonarCloud so the CI-based analysis with coverage is used).
   Deploy ([deploy.yml](.github/workflows/deploy.yml)) is a separate manual workflow and does not depend on CI or Sonar.
