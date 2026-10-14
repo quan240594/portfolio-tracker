@@ -77,12 +77,14 @@ jobs:
         run: |
           pnpm --filter @portfolio/api package
           pnpm --filter @portfolio/ingest package
+          pnpm --filter @portfolio/broker-sync package
       - uses: actions/upload-artifact@v7
         with:
           name: lambda-node
           path: |
             services/api/dist/api.zip
             services/ingest/dist/ingest.zip
+            services/broker-sync/dist/broker-sync.zip
           if-no-files-found: error
           retention-days: 7
 
@@ -137,7 +139,7 @@ jobs:
       - name: Create placeholder Lambda artifacts
         working-directory: .
         run: |
-          for z in services/api/dist/api.zip services/ingest/dist/ingest.zip services/prices/dist/prices.zip; do
+          for z in services/api/dist/api.zip services/ingest/dist/ingest.zip services/prices/dist/prices.zip services/broker-sync/dist/broker-sync.zip; do
             mkdir -p "$(dirname "$z")"
             python3 -c "import sys, zipfile; zipfile.ZipFile(sys.argv[1], 'w').writestr('placeholder.txt', 'ci')" "$z"
           done
