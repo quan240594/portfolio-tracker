@@ -24,10 +24,20 @@ const unsupportedMfa = () => new Error('This account requires an unsupported MFA
 
 const emailOf = (session: CognitoUserSession): string => String(session.getIdToken().decodePayload().email ?? '');
 
+/** The SDK normally hands over Errors; anything else is wrapped so callers always get one (keeping its `code`/`message`). */
+const toError = (reason: unknown): Error => {
+  if (reason instanceof Error) return reason;
+  if (typeof reason === 'object' && reason !== null) {
+    const { message } = reason as { message?: unknown };
+    return Object.assign(new Error(typeof message === 'string' ? message : 'Authentication request failed.'), reason);
+  }
+  return new Error(typeof reason === 'string' && reason ? reason : 'Authentication request failed.');
+};
+
 /** Adapts a Node-style callback API to a promise. */
 const promisify = <T>(run: (done: (err: unknown, value?: T) => void) => void): Promise<T> =>
   new Promise<T>((resolve, reject) => {
-    run((err, value) => (err ? reject(err) : resolve(value as T)));
+    run((err, value) => (err ? reject(toError(err)) : resolve(value as T)));
   });
 
 export function createCognitoService(

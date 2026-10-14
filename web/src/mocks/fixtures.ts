@@ -218,7 +218,14 @@ export function createSeed(now: Date = new Date()): MockSeed {
   };
   /** `brokerFx` records the broker's FX rate (ECB fixing minus spread) on the transaction, as on a statement. */
   /** `unadjusted` multiplies the (split-adjusted) EOD close: the price actually paid before a later split. */
-  const trade = (type: 'BUY' | 'SELL', symbol: string, daysAgo: number, quantity: number, fee: number, note?: string, brokerFx = false, unadjusted = 1) => {
+  const trade = (
+    type: 'BUY' | 'SELL',
+    symbol: string,
+    daysAgo: number,
+    quantity: number,
+    fee: number,
+    { note, brokerFx = false, unadjusted = 1 }: { note?: string; brokerFx?: boolean; unadjusted?: number } = {},
+  ) => {
     const date = profiles[symbol]!.assetClass === 'CRYPTO' ? addDays(today, -daysAgo) : tradingDay(addDays(today, -daysAgo));
     const currency = profiles[symbol]!.currency;
     const fxRate = brokerFx ? round(timeline.rate(currency, date) * (1 - BROKER_FX_SPREAD), 4) : undefined;
@@ -234,12 +241,12 @@ export function createSeed(now: Date = new Date()): MockSeed {
   cash('WITHDRAWAL', 45, 1_000, 'Holiday');
   cash('INTEREST', 30, 14.2, 'Interest on cash');
   cash('FEE', 12, 4.95, 'Account fee');
-  trade('BUY', 'VWRL.AS', 378, 80, 2, 'Initial core position');
-  trade('BUY', 'AAPL', 372, 25, 1, 'Broker FX rate', true);
+  trade('BUY', 'VWRL.AS', 378, 80, 2, { note: 'Initial core position' });
+  trade('BUY', 'AAPL', 372, 25, 1, { note: 'Broker FX rate', brokerFx: true });
   trade('BUY', 'MSFT', 365, 12, 1);
   trade('BUY', 'KO', 358, 60, 1);
   // 2-for-1 split of JNJ shortly after the purchase: 15 pre-split shares at twice the adjusted price become 30.
-  trade('BUY', 'JNJ', 341, 15, 1, 'Bought before the 2-for-1 split', false, 2);
+  trade('BUY', 'JNJ', 341, 15, 1, { note: 'Bought before the 2-for-1 split', unadjusted: 2 });
   push({ date: tradingDay(addDays(today, -330)), type: 'SPLIT', symbol: 'JNJ', quantity: 2, price: 0, fee: 0, currency: 'USD', note: '2-for-1 stock split' });
   trade('BUY', 'BTC-EUR', 330, 0.15, 4.5);
   trade('BUY', 'IWDA.AS', 301, 100, 2);
@@ -248,9 +255,9 @@ export function createSeed(now: Date = new Date()): MockSeed {
   trade('BUY', 'AAPL', 201, 10, 1);
   trade('BUY', 'BTC-EUR', 152, 0.05, 2.5);
   trade('BUY', 'VWRL.AS', 131, 40, 2);
-  trade('BUY', 'MSFT', 118, 5, 1, undefined, true);
+  trade('BUY', 'MSFT', 118, 5, 1, { brokerFx: true });
   trade('BUY', 'IWDA.AS', 89, 50, 2);
-  trade('SELL', 'AAPL', 58, 10, 1, 'Trimmed position');
+  trade('SELL', 'AAPL', 58, 10, 1, { note: 'Trimmed position' });
   trade('BUY', 'VWRL.AS', 19, 30, 2);
 
   const dividendEvents: DividendEvent[] = [];

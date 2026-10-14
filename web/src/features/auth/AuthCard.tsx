@@ -33,14 +33,19 @@ export function Field({ label, hint, ...input }: Readonly<{ label: string; hint?
   );
 }
 
-export const FormMessage = ({ kind, children }: Readonly<{ kind: 'error' | 'notice'; children: ReactNode }>) => (
-  <p
-    role={kind === 'error' ? 'alert' : 'status'}
-    className={kind === 'error' ? 'text-sm text-red-600 dark:text-red-400' : 'text-sm text-emerald-700 dark:text-emerald-400'}
-  >
-    {children}
-  </p>
-);
+const MESSAGE_CLASS = {
+  error: 'text-sm text-red-600 dark:text-red-400',
+  notice: 'text-sm text-emerald-700 dark:text-emerald-400',
+} as const;
+
+export const FormMessage = ({ kind, children }: Readonly<{ kind: 'error' | 'notice'; children: ReactNode }>) =>
+  kind === 'error' ? (
+    <p role="alert" className={MESSAGE_CLASS.error}>
+      {children}
+    </p>
+  ) : (
+    <output className={`block ${MESSAGE_CLASS.notice}`}>{children}</output>
+  );
 
 export const LinkButton = ({ onClick, children }: Readonly<{ onClick: () => void; children: ReactNode }>) => (
   <button type="button" onClick={onClick} className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-400">

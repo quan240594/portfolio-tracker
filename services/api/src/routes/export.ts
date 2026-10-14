@@ -28,11 +28,12 @@ export async function exportBackup(ctx: RouteContext): Promise<RouteResult> {
     mgmt.listCustomAssets(ctx.userId),
     mgmt.listWatchlist(ctx.userId),
   ]);
+  const sortedPortfolios = [...portfolios].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.portfolioId.localeCompare(b.portfolioId));
   const backup: BackupResponse = {
     version: 1,
     exportedAt: now().toISOString(),
     baseCurrency: config.baseCurrency,
-    portfolios: portfolios.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.portfolioId.localeCompare(b.portfolioId)),
+    portfolios: sortedPortfolios,
     settings,
     transactions,
     categories,

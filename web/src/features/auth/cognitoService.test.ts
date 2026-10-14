@@ -281,4 +281,20 @@ describe('defaults', () => {
     const service = createCognitoService({ userPoolId: 'eu-west-1_Pool', clientId: 'default-client' });
     await expect(service.restoreSession()).resolves.toBeNull();
   });
+
+  it('wraps non-Error SDK failures in an Error, keeping their code', async () => {
+    const { service, memory } = setup();
+    memory.set(`${KEY}.LastAuthUser`, 'me');
+    memory.set(`${KEY}.me.refreshToken`, 'r');
+    const failWith = (reason: unknown) => sdk.refreshSession.mockImplementation((_t, done: (e: unknown) => void) => done(reason));
+
+    failWith({ code: 'NetworkError', message: 'offline' });
+    await expect(service.restoreSession()).rejects.toMatchObject({ code: 'NetworkError', message: 'offline' });
+    failWith({ code: 'NetworkError' });
+    await expect(service.restoreSession()).rejects.toThrow('Authentication request failed.');
+    failWith('boom');
+    await expect(service.restoreSession()).rejects.toThrow('boom');
+    failWith(42);
+    await expect(service.restoreSession()).rejects.toBeInstanceOf(Error);
+  });
 });

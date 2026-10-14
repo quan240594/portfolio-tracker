@@ -54,7 +54,7 @@ export function RebalanceForm({ disabled, onSubmit }: Readonly<Props>) {
       </div>
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={wholeUnits} onChange={(e) => setWholeUnits(e.target.checked)} />
-        Whole units only (no fractional shares)
+        <span>Whole units only (no fractional shares)</span>
       </label>
       {error && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{error}</p>}
       <button type="submit" className="btn-primary" disabled={disabled}>Calculate trades</button>

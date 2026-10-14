@@ -19,6 +19,8 @@ export const ASSET_CLASS_LABELS: Record<AssetClass, string> = {
 const SELECTABLE_CLASSES = ASSET_CLASSES.filter((c) => c !== 'CASH');
 const today = () => new Date().toISOString().slice(0, 10);
 
+const costBasisInvalid = (raw: string, cost: number | undefined) => raw.trim() !== '' && (cost === undefined || cost < 0);
+
 interface Props {
   portfolioId: string;
   /** Asset being edited; `null` creates a new one. */
@@ -45,7 +47,7 @@ export function AssetDialog({ portfolioId, asset, onClose }: Readonly<Props>) {
     const cost = parseNumber(costBasis);
     if (name.trim() === '') return setError('Name is required');
     if (growthRate === undefined) return setError('Growth must be a number');
-    if (costBasis.trim() !== '' && (cost === undefined || cost < 0)) return setError('Cost basis must be 0 or more');
+    if (costBasisInvalid(costBasis, cost)) return setError('Cost basis must be 0 or more');
     try {
       if (asset) {
         await update.mutateAsync({ id: asset.assetId, body: { name: name.trim(), assetClass, growthRate, ...(cost === undefined ? {} : { costBasis: cost }) } });

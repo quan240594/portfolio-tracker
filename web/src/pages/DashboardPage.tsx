@@ -139,11 +139,11 @@ function PerformanceCard() {
 }
 
 function AllocationCard() {
-  const [selected, setBy] = useState<AllocationTab>('assetClass');
+  const [selectedBy, setSelectedBy] = useState<AllocationTab>('assetClass');
   const { scope, ready } = usePortfolioScope();
   // Categories belong to one portfolio, so that tab only exists outside the combined view.
   const tabs = scope === ALL_PORTFOLIOS ? ALLOCATION_TABS.filter((t) => t.value !== 'category') : ALLOCATION_TABS;
-  const by = tabs.some((t) => t.value === selected) ? selected : 'assetClass';
+  const by = tabs.some((t) => t.value === selectedBy) ? selectedBy : 'assetClass';
   const { data, isPending, isError, error, refetch } = useAllocation(scope, by, { enabled: ready });
   const panelId = 'allocation-panel';
 
@@ -166,7 +166,7 @@ function AllocationCard() {
       <h2 id="alloc-title" className="mb-3 font-semibold">
         Allocation
       </h2>
-      <SegmentedControl variant="tabs" label="Allocation by" options={tabs} value={by} onChange={setBy} panelId={panelId} idPrefix="alloc-tab" />
+      <SegmentedControl variant="tabs" label="Allocation by" options={tabs} value={by} onChange={setSelectedBy} panelId={panelId} idPrefix="alloc-tab" />
       <div id={panelId} role="tabpanel" aria-labelledby={`alloc-tab-${by}`} className="mt-4">
         {body}
       </div>

@@ -18,7 +18,7 @@ import {
   type UpdatePortfolioSettingsRequest,
   type WatchlistItem,
 } from '@portfolio/shared';
-import { ApiError, apiUrl, request, scopeQuery, type Scope } from './client';
+import { ApiError, apiUrl, request, scopeQuery } from './client';
 
 const seg = encodeURIComponent;
 const base = (portfolioId: string) => `/portfolios/${seg(portfolioId)}`;
@@ -74,6 +74,6 @@ export const managementApi = {
   addWatchlist: (body: AddWatchlistRequest) => request<WatchlistItem>('POST', '/watchlist', { body }),
   removeWatchlist: (symbol: string) => request<void>('DELETE', `/watchlist/${seg(symbol)}`),
 
-  exportTransactionsCsv: (scope: Scope) => requestText('/export/transactions', scopeQuery(scope)),
+  exportTransactionsCsv: (scope: string) => requestText('/export/transactions', scopeQuery(scope)),
   exportBackup: () => request<BackupResponse>('GET', '/export/backup'),
 };

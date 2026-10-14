@@ -90,7 +90,7 @@ export function buildPositions(txns: readonly Transaction[], asOfDate?: string, 
 export function applyTransaction(positions: Map<string, Position>, t: Transaction, fx?: FxTimeline): void {
   if (CASH_ONLY_TYPES.has(t.type)) return;
   let p = positions.get(t.symbol);
-  if (t.type === 'SPLIT' && (!p || p.quantity <= 0 || !(t.quantity > 0))) {
+  if (t.type === 'SPLIT' && (!p || p.quantity <= 0 || Number.isNaN(t.quantity) || t.quantity <= 0)) {
     throw new PortfolioError(`Cannot split ${t.symbol} on ${t.date}: no position held or invalid ratio`);
   }
   if (!p) {

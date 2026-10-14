@@ -84,7 +84,7 @@ function GoalForm({ onSubmit }: Readonly<{ onSubmit: (params: AnalyticsGoalParam
       ))}
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={values.reinvestDividends} onChange={(e) => setValues({ ...values, reinvestDividends: e.target.checked })} />
-        Reinvest dividends
+        <span>Reinvest dividends</span>
       </label>
       <button type="submit" className="btn-primary">
         Update projection

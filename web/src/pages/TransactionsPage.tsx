@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ALL_PORTFOLIOS, isCashTransactionType, type Portfolio, type Transaction } from '@portfolio/shared';
 import { useDeleteTransaction, useTransactions } from '../api/hooks';
-import { errorMessage, type Scope } from '../api/client';
+import { errorMessage } from '../api/client';
 import { PageHeader } from '../components/Layout';
 import { Dialog } from '../components/Dialog';
 import { ErrorState } from '../components/ErrorState';
@@ -104,7 +104,7 @@ function TransactionsTable({ transactions, portfolios, onDelete }: Readonly<Tabl
 }
 
 /** Mentions the target portfolio when the new transaction is not visible in the current scope. */
-function addedNotice(t: Transaction, scope: Scope, portfolios: readonly Portfolio[] | undefined): string {
+function addedNotice(t: Transaction, scope: string, portfolios: readonly Portfolio[] | undefined): string {
   const added = `Added ${t.type.toLowerCase()} of ${formatQuantity(t.quantity)} ${t.symbol}`;
   if (scope === ALL_PORTFOLIOS || scope === t.portfolioId) return `${added}.`;
   return `${added} to ${portfolioName(portfolios, t.portfolioId)} (switch portfolio to see it).`;

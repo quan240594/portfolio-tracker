@@ -1,15 +1,15 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { ALL_PORTFOLIOS, type AllocationDimension, type CreateTransactionRequest, type HistoryRange, type Transaction } from '@portfolio/shared';
-import { api, type Scope } from './client';
+import { api } from './client';
 
 export const queryKeys = {
   portfolios: ['portfolios'] as const,
-  portfolio: (scope: Scope) => ['portfolio', scope] as const,
-  holdings: (scope: Scope) => ['holdings', scope] as const,
-  allocation: (scope: Scope, by: AllocationDimension | 'category') => ['allocation', scope, by] as const,
-  history: (scope: Scope, range: HistoryRange) => ['history', scope, range] as const,
-  dividends: (scope: Scope) => ['dividends', scope] as const,
-  transactions: (scope: Scope) => ['transactions', scope] as const,
+  portfolio: (scope: string) => ['portfolio', scope] as const,
+  holdings: (scope: string) => ['holdings', scope] as const,
+  allocation: (scope: string, by: AllocationDimension | 'category') => ['allocation', scope, by] as const,
+  history: (scope: string, range: HistoryRange) => ['history', scope, range] as const,
+  dividends: (scope: string) => ['dividends', scope] as const,
+  transactions: (scope: string) => ['transactions', scope] as const,
   import: (id: string) => ['imports', id] as const,
 };
 
@@ -35,13 +35,13 @@ interface ReadOptions {
 export const usePortfolios = () =>
   useQuery({ queryKey: queryKeys.portfolios, queryFn: ({ signal }) => api.listPortfolios(signal), staleTime: 60_000 });
 
-export const usePortfolio = (scope: Scope, { enabled = true }: ReadOptions = {}) =>
+export const usePortfolio = (scope: string, { enabled = true }: ReadOptions = {}) =>
   useQuery({ queryKey: queryKeys.portfolio(scope), queryFn: ({ signal }) => api.getPortfolio(scope, signal), enabled });
 
-export const useHoldings = (scope: Scope, { enabled = true }: ReadOptions = {}) =>
+export const useHoldings = (scope: string, { enabled = true }: ReadOptions = {}) =>
   useQuery({ queryKey: queryKeys.holdings(scope), queryFn: ({ signal }) => api.getHoldings(scope, signal), enabled });
 
-export const useAllocation = (scope: Scope, by: AllocationDimension | 'category', { enabled = true }: ReadOptions = {}) =>
+export const useAllocation = (scope: string, by: AllocationDimension | 'category', { enabled = true }: ReadOptions = {}) =>
   useQuery({
     queryKey: queryKeys.allocation(scope, by),
     queryFn: ({ signal }) => api.getAllocation(scope, by, signal),
@@ -49,7 +49,7 @@ export const useAllocation = (scope: Scope, by: AllocationDimension | 'category'
     enabled,
   });
 
-export const useHistory = (scope: Scope, range: HistoryRange, { enabled = true }: ReadOptions = {}) =>
+export const useHistory = (scope: string, range: HistoryRange, { enabled = true }: ReadOptions = {}) =>
   useQuery({
     queryKey: queryKeys.history(scope, range),
     queryFn: ({ signal }) => api.getHistory(scope, range, signal),
@@ -57,10 +57,10 @@ export const useHistory = (scope: Scope, range: HistoryRange, { enabled = true }
     enabled,
   });
 
-export const useDividends = (scope: Scope, { enabled = true }: ReadOptions = {}) =>
+export const useDividends = (scope: string, { enabled = true }: ReadOptions = {}) =>
   useQuery({ queryKey: queryKeys.dividends(scope), queryFn: ({ signal }) => api.getDividends(scope, signal), enabled });
 
-export const useTransactions = (scope: Scope, { enabled = true }: ReadOptions = {}) =>
+export const useTransactions = (scope: string, { enabled = true }: ReadOptions = {}) =>
   useQuery({ queryKey: queryKeys.transactions(scope), queryFn: ({ signal }) => api.listTransactions(scope, signal), enabled });
 
 export function useCreateTransaction() {

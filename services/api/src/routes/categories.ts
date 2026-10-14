@@ -54,9 +54,12 @@ async function loadCategories(ctx: RouteContext, portfolioId: string): Promise<L
   ]);
   const totalTarget = categoryTargetTotal(categories);
   const known = new Set(categories.map((c) => c.categoryId));
+  const sortedCategories = [...categories].sort(byCreatedAt);
+  const sortedAssignments = assignments.filter((a) => known.has(a.categoryId));
+  sortedAssignments.sort((a, b) => a.symbol.localeCompare(b.symbol));
   return {
-    categories: categories.sort(byCreatedAt),
-    assignments: assignments.filter((a) => known.has(a.categoryId)).sort((a, b) => a.symbol.localeCompare(b.symbol)),
+    categories: sortedCategories,
+    assignments: sortedAssignments,
     totalTarget,
     unallocated: Math.round((100 - totalTarget) * 100) / 100,
   };
