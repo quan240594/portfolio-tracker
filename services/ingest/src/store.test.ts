@@ -12,6 +12,7 @@ const NOW = '2026-06-15T12:00:00.000Z';
 const txn = (i: number): Transaction => ({
   id: `imp-${i}`,
   userId: 'u',
+  portfolioId: 'p1',
   date: '2025-01-01',
   type: 'BUY',
   symbol: 'A',
@@ -47,6 +48,22 @@ describe('DynamoIngestStore.getImport', () => {
   it('returns null when the item does not exist', async () => {
     ddbMock.on(GetCommand).resolves({});
     expect(await store.getImport('u', 'i')).toBeNull();
+  });
+});
+
+describe('DynamoIngestStore.portfolioExists', () => {
+  const store = new DynamoIngestStore(doc, 'tbl');
+
+  it('reads the PORTFOLIO item consistently, projecting only the key', async () => {
+    ddbMock.on(GetCommand).resolvesOnce({ Item: { PK: 'USER#u' } }).resolvesOnce({});
+    expect(await store.portfolioExists('u', 'p1')).toBe(true);
+    expect(await store.portfolioExists('u', 'gone')).toBe(false);
+    expect(ddbMock.commandCalls(GetCommand)[0]!.args[0].input).toEqual({
+      TableName: 'tbl',
+      Key: { PK: 'USER#u', SK: 'PORTFOLIO#p1' },
+      ConsistentRead: true,
+      ProjectionExpression: 'PK',
+    });
   });
 });
 
@@ -135,11 +152,11 @@ describe('DynamoIngestStore.listTransactions', () => {
   const store = new DynamoIngestStore(doc, 'tbl');
 
   it('follows LastEvaluatedKey across pages and strips key attributes', async () => {
-    const lek = { PK: 'USER#u', SK: 'TXN#2025-01-01#a' };
+    const lek = { PK: 'USER#u', SK: 'TXN#p1#2025-01-01#a' };
     ddbMock
       .on(QueryCommand)
-      .resolvesOnce({ Items: [{ PK: 'USER#u', SK: 'TXN#2025-01-01#a', entityType: 'TRANSACTION', id: 'a' }], LastEvaluatedKey: lek })
-      .resolvesOnce({ Items: [{ PK: 'USER#u', SK: 'TXN#2025-01-02#b', entityType: 'TRANSACTION', id: 'b' }] });
+      .resolvesOnce({ Items: [{ PK: 'USER#u', SK: 'TXN#p1#2025-01-01#a', entityType: 'TRANSACTION', id: 'a' }], LastEvaluatedKey: lek })
+      .resolvesOnce({ Items: [{ PK: 'USER#u', SK: 'TXN#p1#2025-01-02#b', entityType: 'TRANSACTION', id: 'b' }] });
     expect(await store.listTransactions('u')).toEqual([{ id: 'a' }, { id: 'b' }]);
     const inputs = ddbMock.commandCalls(QueryCommand).map((c) => c.args[0].input);
     expect(inputs[0]).toMatchObject({ ExpressionAttributeValues: { ':pk': 'USER#u', ':sk': 'TXN#' }, ExclusiveStartKey: undefined });
@@ -164,7 +181,7 @@ describe('DynamoIngestStore.putTransactions', () => {
     await new DynamoIngestStore(doc, 'tbl', sleep).putTransactions(txns(2 * BATCH_SIZE + 1));
     const calls = ddbMock.commandCalls(BatchWriteCommand).map((c) => c.args[0].input.RequestItems!.tbl!);
     expect(calls.map((c) => c.length)).toEqual([25, 25, 1]);
-    expect(calls[2]![0]!.PutRequest!.Item).toEqual({ PK: 'USER#u', SK: 'TXN#2025-01-01#imp-51', entityType: 'TRANSACTION', ...txn(51) });
+    expect(calls[2]![0]!.PutRequest!.Item).toEqual({ PK: 'USER#u', SK: 'TXN#p1#2025-01-01#imp-51', entityType: 'TRANSACTION', ...txn(51) });
     expect(sleep).not.toHaveBeenCalled();
   });
 
@@ -172,7 +189,7 @@ describe('DynamoIngestStore.putTransactions', () => {
     ddbMock.on(BatchWriteCommand).resolves({});
     await new DynamoIngestStore(doc, 'tbl', async () => {}).putTransactions([{ ...txn(1), currency: 'USD', fxRate: 1.0842 }]);
     const item = ddbMock.commandCalls(BatchWriteCommand)[0]!.args[0].input.RequestItems!.tbl![0]!.PutRequest!.Item;
-    expect(item).toMatchObject({ PK: 'USER#u', SK: 'TXN#2025-01-01#imp-1', entityType: 'TRANSACTION', currency: 'USD', fxRate: 1.0842 });
+    expect(item).toMatchObject({ PK: 'USER#u', SK: 'TXN#p1#2025-01-01#imp-1', entityType: 'TRANSACTION', currency: 'USD', fxRate: 1.0842 });
   });
 
   it('retries only the unprocessed items, ignoring other tables in the response', async () => {

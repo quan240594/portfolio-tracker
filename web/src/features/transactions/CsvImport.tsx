@@ -1,6 +1,7 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { CSV_HEADER, downloadSampleCsv } from './sampleCsv';
 import { useCsvImport, type CsvImportOptions } from './useCsvImport';
+import { defaultTargetPortfolio, portfolioName, usePortfolioScope } from '../portfolios/usePortfolioScope';
 
 interface Props extends CsvImportOptions {
   onDone?: () => void;
@@ -11,11 +12,15 @@ export function CsvImport({ onDone, ...options }: Readonly<Props>) {
   const [file, setFile] = useState<File | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const inputId = useId();
+  const portfolioSelectId = useId();
+  const { scope, portfolios } = usePortfolioScope();
+  const [chosen, setChosen] = useState(() => defaultTargetPortfolio(scope, portfolios));
+  const portfolioId = portfolios && !portfolios.some((p) => p.portfolioId === chosen) ? defaultTargetPortfolio(scope, portfolios) : chosen;
   const busy = state.phase === 'uploading' || state.phase === 'processing';
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (file) void start(file);
+    if (file) void start(file, portfolioId);
   };
 
   const startOver = () => {
@@ -49,6 +54,29 @@ export function CsvImport({ onDone, ...options }: Readonly<Props>) {
       {(state.phase === 'idle' || state.phase === 'uploading' || state.phase === 'processing') && (
         <form onSubmit={onSubmit} className="space-y-3">
           <div>
+            <label htmlFor={portfolioSelectId} className="label">
+              Import into portfolio
+            </label>
+            <select
+              id={portfolioSelectId}
+              className="input"
+              required
+              disabled={busy}
+              value={portfolioId}
+              onChange={(e) => setChosen(e.target.value)}
+            >
+              {portfolios ? (
+                portfolios.map((p) => (
+                  <option key={p.portfolioId} value={p.portfolioId}>
+                    {p.name}
+                  </option>
+                ))
+              ) : (
+                <option value={portfolioId}>Loading portfolios…</option>
+              )}
+            </select>
+          </div>
+          <div>
             <label htmlFor={inputId} className="label">
               CSV file
             </label>
@@ -76,7 +104,8 @@ export function CsvImport({ onDone, ...options }: Readonly<Props>) {
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-100">
             <p className="font-semibold">✓ Import completed</p>
             <p>
-              Imported {state.result.importedCount ?? 0} of {state.result.rowCount ?? 0} rows from {state.result.fileName}.
+              Imported {state.result.importedCount ?? 0} of {state.result.rowCount ?? 0} rows from {state.result.fileName} into{' '}
+              {portfolioName(portfolios, state.result.portfolioId ?? portfolioId)}.
             </p>
           </div>
         )}

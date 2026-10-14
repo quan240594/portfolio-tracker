@@ -5,7 +5,7 @@ import { EventBridgePublisher } from './events.js';
 
 const ebMock = mockClient(EventBridgeClient);
 const publisher = new EventBridgePublisher(new EventBridgeClient({ region: 'eu-west-1' }), 'bus');
-const detail = { userId: 'u', symbols: ['AAPL'], reason: 'IMPORTED' as const, importId: 'i' };
+const detail = { userId: 'u', portfolioId: 'p1', symbols: ['AAPL'], reason: 'IMPORTED' as const, importId: 'i' };
 
 beforeEach(() => ebMock.reset());
 

@@ -245,8 +245,52 @@ describe('needsFxRate', () => {
   });
 });
 
+describe('TransactionForm portfolio selection', () => {
+  it('defaults to the main portfolio in the combined view and submits the chosen portfolio', async () => {
+    const user = userEvent.setup();
+    const onSuccess = vi.fn();
+    renderWithProviders(<TransactionForm onSuccess={onSuccess} />);
+    const select = screen.getByLabelText('Portfolio');
+    expect(select).toBeRequired();
+    expect(await screen.findByRole('option', { name: 'Trading 212' })).toBeInTheDocument();
+    expect(select).toHaveValue('default');
+
+    await user.selectOptions(select, 'Trading 212');
+    await user.type(screen.getByLabelText('Symbol'), 'KO');
+    await user.clear(screen.getByLabelText('Currency'));
+    await user.type(screen.getByLabelText('Currency'), 'USD');
+    await user.type(screen.getByLabelText('Quantity'), '3');
+    await user.type(screen.getByLabelText('Price per unit'), '60');
+    await user.click(screen.getByRole('button', { name: 'Save transaction' }));
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledWith(expect.objectContaining({ portfolioId: 'trading-212', symbol: 'KO' })));
+    // The form resets but keeps the portfolio that was just used.
+    expect(select).toHaveValue('trading-212');
+  });
+
+  it('preselects the portfolio in scope', async () => {
+    renderWithProviders(<TransactionForm />, { route: '/transactions?portfolio=trading-212' });
+    const select = screen.getByLabelText('Portfolio');
+    expect(select).toHaveValue('trading-212');
+    expect(screen.getByRole('option', { name: 'Loading portfolios…' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: 'Trading 212' })).toBeInTheDocument();
+    expect(select).toHaveValue('trading-212');
+  });
+
+  it('falls back to the first portfolio when the default one no longer exists', async () => {
+    server.use(
+      http.get('/api/portfolios', () =>
+        HttpResponse.json({ portfolios: [{ portfolioId: 'isa', userId: 'demo', name: 'ISA', createdAt: '', updatedAt: '' }] }),
+      ),
+    );
+    renderWithProviders(<TransactionForm />);
+    await screen.findByRole('option', { name: 'ISA' });
+    expect(screen.getByLabelText('Portfolio')).toHaveValue('isa');
+  });
+});
+
 describe('validateTransaction', () => {
-  const valid = { date: '2024-01-02', type: 'BUY', symbol: 'KO', quantity: '1', price: '1', fee: '0', currency: 'USD', note: '' };
+  const valid = { portfolioId: 'default', date: '2024-01-02', type: 'BUY', symbol: 'KO', quantity: '1', price: '1', fee: '0', currency: 'USD', note: '' };
 
   it.each([
     ['symbol', { symbol: 'A'.repeat(21) }, 'Symbol is too long (max 20 characters)'],
@@ -259,6 +303,7 @@ describe('validateTransaction', () => {
     ['type', { type: 'HOLD' }, expect.stringMatching(/Invalid enum value/)],
     ['date', { date: '' }, 'Date is required'],
     ['date', { date: '2024-02-30' }, 'Enter a date as YYYY-MM-DD'],
+    ['portfolioId', { portfolioId: '' }, 'Choose a portfolio'],
   ] as const)('maps %s errors to friendly messages (%j)', (field, patch, message) => {
     const res = validateTransaction({ ...valid, ...patch });
     expect(res.data).toBeUndefined();
@@ -268,10 +313,10 @@ describe('validateTransaction', () => {
 
   it('returns parsed data for valid input', () => {
     const res = validateTransaction({
-      date: '2024-01-02', type: 'DIVIDEND', symbol: ' ko ', quantity: '10', price: '0.485', fee: '', currency: 'usd', note: '  ',
+      portfolioId: 'default', date: '2024-01-02', type: 'DIVIDEND', symbol: ' ko ', quantity: '10', price: '0.485', fee: '', currency: 'usd', note: '  ',
     });
     expect(res.errors).toEqual({});
-    expect(res.data).toEqual({ date: '2024-01-02', type: 'DIVIDEND', symbol: 'KO', quantity: 10, price: 0.485, fee: 0, currency: 'USD' });
+    expect(res.data).toEqual({ portfolioId: 'default', date: '2024-01-02', type: 'DIVIDEND', symbol: 'KO', quantity: 10, price: 0.485, fee: 0, currency: 'USD' });
   });
 
   it('parses an optional FX rate for foreign-currency trades and drops it for EUR trades', () => {
@@ -293,7 +338,7 @@ describe('validateTransaction', () => {
 
   it('reports a malformed date', () => {
     const res = validateTransaction({
-      date: '02/01/2024', type: 'BUY', symbol: 'KO', quantity: '1', price: '1', fee: '0', currency: 'USD', note: '',
+      portfolioId: 'default', date: '02/01/2024', type: 'BUY', symbol: 'KO', quantity: '1', price: '1', fee: '0', currency: 'USD', note: '',
     });
     expect(res.errors.date).toBe('Enter a date as YYYY-MM-DD');
   });

@@ -21,6 +21,7 @@ import {
 } from '@portfolio/shared';
 import { ok, validate, type RouteResult } from '../lib/http.js';
 import type { Deps, RouteContext } from '../deps.js';
+import { scopedTransactions } from './portfolios.js';
 
 export const MAX_HISTORY_POINTS = 400;
 /** Extra days of EOD loaded before the range start so carry-forward closes are seeded. */
@@ -72,7 +73,7 @@ async function loadFx(deps: Deps, transactions: readonly Transaction[]): Promise
 
 async function computePortfolio(ctx: RouteContext) {
   const { repo } = ctx.deps;
-  const transactions = await repo.listTransactions(ctx.userId);
+  const transactions = await scopedTransactions(ctx);
   const symbols = heldSymbols(transactions);
   const [quotes, profiles, { fx, fxHistory }] = await Promise.all([
     symbols.length ? repo.getQuotes(symbols) : {},
@@ -110,7 +111,7 @@ export function downsample(points: ValuePoint[], max = MAX_HISTORY_POINTS): Valu
 export async function getHistory(ctx: RouteContext): Promise<RouteResult> {
   const { range } = validate(historyQuerySchema.safeParse(ctx.query), 'Invalid query parameters');
   const { repo } = ctx.deps;
-  const transactions = sortTransactions(await repo.listTransactions(ctx.userId));
+  const transactions = sortTransactions(await scopedTransactions(ctx));
   const { fx, fxHistory } = await loadFx(ctx.deps, transactions);
   const today = isoDay(ctx.deps.now());
   if (transactions.length === 0) {
@@ -128,7 +129,7 @@ export async function getHistory(ctx: RouteContext): Promise<RouteResult> {
 
 export async function getDividends(ctx: RouteContext): Promise<RouteResult> {
   const { repo } = ctx.deps;
-  const transactions = await repo.listTransactions(ctx.userId);
+  const transactions = await scopedTransactions(ctx);
   const symbols = heldSymbols(transactions);
   const [events, { fx, fxHistory }] = await Promise.all([
     Promise.all(symbols.map((s) => repo.getDividendEvents(s))),

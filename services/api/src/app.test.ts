@@ -4,7 +4,7 @@ import { MissingFxRateError, PortfolioError } from '@portfolio/shared';
 import { createHandler, errorToResult, resolveUserId } from './app.js';
 import { HttpError } from './lib/http.js';
 import { logger } from './lib/logger.js';
-import { apiEvent, fakeDeps, txn } from './testing/fakes.js';
+import { apiEvent, fakeDeps, portfolio, txn } from './testing/fakes.js';
 import type { Deps } from './deps.js';
 
 const json = (res: APIGatewayProxyStructuredResultV2) => (res.body ? JSON.parse(res.body) : undefined);
@@ -12,6 +12,7 @@ const json = (res: APIGatewayProxyStructuredResultV2) => (res.body ? JSON.parse(
 function setup(overrides: Partial<Deps> = {}) {
   const ctx = fakeDeps(overrides);
   const { repo } = ctx;
+  repo.portfolios = [portfolio({ portfolioId: 'default', name: 'Main portfolio' })];
   repo.transactions = [
     txn({ id: 't1', date: '2025-01-10', type: 'BUY', symbol: 'VWRL.AS', quantity: 10, price: 100, fee: 2 }),
     txn({ id: 't2', date: '2025-03-03', type: 'BUY', symbol: 'AAPL', quantity: 5, price: 150, currency: 'USD' }),
@@ -68,7 +69,7 @@ describe('routing & errors', () => {
   it('returns 400 for invalid JSON and invalid transaction bodies', async () => {
     const { handler } = setup();
     expect((await handler(apiEvent('POST', '/transactions', { body: '{oops' }))).statusCode).toBe(400);
-    const res = await handler(apiEvent('POST', '/transactions', { body: { date: '2026-13', type: 'HOLD', symbol: '', quantity: -1 } }));
+    const res = await handler(apiEvent('POST', '/transactions', { body: { portfolioId: 'default', date: '2026-13', type: 'HOLD', symbol: '', quantity: -1 } }));
     expect(res.statusCode).toBe(400);
     expect(json(res).error.details.length).toBeGreaterThan(1);
   });
@@ -182,7 +183,7 @@ describe('POST /transactions', () => {
     const { handler, repo, events } = setup();
     const before = repo.transactions.length;
     const res = await handler(
-      apiEvent('POST', '/transactions', { body: { date: '2026-06-01', type: 'SELL', symbol: 'aapl', quantity: 6, price: 210, currency: 'usd' } }),
+      apiEvent('POST', '/transactions', { body: { portfolioId: 'default', date: '2026-06-01', type: 'SELL', symbol: 'aapl', quantity: 6, price: 210, currency: 'usd' } }),
     );
     expect(res.statusCode).toBe(422);
     expect(json(res).error.code).toBe('UNPROCESSABLE');
@@ -193,7 +194,7 @@ describe('POST /transactions', () => {
   it('creates the transaction, registers user + ticker and publishes TransactionsChanged', async () => {
     const { handler, repo, events } = setup();
     const res = await handler(
-      apiEvent('POST', '/transactions', { body: { date: '2026-06-01', type: 'BUY', symbol: 'msft', quantity: '2', price: 400, currency: 'usd' } }),
+      apiEvent('POST', '/transactions', { body: { portfolioId: 'default', date: '2026-06-01', type: 'BUY', symbol: 'msft', quantity: '2', price: 400, currency: 'usd' } }),
     );
     expect(res.statusCode).toBe(201);
     const created = json(res);
@@ -202,7 +203,7 @@ describe('POST /transactions', () => {
     expect(repo.transactions.find((t) => t.id === 'uuid-1')).toBeDefined();
     expect(repo.users.has('demo')).toBe(true);
     expect(repo.tracked.get('MSFT')).toBe('USD');
-    expect(events.published).toEqual([{ userId: 'demo', symbols: ['MSFT'], reason: 'CREATED' }]);
+    expect(events.published).toEqual([{ userId: 'demo', portfolioId: 'default', symbols: ['MSFT'], reason: 'CREATED' }]);
   });
 
   it('still succeeds when publishing the event fails', async () => {
@@ -211,7 +212,7 @@ describe('POST /transactions', () => {
       throw new Error('eventbridge down');
     };
     const res = await handler(
-      apiEvent('POST', '/transactions', { body: { date: '2026-06-01', type: 'BUY', symbol: 'MSFT', quantity: 1, price: 400, currency: 'USD' } }),
+      apiEvent('POST', '/transactions', { body: { portfolioId: 'default', date: '2026-06-01', type: 'BUY', symbol: 'MSFT', quantity: 1, price: 400, currency: 'USD' } }),
     );
     expect(res.statusCode).toBe(201);
   });
@@ -238,31 +239,31 @@ describe('DELETE /transactions/{id}', () => {
     expect(res.statusCode).toBe(204);
     expect(res.body).toBe('');
     expect(repo.transactions.some((t) => t.id === 't1')).toBe(false);
-    expect(events.published).toEqual([{ userId: 'demo', symbols: ['VWRL.AS'], reason: 'DELETED' }]);
+    expect(events.published).toEqual([{ userId: 'demo', portfolioId: 'default', symbols: ['VWRL.AS'], reason: 'DELETED' }]);
   });
 });
 
 describe('imports', () => {
   it('POST /imports writes a PENDING import and returns a presigned URL', async () => {
     const { handler, repo } = setup();
-    const res = await handler(apiEvent('POST', '/imports', { body: { fileName: 'trades.csv' } }));
+    const res = await handler(apiEvent('POST', '/imports', { body: { portfolioId: 'default', fileName: 'trades.csv' } }));
     expect(res.statusCode).toBe(201);
     expect(json(res)).toEqual({
       importId: 'uuid-1',
       uploadUrl: 'https://bucket.example/imports/demo/uuid-1.csv?X-Amz-Expires=300',
       expiresInSeconds: 300,
     });
-    expect(repo.imports.get('demo/uuid-1')).toMatchObject({ status: 'PENDING', fileName: 'trades.csv', userId: 'demo' });
+    expect(repo.imports.get('demo/uuid-1')).toMatchObject({ status: 'PENDING', fileName: 'trades.csv', userId: 'demo', portfolioId: 'default' });
   });
 
   it('POST /imports rejects non-csv file names', async () => {
     const { handler } = setup();
-    expect((await handler(apiEvent('POST', '/imports', { body: { fileName: 'trades.xlsx' } }))).statusCode).toBe(400);
+    expect((await handler(apiEvent('POST', '/imports', { body: { portfolioId: 'default', fileName: 'trades.xlsx' } }))).statusCode).toBe(400);
   });
 
   it('GET /imports/{id} returns the status or 404', async () => {
     const { handler } = setup();
-    const created = json(await handler(apiEvent('POST', '/imports', { body: { fileName: 'a.csv' } })));
+    const created = json(await handler(apiEvent('POST', '/imports', { body: { portfolioId: 'default', fileName: 'a.csv' } })));
     const res = await handler(apiEvent('GET', `/imports/${created.importId}`));
     expect(res.statusCode).toBe(200);
     expect(json(res).status).toBe('PENDING');
@@ -376,7 +377,7 @@ describe('handler logging & request handling', () => {
     const expected = {
       'content-type': 'application/json',
       'access-control-allow-origin': 'http://localhost:5173',
-      'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
+      'access-control-allow-methods': 'GET,POST,PATCH,DELETE,OPTIONS',
       'access-control-allow-headers': 'content-type,authorization',
       'cache-control': 'no-store',
     };
@@ -476,7 +477,7 @@ describe('transactions edge cases', () => {
     const { handler, repo } = setup();
     const event = apiEvent('POST', '/transactions');
     event.body = Buffer.from(
-      JSON.stringify({ date: '2026-06-01', type: 'BUY', symbol: 'MSFT', quantity: 1, price: 400, fee: 1.5, currency: 'USD', note: 'first' }),
+      JSON.stringify({ portfolioId: 'default', date: '2026-06-01', type: 'BUY', symbol: 'MSFT', quantity: 1, price: 400, fee: 1.5, currency: 'USD', note: 'first' }),
     ).toString('base64');
     event.isBase64Encoded = true;
     const res = await handler(event);
@@ -498,7 +499,7 @@ describe('transactions edge cases', () => {
       throw new Error('ddb down');
     };
     const res = await handler(
-      apiEvent('POST', '/transactions', { body: { date: '2026-06-01', type: 'BUY', symbol: 'MSFT', quantity: 1, price: 400, currency: 'USD' } }),
+      apiEvent('POST', '/transactions', { body: { portfolioId: 'default', date: '2026-06-01', type: 'BUY', symbol: 'MSFT', quantity: 1, price: 400, currency: 'USD' } }),
     );
     expect(res.statusCode).toBe(500);
     expect(repo.users.size).toBe(0);
@@ -516,7 +517,7 @@ describe('transactions edge cases', () => {
     const del = await handler(apiEvent('DELETE', '/transactions/t3'));
     expect(del.statusCode).toBe(204);
     expect(repo.transactions.some((t) => t.id === 't3')).toBe(false);
-    expect(error).toHaveBeenCalledWith('Failed to publish TransactionsChanged', { error: failure, reason: 'DELETED', symbols: ['AAPL'] });
+    expect(error).toHaveBeenCalledWith('Failed to publish TransactionsChanged', { error: failure, reason: 'DELETED', portfolioId: 'default', symbols: ['AAPL'] });
   });
 
   it('DELETE decodes the id from the path', async () => {
@@ -530,7 +531,7 @@ describe('transactions edge cases', () => {
 describe('imports edge cases', () => {
   it('scopes imports per user', async () => {
     const { handler } = setup();
-    const created = json(await handler(apiEvent('POST', '/imports', { body: { fileName: 'a.csv' }, sub: 'alice' })));
+    const created = json(await handler(apiEvent('POST', '/imports', { body: { portfolioId: 'default', fileName: 'a.csv' }, sub: 'alice' })));
     expect((await handler(apiEvent('GET', `/imports/${created.importId}`, { sub: 'alice' }))).statusCode).toBe(200);
     const other = await handler(apiEvent('GET', `/imports/${created.importId}`, { sub: 'bob' }));
     expect(other.statusCode).toBe(404);
@@ -540,7 +541,7 @@ describe('imports edge cases', () => {
   it('signs the upload for the user-scoped key with the documented expiry', async () => {
     const { handler, deps } = setup();
     const sign = vi.spyOn(deps.signer, 'signCsvUpload');
-    await handler(apiEvent('POST', '/imports', { body: { fileName: 'a.csv' }, sub: 'alice' }));
+    await handler(apiEvent('POST', '/imports', { body: { portfolioId: 'default', fileName: 'a.csv' }, sub: 'alice' }));
     expect(sign).toHaveBeenCalledWith('imports/alice/uuid-1.csv', 300);
   });
 
@@ -643,7 +644,7 @@ describe('historical FX (ECB fixings and broker rates)', () => {
 });
 
 describe('transaction fxRate', () => {
-  const body = { date: '2026-06-01', type: 'BUY', symbol: 'MSFT', quantity: 2, price: 400, currency: 'USD' };
+  const body = { portfolioId: 'default', date: '2026-06-01', type: 'BUY', symbol: 'MSFT', quantity: 2, price: 400, currency: 'USD' };
 
   it('persists and returns a broker fxRate, and lists it on GET /transactions', async () => {
     const { handler, repo } = setup();

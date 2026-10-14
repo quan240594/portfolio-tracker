@@ -13,6 +13,8 @@ export type TransactionType = (typeof TRANSACTION_TYPES)[number];
 export interface Transaction {
   id: string;
   userId: string;
+  /** Portfolio the transaction belongs to (see Portfolio). */
+  portfolioId: string;
   date: string;
   type: TransactionType;
   symbol: string;
@@ -172,6 +174,8 @@ export type ImportStatusValue = (typeof IMPORT_STATUSES)[number];
 export interface ImportStatus {
   importId: string;
   userId: string;
+  /** Target portfolio for the imported rows. */
+  portfolioId: string;
   fileName: string;
   status: ImportStatusValue;
   rowCount?: number;
@@ -185,6 +189,20 @@ export interface ImportStatus {
 export interface TrackedTicker {
   symbol: string;
   currency?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * A named collection of transactions (e.g. one per broker account). All portfolios of a user share
+ * the global base currency (DEFAULT_BASE_CURRENCY). Analytics endpoints work on one portfolio or on
+ * all of them combined. A user always has at least one portfolio; `DEFAULT_PORTFOLIO_ID` is created
+ * on first use.
+ */
+export interface Portfolio {
+  portfolioId: string;
+  userId: string;
+  name: string;
   createdAt: string;
   updatedAt: string;
 }

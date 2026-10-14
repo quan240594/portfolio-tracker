@@ -16,6 +16,7 @@ let seq = 0;
 const tx = (p: Partial<Transaction>): Transaction => ({
   id: `t${++seq}`,
   userId: 'demo',
+  portfolioId: 'default',
   date: '2026-01-02',
   type: 'BUY',
   symbol: 'AAPL',

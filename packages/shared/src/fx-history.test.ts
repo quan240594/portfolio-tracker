@@ -23,6 +23,7 @@ let seq = 0;
 const tx = (p: Partial<Transaction>): Transaction => ({
   id: `f${++seq}`,
   userId: 'u',
+  portfolioId: 'default',
   date: '2025-01-02',
   type: 'BUY',
   symbol: 'AAPL',
@@ -125,11 +126,11 @@ describe('contract additions', () => {
   });
   it('accepts an optional positive fxRate on input and CSV', () => {
     const base = { date: '2025-01-02', type: 'BUY', symbol: 'AAPL', quantity: '1', price: '1', currency: 'USD' };
-    expect(transactionInputSchema.parse({ ...base, fxRate: '1.0842' }).fxRate).toBe(1.0842);
+    expect(transactionInputSchema.parse({ ...base, portfolioId: 'default', fxRate: '1.0842' }).fxRate).toBe(1.0842);
     expect(csvRowSchema.parse({ ...base, fxRate: '' }).fxRate).toBeUndefined();
     expect(csvRowSchema.safeParse({ ...base, fxRate: '-1' }).success).toBe(false);
-    expect(transactionInputSchema.parse({ ...base, fxRate: '' }).fxRate).toBeUndefined();
-    expect(transactionInputSchema.parse({ ...base, fxRate: null }).fxRate).toBeUndefined();
-    expect(transactionInputSchema.safeParse({ ...base, fxRate: 0 }).success).toBe(false);
+    expect(transactionInputSchema.parse({ ...base, portfolioId: 'default', fxRate: '' }).fxRate).toBeUndefined();
+    expect(transactionInputSchema.parse({ ...base, portfolioId: 'default', fxRate: null }).fxRate).toBeUndefined();
+    expect(transactionInputSchema.safeParse({ ...base, portfolioId: 'default', fxRate: 0 }).success).toBe(false);
   });
 });

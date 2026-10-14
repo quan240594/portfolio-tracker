@@ -26,7 +26,11 @@ const safeParseKey = (key: string) => {
 /** The user owning an uploaded object, or null when the key is outside the imports/ layout. */
 export const importOwner = (key: string): string | null => safeParseKey(key)?.userId ?? null;
 
-/** Maps an oversell PortfolioError ("Cannot sell Q SYM on DATE: ...") back to the offending CSV row, if it came from this file. */
+/**
+ * Maps an oversell PortfolioError ("Cannot sell Q SYM on DATE: ...") back to the offending CSV row, if it came
+ * from this file. Anything else (a later stored sell, or mixed currencies already present in stored data, since
+ * the file's own currencies are checked beforehand) is a file-level error (row 0).
+ */
 function rowForPortfolioError(err: PortfolioError, rows: ParsedRow[]): number {
   const m = /^Cannot sell (\S+) (\S+) on (\d{4}-\d{2}-\d{2})/.exec(err.message);
   if (m) {
@@ -34,15 +38,22 @@ function rowForPortfolioError(err: PortfolioError, rows: ParsedRow[]): number {
     const hit = rows.find((r) => r.input.type === 'SELL' && r.input.symbol === symbol && r.input.date === date && String(r.input.quantity) === qty);
     if (hit) return hit.row;
   }
-  const mixed = /^Mixed currencies for (\S+): \S+ and (\S+)/.exec(err.message);
-  if (mixed) {
-    const [, symbol, offending] = mixed;
-    // Prefer the row carrying the conflicting currency; fall back to any row of the symbol.
-    const hit =
-      rows.find((r) => r.input.symbol === symbol && r.input.currency === offending) ?? rows.find((r) => r.input.symbol === symbol);
-    if (hit) return hit.row;
-  }
   return 0;
+}
+
+/**
+ * A symbol must use the same currency in every portfolio of the user (same rule as the API). Returns the
+ * first imported row that breaks it, checked against all stored transactions and the earlier rows of the file.
+ */
+function currencyConflict(existing: readonly Transaction[], rows: ParsedRow[]): RowError | null {
+  const currencies = new Map<string, string>();
+  for (const t of existing) if (!currencies.has(t.symbol)) currencies.set(t.symbol, t.currency);
+  for (const { row, input } of rows) {
+    const known = currencies.get(input.symbol);
+    if (known === undefined) currencies.set(input.symbol, input.currency);
+    else if (known !== input.currency) return { row, message: `Mixed currencies for ${input.symbol}: ${known} and ${input.currency}` };
+  }
+  return null;
 }
 
 /**
@@ -78,6 +89,12 @@ export async function processImportObject(deps: IngestDeps, ref: S3ObjectRef): P
     return 'FAILED';
   };
 
+  const { portfolioId } = existing;
+  if (!portfolioId) return fail(0, [{ row: 0, message: 'Import has no target portfolio' }]);
+  if (!(await deps.store.portfolioExists(userId, portfolioId))) {
+    return fail(0, [{ row: 0, message: `Portfolio ${portfolioId} not found` }]);
+  }
+
   const file = await deps.reader.readText(ref.bucket, importObjectKey(userId, importId), MAX_OBJECT_BYTES);
   if (!file.ok) return fail(0, [{ row: 0, message: file.reason }]);
 
@@ -89,6 +106,7 @@ export async function processImportObject(deps: IngestDeps, ref: S3ObjectRef): P
     const t: Transaction = {
       id: `${importId}-${row}`,
       userId,
+      portfolioId,
       ...input,
       importId,
       // Row-ordered timestamps keep same-day transactions in file order when replayed.
@@ -101,8 +119,11 @@ export async function processImportObject(deps: IngestDeps, ref: S3ObjectRef): P
 
   // On redelivery, rows of this import may already be stored; exclude them so they are not double-counted.
   const current = (await deps.store.listTransactions(userId)).filter((t) => t.importId !== importId);
+  const conflict = currencyConflict(current, parsed.rows);
+  if (conflict) return fail(parsed.rowCount, [conflict]);
   try {
-    buildPositions([...current, ...imported]);
+    // Overselling is validated against the target portfolio only.
+    buildPositions([...current.filter((t) => t.portfolioId === portfolioId), ...imported]);
   } catch (err) {
     if (err instanceof PortfolioError) {
       return fail(parsed.rowCount, [{ row: rowForPortfolioError(err, parsed.rows), message: err.message }]);
@@ -114,8 +135,14 @@ export async function processImportObject(deps: IngestDeps, ref: S3ObjectRef): P
   await deps.store.registerUser(userId);
   const tickers = new Map(imported.map((t) => [t.symbol, t.currency]));
   await deps.store.trackTickers([...tickers].map(([symbol, currency]) => ({ symbol, currency })));
-  await deps.events.transactionsChanged({ userId, symbols: [...tickers.keys()].sort((a, b) => a.localeCompare(b)), reason: 'IMPORTED', importId });
+  await deps.events.transactionsChanged({
+    userId,
+    portfolioId,
+    symbols: [...tickers.keys()].sort((a, b) => a.localeCompare(b)),
+    reason: 'IMPORTED',
+    importId,
+  });
   await deps.store.markCompleted(userId, importId, parsed.rowCount, imported.length);
-  log.info('Import completed', { rowCount: parsed.rowCount, importedCount: imported.length });
+  log.info('Import completed', { portfolioId, rowCount: parsed.rowCount, importedCount: imported.length });
   return 'COMPLETED';
 }

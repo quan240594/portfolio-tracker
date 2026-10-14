@@ -27,6 +27,7 @@ const BUCKET = `portfolio-tracker-imports-it-${runId}`;
 const BUS = `portfolio-tracker-it-${runId}`;
 const QUEUE = `portfolio-tracker-ingest-it-${runId}`;
 const USER = 'it-user';
+const PORTFOLIO = 'it-portfolio';
 
 describe.skipIf(!available)('ingest against LocalStack (S3 notification -> SQS -> handler)', () => {
   const ddb = new DynamoDBClient(localAwsConfig);
@@ -76,12 +77,18 @@ describe.skipIf(!available)('ingest against LocalStack (S3 notification -> SQS -
     await ddb.send(new DeleteTableCommand({ TableName: TABLE })).catch(() => {});
   });
 
-  async function createImport(importId: string) {
+  async function createImport(importId: string, portfolioId = PORTFOLIO) {
     const ts = new Date().toISOString();
     await doc.send(
       new PutCommand({
         TableName: TABLE,
-        Item: { ...keys.import(USER, importId), entityType: ENTITY.import, importId, userId: USER, fileName: 'x.csv', status: 'PENDING', createdAt: ts, updatedAt: ts },
+        Item: { ...keys.portfolio(USER, PORTFOLIO), entityType: ENTITY.portfolio, portfolioId: PORTFOLIO, userId: USER, name: 'IT', createdAt: ts, updatedAt: ts },
+      }),
+    );
+    await doc.send(
+      new PutCommand({
+        TableName: TABLE,
+        Item: { ...keys.import(USER, importId), entityType: ENTITY.import, importId, userId: USER, portfolioId, fileName: 'x.csv', status: 'PENDING', createdAt: ts, updatedAt: ts },
       }),
     );
   }
@@ -133,6 +140,7 @@ describe.skipIf(!available)('ingest against LocalStack (S3 notification -> SQS -
     expect(await getImport(importId)).toMatchObject({ status: 'COMPLETED', rowCount: 3, importedCount: 3 });
     const txns = await userTransactions();
     expect(txns.map((t) => t.id).sort()).toEqual([`${importId}-1`, `${importId}-2`, `${importId}-3`]);
+    expect(txns.every((t) => t.portfolioId === PORTFOLIO && String(t.SK).startsWith(keys.portfolioTransactionPrefix(PORTFOLIO)))).toBe(true);
 
     // Redelivery is a no-op.
     expect((await handler(toEvent(messages))).batchItemFailures).toEqual([]);
@@ -152,5 +160,14 @@ describe.skipIf(!available)('ingest against LocalStack (S3 notification -> SQS -
     expect(imp).toMatchObject({ status: 'FAILED', importedCount: 0 });
     expect(imp!.errors[0]).toMatchObject({ row: 2 });
     expect((await userTransactions()).filter((t) => t.symbol === 'MSFT')).toHaveLength(0);
+  });
+
+  it('marks an import FAILED when its portfolio does not exist', async () => {
+    const importId = `noportfolio-${runId}`;
+    await createImport(importId, 'missing-portfolio');
+    const key = importObjectKey(USER, importId);
+    await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: 'text/csv', Body: 'date,type,symbol,quantity,price,fee,currency\n2025-04-01,BUY,SAP.DE,1,200,0,EUR\n' }));
+    expect((await handler(toEvent(await receiveFor(key)))).batchItemFailures).toEqual([]);
+    expect(await getImport(importId)).toMatchObject({ status: 'FAILED', errors: [{ row: 0, message: 'Portfolio missing-portfolio not found' }] });
   });
 });

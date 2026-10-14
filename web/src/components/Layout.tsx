@@ -1,6 +1,8 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useTheme } from '../theme/ThemeProvider';
 import { USE_MOCKS } from '../config';
+import { PortfolioSwitcher } from '../features/portfolios/PortfolioSwitcher';
+import { usePortfolioScope, usePortfolioScopeSync } from '../features/portfolios/usePortfolioScope';
 
 const NAV = [
   { to: '/', label: 'Dashboard', end: true },
@@ -60,6 +62,8 @@ export function Footer() {
 }
 
 export function Layout() {
+  usePortfolioScopeSync();
+  const { withScope } = usePortfolioScope();
   return (
     <div className="flex min-h-screen flex-col">
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:shadow dark:focus:bg-slate-900">
@@ -67,7 +71,7 @@ export function Layout() {
       </a>
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/85 backdrop-blur dark:border-slate-800 dark:bg-slate-950/85">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
-          <NavLink to="/" className="flex items-center gap-2 font-semibold tracking-tight">
+          <NavLink to={withScope('/')} className="flex items-center gap-2 font-semibold tracking-tight">
             <Logo />
             <span>Portfolio Tracker</span>
           </NavLink>
@@ -76,7 +80,8 @@ export function Layout() {
               Demo data
             </span>
           )}
-          <div className="ml-auto sm:order-last">
+          <div className="ml-auto flex items-center gap-2 sm:order-last">
+            <PortfolioSwitcher />
             <ThemeToggle />
           </div>
           <nav aria-label="Main" className="order-last w-full overflow-x-auto sm:order-none sm:w-auto">
@@ -84,7 +89,7 @@ export function Layout() {
               {NAV.map((item) => (
                 <li key={item.to}>
                   <NavLink
-                    to={item.to}
+                    to={withScope(item.to)}
                     end={item.end}
                     className={({ isActive }) =>
                       `block rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors ${

@@ -26,11 +26,11 @@ describe('ingest handler', () => {
     expect(res.batchItemFailures).toEqual([]);
     expect(store.imp('demo', 'imp1')).toMatchObject({ status: 'COMPLETED', rowCount: 4, importedCount: 4 });
     expect(store.transactions.map((t) => t.id)).toEqual(['imp1-1', 'imp1-2', 'imp1-3', 'imp1-4']);
-    expect(store.transactions[0]).toMatchObject({ userId: 'demo', importId: 'imp1', symbol: 'AAPL', note: 'first buy', createdAt: '2026-06-15T12:00:00.001Z' });
+    expect(store.transactions[0]).toMatchObject({ userId: 'demo', portfolioId: 'default', importId: 'imp1', symbol: 'AAPL', note: 'first buy', createdAt: '2026-06-15T12:00:00.001Z' });
     expect(store.transactions[1]).not.toHaveProperty('note');
     expect(store.users.has('demo')).toBe(true);
     expect([...store.tracked]).toEqual([['AAPL', 'USD'], ['VWRL.AS', 'EUR']]);
-    expect(events.published).toEqual([{ userId: 'demo', symbols: ['AAPL', 'VWRL.AS'], reason: 'IMPORTED', importId: 'imp1' }]);
+    expect(events.published).toEqual([{ userId: 'demo', portfolioId: 'default', symbols: ['AAPL', 'VWRL.AS'], reason: 'IMPORTED', importId: 'imp1' }]);
   });
 
   it('imports a CSV delivered as an S3 notification (LocalStack shape)', async () => {
@@ -64,7 +64,7 @@ describe('ingest handler', () => {
 
   it('validates against the user existing transactions', async () => {
     const { handler, store, key } = setup(`${HEADER}\n2025-06-01,SELL,MSFT,5,400,0,USD,\n`);
-    store.transactions.push({ id: 'x', userId: 'demo', date: '2025-01-01', type: 'BUY', symbol: 'MSFT', quantity: 5, price: 300, fee: 0, currency: 'USD', createdAt: '2025-01-01T00:00:00Z' });
+    store.transactions.push({ id: 'x', userId: 'demo', portfolioId: 'default', date: '2025-01-01', type: 'BUY', symbol: 'MSFT', quantity: 5, price: 300, fee: 0, currency: 'USD', createdAt: '2025-01-01T00:00:00Z' });
     await handler(sqsEvent(eventBridgeBody(BUCKET, key)));
     expect(store.imp('demo', 'imp1')!.status).toBe('COMPLETED');
   });
@@ -85,8 +85,8 @@ describe('ingest handler', () => {
     store.imp('demo', 'imp1')!.status = 'PROCESSING';
     // A previous attempt wrote the rows and crashed before COMPLETED.
     store.transactions.push(
-      { id: 'imp1-1', importId: 'imp1', userId: 'demo', date: '2025-01-02', type: 'BUY', symbol: 'AAPL', quantity: 2, price: 150, fee: 1, currency: 'USD', createdAt: 'a' },
-      { id: 'imp1-2', importId: 'imp1', userId: 'demo', date: '2025-01-05', type: 'SELL', symbol: 'AAPL', quantity: 2, price: 150, fee: 1, currency: 'USD', createdAt: 'b' },
+      { id: 'imp1-1', importId: 'imp1', userId: 'demo', portfolioId: 'default', date: '2025-01-02', type: 'BUY', symbol: 'AAPL', quantity: 2, price: 150, fee: 1, currency: 'USD', createdAt: 'a' },
+      { id: 'imp1-2', importId: 'imp1', userId: 'demo', portfolioId: 'default', date: '2025-01-05', type: 'SELL', symbol: 'AAPL', quantity: 2, price: 150, fee: 1, currency: 'USD', createdAt: 'b' },
     );
     await handler(sqsEvent(eventBridgeBody(BUCKET, key)));
     expect(store.imp('demo', 'imp1')!.status).toBe('COMPLETED');

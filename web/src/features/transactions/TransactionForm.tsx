@@ -2,19 +2,21 @@ import { useRef, useState, type FormEvent } from 'react';
 import { TRANSACTION_TYPES, transactionInputSchema, type Transaction, type TransactionInput } from '@portfolio/shared';
 import type { ZodIssue } from 'zod';
 import { useCreateTransaction } from '../../api/hooks';
+import { defaultTargetPortfolio, usePortfolioScope } from '../portfolios/usePortfolioScope';
 import { errorMessage } from '../../api/client';
 import { BASE_CURRENCY, normalizeDecimalInput } from '../../lib/format';
 
-type FieldName = 'date' | 'type' | 'symbol' | 'quantity' | 'price' | 'fee' | 'currency' | 'fxRate' | 'note';
+type FieldName = 'portfolioId' | 'date' | 'type' | 'symbol' | 'quantity' | 'price' | 'fee' | 'currency' | 'fxRate' | 'note';
 type Values = Record<FieldName, string>;
 type Errors = Partial<Record<FieldName, string>>;
 
-const FIELD_ORDER: FieldName[] = ['date', 'type', 'symbol', 'currency', 'fxRate', 'quantity', 'price', 'fee', 'note'];
+const FIELD_ORDER: FieldName[] = ['portfolioId', 'date', 'type', 'symbol', 'currency', 'fxRate', 'quantity', 'price', 'fee', 'note'];
 const COMMON_CURRENCIES = ['EUR', 'USD', 'GBP', 'CHF', 'SEK', 'DKK', 'NOK', 'JPY', 'CAD', 'AUD'];
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-const initialValues = (): Values => ({
+const initialValues = (portfolioId: string): Values => ({
+  portfolioId,
   date: today(),
   type: 'BUY',
   symbol: '',
@@ -49,6 +51,7 @@ const NUMBER_RANGE_MESSAGES: Partial<Record<FieldName, string>> = {
 };
 
 const STATIC_MESSAGES: Partial<Record<FieldName, string>> = {
+  portfolioId: 'Choose a portfolio',
   date: 'Enter a date as YYYY-MM-DD',
   currency: 'Use a 3-letter currency code (e.g. EUR)',
   note: 'Note is too long (max 500 characters)',
@@ -98,7 +101,11 @@ interface Props {
 }
 
 export function TransactionForm({ onSuccess, onCancel }: Readonly<Props>) {
-  const [values, setValues] = useState<Values>(initialValues);
+  const { scope, portfolios } = usePortfolioScope();
+  const [values, setValues] = useState<Values>(() => initialValues(defaultTargetPortfolio(scope, portfolios)));
+  // The list may load after the form opens, or the preselected portfolio may not exist (any more).
+  const portfolioId =
+    portfolios && !portfolios.some((p) => p.portfolioId === values.portfolioId) ? defaultTargetPortfolio(scope, portfolios) : values.portfolioId;
   const [errors, setErrors] = useState<Errors>({});
   const formRef = useRef<HTMLFormElement>(null);
   const mutation = useCreateTransaction();
@@ -111,7 +118,7 @@ export function TransactionForm({ onSuccess, onCancel }: Readonly<Props>) {
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    const { data, errors: errs } = validateTransaction(values);
+    const { data, errors: errs } = validateTransaction({ ...values, portfolioId });
     setErrors(errs);
     if (!data) {
       const first = FIELD_ORDER.find((f) => errs[f]);
@@ -120,7 +127,7 @@ export function TransactionForm({ onSuccess, onCancel }: Readonly<Props>) {
     }
     mutation.mutate(data, {
       onSuccess: (txn) => {
-        setValues(initialValues());
+        setValues(initialValues(txn.portfolioId));
         onSuccess?.(txn);
       },
     });
@@ -131,7 +138,7 @@ export function TransactionForm({ onSuccess, onCancel }: Readonly<Props>) {
     return {
       id: `txn-${name}`,
       name,
-      value: values[name],
+      value: name === 'portfolioId' ? portfolioId : values[name],
       onChange: set(name),
       'aria-invalid': errors[name] ? true : undefined,
       'aria-describedby': describedBy || undefined,
@@ -151,6 +158,21 @@ export function TransactionForm({ onSuccess, onCancel }: Readonly<Props>) {
   return (
     <form ref={formRef} onSubmit={onSubmit} noValidate aria-label="Add transaction" className="space-y-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="sm:col-span-2">
+          <label className="label" htmlFor="txn-portfolioId">Portfolio</label>
+          <select className="input" required {...fieldProps('portfolioId')}>
+            {portfolios ? (
+              portfolios.map((p) => (
+                <option key={p.portfolioId} value={p.portfolioId}>
+                  {p.name}
+                </option>
+              ))
+            ) : (
+              <option value={portfolioId}>Loading portfolios…</option>
+            )}
+          </select>
+          {fieldError('portfolioId')}
+        </div>
         <div>
           <label className="label" htmlFor="txn-date">Date</label>
           <input type="date" className="input" max={today()} required {...fieldProps('date')} data-autofocus />

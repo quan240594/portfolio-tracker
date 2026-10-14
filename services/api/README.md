@@ -7,19 +7,33 @@ Routes are the `API_ROUTES` contract in `@portfolio/shared`; calculations come f
 src/index.ts        Lambda entry (index.handler) – creates AWS clients once per container
 src/app.ts          request → router → route handler, error mapping, CORS, structured logging
 src/router.ts       matches API_ROUTES (strips trailing slash and an optional /api prefix)
-src/routes/*        portfolio | holdings | allocation | history | dividends | transactions | imports
+src/routes/*        portfolios (CRUD + read scope) | portfolio | holdings | allocation | history | dividends | transactions | imports
 src/repository.ts   DynamoDB single-table access (DocumentClient)
 src/events.ts       EventBridge TransactionsChanged publisher (source portfolio.api)
 src/presigner.ts    S3 presigned PUT URLs for CSV imports
 src/local.ts        local HTTP server on :3001 wrapping the handler
-scripts/seed.ts     idempotent LocalStack seed for user `demo` (incl. daily ECB fixings FX_DAY for USD/GBP/CHF)
+scripts/seed.ts     idempotent LocalStack seed for user `demo`: portfolios `default` (Main portfolio, EUR) and `trading-212`
+                    (Trading 212, USD stocks) plus daily ECB fixings FX_DAY for USD/GBP/CHF
 ```
+
+## Portfolios
+
+Every transaction belongs to one portfolio (`USER#{userId}` / `PORTFOLIO#{id}`; transactions under `TXN#{portfolioId}#{date}#{id}`).
+`GET /portfolios` creates `default` ("Main portfolio") for a user without any (conditional put, so concurrent first
+requests are idempotent); writes and `?portfolioId=default` reads do the same on first use. Names are unique per user
+(case-insensitive, `409 CONFLICT`), at most `MAX_PORTFOLIOS` (`422`). `DELETE /portfolios/{id}` answers `409 PORTFOLIO_NOT_EMPTY`
+(details `{ transactionCount }`) unless `?force=true`, which batch-deletes the transactions and publishes
+`TransactionsChanged` (reason `DELETED`); the only portfolio cannot be deleted (`409 LAST_PORTFOLIO`).
+
+Read endpoints accept `?portfolioId=` (omitted or `all` = every portfolio combined; unknown = 404). `POST /transactions`
+and `POST /imports` require `portfolioId`. Overselling is validated within the target portfolio; a symbol must use the
+same currency in all portfolios of the user (`422` otherwise).
 
 ## Currency conversion
 
 Every amount is reported in the base currency (`BASE_CURRENCY`, default `DEFAULT_BASE_CURRENCY` = EUR).
 Portfolio, holdings, allocation, history and dividends load the latest rates (`FX#{base}` / `LATEST`) plus the
-daily ECB fixings (`FX#{base}` / `DAY#{date}`) from 7 days before the first transaction until today. Each
+daily ECB fixings (`FX#{base}` / `DAY#{date}`) from 7 days before the first transaction in scope until today. Each
 transaction is converted at its broker-applied `fxRate` if present, else at the fixing of its trade date (the previous
 business day's for weekends/holidays), else at the latest rate. Market values use the latest rate; the resulting FX
 part of the unrealized P&L is reported as `currencyEffect`. Without a `LATEST` item the newest fixing is used; without
@@ -27,7 +41,8 @@ any FX data only base-currency portfolios work (`FX_UNAVAILABLE` otherwise). `PO
 `fxRate` (units of the transaction currency per 1 unit of base currency, > 0), stored and returned with the transaction.
 
 Errors use `{ error: { code, message, details? } }`: `VALIDATION_ERROR` 400, `NOT_FOUND` 404,
-`UNPROCESSABLE` 422 (oversell / mixed currency), `FX_UNAVAILABLE` 503, `INTERNAL_ERROR` 500.
+`CONFLICT` / `PORTFOLIO_NOT_EMPTY` / `LAST_PORTFOLIO` 409, `UNPROCESSABLE` 422 (oversell / mixed currency / portfolio limit),
+`FX_UNAVAILABLE` 503, `INTERNAL_ERROR` 500.
 
 ## Environment
 

@@ -11,9 +11,14 @@ import type {
   Quote,
   Transaction,
 } from '@portfolio/shared';
-import { FxTimeline, buildPositions } from '@portfolio/shared';
+import { DEFAULT_PORTFOLIO_ID, FxTimeline, buildPositions } from '@portfolio/shared';
 
 export const MOCK_USER_ID = 'demo';
+/** Second demo portfolio: the US stocks live at "Trading 212", everything else in the default portfolio. */
+export const TRADING_212_ID = 'trading-212';
+export const TRADING_212_NAME = 'Trading 212';
+const TRADING_212_SYMBOLS = new Set(['AAPL', 'MSFT', 'KO', 'JNJ']);
+export const seedPortfolioOf = (symbol: string) => (TRADING_212_SYMBOLS.has(symbol) ? TRADING_212_ID : DEFAULT_PORTFOLIO_ID);
 export const BASE_CURRENCY: string = 'EUR';
 
 interface InstrumentSeed extends InstrumentProfile {
@@ -182,10 +187,11 @@ export function createSeed(now: Date = new Date()): MockSeed {
 
   const transactions: Transaction[] = [];
   let seq = 0;
-  const push = (t: Omit<Transaction, 'id' | 'userId' | 'createdAt'>) => {
+  const push = (t: Omit<Transaction, 'id' | 'userId' | 'createdAt' | 'portfolioId'>) => {
     seq += 1;
     transactions.push({
       ...t,
+      portfolioId: seedPortfolioOf(t.symbol),
       id: `txn-${String(seq).padStart(4, '0')}`,
       userId: MOCK_USER_ID,
       createdAt: `${t.date}T09:30:00.000Z`,

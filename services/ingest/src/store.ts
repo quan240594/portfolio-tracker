@@ -15,6 +15,8 @@ export interface IngestStore {
   markProcessing(userId: string, importId: string): Promise<boolean>;
   markFailed(userId: string, importId: string, rowCount: number, errors: { row: number; message: string }[]): Promise<void>;
   markCompleted(userId: string, importId: string, rowCount: number, importedCount: number): Promise<void>;
+  portfolioExists(userId: string, portfolioId: string): Promise<boolean>;
+  /** Transactions of every portfolio of the user. */
   listTransactions(userId: string): Promise<Transaction[]>;
   putTransactions(txns: Transaction[]): Promise<void>;
   registerUser(userId: string): Promise<void>;
@@ -89,6 +91,18 @@ export class DynamoIngestStore implements IngestStore {
     );
   }
 
+  async portfolioExists(userId: string, portfolioId: string): Promise<boolean> {
+    const res = await this.doc.send(
+      new GetCommand({
+        TableName: this.tableName,
+        Key: keys.portfolio(userId, portfolioId),
+        ConsistentRead: true,
+        ProjectionExpression: 'PK',
+      }),
+    );
+    return res.Item !== undefined;
+  }
+
   async listTransactions(userId: string): Promise<Transaction[]> {
     const pages = paginate<Record<string, unknown>[], Record<string, unknown>>(async (ExclusiveStartKey) => {
       const res = await this.doc.send(
@@ -115,7 +129,7 @@ export class DynamoIngestStore implements IngestStore {
     for (let i = 0; i < txns.length; i += BATCH_SIZE) {
       chunks.push(
         txns.slice(i, i + BATCH_SIZE).map((t) => ({
-          PutRequest: { Item: { ...keys.transaction(t.userId, t.date, t.id), entityType: ENTITY.transaction, ...t } },
+          PutRequest: { Item: { ...keys.transaction(t.userId, t.portfolioId, t.date, t.id), entityType: ENTITY.transaction, ...t } },
         })),
       );
     }

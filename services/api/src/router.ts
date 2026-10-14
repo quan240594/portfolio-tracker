@@ -2,6 +2,7 @@ import { API_ROUTES } from '@portfolio/shared';
 import { HttpError, type RouteResult } from './lib/http.js';
 import type { RouteContext } from './deps.js';
 import * as portfolio from './routes/portfolio.js';
+import * as portfolios from './routes/portfolios.js';
 import * as transactions from './routes/transactions.js';
 import * as imports from './routes/imports.js';
 
@@ -10,6 +11,10 @@ type RouteName = keyof typeof API_ROUTES;
 
 const handlers: Record<RouteName, RouteHandler> = {
   health: () => Promise.resolve({ statusCode: 200, body: { status: 'ok' } }),
+  listPortfolios: portfolios.listPortfolios,
+  createPortfolio: portfolios.createPortfolio,
+  updatePortfolio: portfolios.updatePortfolio,
+  deletePortfolio: portfolios.deletePortfolio,
   portfolio: portfolio.getPortfolio,
   holdings: portfolio.getHoldings,
   allocation: portfolio.getAllocation,

@@ -21,22 +21,27 @@ export interface CsvImportOptions {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function fileError(file: File): string | undefined {
-  const nameCheck = createImportSchema.safeParse({ fileName: file.name });
-  if (!nameCheck.success) return nameCheck.error.issues[0]?.message ?? 'Invalid file name';
+function fileError(file: File, portfolioId: string): string | undefined {
+  const check = createImportSchema.safeParse({ fileName: file.name, portfolioId });
+  if (!check.success) {
+    const issue = check.error.issues[0];
+    if (issue?.path[0] === 'portfolioId') return 'Choose a portfolio to import into.';
+    return issue?.message ?? 'Invalid file name';
+  }
   if (file.size > MAX_CSV_BYTES) return 'The file is larger than 1 MB.';
   return undefined;
 }
 
 interface PollContext extends Required<CsvImportOptions> {
   importId: string;
+  portfolioId: string;
   fileName: string;
   alive: () => boolean;
   setState: (state: ImportState) => void;
   qc: QueryClient;
 }
 
-async function pollImport({ importId, fileName, alive, setState, qc, pollIntervalMs, timeoutMs }: PollContext): Promise<void> {
+async function pollImport({ importId, portfolioId, fileName, alive, setState, qc, pollIntervalMs, timeoutMs }: PollContext): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (alive()) {
     await sleep(pollIntervalMs);
@@ -45,7 +50,7 @@ async function pollImport({ importId, fileName, alive, setState, qc, pollInterva
     if (!alive()) return;
     if (status.status === 'COMPLETED') {
       setState({ phase: 'completed', result: status });
-      await invalidatePortfolioData(qc);
+      await invalidatePortfolioData(qc, portfolioId);
       return;
     }
     if (status.status === 'FAILED') {
@@ -63,7 +68,7 @@ async function pollImport({ importId, fileName, alive, setState, qc, pollInterva
   }
 }
 
-/** POST /imports → PUT file to presigned URL → poll GET /imports/{id} until COMPLETED/FAILED. */
+/** POST /imports (target portfolio) → PUT file to presigned URL → poll GET /imports/{id} until COMPLETED/FAILED. */
 export function useCsvImport({ pollIntervalMs = 1500, timeoutMs = 60_000 }: CsvImportOptions = {}) {
   const qc = useQueryClient();
   const [state, setState] = useState<ImportState>({ phase: 'idle' });
@@ -82,11 +87,11 @@ export function useCsvImport({ pollIntervalMs = 1500, timeoutMs = 60_000 }: CsvI
   }, []);
 
   const start = useCallback(
-    async (file: File) => {
+    async (file: File, portfolioId: string) => {
       const id = ++runId.current;
       const alive = () => runId.current === id;
 
-      const invalid = fileError(file);
+      const invalid = fileError(file, portfolioId);
       if (invalid) {
         setState({ phase: 'error', message: invalid });
         return;
@@ -94,13 +99,13 @@ export function useCsvImport({ pollIntervalMs = 1500, timeoutMs = 60_000 }: CsvI
 
       try {
         setState({ phase: 'uploading', fileName: file.name });
-        const { importId, uploadUrl } = await api.createImport({ fileName: file.name });
+        const { importId, uploadUrl } = await api.createImport({ fileName: file.name, portfolioId });
         if (!alive()) return;
         await uploadCsv(uploadUrl, file);
         if (!alive()) return;
         setState({ phase: 'processing', fileName: file.name, importId });
 
-        await pollImport({ importId, fileName: file.name, alive, setState, qc, pollIntervalMs, timeoutMs });
+        await pollImport({ importId, portfolioId, fileName: file.name, alive, setState, qc, pollIntervalMs, timeoutMs });
       } catch (err) {
         if (alive()) setState({ phase: 'error', message: err instanceof ApiError ? err.message : errorMessage(err) });
       }

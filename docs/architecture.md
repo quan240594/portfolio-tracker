@@ -112,6 +112,20 @@ handler accepts both). Then:
 4. `pnpm --filter @portfolio/web dev` — Vite on `:5173`, proxies `/api/*` → `:3001` (prefix stripped).
 5. Optional: `cd services/prices && python -m prices.local refresh` with `MARKET_DATA_PROVIDER=mock`.
 
+## Portfolios
+
+A user owns 1..`MAX_PORTFOLIOS` (20) portfolios, e.g. one per broker account. `default` ("Main portfolio")
+is created on first `GET /portfolios`. Transactions live under `USER#{userId}` with sort key
+`TXN#{portfolioId}#{date}#{id}`, so one portfolio is a `begins_with(TXN#{portfolioId}#)` query and the
+combined view is `begins_with(TXN#)` — no GSI needed.
+
+- Read endpoints take `?portfolioId=`; omitted or `all` = all portfolios combined (same symbol is merged).
+- Writes (manual transactions, CSV imports) target one portfolio; oversell checks use that portfolio only.
+- A symbol must have the same currency in every portfolio of a user, so the combined view never mixes currencies.
+- Deleting a non-empty portfolio needs `?force=true` (cascades); the last portfolio cannot be deleted.
+- All portfolios share the global base currency (EUR).
+- `TransactionsChanged` events carry `portfolioId`; the prices service ignores it (prices are per ticker).
+
 ## Currency conversion (base currency EUR)
 
 Every monetary value in API responses is in the portfolio base currency (`DEFAULT_BASE_CURRENCY = 'EUR'`)

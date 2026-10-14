@@ -113,4 +113,60 @@ test.describe('Portfolio Tracker (mock mode)', () => {
     await expect(page.locator('html')).toHaveClass(/dark/);
     await expect(page.getByRole('button', { name: 'Dark mode' })).toHaveAttribute('aria-pressed', 'true');
   });
+
+  test('multiple portfolios: create one, add a transaction to it, switch scope and see it', async ({ page }) => {
+    await page.goto('/transactions');
+    await expect(page.getByRole('table')).toBeVisible();
+    const switcher = page.getByRole('combobox', { name: 'Portfolio' });
+    await expect(switcher).toHaveValue('all');
+    await expect(switcher.getByRole('option')).toHaveText(['All portfolios', 'Main portfolio', 'Trading 212']);
+
+    await page.getByRole('button', { name: 'Manage portfolios' }).click();
+    const manage = page.getByRole('dialog', { name: 'Manage portfolios' });
+    await expect(manage.getByLabel('New portfolio name')).toBeFocused();
+    await manage.getByLabel('New portfolio name').fill('Main portfolio');
+    await manage.getByRole('button', { name: 'Create portfolio' }).click();
+    await expect(manage.getByRole('alert')).toContainText('already exists');
+    await manage.getByLabel('New portfolio name').fill('Pension');
+    await manage.getByRole('button', { name: 'Create portfolio' }).click();
+    await expect(manage.getByText('Created “Pension”.')).toBeVisible();
+    await expect(manage.getByRole('list', { name: 'Portfolios' })).toContainText('Pension');
+    await page.keyboard.press('Escape');
+    await expect(manage).toBeHidden();
+
+    await page.getByRole('button', { name: 'Add transaction' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Add transaction' });
+    await expect(dialog.getByLabel('Portfolio')).toHaveValue('default');
+    await dialog.getByLabel('Portfolio').selectOption({ label: 'Pension' });
+    await dialog.getByLabel('Symbol').fill('IWDA.AS');
+    await dialog.getByLabel('Quantity').fill('3');
+    await dialog.getByLabel('Price per unit').fill('95,50');
+    await dialog.getByRole('button', { name: 'Save transaction' }).click();
+    await expect(dialog).toBeHidden();
+
+    // Combined list shows which portfolio each row belongs to.
+    const row = page.getByRole('row').filter({ hasText: '€ 286,50' });
+    await expect(row).toContainText('Pension');
+
+    await switcher.selectOption({ label: 'Pension' });
+    await expect(page).toHaveURL(/[?&]portfolio=[a-z0-9-]+/);
+    await expect(page.getByRole('columnheader', { name: 'Portfolio' })).toHaveCount(0);
+    await expect(page.getByRole('table').getByRole('row')).toHaveCount(2);
+    await expect(page.getByRole('table')).toContainText('IWDA.AS');
+
+    // Nav links keep the scope; holdings only contain the new position.
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Holdings' }).click();
+    await expect(page).toHaveURL(/\/holdings\?portfolio=/);
+    await expect(page.getByText(/^Pension · 1 positions/)).toBeVisible();
+    await expect(page.getByRole('table').getByRole('rowheader')).toHaveCount(1);
+
+    // The choice survives a reload without the URL param (localStorage fallback; mock data itself resets on reload).
+    await switcher.selectOption({ label: 'Trading 212' });
+    await expect(page).toHaveURL(/\/holdings\?portfolio=trading-212$/);
+    await page.goto('/dividends');
+    await expect(page).toHaveURL(/\/dividends\?portfolio=trading-212$/);
+    await expect(switcher).toHaveValue('trading-212');
+    await expect(page.getByText(/^Trading 212 · amounts in EUR/)).toBeVisible();
+  });
 });
+

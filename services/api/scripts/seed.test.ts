@@ -64,6 +64,48 @@ describe('generateFxDays', () => {
 });
 
 describe('seed', () => {
+  it('writes two portfolios and assigns USD trades to Trading 212, everything else to the main portfolio', async () => {
+    const { portfolios, transactions } = await seed({ doc, tableName: 'tbl', today: TODAY, log: () => {} });
+    expect(portfolios.map((p) => [p.portfolioId, p.name])).toEqual([
+      ['default', 'Main portfolio'],
+      ['trading-212', 'Trading 212'],
+    ]);
+    expect(portfolios[0]!.createdAt < portfolios[1]!.createdAt).toBe(true);
+    const items = written().filter((i) => i.entityType === 'PORTFOLIO');
+    expect(items).toEqual(portfolios.map((p) => ({ PK: 'USER#demo', SK: `PORTFOLIO#${p.portfolioId}`, entityType: 'PORTFOLIO', ...p })));
+
+    const symbolsOf = (id: string) => [...new Set(transactions.filter((t) => t.portfolioId === id).map((t) => t.symbol))].sort();
+    expect(symbolsOf('default')).toEqual(['ASML.AS', 'BTC-EUR', 'IWDA.AS', 'VWRL.AS']);
+    expect(symbolsOf('trading-212')).toEqual(['AAPL', 'MSFT']);
+    expect(transactions.filter((t) => t.fxRate !== undefined).every((t) => t.portfolioId === 'trading-212')).toBe(true);
+    for (const t of written().filter((i) => i.entityType === 'TRANSACTION')) {
+      expect(t.SK).toBe(`TXN#${String(t.portfolioId)}#${String(t.date)}#${String(t.id)}`);
+    }
+  });
+
+  it('removes earlier seed transactions in both the current and the pre-portfolio key layout', async () => {
+    ddbMock.on(QueryCommand).resolvesOnce({
+      Items: [{ PK: 'USER#demo', SK: 'TXN#2025-01-02#seed-01' }],
+      LastEvaluatedKey: { PK: 'USER#demo', SK: 'TXN#2025-01-02#seed-01' },
+    }).resolvesOnce({ Items: [{ PK: 'USER#demo', SK: 'TXN#default#2025-01-03#seed-02' }] });
+    const { removed } = await seed({ doc, tableName: 'tbl', today: TODAY, log: () => {} });
+    expect(removed).toBe(2);
+    const query = ddbMock.commandCalls(QueryCommand)[0]!.args[0].input;
+    expect(query.ExpressionAttributeValues).toEqual({ ':pk': 'USER#demo', ':sk': 'TXN#', ':seed': 'seed-' });
+    const deletes = ddbMock
+      .commandCalls(BatchWriteCommand)
+      .flatMap((c) => c.args[0].input.RequestItems!.tbl!)
+      .map((r) => r.DeleteRequest?.Key)
+      .filter(Boolean);
+    expect(deletes).toEqual([
+      { PK: 'USER#demo', SK: 'TXN#2025-01-02#seed-01' },
+      { PK: 'USER#demo', SK: 'TXN#default#2025-01-03#seed-02' },
+    ]);
+    // Deletes are sent before any put, so a stale key equal to a fresh one cannot remove the new item.
+    const firstPut = ddbMock.commandCalls(BatchWriteCommand).findIndex((c) => c.args[0].input.RequestItems!.tbl![0]!.PutRequest);
+    expect(firstPut).toBe(1);
+  });
+
   it('writes daily FX_DAY items and a LATEST item matching the newest fixing', async () => {
     const { fxDays } = await seed({ doc, tableName: 'tbl', today: TODAY, log: () => {} });
     const items = written();

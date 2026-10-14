@@ -11,6 +11,7 @@ import { formatDate } from '../lib/format';
 const txn = (over: Partial<Transaction>): Transaction => ({
   id: 't1',
   userId: 'demo',
+  portfolioId: 'default',
   date: '2024-03-05',
   type: 'BUY',
   symbol: 'AAPL',

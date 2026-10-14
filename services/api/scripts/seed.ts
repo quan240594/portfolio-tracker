@@ -1,5 +1,5 @@
 /**
- * Idempotently seeds the local DynamoDB table (LocalStack) with a demo portfolio.
+ * Idempotently seeds the local DynamoDB table (LocalStack) with two demo portfolios.
  *   pnpm --filter @portfolio/api seed
  * Prerequisite: `docker compose up -d` (the LocalStack init hook creates the table).
  */
@@ -7,6 +7,8 @@ import { DescribeTableCommand, DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { BatchWriteCommand, DynamoDBDocumentClient, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { pathToFileURL } from 'node:url';
 import {
+  DEFAULT_PORTFOLIO_ID,
+  DEFAULT_PORTFOLIO_NAME,
   ENTITY,
   keys,
   type AssetClass,
@@ -15,6 +17,7 @@ import {
   type FxDay,
   type FxRates,
   type InstrumentProfile,
+  type Portfolio,
   type Quote,
   type Transaction,
   type TransactionType,
@@ -45,6 +48,15 @@ const INSTRUMENTS: InstrumentSeed[] = [
   { profile: { symbol: 'IWDA.AS', name: 'iShares Core MSCI World UCITS ETF', assetClass: 'ETF', sector: 'Diversified', country: 'Global', exchange: 'Euronext Amsterdam', currency: 'EUR' }, p0: 82, drift: 0.09, sigma: 0.008 },
   { profile: { symbol: 'BTC-EUR', name: 'Bitcoin', assetClass: 'CRYPTO' as AssetClass, sector: 'Crypto', country: 'Global', exchange: 'CCC', currency: 'EUR' }, p0: 40000, drift: 0.25, sigma: 0.03, crypto: true },
 ];
+
+export const TRADING_212_PORTFOLIO_ID = 'trading-212';
+/** Seed portfolios in display order: EUR ETFs/stocks + crypto in the default one, US stocks at the broker. */
+export const SEED_PORTFOLIOS = [
+  { portfolioId: DEFAULT_PORTFOLIO_ID, name: DEFAULT_PORTFOLIO_NAME },
+  { portfolioId: TRADING_212_PORTFOLIO_ID, name: 'Trading 212' },
+] as const;
+/** USD instruments are held at the broker (incl. the broker-fxRate trades); everything in EUR in the main portfolio. */
+const seedPortfolioFor = (currency: string) => (currency === 'USD' ? TRADING_212_PORTFOLIO_ID : DEFAULT_PORTFOLIO_ID);
 
 /** [daysAgo, type, symbol, quantity, fee, dividend per unit] */
 const TXNS: [number, TransactionType, string, number, number, number?][] = [
@@ -258,6 +270,7 @@ export async function seed({ doc, tableName, userId = 'demo', today = iso(new Da
     const t: Transaction = {
       id,
       userId,
+      portfolioId: seedPortfolioFor(currency),
       date,
       type,
       symbol,
@@ -272,7 +285,14 @@ export async function seed({ doc, tableName, userId = 'demo', today = iso(new Da
     if (brokerFx) t.fxRate = round(fxOn(currency, date) * (type === 'BUY' ? 1 - BROKER_FX_SPREAD : 1 + BROKER_FX_SPREAD), 4);
     return t;
   });
-  for (const t of transactions) items.push({ ...keys.transaction(userId, t.date, t.id), entityType: ENTITY.transaction, ...t });
+  for (const t of transactions) items.push({ ...keys.transaction(userId, t.portfolioId, t.date, t.id), entityType: ENTITY.transaction, ...t });
+
+  // Fixed, ordered createdAt so the default portfolio is listed first and re-seeding does not reorder them.
+  const portfolios: Portfolio[] = SEED_PORTFOLIOS.map(({ portfolioId, name }, i) => {
+    const ts = `${addDays(firstTxnDate, -1)}T00:00:0${i}.000Z`;
+    return { portfolioId, userId, name, createdAt: ts, updatedAt: ts };
+  });
+  for (const p of portfolios) items.push({ ...keys.portfolio(userId, p.portfolioId), entityType: ENTITY.portfolio, ...p });
 
   for (const [symbol, exOff, payOff, amount] of DIV_EVENTS) {
     const inst = INSTRUMENTS.find((x) => x.profile.symbol === symbol)!;
@@ -290,14 +310,15 @@ export async function seed({ doc, tableName, userId = 'demo', today = iso(new Da
   );
 
   // Seed transaction dates are relative to today: remove earlier seed runs so re-seeding never duplicates.
+  // The query covers every TXN# key, so it also removes items of the pre-portfolio key layout (TXN#{date}#{id}).
   const stale = await querySeedTransactionKeys(doc, tableName, userId);
   const deletes = stale.map((Key) => ({ DeleteRequest: { Key } }));
   await batchWrite(doc, tableName, deletes);
   await batchWrite(doc, tableName, items.map((Item) => ({ PutRequest: { Item } })));
 
-  log(`Seeded user '${userId}': ${transactions.length} transactions, ${INSTRUMENTS.length} instruments, ` +
+  log(`Seeded user '${userId}': ${portfolios.length} portfolios, ${transactions.length} transactions, ${INSTRUMENTS.length} instruments, ` +
     `${fxDays.length} FX fixings, ${items.length} items total (EOD/FX ${eodFrom}..${today}); removed ${stale.length} stale seed transactions.`);
-  return { transactions, fxDays, itemCount: items.length };
+  return { portfolios, transactions, fxDays, itemCount: items.length, removed: stale.length };
 }
 
 async function querySeedTransactionKeys(

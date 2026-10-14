@@ -5,6 +5,7 @@ import type {
   FxRates,
   ImportStatus,
   InstrumentProfile,
+  Portfolio,
   Quote,
   Transaction,
   TransactionsChangedDetail,
@@ -16,6 +17,7 @@ import type { UploadUrlSigner } from '../presigner.js';
 import type { Repository } from '../repository.js';
 
 export class InMemoryRepository implements Repository {
+  portfolios: Portfolio[] = [];
   transactions: Transaction[] = [];
   quotes: Record<string, Quote> = {};
   profiles: Record<string, InstrumentProfile> = {};
@@ -27,8 +29,34 @@ export class InMemoryRepository implements Repository {
   tracked = new Map<string, string>();
   imports = new Map<string, ImportStatus>();
 
-  listTransactions(userId: string) {
-    return Promise.resolve(this.transactions.filter((t) => t.userId === userId).map((t) => ({ ...t })));
+  listPortfolios(userId: string) {
+    return Promise.resolve(this.portfolios.filter((p) => p.userId === userId).map((p) => ({ ...p })));
+  }
+  getPortfolio(userId: string, portfolioId: string) {
+    const p = this.portfolios.find((x) => x.userId === userId && x.portfolioId === portfolioId);
+    return Promise.resolve(p ? { ...p } : null);
+  }
+  createPortfolio(portfolio: Portfolio) {
+    if (this.portfolios.some((p) => p.userId === portfolio.userId && p.portfolioId === portfolio.portfolioId)) return Promise.resolve(false);
+    this.portfolios.push({ ...portfolio });
+    return Promise.resolve(true);
+  }
+  renamePortfolio(userId: string, portfolioId: string, name: string, updatedAt: string) {
+    const p = this.portfolios.find((x) => x.userId === userId && x.portfolioId === portfolioId);
+    if (!p) return Promise.resolve(null);
+    Object.assign(p, { name, updatedAt });
+    return Promise.resolve({ ...p });
+  }
+  deletePortfolio(userId: string, portfolioId: string) {
+    this.portfolios = this.portfolios.filter((p) => !(p.userId === userId && p.portfolioId === portfolioId));
+    return Promise.resolve();
+  }
+  listTransactions(userId: string, portfolioId?: string) {
+    return Promise.resolve(
+      this.transactions
+        .filter((t) => t.userId === userId && (portfolioId === undefined || t.portfolioId === portfolioId))
+        .map((t) => ({ ...t })),
+    );
   }
   findTransaction(userId: string, id: string) {
     return Promise.resolve(this.transactions.find((t) => t.userId === userId && t.id === id) ?? null);
@@ -40,6 +68,9 @@ export class InMemoryRepository implements Repository {
   deleteTransaction(txn: Transaction) {
     this.transactions = this.transactions.filter((t) => !(t.userId === txn.userId && t.id === txn.id));
     return Promise.resolve();
+  }
+  async deleteTransactions(txns: readonly Transaction[]) {
+    for (const t of txns) await this.deleteTransaction(t);
   }
   getQuotes(symbols: string[]) {
     return Promise.resolve(Object.fromEntries(symbols.filter((s) => this.quotes[s]).map((s) => [s, this.quotes[s]!])));
@@ -148,8 +179,16 @@ export function apiEvent(
 
 export const txn = (t: Partial<Transaction> & Pick<Transaction, 'id' | 'date' | 'type' | 'symbol' | 'quantity' | 'price'>): Transaction => ({
   userId: 'demo',
+  portfolioId: 'default',
   fee: 0,
   currency: 'EUR',
   createdAt: `${t.date}T10:00:00.000Z`,
   ...t,
+});
+
+export const portfolio = (p: Partial<Portfolio> & Pick<Portfolio, 'portfolioId' | 'name'>): Portfolio => ({
+  userId: 'demo',
+  createdAt: '2025-01-01T00:00:00.000Z',
+  updatedAt: '2025-01-01T00:00:00.000Z',
+  ...p,
 });

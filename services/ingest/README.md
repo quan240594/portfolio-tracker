@@ -6,13 +6,17 @@ Each SQS message body is either an EventBridge S3 `Object Created` event (AWS) o
 (LocalStack). For every `imports/{userId}/{importId}.csv` object:
 
 1. Load the `IMPORT` item; `COMPLETED`/`FAILED` → acknowledge (idempotent). Conditionally set `PROCESSING`.
+   The item's `portfolioId` is the target portfolio of every row; a missing id or a portfolio that no longer exists
+   fails the import (row 0).
 2. Read the object (max 1 MB), parse with `csv-parse` (case-insensitive header, any order; unknown columns ignored, duplicate columns rejected;
-   blank lines ignored), validate every row with `csvRowSchema` (max 5000 rows) and replay existing + imported transactions with `buildPositions`.
+   blank lines ignored), validate every row with `csvRowSchema` (max 5000 rows), check that each symbol keeps the currency it has in any of
+   the user's portfolios (first offending row is reported), and replay the target portfolio's existing + imported
+   transactions with `buildPositions` (oversell).
    Every row must have exactly as many fields as the header; otherwise the row is reported as
    `Expected N fields but found M` (values containing commas, e.g. notes, must be quoted: `"bought dip, again"`).
 3. Any problem → `FAILED` with `errors[]` (row numbers 1-based excluding header, row 0 = file-level; capped at 100); nothing is written.
-4. Otherwise BatchWrite transactions (ids `{importId}-{row}`), upsert `USERS` / `TRACKED` items, publish
-   `TransactionsChanged` (source `portfolio.ingest`, reason `IMPORTED`) and set `COMPLETED`.
+4. Otherwise BatchWrite transactions (ids `{importId}-{row}`, keys `TXN#{portfolioId}#{date}#{id}`), upsert `USERS` / `TRACKED` items, publish
+   `TransactionsChanged` (source `portfolio.ingest`, reason `IMPORTED`, with `portfolioId`) and set `COMPLETED`.
 
 Transient errors (throttling, network, PutEvents failures) are thrown and reported as batch item failures so SQS retries.
 
