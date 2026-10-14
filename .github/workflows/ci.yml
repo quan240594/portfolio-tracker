@@ -18,11 +18,13 @@ env:
   PYTHON_VERSION: "3.12"
   TERRAFORM_VERSION: "1.9.8"
 
+# Every job starts immediately and runs in parallel; the only dependency is `sonar`, which waits for the two jobs that
+# produce its coverage reports (test, python) and not for typecheck/lint or the slower integration/e2e/build jobs.
 jobs:
-  node:
-    name: Node (typecheck, lint, test, build, package)
+  check:
+    name: Node checks (typecheck, lint)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6 # version from package.json "packageManager"
@@ -33,6 +35,19 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r --if-present typecheck
       - run: pnpm -r --if-present lint
+
+  test:
+    name: Node tests (coverage)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6 # version from package.json "packageManager"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - run: pnpm -r --if-present test:coverage # enforces the 95% thresholds
       - name: Collect coverage for SonarCloud
         run: |
@@ -44,6 +59,19 @@ jobs:
           path: coverage-node.tar
           if-no-files-found: error
           retention-days: 1
+
+  build:
+    name: Node build (build, package)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6 # version from package.json "packageManager"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - run: pnpm -r --if-present build
       - name: Package Lambda artifacts
         run: |
@@ -121,7 +149,6 @@ jobs:
 
   integration:
     name: Integration (LocalStack)
-    needs: node
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
@@ -165,7 +192,6 @@ jobs:
 
   e2e:
     name: E2E (Playwright)
-    needs: node
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -190,8 +216,9 @@ jobs:
 
   sonar:
     name: SonarCloud analysis
-    # Runs last, on the coverage already produced above (no tests are re-run). Skipped for fork PRs, which get no secrets.
-    needs: [node, python, integration, e2e]
+    # Starts as soon as the unit-test coverage exists (no tests are re-run), while build, integration, e2e and terraform
+    # are still running. Skipped for fork PRs, which get no secrets.
+    needs: [test, python]
     if: github.event.pull_request.head.repo.fork != true
     runs-on: ubuntu-24.04
     timeout-minutes: 15
