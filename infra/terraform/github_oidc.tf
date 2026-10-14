@@ -71,6 +71,31 @@ data "aws_iam_policy_document" "github_deploy" {
     ]
   }
 
+  # CMK for the alarms SNS topic. Key ids are generated, so key-level actions cannot be pinned to a name;
+  # aliases are scoped to the app prefix.
+  statement {
+    sid = "KmsAppKeys"
+    actions = [
+      "kms:CreateAlias",
+      "kms:UpdateAlias",
+      "kms:DeleteAlias",
+      "kms:GetKeyPolicy",
+      "kms:PutKeyPolicy",
+      "kms:GetKeyRotationStatus",
+      "kms:EnableKeyRotation",
+      "kms:DisableKeyRotation",
+      "kms:ListResourceTags",
+      "kms:TagResource",
+      "kms:UntagResource",
+      "kms:ScheduleKeyDeletion",
+      "kms:CancelKeyDeletion",
+    ]
+    resources = [
+      "arn:${local.partition}:kms:${local.region}:${local.account_id}:alias/${local.app_prefix}",
+      "arn:${local.partition}:kms:${local.region}:${local.account_id}:key/*",
+    ]
+  }
+
   statement {
     sid       = "DynamoDB"
     actions   = ["dynamodb:*"]
@@ -115,6 +140,8 @@ data "aws_iam_policy_document" "github_deploy" {
       "dynamodb:ListTables",
       "dynamodb:DescribeLimits",
       "kms:DescribeKey",
+      "kms:CreateKey",
+      "kms:ListAliases",
       "sts:GetCallerIdentity",
     ]
     resources = ["*"]

@@ -1,6 +1,60 @@
-resource "aws_sns_topic" "alarms" {
+data "aws_iam_policy_document" "alarms_key" {
   count = var.alarm_email == "" ? 0 : 1
-  name  = "${local.app}-alarms-${var.env}"
+
+  statement {
+    sid       = "EnableAccountAdministration"
+    actions   = ["kms:*"]
+    resources = ["*"]
+    principals {
+      type        = "AWS"
+      identifiers = ["arn:${local.partition}:iam::${local.account_id}:root"]
+    }
+  }
+
+  # CloudWatch alarms publish to the encrypted topic with the alarm's own (service) identity.
+  statement {
+    sid       = "AllowCloudWatchAlarmsToPublish"
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey*"]
+    resources = ["*"]
+    principals {
+      type        = "Service"
+      identifiers = ["cloudwatch.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [local.account_id]
+    }
+    condition {
+      test     = "ArnLike"
+      variable = "aws:SourceArn"
+      values   = ["arn:${local.partition}:cloudwatch:${local.region}:${local.account_id}:alarm:*"]
+    }
+  }
+}
+
+# Customer-managed key for the alarms topic (the AWS-managed alias/aws/sns key cannot grant
+# cloudwatch.amazonaws.com, which would break alarm delivery).
+resource "aws_kms_key" "alarms" {
+  count = var.alarm_email == "" ? 0 : 1
+
+  description             = "${local.app} ${var.env} alarms SNS topic encryption"
+  enable_key_rotation     = true
+  deletion_window_in_days = 7
+  policy                  = data.aws_iam_policy_document.alarms_key[0].json
+}
+
+resource "aws_kms_alias" "alarms" {
+  count = var.alarm_email == "" ? 0 : 1
+
+  name          = "alias/${local.app}-alarms-${var.env}"
+  target_key_id = aws_kms_key.alarms[0].key_id
+}
+
+resource "aws_sns_topic" "alarms" {
+  count             = var.alarm_email == "" ? 0 : 1
+  name              = "${local.app}-alarms-${var.env}"
+  kms_master_key_id = aws_kms_key.alarms[0].arn
 }
 
 resource "aws_sns_topic_subscription" "alarms_email" {

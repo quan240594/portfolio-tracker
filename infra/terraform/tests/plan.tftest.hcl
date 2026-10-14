@@ -8,6 +8,9 @@ mock_provider "aws" {
   mock_data "aws_partition" {
     defaults = { partition = "aws" }
   }
+  mock_data "aws_canonical_user_id" {
+    defaults = { id = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+  }
   mock_data "aws_region" {
     defaults = { name = "eu-west-1" }
   }
@@ -31,6 +34,37 @@ run "dev_defaults" {
   assert {
     condition     = aws_s3_bucket.imports.bucket == "portfolio-tracker-imports-dev-123456789012"
     error_message = "imports bucket naming"
+  }
+
+  assert {
+    condition = (
+      aws_s3_bucket_logging.imports.target_prefix == "s3/imports/" &&
+      aws_s3_bucket_logging.web.target_prefix == "s3/web/"
+    )
+    error_message = "imports and web buckets must log to the shared access-logs bucket under distinct prefixes"
+  }
+
+  assert {
+    condition = (
+      aws_s3_bucket.access_logs.bucket == "portfolio-tracker-access-logs-dev-123456789012" &&
+      aws_s3_bucket.access_logs.force_destroy &&
+      aws_s3_bucket_ownership_controls.access_logs.rule[0].object_ownership == "BucketOwnerPreferred" &&
+      aws_s3_bucket_lifecycle_configuration.access_logs.rule[0].expiration[0].days == 90
+    )
+    error_message = "access-logs bucket: naming, force_destroy (dev), ACL-enabled ownership, 90-day expiry"
+  }
+
+  assert {
+    condition = (
+      one(aws_cloudfront_distribution.web.logging_config).prefix == "cloudfront/web/" &&
+      !one(aws_cloudfront_distribution.web.logging_config).include_cookies
+    )
+    error_message = "CloudFront must log to the access-logs bucket"
+  }
+
+  assert {
+    condition     = length(aws_sns_topic.alarms) == 0 && length(aws_kms_key.alarms) == 0
+    error_message = "no alarm topic / KMS key without alarm_email"
   }
 
   assert {
@@ -81,6 +115,19 @@ run "prod_with_auth_and_github" {
   assert {
     condition     = length(aws_iam_role.github_deploy) == 1 && length(aws_sns_topic.alarms) == 1
     error_message = "github role / SNS topic expected"
+  }
+
+  assert {
+    condition = (
+      aws_kms_key.alarms[0].enable_key_rotation &&
+      aws_kms_alias.alarms[0].name == "alias/portfolio-tracker-alarms-prod"
+    )
+    error_message = "alarms KMS key must rotate and have the env alias"
+  }
+
+  assert {
+    condition     = !aws_s3_bucket.access_logs.force_destroy
+    error_message = "prod access-logs bucket must not be force-destroyable"
   }
 }
 

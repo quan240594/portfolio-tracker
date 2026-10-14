@@ -67,6 +67,12 @@ Key variables: `env` (dev|prod), `market_data_provider` (`mock`|`live`), `market
 
 `prod` enables DynamoDB / Cognito deletion protection and keeps the imports bucket non-force-destroyable.
 
+Access logging: the imports and web buckets log (S3 server access logs) and the CloudFront distribution logs
+(standard/legacy logging) to one shared `portfolio-tracker-access-logs-<env>-<account>` bucket (`access_logs.tf`),
+under the prefixes `s3/imports/`, `s3/web/` and `cloudfront/web/`. Logs expire after `access_log_retention_days`
+(default 90). The alarms SNS topic is encrypted with a customer-managed, auto-rotated KMS key
+(`alias/portfolio-tracker-alarms-<env>`) whose key policy lets CloudWatch alarms publish.
+
 ## 4. Set market-data API keys
 
 Terraform creates the SecureStrings with value `CHANGE_ME` and ignores later value changes:
@@ -113,7 +119,7 @@ terraform destroy -var-file=dev.tfvars
 ```
 
 For `prod`, deletion protection blocks destroy: first disable it on the DynamoDB table (and Cognito
-user pool if `enable_auth`) via the console/CLI, and empty the imports bucket (`aws s3 rm --recursive`).
+user pool if `enable_auth`) via the console/CLI, and empty the imports and access-logs buckets (`aws s3 rm --recursive`).
 SSM parameters and log groups are destroyed too.
 
 ## Local development

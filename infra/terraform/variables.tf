@@ -26,6 +26,17 @@ variable "log_retention_days" {
   default     = 14
 }
 
+variable "access_log_retention_days" {
+  description = "Days to keep S3 server access logs and CloudFront logs in the shared access-logs bucket."
+  type        = number
+  default     = 90
+
+  validation {
+    condition     = var.access_log_retention_days >= 1
+    error_message = "access_log_retention_days must be at least 1."
+  }
+}
+
 variable "log_level" {
   description = "LOG_LEVEL env var for all Lambdas."
   type        = string

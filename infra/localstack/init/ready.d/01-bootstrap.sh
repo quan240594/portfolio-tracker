@@ -56,16 +56,20 @@ ensure_queue() { # name visibility_timeout -> echoes queue url
   aws_ sqs set-queue-attributes --queue-url "$url" --attributes "VisibilityTimeout=$vt" >/dev/null
   echo "$url"
 }
-queue_arn() { aws_ sqs get-queue-attributes --queue-url "$1" --attribute-names QueueArn --query Attributes.QueueArn --output text; }
+queue_arn() { # queue_url -> echoes queue arn
+  local queue_url="$1"
+  aws_ sqs get-queue-attributes --queue-url "$queue_url" --attribute-names QueueArn --query Attributes.QueueArn --output text
+}
 set_redrive() { # queue_url dlq_arn
-  aws_ sqs set-queue-attributes --queue-url "$1" \
-    --attributes "{\"RedrivePolicy\":\"{\\\"deadLetterTargetArn\\\":\\\"$2\\\",\\\"maxReceiveCount\\\":\\\"3\\\"}\"}" >/dev/null
+  local queue_url="$1" dlq_arn="$2"
+  aws_ sqs set-queue-attributes --queue-url "$queue_url" \
+    --attributes "{\"RedrivePolicy\":\"{\\\"deadLetterTargetArn\\\":\\\"$dlq_arn\\\",\\\"maxReceiveCount\\\":\\\"3\\\"}\"}" >/dev/null
 }
 set_policy() { # queue_url queue_arn service source_arn
-  local policy
-  policy="{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"$3\"},\"Action\":\"sqs:SendMessage\",\"Resource\":\"$2\",\"Condition\":{\"ArnEquals\":{\"aws:SourceArn\":\"$4\"}}}]}"
+  local queue_url="$1" target_arn="$2" service="$3" source_arn="$4" policy
+  policy="{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"$service\"},\"Action\":\"sqs:SendMessage\",\"Resource\":\"$target_arn\",\"Condition\":{\"ArnEquals\":{\"aws:SourceArn\":\"$source_arn\"}}}]}"
   policy="${policy//\"/\\\"}"
-  aws_ sqs set-queue-attributes --queue-url "$1" --attributes "{\"Policy\":\"$policy\"}" >/dev/null
+  aws_ sqs set-queue-attributes --queue-url "$queue_url" --attributes "{\"Policy\":\"$policy\"}" >/dev/null
 }
 
 INGEST_DLQ_URL="$(ensure_queue "$INGEST_DLQ" 30)"

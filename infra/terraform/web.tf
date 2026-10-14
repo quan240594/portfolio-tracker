@@ -1,8 +1,16 @@
 # SPA hosting: private S3 bucket served via CloudFront (Origin Access Control).
 
+# Server access logs go to the shared access-logs bucket (see access_logs.tf).
 resource "aws_s3_bucket" "web" {
   bucket        = "${local.app}-web-${var.env}-${local.account_id}"
   force_destroy = true # content is a build artifact; redeployable
+}
+
+resource "aws_s3_bucket_logging" "web" {
+  bucket        = aws_s3_bucket.web.id
+  target_bucket = aws_s3_bucket.access_logs.id
+  target_prefix = local.access_logs_prefix.web
+  depends_on    = [aws_s3_bucket_policy.access_logs]
 }
 
 resource "aws_s3_bucket_ownership_controls" "web" {
@@ -129,6 +137,13 @@ resource "aws_cloudfront_distribution" "web" {
     error_caching_min_ttl = 0
   }
 
+  # Standard (legacy) logging; delivery needs the ACL grant on the access-logs bucket.
+  logging_config {
+    bucket          = aws_s3_bucket.access_logs.bucket_domain_name
+    prefix          = local.access_logs_prefix.cloudfront
+    include_cookies = false
+  }
+
   restrictions {
     geo_restriction {
       restriction_type = "none"
@@ -138,6 +153,9 @@ resource "aws_cloudfront_distribution" "web" {
   viewer_certificate {
     cloudfront_default_certificate = true
   }
+
+  # CloudFront validates the log bucket ACL (awslogsdelivery grant) when the distribution is created.
+  depends_on = [aws_s3_bucket_acl.access_logs]
 }
 
 data "aws_iam_policy_document" "web_bucket" {

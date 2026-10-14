@@ -6,8 +6,6 @@
 AWS-0132
 # AWS-0011 (HIGH)  No WAF on CloudFront. Static SPA only; API Gateway has route throttling. WAF adds fixed cost.
 AWS-0011
-# AWS-0010 (MEDIUM) CloudFront standard logging disabled (cost/noise); API Gateway access logs are enabled.
-AWS-0010
 # AWS-0090 (MEDIUM) No S3 versioning: imports are transient (30-day expiry), web bucket is a rebuildable artifact.
 AWS-0090
 # LOW findings:
@@ -15,5 +13,5 @@ AWS-0090
 AWS-0017
 # AWS-0025 DynamoDB uses the AWS managed aws/dynamodb key (SSE on) rather than a CMK.
 AWS-0025
-# AWS-0089 No S3 server access logging (cost/noise; CloudTrail data events can be enabled if needed).
+# AWS-0089 The shared access-logs bucket does not log to itself (it is the logging target).
 AWS-0089

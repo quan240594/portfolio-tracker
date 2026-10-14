@@ -1,8 +1,16 @@
 # CSV imports bucket. The SPA uploads via presigned PUT to imports/{userId}/{importId}.csv;
 # S3 emits "Object Created" to the default EventBridge bus (see events.tf).
+# Server access logs go to the shared access-logs bucket (see access_logs.tf).
 resource "aws_s3_bucket" "imports" {
   bucket        = "${local.app}-imports-${var.env}-${local.account_id}"
   force_destroy = var.env != "prod"
+}
+
+resource "aws_s3_bucket_logging" "imports" {
+  bucket        = aws_s3_bucket.imports.id
+  target_bucket = aws_s3_bucket.access_logs.id
+  target_prefix = local.access_logs_prefix.imports
+  depends_on    = [aws_s3_bucket_policy.access_logs]
 }
 
 resource "aws_s3_bucket_ownership_controls" "imports" {
