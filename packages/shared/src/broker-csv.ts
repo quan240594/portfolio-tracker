@@ -7,7 +7,8 @@
  * major currency, `fxRate` = units of instrument currency per 1 EUR, only for EUR accounts and only when it agrees
  * with the amounts of the row (see resolveFxRate).
  */
-import { normalizeCurrency, resolveFxRate, roundTo, sumFees, type FeePart } from './broker-fx.js';
+import { roundTo } from './analytics.js';
+import { normalizeCurrency, resolveFxRate, sumFees, type FeePart } from './broker-fx.js';
 import { mapT212Symbol } from './broker-symbols.js';
 import type { UnmappedInstrument } from './broker.js';
 

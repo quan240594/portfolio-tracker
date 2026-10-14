@@ -4,6 +4,8 @@
  * Trading 212 quotes some venues in minor units (`GBX` pence). Every stored price/amount must be in an ISO-4217
  * major currency, so those are divided by 100 and relabelled (same rule as the prices service).
  */
+import { roundTo } from './analytics.js';
+
 
 const MINOR_UNITS: Readonly<Record<string, { currency: string; divisor: number }>> = {
   GBX: { currency: 'GBP', divisor: 100 },
@@ -25,8 +27,6 @@ export function normalizeCurrency(code: string): NormalizedCurrency {
   const upper = canonicalCode(code);
   return MINOR_UNITS[upper] ?? { currency: upper, divisor: 1 };
 }
-
-export const roundTo = (n: number, dp: number): number => Math.round((n + Number.EPSILON) * 10 ** dp) / 10 ** dp;
 
 /** Largest relative deviation between the reported FX rate and the one implied by the trade amounts. */
 export const FX_TOLERANCE = 0.05;
