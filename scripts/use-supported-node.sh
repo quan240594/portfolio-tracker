@@ -7,11 +7,15 @@
 # Does nothing when the current Node is fine; warns (never fails) when no supported Node is installed.
 
 _node_major() { "$1" -p 'process.versions.node.split(".")[0]' 2>/dev/null || true; }
+# The CPU the machine really has. `uname -m` is wrong when this runs under Rosetta (e.g. spawned by an Intel build of
+# git, which is what the pre-push hook is), so ask the kernel whether arm64 is available.
+_native_arch() {
+  if [ "$(sysctl -in hw.optional.arm64 2>/dev/null || true)" = "1" ]; then echo arm64; else uname -m | sed 's/x86_64/x64/'; fi
+}
 _node_runs_natively() {
-  local want have
-  want="$(uname -m | sed 's/x86_64/x64/')"
+  local have
   have="$("$1" -p 'process.arch' 2>/dev/null || true)"
-  [ -n "$have" ] && [ "$have" = "$want" ]
+  [ -n "$have" ] && [ "$have" = "$(_native_arch)" ]
 }
 
 _current_major="$(_node_major node)"
@@ -19,7 +23,7 @@ if [ "$_current_major" != "22" ] && [ "$_current_major" != "20" ]; then
   _found=""
   for _major in 22 20; do
     for _candidate in \
-      $(ls -d "$HOME"/.nvm/versions/node/v"$_major".*/bin/node 2>/dev/null | sort -V -r) \
+      $(find "$HOME/.nvm/versions/node" -maxdepth 3 -path "*/v$_major.*/bin/node" 2>/dev/null | sort -V -r) \
       /opt/homebrew/opt/node@"$_major"/bin/node \
       /usr/local/opt/node@"$_major"/bin/node; do
       [ -x "$_candidate" ] || continue
