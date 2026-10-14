@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const PORT = 5174;
+// Parallel worktrees must not share a dev server: set E2E_PORT to a free port of your own.
+const PORT = Number(process.env.E2E_PORT ?? 5174);
 
 export default defineConfig({
   testDir: './e2e',

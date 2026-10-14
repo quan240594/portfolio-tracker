@@ -1,10 +1,11 @@
-import { DEFAULT_BASE_CURRENCY, DEMO_USER_ID } from '@portfolio/shared';
+import { DEFAULT_BASE_CURRENCY, DEMO_USER_ID, parseAuthMode, type AuthMode } from '@portfolio/shared';
 
 export interface Config {
   tableName: string;
   eventBusName: string;
   importBucket: string;
   baseCurrency: string;
+  authMode: AuthMode;
   demoUserId: string;
   corsAllowedOrigin: string;
   endpointUrl?: string;
@@ -17,6 +18,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     eventBusName: env.EVENT_BUS_NAME ?? 'portfolio-tracker-local',
     importBucket: env.IMPORT_BUCKET ?? 'portfolio-tracker-imports-local',
     baseCurrency: (env.BASE_CURRENCY?.trim() || DEFAULT_BASE_CURRENCY).toUpperCase(),
+    authMode: parseAuthMode(env.AUTH_MODE),
     demoUserId: env.DEMO_USER_ID || DEMO_USER_ID,
     corsAllowedOrigin: env.CORS_ALLOWED_ORIGIN ?? '*',
     endpointUrl: env.AWS_ENDPOINT_URL || undefined,

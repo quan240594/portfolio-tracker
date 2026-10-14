@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useTheme } from '../theme/ThemeProvider';
 import { USE_MOCKS } from '../config';
+import { AccountMenu } from '../features/auth/AccountMenu';
 import { PortfolioSwitcher } from '../features/portfolios/PortfolioSwitcher';
 import { usePortfolioScope, usePortfolioScopeSync } from '../features/portfolios/usePortfolioScope';
 
@@ -93,6 +94,7 @@ export function Layout() {
           <div className="ml-auto flex items-center gap-2 sm:order-last">
             <PortfolioSwitcher />
             <ThemeToggle />
+            <AccountMenu />
           </div>
           <nav aria-label="Main" className="order-last w-full overflow-x-auto sm:order-none sm:w-auto">
             <ul className="flex gap-1">

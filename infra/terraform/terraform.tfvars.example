@@ -18,7 +18,8 @@ price_refresh_cron = "cron(0 8,13,18,22 ? * MON-FRI *)"
 eu_refresh_hours   = "18"
 
 extra_cors_origins = ["http://localhost:5173"]
-enable_auth        = false
+# Cognito login + JWT authorizer. Unset = true for prod; other envs must choose. false = demo user, never allowed in prod.
+enable_auth        = true
 
 # Leave empty to skip the SNS topic / email subscription for DLQ alarms.
 alarm_email = ""

@@ -16,6 +16,7 @@ module "api_lambda" {
     EVENT_BUS_NAME      = aws_cloudwatch_event_bus.main.name
     IMPORT_BUCKET       = aws_s3_bucket.imports.bucket
     BASE_CURRENCY       = var.base_currency
+    AUTH_MODE           = local.auth_mode
     DEMO_USER_ID        = var.demo_user_id
     CORS_ALLOWED_ORIGIN = local.web_origin
     LOG_LEVEL           = var.log_level

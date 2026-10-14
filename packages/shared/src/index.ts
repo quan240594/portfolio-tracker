@@ -6,3 +6,4 @@ export * from './dynamo.js';
 export * from './events.js';
 export * from './fx.js';
 export * from './portfolio.js';
+export * from './auth.js';

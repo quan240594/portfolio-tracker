@@ -35,6 +35,8 @@ function staticHostingFallback(): Plugin {
 export default defineConfig(({ mode }) => ({
   base: normalizeBase(loadEnv(mode, process.cwd(), '').VITE_BASE_PATH),
   plugins: [react(), tailwindcss(), staticHostingFallback()],
+  // amazon-cognito-identity-js (via its crypto helpers) still references the Node global.
+  define: { global: 'globalThis' },
   server: {
     port: 5173,
     proxy: {

@@ -75,6 +75,20 @@ Configured in [sonar-project.properties](sonar-project.properties) (project `qua
 See [infra/terraform/README.md](infra/terraform/README.md) (remote state bootstrap, `terraform apply`, API keys in SSM,
 web upload) and [.github/workflows/deploy.yml](.github/workflows/deploy.yml) (GitHub OIDC → AWS).
 
+### Sign-in (Cognito + TOTP)
+
+Deployed environments require a login: Amazon Cognito, admin-created users only, authenticator-app (TOTP) MFA
+mandatory. Local dev and the GitHub Pages demo run without login. After `terraform apply`, create your user
+(see [infra/terraform/README.md](infra/terraform/README.md#8-users-and-sign-in-cognito)):
+
+```bash
+aws cognito-idp admin-create-user --user-pool-id "$(terraform -chdir=infra/terraform output -raw cognito_user_pool_id)" \
+  --username you@example.com --user-attributes Name=email,Value=you@example.com Name=email_verified,Value=true \
+  --temporary-password '<temporary password>' --message-action SUPPRESS
+```
+
+First sign-in: temporary password → choose a new password → scan the QR code with an authenticator app → enter the code.
+
 ## Deployment (GitHub Pages)
 
 The public demo is deployed by [.github/workflows/pages.yml](.github/workflows/pages.yml).

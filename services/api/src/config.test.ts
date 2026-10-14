@@ -9,6 +9,7 @@ describe('loadConfig', () => {
       eventBusName: 'portfolio-tracker-local',
       importBucket: 'portfolio-tracker-imports-local',
       baseCurrency: 'EUR',
+      authMode: 'cognito',
       demoUserId: DEMO_USER_ID,
       corsAllowedOrigin: '*',
       endpointUrl: undefined,
@@ -31,6 +32,7 @@ describe('loadConfig', () => {
         EVENT_BUS_NAME: 'bus',
         IMPORT_BUCKET: 'bucket',
         BASE_CURRENCY: 'usd',
+        AUTH_MODE: 'demo',
         DEMO_USER_ID: 'alice',
         CORS_ALLOWED_ORIGIN: 'https://app.example',
         AWS_ENDPOINT_URL: 'http://localhost:4566',
@@ -42,6 +44,7 @@ describe('loadConfig', () => {
       eventBusName: 'bus',
       importBucket: 'bucket',
       baseCurrency: 'USD',
+      authMode: 'demo',
       demoUserId: 'alice',
       corsAllowedOrigin: 'https://app.example',
       endpointUrl: 'http://localhost:4566',
@@ -54,6 +57,13 @@ describe('loadConfig', () => {
     expect(config.demoUserId).toBe(DEMO_USER_ID);
     expect(config.endpointUrl).toBeUndefined();
     expect(config.region).toBe('ap-south-1');
+  });
+
+  it('fails closed: AUTH_MODE defaults to cognito and unknown values are rejected', () => {
+    expect(loadConfig({}).authMode).toBe('cognito');
+    expect(loadConfig({ AUTH_MODE: '' }).authMode).toBe('cognito');
+    expect(loadConfig({ AUTH_MODE: 'demo' }).authMode).toBe('demo');
+    expect(() => loadConfig({ AUTH_MODE: 'off' })).toThrow(/AUTH_MODE/);
   });
 
   it('reads process.env by default', () => {

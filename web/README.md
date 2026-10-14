@@ -41,7 +41,7 @@ The demo includes a seeded daily EUR/USD history (USD per 1 EUR drifting ~1.04 �
 | `typecheck` | `tsc -b --noEmit` |
 | `lint` | ESLint (typescript-eslint + react-hooks) |
 | `test` | Vitest unit/component tests (jsdom + MSW node server) |
-| `test:e2e` | Playwright (chromium) against `pnpm dev:mock --port 5174` |
+| `test:e2e` | Playwright (chromium): `e2e/` against `pnpm dev:mock --port $E2E_PORT` (default 5174), then `e2e-auth/` (`playwright.auth.config.ts`, a Cognito-mode build on `$E2E_AUTH_PORT`, default `$E2E_PORT`+100) proving the sign-in gate |
 | `test:e2e:pages` | `build:pages`, then Playwright (`playwright.pages.config.ts`, `e2e/pages.spec.ts`) against `dist/` served under `/portfolio-tracker/` by `scripts/serve-pages.mjs`, a GitHub-Pages-like static server (404.html fallback with status 404, `/portfolio-tracker` → 301) |
 
 First-time E2E setup: `pnpm --filter @portfolio/web exec playwright install chromium`.
@@ -54,6 +54,9 @@ Build-time (Vite `VITE_*`), see `.env.example`:
 |---|---|---|
 | `VITE_API_BASE_URL` | `/api` | API base. In AWS set to the API Gateway URL at build time. |
 | `VITE_USE_MOCKS` | `false` | `true` enables the MSW browser worker and the "Demo mode" banner. `--mode mock` (used by `dev:mock`/`build:mock`/`build:pages`) implies it. |
+| `VITE_AUTH_MODE` | `none` | `cognito` puts every route behind the Cognito sign-in (TOTP MFA). Ignored in mock mode. Set by the deploy workflow from the Terraform outputs. |
+| `VITE_COGNITO_USER_POOL_ID`, `VITE_COGNITO_CLIENT_ID` | – | Required when `VITE_AUTH_MODE=cognito` (otherwise the app shows a configuration error instead of starting). |
+| `VITE_COGNITO_REGION` | from pool id | Optional; derived from the pool id (`eu-west-1_xxx`). |
 | `VITE_BASE_PATH` | `/` | Public base path (Vite `base`, slashes normalised). The router `basename` is derived from it, and the MSW worker is loaded from `<base>mockServiceWorker.js`. `build:pages` sets `/portfolio-tracker/`. |
 
 ## GitHub Pages demo

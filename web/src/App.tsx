@@ -10,6 +10,8 @@ import { TransactionsPage } from './pages/TransactionsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { ApiError } from './api/client';
 import { routerBasename } from './config';
+import { AuthGate } from './features/auth/AuthGate';
+import { AuthProvider } from './features/auth/AuthProvider';
 
 const TITLES: Record<string, string> = {
   '/': 'Dashboard',
@@ -33,10 +35,10 @@ function RouteAnnouncer() {
 
 function Root() {
   return (
-    <>
+    <AuthGate>
       <RouteAnnouncer />
       <Layout />
-    </>
+    </AuthGate>
   );
 }
 
@@ -83,7 +85,9 @@ export function App() {
   return (
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} future={{ v7_startTransition: true }} />
+        <AuthProvider>
+          <RouterProvider router={router} future={{ v7_startTransition: true }} />
+        </AuthProvider>
       </QueryClientProvider>
     </ThemeProvider>
   );

@@ -133,7 +133,7 @@ export function fakeDeps(overrides: Partial<Deps> = {}) {
     repo,
     events,
     signer: new FakeSigner(),
-    config: { baseCurrency: 'EUR', demoUserId: 'demo', corsAllowedOrigin: 'http://localhost:5173' },
+    config: { baseCurrency: 'EUR', authMode: 'demo', demoUserId: 'demo', corsAllowedOrigin: 'http://localhost:5173' },
     now: () => new Date('2026-06-15T12:00:00.000Z'),
     uuid: () => `uuid-${++n}`,
     ...overrides,
