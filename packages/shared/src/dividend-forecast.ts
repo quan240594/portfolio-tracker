@@ -155,6 +155,39 @@ const emptyPoint = (month: string, phase: TimelinePhase): TimelinePoint => ({ mo
 /** The trend line value (clamped at 0) in month `index`; `x0` = the history month index of x = 0. */
 const trendAt = (fit: LinearFit, x0: number, index: number): number => roundTo(Math.max(0, fit.intercept + fit.slope * (index - x0)));
 
+type TrendFit = NonNullable<ReturnType<typeof trendOf>>;
+
+/** Past months: received, trailing average and, inside the fit window, the trend line. */
+function historyPoints(history: readonly MonthAmount[], averages: readonly (number | null)[], trend: TrendFit | null, x0: number, lastWindow: number): TimelinePoint[] {
+  return history.map((m, i) => {
+    const index = monthIndex(m.month);
+    const inWindow = trend !== null && index >= x0 && index <= lastWindow;
+    return { ...emptyPoint(m.month, 'PAST'), received: m.total, average: averages[i] ?? null, trend: inWindow ? trendAt(trend.fit, x0, index) : null };
+  });
+}
+
+/** The current month and the forecast months: what is still to come plus the projected trend. */
+function forwardPoints(
+  indices: readonly number[],
+  ahead: ReadonlyMap<number, ForecastMonthInput>,
+  now: { current: number; receivedNow: number },
+  trend: TrendFit | null,
+  x0: number,
+): TimelinePoint[] {
+  return indices.map((index) => {
+    const f = ahead.get(index);
+    const isCurrent = index === now.current;
+    return {
+      ...emptyPoint(monthKey(index), isCurrent ? 'CURRENT' : 'FUTURE'),
+      received: isCurrent ? now.receivedNow : 0,
+      declared: f?.declared ?? 0,
+      estimated: f?.estimated ?? 0,
+      trend: trend ? trendAt(trend.fit, x0, index) : null,
+      projected: trend !== null,
+    };
+  });
+}
+
 /** Chronological monthly series (received, forecast, trailing average, trend) and the figures that go with it. */
 export function buildGrowthTimeline(byMonth: readonly MonthAmount[], future: readonly ForecastMonthInput[], today: string): GrowthTimeline {
   const current = monthIndex(today);
@@ -164,31 +197,14 @@ export function buildGrowthTimeline(byMonth: readonly MonthAmount[], future: rea
   const x0 = trend ? monthIndex(trend.info.from) : 0;
   const lastWindow = trend ? monthIndex(trend.info.to) : 0;
 
-  const points: TimelinePoint[] = history.map((m, i) => ({
-    ...emptyPoint(m.month, 'PAST'),
-    received: m.total,
-    average: averages[i] ?? null,
-    trend: trend && monthIndex(m.month) >= x0 && monthIndex(m.month) <= lastWindow ? trendAt(trend.fit, x0, monthIndex(m.month)) : null,
-  }));
+  const points: TimelinePoint[] = historyPoints(history, averages, trend, x0, lastWindow);
 
   const ahead = new Map<number, ForecastMonthInput>();
   for (const f of future) if (monthIndex(f.month) >= current) ahead.set(monthIndex(f.month), f);
   const receivedNow = roundTo(byMonth.filter((m) => monthIndex(m.month) === current).reduce((sum, m) => sum + m.total, 0));
   const hasData = history.length > 0 || receivedNow > 0 || ahead.size > 0;
   const indices = [...new Set([current, ...ahead.keys()])].sort((a, b) => a - b);
-  if (hasData) {
-    for (const index of indices) {
-      const f = ahead.get(index);
-      points.push({
-        ...emptyPoint(monthKey(index), index === current ? 'CURRENT' : 'FUTURE'),
-        received: index === current ? receivedNow : 0,
-        declared: f?.declared ?? 0,
-        estimated: f?.estimated ?? 0,
-        trend: trend ? trendAt(trend.fit, x0, index) : null,
-        projected: trend !== null,
-      });
-    }
-  }
+  if (hasData) points.push(...forwardPoints(indices, ahead, { current, receivedNow }, trend, x0));
 
   const declared = [...ahead.values()].reduce((sum, f) => sum + toCents(f.declared), 0);
   const estimated = [...ahead.values()].reduce((sum, f) => sum + toCents(f.estimated), 0);
