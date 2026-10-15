@@ -8,14 +8,14 @@
  * `benchmark`/`portfolioId`, 404 for an unknown portfolio. A benchmark without end-of-day prices is not an error:
  * `benchmark.available` is false (with a `message`) and every benchmark figure is null.
  */
-import { analyticsRiskQuerySchema, type BenchmarkInfo } from './analytics-api.js';
+import type { BenchmarkInfo } from './analytics-api.js';
 
 export const METRICS_ROUTES = {
   analyticsMetrics: 'GET /analytics/metrics',
 } as const;
 
 /** Same query as GET /analytics/risk: `portfolioId` scope + a validated, upper-cased `benchmark` symbol. */
-export const analyticsMetricsQuerySchema = analyticsRiskQuerySchema;
+export { analyticsRiskQuerySchema as analyticsMetricsQuerySchema } from './analytics-api.js';
 
 /** Fewer weekday returns than this still produce figures, but the UI warns that they are not reliable yet. */
 export const SHORT_HISTORY_OBSERVATIONS = 60;

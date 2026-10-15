@@ -189,7 +189,7 @@ class MockProvider:
         """Known P/E, else a deterministic one in 8.00-37.99 derived from the symbol."""
         return PE_RATIOS.get(symbol) or 8 + (symbol_seed(symbol) % 3000) / 100
 
-    def get_profile(self, symbol: str) -> InstrumentProfile | None:
+    def get_profile(self, symbol: str) -> InstrumentProfile:
         profile = PROFILES.get(symbol)
         if profile is None:
             profile = minimal_profile(symbol)
