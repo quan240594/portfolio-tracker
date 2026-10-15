@@ -4,7 +4,21 @@ import { gotoViaNav, mainNav, openPortfolioMenu, portfolioTrigger } from './nav'
 const MENU_LABELS = ['Holdings', 'Transactions', 'Dividends', 'Rebalance', 'Assets', 'Watchlist', 'Goals', 'Calendar', 'Brokers'];
 
 /** True when the page itself (not an inner scroller) scrolls horizontally. */
-const pageOverflows = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+// Names the elements that push the page wider than the viewport (anything clipped by a scrolling ancestor cannot), so a failure says what overflowed.
+const overflowing = (page: Page) =>
+  page.evaluate(() => {
+    if (document.documentElement.scrollWidth <= window.innerWidth) return [];
+    return [...document.querySelectorAll('body *')]
+      .filter((el) => {
+        if (el.getBoundingClientRect().right <= window.innerWidth + 0.5) return false;
+        for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+          if (getComputedStyle(p).overflowX !== 'visible') return false;
+        }
+        return true;
+      })
+      .slice(0, 8)
+      .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 70)} right=${Math.round(el.getBoundingClientRect().right)}`);
+  });
 
 test.describe('Header navigation (mock mode)', () => {
   test('groups the pages and opens/closes the Portfolio menu', async ({ page }) => {
@@ -86,10 +100,10 @@ test.describe('Header navigation (mock mode)', () => {
       // The dashboard is fully loaded (movers, watchlist, charts) so late content cannot widen the page unnoticed.
       await expect(page.getByRole('heading', { name: 'Top day gainers' })).toBeVisible();
       await expect(page.getByRole('region', { name: 'Watchlist' }).getByRole('table')).toBeVisible();
-      expect(await pageOverflows(page)).toBe(false);
+      expect(await overflowing(page)).toEqual([]);
 
       await openPortfolioMenu(page);
-      expect(await pageOverflows(page)).toBe(false);
+      expect(await overflowing(page)).toEqual([]);
 
       // Everything is reachable and comfortably tappable (≥44px) without sideways scrolling.
       for (const label of MENU_LABELS) {
@@ -104,7 +118,7 @@ test.describe('Header navigation (mock mode)', () => {
 
       await gotoViaNav(page, 'Holdings');
       await expect(page.getByRole('heading', { level: 1, name: 'Holdings' })).toBeVisible();
-      expect(await pageOverflows(page)).toBe(false);
+      expect(await overflowing(page)).toEqual([]);
     });
   }
 });
