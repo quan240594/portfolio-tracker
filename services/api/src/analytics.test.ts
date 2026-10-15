@@ -175,6 +175,7 @@ describe('GET /analytics/dividend-growth', () => {
       byYear: [{ year: '2025', total: 10, payments: 1, yoyPct: null, partial: false }],
       byMonth: [{ month: '2025-12', total: 10 }],
       perShare: [{ symbol: 'VWRL.AS', years: [{ year: '2025', perShare: 1 }] }],
+      growthStats: { asOf: '2026-06-15', qoq: { basis: 'QUARTER', change: -10, pct: -100 }, yoy: null, cagr: null },
     });
     const none = await handler(apiEvent('GET', '/analytics/dividend-growth', { query: { portfolioId: 'usd' } }));
     expect(json(none).byYear).toEqual([]);

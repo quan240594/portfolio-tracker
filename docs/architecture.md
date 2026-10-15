@@ -856,3 +856,47 @@ legend, tooltip); the event *type* is told by marker shape and letter. `PAID` is
 fill / `#14532d` text), `ESTIMATED` as **Estimated** (pastel yellow, `#fef9c3` / `#422006`, always with a dashed outline and italic
 chip text so colour is never the only cue), `CONFIRMED` as **Confirmed** / **Declared** (pastel blue, `#dbeafe` / `#1e3a8a`);
 dark theme uses muted fills with light text (all text ≥ 4.5:1, see `calendarColours.ts`). The API enum values are unchanged.
+
+## Dividend growth stats
+
+Three figures under the "Dividend growth" chart on `/dividends`: quarter over quarter (QoQ), year over year (YoY) and the
+all-time compound annual growth rate (CAGR) of the dividends **received**.
+
+**Decision.** They are an optional, additive `growthStats` block of `GET /analytics/dividend-growth` (`DividendGrowth` /
+`AnalyticsDividendGrowthResponse`), not of `GET /dividends/overview`. That endpoint feeds the chart and its data table, so the figures
+come from the same request and the same monthly rows (`byMonth`): they reconcile with what is drawn, cannot show another snapshot,
+cost no extra request, and the Analytics page's dividend-growth tab gets them for free. The overview is portfolio-valuation heavy and
+holds no per-month received series. The block is optional so older servers and cached responses still parse; the card hides the
+tiles when it is absent. The route, scope (`?portfolioId=`, omitted or `all` = combined) and error envelope are unchanged.
+
+**Calculation.** `calculateDividendGrowthStats(monthlyTotals, today)` (`packages/shared/src/dividend-growth-stats.ts`) is pure and
+takes the cent-rounded net amount received per month (base currency, historical-FX converted, exactly the `byMonth` totals) so every
+period amount is the sum of the rows it covers and can be reproduced from the data table; percentages are rounded to two decimals only on
+output. `today` is `YYYY-MM-DD`; the current month and everything after it never take part, so there is no partial quarter, rolling
+window or year.
+
+| Field | Meaning |
+|---|---|
+| `asOf` | `today` |
+| `qoq` | latest complete calendar quarter vs the one before (`basis: QUARTER`), `null` when no dividend was received up to the end of that quarter |
+| `yoy` | last 12 complete months vs the 12 before (`basis: TTM`) when at least 24 complete months of history exist (first payment month → last complete month); otherwise latest vs previous complete calendar year (`basis: CALENDAR_YEAR`); `null` when that previous year has no dividends |
+| `cagr` | first calendar year with dividends → latest complete calendar year; `null` with fewer than two complete years, a first year of 0, or a negative last year |
+
+`qoq` / `yoy` hold `current` and `previous` (`{ from, to, amount }`, months `YYYY-MM` inclusive), `change` (`current − previous`, EUR) and
+`pct`. `pct` is `null` (shown as "—", never Infinity/NaN) when the previous amount is not above zero; a fall is negative, a latest
+period without dividends is −100 %. `cagr` holds `startYear`, `endYear`, `startAmount`, `endAmount`, `years` (= `endYear − startYear`,
+at least 1) and `pct = (end / start)^(1 / years) − 1`. A latest complete year without dividends gives −100 %.
+The first year counts as a full year even when dividends only started part-way through it, which makes the CAGR look higher; the
+tile says so.
+
+**UI.** `GrowthStats.tsx` / `growthStatsView.ts` (view model: formatting, labels, explanations). Three tiles (stacked on a phone), each with
+a label, a large value with ▲/▼ and the sign (never colour alone), the periods compared, and a native
+`<details>` "How is this calculated?" with the amounts behind the figure. Light themes use the 700 shades, dark themes the 300 shades
+(≥ 4.5:1 on the tile). Missing figures show "—" with the reason (e.g. "Needs at least 2 years of dividend history.").
+
+**Demo mode.** The MSW handler runs the same `computeDividendGrowth` on the demo fixtures. To have 24+ months and two complete years the
+fixtures now reach back about 3.3 years (`LONG_HISTORY_DAYS`): prices and FX start earlier (the newest 400 days are generated
+exactly as before), and the first buys of AAPL, MSFT, KO, VWRL.AS and JNJ (and the initial deposit) moved back, with the same quantities.
+Provider-style dividend events still cover ~900 days; the user's received payments go back further. The e2e tests pin the clock
+(`page.clock.setFixedTime`) to 2026-10-15, where the demo shows Q3 2026 vs Q2 2026 +65,5 % (€ 131,51 vs € 79,48), 12 months Oct 2025 – Sep 2026
+vs Oct 2024 – Sep 2025 +16,7 % (€ 413,58 vs € 354,52) and CAGR 2023 → 2025 +92,0 % (€ 95,81 → € 353,31).

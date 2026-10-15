@@ -1,13 +1,14 @@
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import type { AnalyticsDividendGrowthResponse, GetDividendsResponse } from '@portfolio/shared';
+import type { AnalyticsDividendGrowthResponse, DividendGrowthStats, GetDividendsResponse } from '@portfolio/shared';
 import { computeDividendGrowth } from '@portfolio/shared';
 import { renderWithProviders, sp } from '../../test/utils';
 import { server } from '../../mocks/server';
 import { getAnalyticsData, getDividends } from '../../mocks/db';
 import { formatMoney } from '../../lib/format';
 import { DividendGrowthCard } from './DividendGrowthCard';
+import { growthTiles } from './growthStatsView';
 import { ReceivedCards } from './ReceivedCards';
 
 const DIVIDENDS = '/api/dividends';
@@ -119,6 +120,44 @@ describe('DividendGrowthCard', () => {
     expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Month', ...years]);
     expect(within(table).getAllByRole('row')).toHaveLength(13);
     expect(within(table).getAllByText('—').length).toBeGreaterThan(0);
+  });
+
+  it('shows quarter over quarter, year over year and CAGR under the chart', async () => {
+    const user = userEvent.setup();
+    const { growthStats } = growth();
+    renderWithProviders(<DividendGrowthCard />);
+    const stats = await screen.findByTestId('growth-stats');
+    const tiles = growthTiles(growthStats!, 'EUR');
+    expect(tiles.map((t) => t.id)).toEqual(['qoq', 'yoy', 'cagr']);
+    for (const t of tiles) {
+      expect(t.value).not.toBe('—');
+      const tile = within(stats).getByTestId(`growth-stat-${t.id}`);
+      expect(within(tile).getByTestId(`growth-stat-${t.id}-value`)).toHaveTextContent(`${t.arrow}${t.value}`);
+      expect(within(tile).getByTestId(`growth-stat-${t.id}-periods`)).toHaveTextContent(t.subtext);
+      expect(within(tile).getByText('How is this calculated?')).toBeInTheDocument();
+    }
+    // directly below the chart, above the data table disclosure
+    expect(screen.getByTestId('year-compare-chart').closest('div.overflow-x-auto')!.nextElementSibling).toBe(stats);
+
+    const qoq = within(stats).getByTestId('growth-stat-qoq');
+    await user.click(within(qoq).getByText('How is this calculated?'));
+    expect(within(qoq).getByText(/latest complete calendar quarter/)).toBeVisible();
+  });
+
+  it('shows dashes with the reason when there is not enough history, and no figures from an older server', async () => {
+    const empty: DividendGrowthStats = { asOf: '2026-10-15', qoq: null, yoy: null, cagr: null };
+    server.use(http.get('/api/analytics/dividend-growth', () => HttpResponse.json({ ...growth(), growthStats: empty })));
+    const first = renderWithProviders(<DividendGrowthCard />);
+    const stats = await screen.findByTestId('growth-stats');
+    expect(within(stats).getAllByText('—')).toHaveLength(3);
+    expect(within(stats).getByText('Needs at least 2 years of dividend history.')).toBeInTheDocument();
+    first.unmount();
+
+    const { growthStats: _omitted, ...legacy } = growth();
+    server.use(http.get('/api/analytics/dividend-growth', () => HttpResponse.json(legacy)));
+    renderWithProviders(<DividendGrowthCard />);
+    expect(await screen.findByTestId('year-compare-chart')).toBeInTheDocument();
+    expect(screen.queryByTestId('growth-stats')).not.toBeInTheDocument();
   });
 
   it('follows the portfolio scope', async () => {

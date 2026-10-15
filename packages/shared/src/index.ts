@@ -9,6 +9,7 @@ export * from './portfolio.js';
 export * from './auth.js';
 export * from './analytics.js';
 export * from './analytics-income.js';
+export * from './dividend-growth-stats.js';
 export * from './analytics-insights.js';
 export * from './analytics-api.js';
 export * from './analytics-compute.js';
