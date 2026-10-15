@@ -36,7 +36,7 @@ const addDays = (date: string, days: number): string => {
   return isoDay(d);
 };
 
-interface Needs {
+export interface Needs {
   /** Quotes + profiles of the held symbols (current holdings, insights). */
   holdings?: boolean;
   /** Announced dividend events of the held symbols. */

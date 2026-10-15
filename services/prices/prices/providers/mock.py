@@ -10,6 +10,7 @@ import hashlib
 import math
 import random
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 
 from ..errors import SymbolNotFoundError
@@ -41,6 +42,9 @@ BASE_PRICES: dict[str, float] = {
     "ETH-EUR": 3000.0,
     "SOL-EUR": 150.0,
 }
+
+# Plausible trailing P/Es for the known single stocks (ETFs and crypto have none).
+PE_RATIOS: dict[str, float] = {"AAPL": 34.2, "MSFT": 35.8, ASML: 38.4, SAP: 41.3}
 
 PROFILES: dict[str, InstrumentProfile] = {
     p.symbol: p
@@ -181,21 +185,31 @@ class MockProvider:
             d += timedelta(days=1)
         return out
 
+    def _pe_ratio(self, symbol: str) -> float:
+        """Known P/E, else a deterministic one in 8.00-37.99 derived from the symbol."""
+        return PE_RATIOS.get(symbol) or 8 + (symbol_seed(symbol) % 3000) / 100
+
     def get_profile(self, symbol: str) -> InstrumentProfile | None:
-        if symbol in PROFILES:
-            return PROFILES[symbol]
-        profile = minimal_profile(symbol)
-        if profile.asset_class == "OTHER":
-            return InstrumentProfile(
-                symbol=symbol,
-                name=f"{symbol} (mock)",
-                asset_class="STOCK",
-                currency=profile.currency,
-                sector="Unknown",
-                country=profile.country,
-                exchange=profile.exchange,
-            )
-        return profile
+        profile = PROFILES.get(symbol)
+        if profile is None:
+            profile = minimal_profile(symbol)
+            if profile.asset_class == "OTHER":
+                profile = InstrumentProfile(
+                    symbol=symbol,
+                    name=f"{symbol} (mock)",
+                    asset_class="STOCK",
+                    currency=profile.currency,
+                    sector="Unknown",
+                    country=profile.country,
+                    exchange=profile.exchange,
+                )
+        if profile.asset_class != "STOCK":
+            return profile
+        return replace(
+            profile,
+            pe_ratio=self._pe_ratio(symbol),
+            fundamentals_as_of=self._now().astimezone(UTC).date().isoformat(),
+        )
 
     def _schedule(self, symbol: str) -> tuple[tuple[int, ...], int, float, int] | None:
         if symbol in DIVIDEND_SCHEDULES:

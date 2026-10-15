@@ -4,6 +4,7 @@ import {
   type AnalyticsDividendGrowthResponse,
   type AnalyticsGoalParams,
   type AnalyticsGoalResponse,
+  type AnalyticsMetricsResponse,
   type AnalyticsReturnsResponse,
   type AnalyticsRiskResponse,
   type AnalyticsSummaryResponse,
@@ -27,6 +28,8 @@ export const analyticsApi = {
     request<AnalyticsRiskResponse>('GET', '/analytics/risk', { query: { ...scopeQuery(scope), benchmark }, signal }),
   benchmark: (scope: string, benchmark: string, range: HistoryRange, signal?: AbortSignal) =>
     request<AnalyticsBenchmarkResponse>('GET', '/analytics/benchmark', { query: { ...scopeQuery(scope), benchmark, range }, signal }),
+  metrics: (scope: string, benchmark: string, signal?: AbortSignal) =>
+    request<AnalyticsMetricsResponse>('GET', '/analytics/metrics', { query: { ...scopeQuery(scope), benchmark }, signal }),
   dividendGrowth: (scope: string, signal?: AbortSignal) =>
     request<AnalyticsDividendGrowthResponse>('GET', '/analytics/dividend-growth', { query: scopeQuery(scope), signal }),
   goal: (scope: string, params: AnalyticsGoalParams, signal?: AbortSignal) =>

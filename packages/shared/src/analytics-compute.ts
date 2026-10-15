@@ -99,7 +99,7 @@ export function buildContext(data: AnalyticsData): Context | null {
 
 const scopedTransactions = (data: AnalyticsData): Transaction[] => data.transactions.filter((t) => t.date <= data.today);
 
-function currentPortfolio(data: AnalyticsData): PortfolioResult {
+export function currentPortfolio(data: AnalyticsData): PortfolioResult {
   return calculatePortfolio({
     transactions: scopedTransactions(data),
     quotes: data.quotes,

@@ -26,7 +26,7 @@ describe('AnalyticsPage', () => {
     renderApp('/analytics');
     expect(await screen.findByRole('heading', { level: 1, name: 'Analytics' })).toBeInTheDocument();
     const tabs = screen.getByRole('tablist', { name: 'Analytics' });
-    expect(within(tabs).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Growth', 'Returns', 'Risk', 'Benchmark', 'Dividend growth', 'Income goal']);
+    expect(within(tabs).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Growth', 'Metrics', 'Returns', 'Risk', 'Benchmark', 'Dividend growth', 'Income goal']);
     expect(within(tabs).getByRole('tab', { name: 'Growth' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('link', { name: 'Analytics' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('tabpanel')).toHaveAccessibleName('Growth');

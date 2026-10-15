@@ -34,17 +34,17 @@ interface InstrumentSeed extends InstrumentProfile {
 }
 
 export const INSTRUMENTS: InstrumentSeed[] = [
-  { symbol: 'AAPL', name: 'Apple Inc.', assetClass: 'STOCK', sector: 'Technology', country: 'United States', exchange: 'NASDAQ', currency: 'USD', price: 228.52, annualDrift: 0.18, dailyVol: 0.015 },
-  { symbol: 'MSFT', name: 'Microsoft Corporation', assetClass: 'STOCK', sector: 'Technology', country: 'United States', exchange: 'NASDAQ', currency: 'USD', price: 418.16, annualDrift: 0.14, dailyVol: 0.013 },
-  { symbol: 'KO', name: 'The Coca-Cola Company', assetClass: 'STOCK', sector: 'Consumer Staples', country: 'United States', exchange: 'NYSE', currency: 'USD', price: 69.84, annualDrift: 0.06, dailyVol: 0.008 },
+  { symbol: 'AAPL', name: 'Apple Inc.', assetClass: 'STOCK', sector: 'Technology', country: 'United States', exchange: 'NASDAQ', currency: 'USD', peRatio: 33.4, price: 228.52, annualDrift: 0.18, dailyVol: 0.015 },
+  { symbol: 'MSFT', name: 'Microsoft Corporation', assetClass: 'STOCK', sector: 'Technology', country: 'United States', exchange: 'NASDAQ', currency: 'USD', peRatio: 34.9, price: 418.16, annualDrift: 0.14, dailyVol: 0.013 },
+  { symbol: 'KO', name: 'The Coca-Cola Company', assetClass: 'STOCK', sector: 'Consumer Staples', country: 'United States', exchange: 'NYSE', currency: 'USD', peRatio: 24.3, price: 69.84, annualDrift: 0.06, dailyVol: 0.008 },
   { symbol: 'JNJ', name: 'Johnson & Johnson', assetClass: 'STOCK', sector: 'Healthcare', country: 'United States', exchange: 'NYSE', currency: 'USD', price: 158.41, annualDrift: -0.03, dailyVol: 0.009 },
   { symbol: 'VWRL.AS', name: 'Vanguard FTSE All-World UCITS ETF (Dist)', assetClass: 'ETF', sector: 'Diversified', country: 'Global', exchange: 'Euronext Amsterdam', currency: 'EUR', price: 121.38, annualDrift: 0.15, dailyVol: 0.007 },
   { symbol: 'IWDA.AS', name: 'iShares Core MSCI World UCITS ETF (Acc)', assetClass: 'ETF', sector: 'Diversified', country: 'Global', exchange: 'Euronext Amsterdam', currency: 'EUR', price: 98.74, annualDrift: 0.16, dailyVol: 0.007 },
-  { symbol: 'ASML.AS', name: 'ASML Holding N.V.', assetClass: 'STOCK', sector: 'Technology', country: 'Netherlands', exchange: 'Euronext Amsterdam', currency: 'EUR', price: 712.3, annualDrift: 0.02, dailyVol: 0.022 },
+  { symbol: 'ASML.AS', name: 'ASML Holding N.V.', assetClass: 'STOCK', sector: 'Technology', country: 'Netherlands', exchange: 'Euronext Amsterdam', currency: 'EUR', peRatio: 36.8, price: 712.3, annualDrift: 0.02, dailyVol: 0.022 },
   { symbol: 'BTC-EUR', name: 'Bitcoin', assetClass: 'CRYPTO', sector: 'Digital Assets', country: 'Global', currency: 'EUR', price: 56_820, annualDrift: 0.55, dailyVol: 0.03, tradesWeekends: true },
   // Watchlist-only instruments (no transactions).
-  { symbol: 'NVDA', name: 'NVIDIA Corporation', assetClass: 'STOCK', sector: 'Technology', country: 'United States', exchange: 'NASDAQ', currency: 'USD', price: 131.4, annualDrift: 0.35, dailyVol: 0.024 },
-  { symbol: 'SAP.DE', name: 'SAP SE', assetClass: 'STOCK', sector: 'Technology', country: 'Germany', exchange: 'XETRA', currency: 'EUR', price: 231.9, annualDrift: 0.12, dailyVol: 0.014 },
+  { symbol: 'NVDA', name: 'NVIDIA Corporation', assetClass: 'STOCK', sector: 'Technology', country: 'United States', exchange: 'NASDAQ', currency: 'USD', peRatio: 45.2, price: 131.4, annualDrift: 0.35, dailyVol: 0.024 },
+  { symbol: 'SAP.DE', name: 'SAP SE', assetClass: 'STOCK', sector: 'Technology', country: 'Germany', exchange: 'XETRA', currency: 'EUR', peRatio: 38.7, price: 231.9, annualDrift: 0.12, dailyVol: 0.014 },
   { symbol: 'ETH-EUR', name: 'Ethereum', assetClass: 'CRYPTO', sector: 'Digital Assets', country: 'Global', currency: 'EUR', price: 2_410, annualDrift: 0.3, dailyVol: 0.035, tradesWeekends: true },
 ];
 
@@ -209,7 +209,8 @@ export function createSeed(now: Date = new Date()): MockSeed {
   const quotes: Record<string, Quote> = {};
   for (const inst of INSTRUMENTS) {
     const { price: _p, annualDrift: _d, dailyVol: _v, tradesWeekends: _w, ...profile } = inst;
-    profiles[inst.symbol] = profile;
+    // Demo P/Es are fixed values; JNJ deliberately has none so the coverage line is meaningful.
+    profiles[inst.symbol] = profile.peRatio === undefined ? profile : { ...profile, fundamentalsAsOf: addDays(today, -9) };
     const prices = buildEod(inst, today);
     eod[inst.symbol] = prices;
     const last = prices.at(-1)!;

@@ -150,6 +150,15 @@ describe('seed', () => {
     expect([...countries].sort()).toEqual(['Germany', 'Global', 'Netherlands', 'United States']);
   });
 
+  it('gives AAPL and MSFT a P/E (with its date) and leaves ASML without, so P/E coverage is partial', async () => {
+    await seed({ doc, tableName: 'tbl', today: TODAY, log: () => {} });
+    const profiles = Object.fromEntries(written().filter((i) => i.entityType === 'PROFILE').map((i) => [String(i.symbol), i]));
+    expect(profiles.AAPL).toMatchObject({ peRatio: 33.4, fundamentalsAsOf: TODAY });
+    expect(profiles.MSFT).toMatchObject({ peRatio: 34.9, fundamentalsAsOf: TODAY });
+    expect(profiles['ASML.AS']).not.toHaveProperty('peRatio');
+    expect(profiles['VWRL.AS']).not.toHaveProperty('fundamentalsAsOf');
+  });
+
   it('yields a negative currency effect on USD holdings as EUR strengthens', async () => {
     await seed({ doc, tableName: 'tbl', today: TODAY, log: () => {} });
     const items = written();

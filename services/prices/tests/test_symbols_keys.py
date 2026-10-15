@@ -103,6 +103,33 @@ def test_item_shapes() -> None:
         "assetClass": "CRYPTO",
         "currency": "EUR",
     }
+    stock = keys.profile_item(
+        InstrumentProfile(
+            "AAPL",
+            "Apple Inc.",
+            "STOCK",
+            "USD",
+            "Technology",
+            "United States",
+            "NASDAQ",
+            pe_ratio=34.2,
+            fundamentals_as_of="2026-10-13",
+        )
+    )
+    assert stock == {
+        "PK": "TICKER#AAPL",
+        "SK": "PROFILE",
+        "entityType": "PROFILE",
+        "symbol": "AAPL",
+        "name": "Apple Inc.",
+        "assetClass": "STOCK",
+        "currency": "USD",
+        "sector": "Technology",
+        "country": "United States",
+        "exchange": "NASDAQ",
+        "peRatio": Decimal("34.2"),
+        "fundamentalsAsOf": "2026-10-13",
+    }
     div = keys.dividend_item(DividendEvent("AAPL", "2026-02-10", 0.26, "USD", pay_date="2026-02-14"))
     assert div["entityType"] == "DIVIDEND_EVENT" and div["SK"] == "DIV#2026-02-10"
     assert (

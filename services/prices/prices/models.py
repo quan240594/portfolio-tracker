@@ -12,6 +12,8 @@ WIRE_NAMES = {
     "asset_class": "assetClass",
     "ex_date": "exDate",
     "pay_date": "payDate",
+    "pe_ratio": "peRatio",
+    "fundamentals_as_of": "fundamentalsAsOf",
 }
 
 ASSET_CLASSES = ("STOCK", "ETF", "CRYPTO", "BOND", "CASH", "OTHER")
@@ -76,6 +78,9 @@ class InstrumentProfile:
     sector: str | None = None
     country: str | None = None
     exchange: str | None = None
+    # Trailing-twelve-month price/earnings ratio (positive only) and the YYYY-MM-DD it was fetched.
+    pe_ratio: float | None = None
+    fundamentals_as_of: str | None = None
 
     def __post_init__(self) -> None:
         if self.asset_class not in ASSET_CLASSES:
