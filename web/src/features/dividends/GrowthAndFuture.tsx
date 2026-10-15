@@ -102,25 +102,38 @@ function FutureHeader({ data }: Readonly<{ data: DividendsOverviewResponse }>) {
   );
 }
 
-const futureName = (name: unknown) => (name === 'declared' ? 'Declared' : 'Estimated');
+const STATUS_NAMES: Readonly<Record<string, string>> = { paid: 'Received', declared: 'Declared', estimated: 'Estimated' };
 
-/** Tooltip row label: a colour swatch plus the name, so the pastel colours do not have to carry the text. */
+function swatchOf(status: string, c: ReturnType<typeof useDividendTheme>) {
+  if (status === 'paid') return { fill: c.paid, edge: c.paidEdge };
+  if (status === 'declared') return { fill: c.declared, edge: c.declaredEdge };
+  return { fill: c.estimated, edge: c.estimatedEdge };
+}
+
+/** Tooltip row label: a colour swatch plus the name, so the pastel colours do not have to carry the text. `avg` is the dashed average line of the received chart. */
 export function FutureKey({ name, c }: Readonly<{ name: unknown; c: ReturnType<typeof useDividendTheme> }>) {
-  const declared = name === 'declared';
+  const status = String(name);
+  if (status === 'avg') {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <span aria-hidden="true" className="inline-block w-4 border-t-2 border-dashed" style={{ borderColor: c.text }} />
+        avg
+      </span>
+    );
+  }
+  const swatch = swatchOf(status, c);
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span
-        aria-hidden="true"
-        className="h-2.5 w-2.5 rounded-sm"
-        style={{ background: declared ? c.declared : c.estimated, border: `1px ${declared ? 'solid' : 'dashed'} ${declared ? c.declaredEdge : c.estimatedEdge}` }}
-      />
-      {futureName(name)}
+      <span aria-hidden="true" className="h-2.5 w-2.5 rounded-sm" style={{ background: swatch.fill, border: `1px ${status === 'estimated' ? 'dashed' : 'solid'} ${swatch.edge}` }} />
+      {STATUS_NAMES[status] ?? 'Estimated'}
     </span>
   );
 }
 
 interface LegendEntry {
   value?: unknown;
+  /** `none` marks helper series (e.g. the invisible total line behind value labels) that have no legend entry. */
+  type?: string;
 }
 
 /** Tooltip row for one status: the amount and its swatch + name. */
@@ -131,8 +144,8 @@ export function futureTooltipRow(ccy: string, c: ReturnType<typeof useDividendTh
 /** Own legend: recharts paints its default legend text in the (pastel) bar colour, which is unreadable on white. */
 export function FutureLegend({ payload, c }: Readonly<{ payload?: readonly LegendEntry[]; c: ReturnType<typeof useDividendTheme> }>) {
   return (
-    <ul className="m-0 flex list-none justify-center gap-4 p-0 text-xs" style={{ color: c.text }}>
-      {(payload ?? []).map((entry) => (
+    <ul className="m-0 flex list-none flex-wrap justify-center gap-x-4 gap-y-1 p-0 text-xs" style={{ color: c.text }}>
+      {(payload ?? []).filter((entry) => entry.type !== 'none').map((entry) => (
         <li key={String(entry.value)}>
           <FutureKey name={entry.value} c={c} />
         </li>

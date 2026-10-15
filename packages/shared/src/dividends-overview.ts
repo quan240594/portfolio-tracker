@@ -248,6 +248,15 @@ export interface FutureMonth {
   estimated: number;
 }
 
+/** Declared and estimated forward income of one holding in one future month (zero amounts are left out). */
+export interface FutureHoldingAmount {
+  /** YYYY-MM, one of the `futureMonths`. */
+  month: string;
+  symbol: string;
+  declared: number;
+  estimated: number;
+}
+
 export interface DividendsOverviewResponse {
   baseCurrency: string;
   asOf: string;
@@ -256,6 +265,12 @@ export interface DividendsOverviewResponse {
   holdings: DividendOverviewHolding[];
   /** Forward income by month: the declared part sums with the estimated part to `summary.forward12m`. */
   futureMonths: FutureMonth[];
+  /**
+   * Optional (older responses lack it; clients hide the per-holding breakdown then): the same forward income per holding
+   * and month, ordered by month then symbol. Amounts are rounded per entry, so a month's entries can differ from its
+   * `futureMonths` total by a few cents.
+   */
+  futureByHolding?: FutureHoldingAmount[];
 }
 
 type EventsBySymbol = ReadonlyMap<string, readonly DividendEvent[]>;
@@ -367,6 +382,23 @@ function futureMonths(schedules: readonly HoldingSchedule[], today: string): Fut
   return months.map((m) => ({ month: m.month, declared: roundTo(m.declared), estimated: roundTo(m.estimated) }));
 }
 
+/** Forward income per holding and month, same placement rules as `futureMonths`. */
+function futureByHolding(rows: readonly Row[], today: string): FutureHoldingAmount[] {
+  const keys = monthKeys(today);
+  const entries: FutureHoldingAmount[] = [];
+  for (const { holding, schedule } of rows) {
+    const months = keys.map(() => ({ declared: 0, estimated: 0 }));
+    for (const p of schedule.declared) months[monthIndex(p.date, keys[0]!)]!.declared += p.amount;
+    for (const p of schedule.estimated) months[monthIndex(p.date, keys[0]!)]!.estimated += p.amount;
+    months.forEach((m, i) => {
+      const declared = roundTo(m.declared);
+      const estimated = roundTo(m.estimated);
+      if (declared > 0 || estimated > 0) entries.push({ month: keys[i]!, symbol: holding.symbol, declared, estimated });
+    });
+  }
+  return [...entries].sort((a, b) => a.month.localeCompare(b.month) || a.symbol.localeCompare(b.symbol));
+}
+
 // --- Rows --------------------------------------------------------------------------------------------
 
 function netReceived(transactions: readonly Transaction[], timeline: FxTimeline, since?: string): number {
@@ -463,5 +495,6 @@ export function computeDividendsOverview(data: AnalyticsData): DividendsOverview
     summary: summaryOf(passive, last12m),
     holdings: rows.map((r) => r.holding).sort((a, b) => b.forward12m - a.forward12m || a.symbol.localeCompare(b.symbol)),
     futureMonths: futureMonths(rows.map((r) => r.schedule), data.today),
+    futureByHolding: futureByHolding(rows, data.today),
   };
 }

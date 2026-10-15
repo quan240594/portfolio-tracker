@@ -48,7 +48,7 @@ test.describe('Dividends page (mock mode)', () => {
     await expect(received.getByText('received this year to date')).toBeVisible();
     await received.getByRole('radio', { name: 'Yearly' }).click();
     await received.getByText('Show data table').click();
-    await expect(received.getByRole('table', { name: 'Dividends received per period' }).getByRole('cell').first()).toHaveText(/^\d{4}$/);
+    await expect(received.getByRole('table', { name: 'Dividends received and upcoming per period' }).getByRole('cell').first()).toHaveText(/^\d{4}( · Current)?$/);
     expect(allTime).toMatch(/€/);
 
     const growth = page.getByRole('region', { name: 'Payment consistency' });
@@ -174,4 +174,103 @@ test.describe('Dividends page (mock mode)', () => {
       });
     }
   });
+});
+
+test.describe('Dividends received with future payments (mock mode)', () => {
+  // The demo is relative to "today"; a fixed clock makes its figures reproducible.
+  test.beforeEach(async ({ page }) => {
+    await page.clock.setFixedTime(new Date('2026-10-15T10:00:00Z'));
+  });
+
+  const card = (page: Page) => page.getByRole('region', { name: 'Dividends received', exact: true });
+  const chart = (page: Page) => card(page).getByTestId('received-time-chart');
+  const horizontalOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  const euros = (text: string | null) => Number((text ?? '').replaceAll(/[^\d,]/g, '').replace(',', '.'));
+
+  test('includes the upcoming 12 months by default, next to a headline that stays received only', async ({ page }) => {
+    await page.goto('/dividends');
+    const toggle = card(page).getByRole('checkbox', { name: 'Include future payments' });
+    await expect(toggle).toBeChecked();
+    await expect(chart(page)).toHaveAttribute('aria-label', /received, .* upcoming \(.* declared, .* estimated\)/);
+    const upcoming = card(page).getByTestId('received-upcoming-total');
+    await expect(upcoming).toBeVisible();
+    // same number as the Future payments card
+    expect(euros(await upcoming.textContent())).toBe(euros(await page.getByTestId('future-total').textContent()));
+    await expect(card(page).getByText('received all time')).toBeVisible();
+
+    // the chart marks where the future starts in words, labels the bars and draws the average line
+    await expect(chart(page).getByText('Upcoming', { exact: true })).toBeVisible();
+    await expect(chart(page).getByText('avg', { exact: true })).toHaveCount(1);
+    expect(await chart(page).locator('.recharts-label-list text').count()).toBeGreaterThan(5);
+    const legend = card(page).getByRole('list');
+    for (const name of ['Received', 'Declared', 'Estimated', 'avg']) await expect(legend.getByText(name, { exact: true })).toBeVisible();
+    // future bars have their own colours
+    await expect(chart(page).locator('path.recharts-rectangle[stroke="#3b6fd4"]').first()).toBeVisible();
+
+    await toggle.uncheck();
+    await expect(upcoming).toHaveCount(0);
+    await expect(chart(page)).not.toHaveAttribute('aria-label', /upcoming/);
+    await expect(chart(page).getByText('Upcoming', { exact: true })).toHaveCount(0);
+    await expect(chart(page).locator('path.recharts-rectangle[stroke="#3b6fd4"]')).toHaveCount(0);
+    await toggle.check();
+    await expect(upcoming).toBeVisible();
+  });
+
+  for (const [granularity, label] of [
+    ['Monthly', /^[a-z]{3}\.? \d{2}( · (Current|Upcoming))?$/],
+    ['Quarterly', /^Q[1-4] \d{2}( · (Current|Upcoming))?$/],
+    ['Yearly', /^\d{4}( · (Current|Upcoming))?$/],
+  ] as const) {
+    test(`${granularity}: future periods follow the received ones, in the chart and in the data table`, async ({ page }) => {
+      await page.goto('/dividends');
+      await card(page).getByRole('radio', { name: granularity }).click();
+      await card(page).getByText('Show data table').click();
+      const table = card(page).getByRole('table', { name: 'Dividends received and upcoming per period' });
+      await expect(table.getByRole('columnheader')).toHaveText(['Period', 'Received', 'Declared', 'Estimated', 'Total']);
+      const periods = await table.locator('td:first-child').allTextContents();
+      for (const period of periods) expect(period).toMatch(label);
+      expect(periods.filter((p) => p.endsWith('· Current'))).toHaveLength(1);
+      expect(periods.filter((p) => p.endsWith('· Upcoming')).length).toBeGreaterThanOrEqual(1);
+      // each row adds up: received + declared + estimated = total
+      for (const row of await table.locator('tbody tr').all()) {
+        const [received, declared, estimated, total] = (await row.locator('td').allTextContents()).slice(1).map((c) => euros(c));
+        expect(received! + declared! + estimated!).toBeCloseTo(total!, 1);
+      }
+      await expect(chart(page).getByText('Upcoming', { exact: true })).toBeVisible();
+    });
+  }
+
+  test('the tooltip names the status amounts, the total and the holdings of a period', async ({ page }) => {
+    await page.goto('/dividends');
+    await card(page).getByRole('radio', { name: 'Yearly' }).click();
+    await chart(page).locator('path.recharts-rectangle').last().hover();
+    const tip = page.getByTestId('received-future-tooltip');
+    await expect(tip).toBeVisible();
+    await expect(tip).toContainText('· Upcoming');
+    for (const name of ['Received', 'Declared', 'Estimated', 'Total', 'By holding']) await expect(tip).toContainText(name);
+    expect(await tip.getByTestId('received-future-tooltip-holdings').getByRole('listitem').count()).toBeGreaterThan(0);
+  });
+
+  for (const [width, height] of [
+    [1440, 900],
+    [390, 844],
+    [320, 700],
+  ] as const) {
+    test(`the page never scrolls sideways at ${width}px, whatever the granularity`, async ({ page }) => {
+      await page.setViewportSize({ width, height });
+      await page.goto('/dividends');
+      await expect(chart(page)).toBeVisible();
+      for (const granularity of ['Monthly', 'Quarterly', 'Yearly']) {
+        await card(page).getByRole('radio', { name: granularity }).click();
+        await expect(chart(page)).toBeVisible();
+        expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+      }
+      await card(page).getByText('Show data table').click();
+      await expect(card(page).getByRole('table', { name: 'Dividends received and upcoming per period' })).toBeVisible();
+      expect(await horizontalOverflow(page)).toBeLessThanOrEqual(0);
+      // many bars scroll inside the chart's own container, not the page
+      await card(page).getByRole('radio', { name: 'Monthly' }).click();
+      expect(await chart(page).evaluate((el) => (el.parentElement?.scrollWidth ?? 0) > (el.parentElement?.clientWidth ?? 0))).toBe(true);
+    });
+  }
 });

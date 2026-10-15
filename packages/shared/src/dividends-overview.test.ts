@@ -262,6 +262,42 @@ describe('computeDividendsOverview', () => {
     expect(total).toBeCloseTo(overview.summary.forward12m, 2);
   });
 
+  it('breaks the future months down per holding, so the periods reconcile with the forward income', () => {
+    expect(overview.futureByHolding).toEqual([
+      { month: '2026-07', symbol: 'AAA', declared: 10, estimated: 0 },
+      { month: '2026-10', symbol: 'AAA', declared: 0, estimated: 10 },
+      { month: '2026-12', symbol: 'AAA', declared: 0, estimated: 10 },
+      { month: '2027-03', symbol: 'BBB', declared: 0, estimated: 6.8 },
+      { month: '2027-04', symbol: 'AAA', declared: 0, estimated: 10 },
+    ]);
+    const entries = overview.futureByHolding!;
+    const declared = entries.reduce((s, e) => s + e.declared, 0);
+    const estimated = entries.reduce((s, e) => s + e.estimated, 0);
+    expect(declared).toBeCloseTo(overview.summary.declared, 2);
+    expect(estimated).toBeCloseTo(overview.summary.estimated, 2);
+    expect(declared + estimated).toBeCloseTo(overview.summary.forward12m, 2);
+    for (const month of overview.futureMonths) {
+      const own = entries.filter((e) => e.month === month.month);
+      expect(own.reduce((s, e) => s + e.declared, 0)).toBeCloseTo(month.declared, 2);
+      expect(own.reduce((s, e) => s + e.estimated, 0)).toBeCloseTo(month.estimated, 2);
+    }
+  });
+
+  it('orders several holdings in one month by symbol', () => {
+    const same = computeDividendsOverview(
+      data({
+        dividendEvents: [
+          { symbol: 'CCC', exDate: '2026-06-20', payDate: '2026-07-02', amount: 0.2, currency: 'EUR' },
+          { symbol: 'AAA', exDate: '2026-06-20', payDate: '2026-07-01', amount: 0.1, currency: 'EUR' },
+        ],
+      }),
+    );
+    const july = same.futureByHolding!.filter((e) => e.month === '2026-07');
+    expect(july.map((e) => e.symbol)).toEqual(['AAA', 'CCC']);
+    expect(july.map((e) => e.declared)).toEqual([10, 20]);
+    expect(same.futureByHolding!.map((e) => e.month)).toEqual([...same.futureByHolding!.map((e) => e.month)].sort((a, b) => a.localeCompare(b)));
+  });
+
   it('puts payments dated in the 13th month in the current month and splits declared income by event value', () => {
     const late = computeDividendsOverview(
       data({
@@ -302,6 +338,7 @@ describe('computeDividendsOverview', () => {
     expect(empty.holdings).toEqual([]);
     expect(empty.summary).toEqual({ forward12m: 0, declared: 0, estimated: 0, monthlyAverage: 0, yieldOnValuePct: 0, yieldOnCostPct: 0, last12m: 0, growthVsLast12mPct: null });
     expect(empty.futureMonths).toHaveLength(12);
+    expect(empty.futureByHolding).toEqual([]);
     expect(empty.futureMonths.every((m) => m.declared === 0 && m.estimated === 0)).toBe(true);
   });
 

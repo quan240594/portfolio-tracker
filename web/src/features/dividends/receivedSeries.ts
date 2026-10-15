@@ -18,9 +18,9 @@ export type Granularity = (typeof GRANULARITIES)[number]['value'];
 const MONTHS = 12;
 const monthIndex = (date: string): number => Number(date.slice(0, 4)) * MONTHS + Number(date.slice(5, 7)) - 1;
 const MONTHS_PER_BUCKET: Record<Granularity, number> = { month: 1, quarter: 3, year: 12 };
-const bucketOf = (date: string, granularity: Granularity): number => Math.floor(monthIndex(date) / MONTHS_PER_BUCKET[granularity]);
+export const bucketOf = (date: string, granularity: Granularity): number => Math.floor(monthIndex(date) / MONTHS_PER_BUCKET[granularity]);
 
-function bucketLabel(bucket: number, granularity: Granularity): string {
+export function bucketLabel(bucket: number, granularity: Granularity): string {
   if (granularity === 'year') return String(bucket);
   if (granularity === 'quarter') return `Q${(bucket % 4) + 1} ${String(Math.floor(bucket / 4)).slice(2)}`;
   return formatMonth(`${Math.floor(bucket / MONTHS)}-${String((bucket % MONTHS) + 1).padStart(2, '0')}`);
@@ -47,8 +47,13 @@ export interface ReceivedBucket {
   amount: number;
 }
 
+/** A received bucket with its period number (months / 1, 3 or 12 since year 0), to line it up with future months. */
+export interface NumberedBucket extends ReceivedBucket {
+  bucket: number;
+}
+
 /** Net dividends received per month/quarter/year over the period, without gaps between the first bucket and today's. */
-export function receivedSeries(received: readonly DividendPayment[], period: ReceivedPeriod, granularity: Granularity, today: string): ReceivedBucket[] {
+export function receivedBuckets(received: readonly DividendPayment[], period: ReceivedPeriod, granularity: Granularity, today: string): NumberedBucket[] {
   const payments = paymentsInPeriod(received, period, today);
   let first = today;
   for (const p of payments) if (p.date < first) first = p.date;
@@ -60,7 +65,16 @@ export function receivedSeries(received: readonly DividendPayment[], period: Rec
   }
   const from = bucketOf(start, granularity);
   const to = bucketOf(today, granularity);
-  return Array.from({ length: to - from + 1 }, (_, i) => ({ label: bucketLabel(from + i, granularity), amount: Math.round((totals.get(from + i) ?? 0) * 100) / 100 }));
+  return Array.from({ length: to - from + 1 }, (_, i) => ({
+    bucket: from + i,
+    label: bucketLabel(from + i, granularity),
+    amount: Math.round((totals.get(from + i) ?? 0) * 100) / 100,
+  }));
+}
+
+/** Net dividends received per month/quarter/year over the period, without gaps between the first bucket and today's. */
+export function receivedSeries(received: readonly DividendPayment[], period: ReceivedPeriod, granularity: Granularity, today: string): ReceivedBucket[] {
+  return receivedBuckets(received, period, granularity, today).map(({ label, amount }) => ({ label, amount }));
 }
 
 export interface HoldingTotal {

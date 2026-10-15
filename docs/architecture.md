@@ -1017,3 +1017,31 @@ per-share amount, and a short or irregular history gives a weak trend. Not inves
 fixtures (about 3.3 years of history). With the clock pinned to 2026-10-15 the demo shows € 479,16 (declared € 270,48, estimated € 208,68) and a trend of +€ 8,15/month per year.
 Unit tests: `dividend-forecast.test.ts` (no history, < 6 months, gaps, falling trend clamped at 0, leap day, year boundary, no future events), `growthForecast.test.ts` (view models,
 reconciliation with `summary.forward12m`), `growthCards.test.tsx` (components and the card); e2e: `web/e2e/dividend-growth-trend.spec.ts`.
+## Dividends received with future payments
+
+The "Dividends received" card (Dividends page) can append the upcoming 12 months to the received history, so past and
+expected income sit on one timeline. Code: `web/src/features/dividends/` (`receivedFuture.ts` is the pure model,
+`ReceivedTimeline.tsx` the chart). Amounts are net, in EUR, like the Future payments card, which stays unchanged.
+
+**Contract.** `GET /dividends/overview` gained one OPTIONAL field, `futureByHolding?: { month, symbol, declared, estimated }[]`
+(`FutureHoldingAmount` in `packages/shared/src/dividends-overview.ts`, calculated by `computeDividendsOverview`): the
+income of `futureMonths` split per holding and month, placed by exactly the same rules, zero amounts left out, ordered by
+month then symbol. Nothing else changed; older responses lack it and the web then hides the per-holding breakdown of every
+period that has future income (the bars and totals do not depend on it). Amounts are rounded to cents per entry, so a month's
+entries and the sum of `futureMonths` can differ from `summary.forward12m` by a few cents; the headline "Upcoming 12 months" and
+the chart label use the summary's own numbers (`forward12m`, `declared`, `estimated`), the same as the Future payments card.
+
+**Aggregation.** The axis is months, quarters or years (granularity toggle), from the first period of the range toggle (All
+time / 12 months / YTD) to the last period that has future income, without gaps. A future month falls in the quarter / year that
+contains it; quarter and year bars are the sums of their months. The period that contains today is stacked: received so far
+(payments dated up to today) + declared + estimated still expected in it, so its bar is the full expected total; periods after
+it are future only (named "Upcoming" in the table, tooltip and above the shaded band; the current one is "Current"). The
+per-holding list of a period adds received and expected amounts of that holding. The received headline ("€ X received all
+time") counts only received money; "Upcoming 12 months" is shown next to it while the checkbox "Include future payments"
+(default on) is ticked.
+
+**"avg" line.** The mean amount *received* per completed period (the same unit as the bars: month, quarter or year) over the
+periods of the chart that lie before the current one; the current and upcoming periods are left out because they are not
+complete. It is drawn dashed, labelled `avg` and listed in the legend; there is no line when no period is complete or nothing
+was received in them. The value is spelled out under the chart and in the card's info tip. It is a history of what was
+received, not a forecast.

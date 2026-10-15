@@ -2,13 +2,14 @@ import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import type { AnalyticsDividendGrowthResponse, DividendGrowthStats, GetDividendsResponse } from '@portfolio/shared';
-import { computeDividendGrowth } from '@portfolio/shared';
+import { computeDividendGrowth, computeDividendsOverview, type DividendsOverviewResponse } from '@portfolio/shared';
 import { renderWithProviders, sp } from '../../test/utils';
 import { server } from '../../mocks/server';
 import { getAnalyticsData, getDividends } from '../../mocks/db';
 import { formatMoney } from '../../lib/format';
 import { DividendGrowthCard } from './DividendGrowthCard';
 import { growthTiles } from './growthStatsView';
+import { FuturePaymentsCard } from './GrowthAndFuture';
 import { ReceivedCards } from './ReceivedCards';
 
 const DIVIDENDS = '/api/dividends';
@@ -52,6 +53,9 @@ describe('ReceivedCards', () => {
     await user.click(screen.getByRole('radio', { name: '12 months' }));
     expect(screen.getByTestId('received-total').parentElement).toHaveTextContent('received the last 12 months');
     await user.click(within(screen.getByRole('region', { name: 'Dividends received' })).getByText('Show data table'));
+    // 12 months of history (the current one included) + the 11 months after it, and the header row
+    expect(within(screen.getByRole('table', { name: 'Dividends received and upcoming per period' })).getAllByRole('row')).toHaveLength(24);
+    await user.click(screen.getByRole('checkbox', { name: 'Include future payments' }));
     expect(within(screen.getByRole('table', { name: 'Dividends received per period' })).getAllByRole('row')).toHaveLength(13);
   });
 
@@ -62,10 +66,12 @@ describe('ReceivedCards', () => {
     const card = screen.getByRole('region', { name: 'Dividends received' });
     await user.click(within(card).getByText('Show data table'));
     await user.click(screen.getByRole('radio', { name: 'Quarterly' }));
-    const cells = within(screen.getByRole('table', { name: 'Dividends received per period' })).getAllByRole('cell');
+    const cells = within(screen.getByRole('table', { name: 'Dividends received and upcoming per period' })).getAllByRole('cell');
     expect(cells[0]).toHaveTextContent(/^Q[1-4] \d{2}$/);
     await user.click(screen.getByRole('radio', { name: 'Yearly' }));
-    expect(within(screen.getByRole('table', { name: 'Dividends received per period' })).getAllByRole('cell')[0]).toHaveTextContent(/^\d{4}$/);
+    const years = within(screen.getByRole('table', { name: 'Dividends received and upcoming per period' })).getAllByRole('cell');
+    expect(years[0]).toHaveTextContent(/^\d{4}$/);
+    expect(years.map((c) => c.textContent)).toContain(`${new Date().getFullYear() + 1} · Upcoming`);
   });
 
   it('follows the portfolio scope', async () => {
@@ -99,6 +105,118 @@ describe('ReceivedCards', () => {
     await user.click(within(alerts[0]!).getByRole('button', { name: 'Try again' }));
     expect(await screen.findByTestId('received-time-chart')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});
+
+const OVERVIEW = '/api/dividends/overview';
+const overviewData = (): DividendsOverviewResponse => computeDividendsOverview(getAnalyticsData());
+const overviewWith = (data: DividendsOverviewResponse) => server.use(http.get(OVERVIEW, () => HttpResponse.json(data)));
+const numberIn = (text: string | null) => Number((text ?? '').replaceAll(/[^\d,]/g, '').replace(',', '.'));
+
+describe('ReceivedCards with future payments', () => {
+  it('is on by default and shows the upcoming 12 months next to the received headline, which stays received only', async () => {
+    const data = getDividends();
+    const { summary } = overviewData();
+    renderWithProviders(<ReceivedCards />);
+    expect(screen.getByRole('checkbox', { name: 'Include future payments' })).toBeChecked();
+    expect(await screen.findByTestId('received-upcoming-total')).toHaveTextContent(sp(formatMoney(summary.forward12m, 'EUR')));
+    expect(screen.getByTestId('received-total')).toHaveTextContent(sp(formatMoney(sum(data.received), 'EUR')));
+    expect(screen.getByTestId('received-total').parentElement).toHaveTextContent('received all time');
+    const label = sp(screen.getByTestId('received-time-chart').getAttribute('aria-label')!);
+    expect(label).toContain(sp(`${formatMoney(sum(data.received), 'EUR')} received, ${formatMoney(summary.forward12m, 'EUR')} upcoming (${formatMoney(summary.declared, 'EUR')} declared, ${formatMoney(summary.estimated, 'EUR')} estimated)`));
+    expect(screen.getByTestId('received-average-note')).toHaveTextContent('average received per completed month');
+  });
+
+  it('reconciles with the Future payments card, in every granularity', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <>
+        <ReceivedCards />
+        <FuturePaymentsCard />
+      </>,
+    );
+    const futureTotal = numberIn((await screen.findByTestId('future-total')).textContent);
+    expect(numberIn((await screen.findByTestId('received-upcoming-total')).textContent)).toBe(futureTotal);
+    const card = screen.getByRole('region', { name: 'Dividends received' });
+    await user.click(within(card).getByText('Show data table'));
+    for (const granularity of ['Monthly', 'Quarterly', 'Yearly']) {
+      await user.click(screen.getByRole('radio', { name: granularity }));
+      const rows = within(screen.getByRole('table', { name: 'Dividends received and upcoming per period' })).getAllByRole('row').slice(1);
+      const expected = rows.map((r) => within(r).getAllByRole('cell').map((c) => numberIn(c.textContent)));
+      // Period | Received | Declared | Estimated | Total: the future columns add up to the Future payments total
+      // (each period is rounded to cents, so allow a cent per month)
+      const future = expected.reduce((s, [, , declared, estimated]) => s + declared! + estimated!, 0);
+      expect(Math.abs(future - futureTotal)).toBeLessThanOrEqual(0.12);
+      for (const [, received, declared, estimated, total] of expected) expect(received! + declared! + estimated!).toBeCloseTo(total!, 1);
+    }
+  });
+
+  it('draws the same months as the Future payments card', async () => {
+    const user = userEvent.setup();
+    const { futureMonths } = overviewData();
+    renderWithProviders(<ReceivedCards />);
+    await screen.findByTestId('received-upcoming-total');
+    await user.click(within(screen.getByRole('region', { name: 'Dividends received' })).getByText('Show data table'));
+    const rows = within(screen.getByRole('table', { name: 'Dividends received and upcoming per period' })).getAllByRole('row').slice(-12);
+    rows.forEach((row, i) => {
+      const cells = within(row).getAllByRole('cell').map((c) => c.textContent);
+      expect(cells[0]).toMatch(i === 0 ? /· Current$/ : /· Upcoming$/);
+      expect(numberIn(cells[2]!)).toBe(futureMonths[i]!.declared);
+      expect(numberIn(cells[3]!)).toBe(futureMonths[i]!.estimated);
+    });
+  });
+
+  it('spells the future rows of the data table out in words', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ReceivedCards />);
+    await screen.findByTestId('received-upcoming-total');
+    await user.click(within(screen.getByRole('region', { name: 'Dividends received' })).getByText('Show data table'));
+    const table = screen.getByRole('table', { name: 'Dividends received and upcoming per period' });
+    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Period', 'Received', 'Declared', 'Estimated', 'Total']);
+    const periods = within(table).getAllByRole('row').slice(1).map((r) => within(r).getAllByRole('cell')[0]!.textContent);
+    expect(periods.filter((p) => p!.endsWith('· Current'))).toHaveLength(1);
+    expect(periods.filter((p) => p!.endsWith('· Upcoming')).length).toBeGreaterThanOrEqual(11);
+  });
+
+  it('can be switched off: received history only, no upcoming figure, legend or future columns', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ReceivedCards />);
+    await screen.findByTestId('received-upcoming-total');
+    await user.click(screen.getByRole('checkbox', { name: 'Include future payments' }));
+    expect(screen.queryByTestId('received-upcoming-total')).not.toBeInTheDocument();
+    expect(screen.getByTestId('received-time-chart').getAttribute('aria-label')).not.toContain('upcoming');
+    await user.click(within(screen.getByRole('region', { name: 'Dividends received' })).getByText('Show data table'));
+    expect(within(screen.getByRole('table', { name: 'Dividends received per period' })).getAllByRole('columnheader')).toHaveLength(2);
+    await user.click(screen.getByRole('checkbox', { name: 'Include future payments' }));
+    expect(await screen.findByTestId('received-upcoming-total')).toBeInTheDocument();
+  });
+
+  it('keeps working when the overview has no per-holding future amounts', async () => {
+    const { futureByHolding: _omitted, ...older } = overviewData();
+    overviewWith(older);
+    renderWithProviders(<ReceivedCards />);
+    expect(await screen.findByTestId('received-upcoming-total')).toHaveTextContent(sp(formatMoney(older.summary.forward12m, 'EUR')));
+    expect(screen.getByTestId('received-time-chart')).toBeInTheDocument();
+  });
+
+  it('shows an error for the upcoming payments with a retry, and the received chart once the future is switched off', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(OVERVIEW, () => HttpResponse.json({ error: { code: 'INTERNAL', message: 'Boom' } }, { status: 500 }), { once: true }));
+    renderWithProviders(<ReceivedCards />);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Could not load upcoming payments');
+    await user.click(screen.getByRole('checkbox', { name: 'Include future payments' }));
+    expect(await screen.findByTestId('received-total')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: 'Include future payments' }));
+    await user.click(within(await screen.findByRole('alert')).getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByTestId('received-upcoming-total')).toBeInTheDocument();
+  });
+
+  it('follows the portfolio scope', async () => {
+    renderWithProviders(<ReceivedCards />, { route: '/dividends?portfolio=trading-212' });
+    const expected = computeDividendsOverview(getAnalyticsData('trading-212')).summary.forward12m;
+    expect(await screen.findByTestId('received-upcoming-total')).toHaveTextContent(sp(formatMoney(expected, 'EUR')));
   });
 });
 
