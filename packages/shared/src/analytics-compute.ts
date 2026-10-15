@@ -69,7 +69,7 @@ export interface AnalyticsData {
   now?: Date;
 }
 
-interface Context {
+export interface Context {
   timeline: FxTimeline;
   firstDate: string;
   history: ValuePoint[];
@@ -79,7 +79,7 @@ interface Context {
 }
 
 /** Daily value history, flows and flow-adjusted returns from the first transaction to today; null without transactions. */
-function buildContext(data: AnalyticsData): Context | null {
+export function buildContext(data: AnalyticsData): Context | null {
   const transactions = sortTransactions(data.transactions).filter((t) => t.date <= data.today);
   // "Since" is the first investment transaction, not e.g. an earlier cash deposit.
   const first = transactions.find(isInvestmentFlow);
@@ -204,14 +204,14 @@ export function computeReturns(data: AnalyticsData, period: ReturnPeriod): Analy
 
 // --- Benchmark helpers -----------------------------------------------------------------------------
 
-interface PricePoint {
+export interface PricePoint {
   date: string;
   /** Price per unit in the base currency. */
   price: number;
 }
 
 /** Daily benchmark prices in the base currency from `from` (or the first close) to `to`, carrying closes over gaps. */
-function benchmarkPrices(eod: readonly EodPrice[] | undefined, timeline: FxTimeline, from: string, to: string): PricePoint[] {
+export function benchmarkPrices(eod: readonly EodPrice[] | undefined, timeline: FxTimeline, from: string, to: string): PricePoint[] {
   const closes = [...(eod ?? [])].sort((a, b) => a.date.localeCompare(b.date));
   const firstClose = closes[0];
   if (!firstClose) return [];
@@ -225,13 +225,13 @@ function benchmarkPrices(eod: readonly EodPrice[] | undefined, timeline: FxTimel
   return out;
 }
 
-const priceReturns = (prices: readonly PricePoint[]): DailyReturn[] =>
+export const priceReturns = (prices: readonly PricePoint[]): DailyReturn[] =>
   prices.slice(1).map((p, i) => ({ date: p.date, r: p.price / prices[i]!.price - 1 }));
 
-const noBenchmarkMessage = (symbol: string): string =>
+export const noBenchmarkMessage = (symbol: string): string =>
   `No end-of-day prices are tracked for ${symbol} in this period, so it cannot be used as a benchmark. Pick another benchmark or add it to a portfolio to start tracking it.`;
 
-const NO_TRANSACTIONS_MESSAGE = 'Add transactions to compare your portfolio with a benchmark.';
+export const NO_TRANSACTIONS_MESSAGE = 'Add transactions to compare your portfolio with a benchmark.';
 
 // --- Risk ------------------------------------------------------------------------------------------
 
@@ -288,7 +288,7 @@ export function computeRisk(data: AnalyticsData, benchmark: string = DEFAULT_BEN
  * Portfolio value (+ dividends received since the start) next to the benchmark replayed with the same net
  * buys and sells: the starting value is put into the benchmark on day one, later flows buy/sell it at that day's price.
  */
-function replay(history: readonly ValuePoint[], flows: ReadonlyMap<string, DayFlows>, prices: ReadonlyMap<string, number> | null): BenchmarkPoint[] {
+export function replay(history: readonly ValuePoint[], flows: ReadonlyMap<string, DayFlows>, prices: ReadonlyMap<string, number> | null): BenchmarkPoint[] {
   let units = 0;
   let invested = 0;
   let income = 0;
@@ -312,7 +312,7 @@ function replay(history: readonly ValuePoint[], flows: ReadonlyMap<string, DayFl
   });
 }
 
-function compare(ctx: Context, points: readonly BenchmarkPoint[], prices: readonly PricePoint[]): BenchmarkComparison | null {
+export function compare(ctx: Context, points: readonly BenchmarkPoint[], prices: readonly PricePoint[]): BenchmarkComparison | null {
   const first = points[0];
   const last = points.at(-1);
   const lastPrice = prices.at(-1);

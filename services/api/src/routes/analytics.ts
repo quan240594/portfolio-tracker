@@ -43,22 +43,22 @@ interface Needs {
   events?: boolean;
   /** End-of-day prices of every traded symbol (value history). */
   eod?: boolean;
-  /** Also load end-of-day prices of this benchmark symbol. */
-  benchmark?: string;
+  /** Also load end-of-day prices of this benchmark symbol (or symbols). */
+  benchmark?: string | readonly string[];
 }
 
-async function loadEod(ctx: RouteContext, transactions: readonly Transaction[], extra: string | undefined): Promise<Record<string, EodPrice[]>> {
+async function loadEod(ctx: RouteContext, transactions: readonly Transaction[], extra: Needs['benchmark']): Promise<Record<string, EodPrice[]>> {
   const today = isoDay(ctx.deps.now());
   let first = today;
   for (const t of transactions) if (t.date < first) first = t.date;
-  const symbols = [...new Set([...transactions.map((t) => t.symbol), ...(extra ? [extra] : [])])];
+  const symbols = [...new Set([...transactions.map((t) => t.symbol), ...(extra === undefined ? [] : [extra].flat())])];
   const from = addDays(first, -EOD_LOOKBACK_DAYS);
   const series = await Promise.all(symbols.map((s) => ctx.deps.repo.getEod(s, from, today)));
   return Object.fromEntries(symbols.map((s, i) => [s, series[i]!]));
 }
 
 /** Loads exactly the stored data the requested calculation needs, scoped like every other read endpoint. */
-async function loadAnalyticsData(ctx: RouteContext, needs: Needs): Promise<AnalyticsData> {
+export async function loadAnalyticsData(ctx: RouteContext, needs: Needs): Promise<AnalyticsData> {
   const { repo, now } = ctx.deps;
   const transactions = await scopedTransactions(ctx);
   const held = heldSymbols(transactions);

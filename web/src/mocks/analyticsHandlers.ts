@@ -31,7 +31,7 @@ async function latency() {
 }
 
 /** Validates the query string with the API's schema and runs `compute` on the scoped demo data. */
-async function respond<S extends z.ZodTypeAny>(request: Request, schema: S, compute: (query: z.output<S>, data: ReturnType<typeof db.getAnalyticsData>) => unknown) {
+export async function respond<S extends z.ZodTypeAny>(request: Request, schema: S, compute: (query: z.output<S>, data: ReturnType<typeof db.getAnalyticsData>) => unknown) {
   await latency();
   const params = Object.fromEntries(new URL(request.url).searchParams);
   const parsed = schema.safeParse(params);

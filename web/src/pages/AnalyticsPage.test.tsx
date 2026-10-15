@@ -22,23 +22,26 @@ async function openTab(name: string) {
 }
 
 describe('AnalyticsPage', () => {
-  it('is reachable from the nav and shows accessible tabs with the returns tab first', async () => {
+  it('is reachable from the nav and shows accessible tabs with the growth tab first', async () => {
     renderApp('/analytics');
     expect(await screen.findByRole('heading', { level: 1, name: 'Analytics' })).toBeInTheDocument();
     const tabs = screen.getByRole('tablist', { name: 'Analytics' });
-    expect(within(tabs).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Returns', 'Risk', 'Benchmark', 'Dividend growth', 'Income goal']);
-    expect(within(tabs).getByRole('tab', { name: 'Returns' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(tabs).getAllByRole('tab').map((t) => t.textContent)).toEqual(['Growth', 'Returns', 'Risk', 'Benchmark', 'Dividend growth', 'Income goal']);
+    expect(within(tabs).getByRole('tab', { name: 'Growth' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('link', { name: 'Analytics' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('tabpanel')).toHaveAccessibleName('Returns');
+    expect(screen.getByRole('tabpanel')).toHaveAccessibleName('Growth');
   });
 
-  it('falls back to the returns tab for an unknown ?tab= value and honours a valid one', async () => {
-    renderApp('/analytics?tab=nope');
+  it('falls back to the growth tab for an unknown ?tab= value and honours a valid one', async () => {
+    const first = renderApp('/analytics?tab=nope');
+    expect(await screen.findByRole('tab', { name: 'Growth', selected: true })).toBeInTheDocument();
+    first.unmount();
+    renderApp('/analytics?tab=returns');
     expect(await screen.findByRole('tab', { name: 'Returns', selected: true })).toBeInTheDocument();
   });
 
   it('shows the returns table per year and switches to quarters and months', async () => {
-    renderApp('/analytics');
+    renderApp('/analytics?tab=returns');
     expect(screen.getByText('Loading returns')).toBeInTheDocument();
     const yearTable = await screen.findByRole('table', { name: 'Returns per year, newest first' });
     expect(within(yearTable).getByRole('columnheader', { name: 'IRR' })).toBeInTheDocument();
@@ -56,14 +59,14 @@ describe('AnalyticsPage', () => {
 
   it('shows an empty message when there is not enough history for returns', async () => {
     server.use(http.get(api('/returns'), () => HttpResponse.json({ ...returns('year'), rows: [] })));
-    renderApp('/analytics');
+    renderApp('/analytics?tab=returns');
     expect(await screen.findByText('Not enough history yet to calculate returns.')).toBeInTheDocument();
   });
 
   it('shows an error with retry', async () => {
     let fail = true;
     server.use(http.get(api('/returns'), () => (fail ? serverError() : HttpResponse.json(returns('year')))));
-    renderApp('/analytics');
+    renderApp('/analytics?tab=returns');
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Could not load returns');
     fail = false;
@@ -241,6 +244,9 @@ describe('AnalyticsPage', () => {
 
   it('keeps the tab in the URL', async () => {
     const { router } = renderApp('/analytics');
+    await screen.findByRole('tab', { name: 'Growth', selected: true });
+    await openTab('Returns');
+    expect(router.state.location.search).toContain('tab=returns');
     await screen.findByRole('table', { name: /Returns per year/ });
     await openTab('Risk');
     expect(router.state.location.search).toContain('tab=risk');

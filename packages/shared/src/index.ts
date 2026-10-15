@@ -17,3 +17,5 @@ export * from './management-api.js';
 export * from './management.js';
 export * from './async.js';
 export * from './broker.js';
+export * from './growth-api.js';
+export * from './growth.js';

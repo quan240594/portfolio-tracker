@@ -114,6 +114,17 @@ test.describe('GitHub Pages build (demo mode under /portfolio-tracker/)', () => 
     await expect(page.getByRole('row').filter({ hasText: 'SAP.DE' })).toHaveCount(0);
   });
 
+  test('the analytics page opens on the Growth tab with its charts', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto(`${BASE}analytics`);
+    await expect(page.getByRole('tab', { name: 'Growth', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByText(/^Your portfolio is (ahead of|behind) IWDA\.AS by/)).toBeVisible();
+    for (const id of ['growth-value-chart', 'growth-performance-chart', 'growth-dynamics-chart', 'growth-holdings-chart']) {
+      await expect(page.getByTestId(id)).toBeVisible();
+    }
+    expect(errors.filter((e) => !isExpectedDeepLink404(e))).toEqual([]);
+  });
+
   test('the bare project URL without trailing slash redirects into the app', async ({ page }) => {
     await page.goto(BASE.replace(/\/$/, ''));
     await expect(page).toHaveURL(new RegExp(`${BASE}$`));
