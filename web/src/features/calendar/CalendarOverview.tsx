@@ -52,27 +52,30 @@ export function IncomeChart({ monthly, average, currency }: Readonly<{ monthly: 
         </ResponsiveContainer>
       </div>
       <figcaption className="sr-only">Dividend income per month</figcaption>
-      <table className="sr-only">
-        <caption>Dividend income per month</caption>
-        <thead>
-          <tr>
-            <th scope="col">Month</th>
-            <th scope="col">{seriesName('paid')}</th>
-            <th scope="col">{seriesName('declared')}</th>
-            <th scope="col">{seriesName('estimated')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {monthly.map((m) => (
-            <tr key={m.month}>
-              <th scope="row">{formatMonth(m.month)}</th>
-              <td>{formatMoney(m.paid, currency)}</td>
-              <td>{formatMoney(m.declared, currency)}</td>
-              <td>{formatMoney(m.estimated, currency)}</td>
+      {/* a div clips reliably; an sr-only table ignores width/overflow and can widen the page */}
+      <div className="sr-only">
+        <table>
+          <caption>Dividend income per month</caption>
+          <thead>
+            <tr>
+              <th scope="col">Month</th>
+              <th scope="col">{seriesName('paid')}</th>
+              <th scope="col">{seriesName('declared')}</th>
+              <th scope="col">{seriesName('estimated')}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {monthly.map((m) => (
+              <tr key={m.month}>
+                <th scope="row">{formatMonth(m.month)}</th>
+                <td>{formatMoney(m.paid, currency)}</td>
+                <td>{formatMoney(m.declared, currency)}</td>
+                <td>{formatMoney(m.estimated, currency)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </figure>
   );
 }
