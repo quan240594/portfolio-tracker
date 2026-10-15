@@ -14,6 +14,6 @@ export const USE_MOCKS: boolean =
  * "/portfolio-tracker/" → "/portfolio-tracker", "/" (or a relative base) → undefined.
  */
 export function routerBasename(baseUrl: string = import.meta.env.BASE_URL): string | undefined {
-  const trimmed = baseUrl.replace(/\/+$/, '');
+  const trimmed = trimTrailingSlashes(baseUrl);
   return trimmed.startsWith('/') ? trimmed : undefined;
 }

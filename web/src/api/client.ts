@@ -97,11 +97,8 @@ function toApiError(res: Response, data: unknown): ApiError {
   return new ApiError(res.status, `HTTP_${res.status}`, res.statusText || `Request failed with status ${res.status}`);
 }
 
-/** 'all' (ALL_PORTFOLIOS) or a portfolio id. */
-export type Scope = string;
-
-/** `?portfolioId=` for one portfolio; omitted for the combined view. */
-export const scopeQuery = (scope: Scope) => (scope === ALL_PORTFOLIOS ? {} : { portfolioId: scope });
+/** `?portfolioId=` for one portfolio; omitted for the combined view. `scope` is 'all' (ALL_PORTFOLIOS) or a portfolio id. */
+export const scopeQuery = (scope: string) => (scope === ALL_PORTFOLIOS ? {} : { portfolioId: scope });
 
 export const api = {
   listPortfolios: (signal?: AbortSignal) => request<ListPortfoliosResponse>('GET', '/portfolios', { signal }),
@@ -110,17 +107,17 @@ export const api = {
     request<PortfolioResponse>('PATCH', `/portfolios/${encodeURIComponent(id)}`, { body: { name } }),
   deletePortfolio: (id: string, force = false) =>
     request<void>('DELETE', `/portfolios/${encodeURIComponent(id)}`, { query: force ? { force: 'true' } : undefined }),
-  getPortfolio: (scope: Scope, signal?: AbortSignal) =>
+  getPortfolio: (scope: string, signal?: AbortSignal) =>
     request<GetPortfolioResponse>('GET', '/portfolio', { query: scopeQuery(scope), signal }),
-  getHoldings: (scope: Scope, signal?: AbortSignal) =>
+  getHoldings: (scope: string, signal?: AbortSignal) =>
     request<GetHoldingsResponse>('GET', '/holdings', { query: scopeQuery(scope), signal }),
-  getAllocation: (scope: Scope, by: AllocationDimension | 'category', signal?: AbortSignal) =>
+  getAllocation: (scope: string, by: AllocationDimension | 'category', signal?: AbortSignal) =>
     request<GetAllocationResponse | CategoryAllocationResponse>('GET', '/allocation', { query: { ...scopeQuery(scope), by }, signal }),
-  getHistory: (scope: Scope, range: HistoryRange, signal?: AbortSignal) =>
+  getHistory: (scope: string, range: HistoryRange, signal?: AbortSignal) =>
     request<GetHistoryResponse>('GET', '/history', { query: { ...scopeQuery(scope), range }, signal }),
-  getDividends: (scope: Scope, signal?: AbortSignal) =>
+  getDividends: (scope: string, signal?: AbortSignal) =>
     request<GetDividendsResponse>('GET', '/dividends', { query: scopeQuery(scope), signal }),
-  listTransactions: (scope: Scope, signal?: AbortSignal) =>
+  listTransactions: (scope: string, signal?: AbortSignal) =>
     request<ListTransactionsResponse>('GET', '/transactions', { query: scopeQuery(scope), signal }),
   createTransaction: (body: CreateTransactionRequest) =>
     request<CreateTransactionResponse>('POST', '/transactions', { body }),

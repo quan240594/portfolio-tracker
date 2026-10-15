@@ -152,17 +152,16 @@ export class Trading212Client implements Trading212Api {
     return validateItems(body, schema);
   }
 
-  private async *pages<S extends z.ZodTypeAny>(firstPath: string, schema: S): AsyncGenerator<Page<z.output<S>>, void, undefined> {
+  private pages<S extends z.ZodTypeAny>(firstPath: string, schema: S): AsyncGenerator<Page<z.output<S>>, void, undefined> {
     let fetched = 0;
     // The cursor is the raw `nextPagePath`; it is validated when the following page is requested, i.e. after the previous page was yielded.
-    const pages = paginate<Page<z.output<S>>, string>(async (cursor) => {
+    return paginate<Page<z.output<S>>, string>(async (cursor) => {
       const path = cursor === undefined ? firstPath : this.nextPath(cursor);
       if (fetched++ >= this.maxPages) throw new BrokerError('T212_BAD_RESPONSE', 'Pagination did not terminate');
       const envelope = pageSchema.safeParse(await this.request(path));
       if (!envelope.success) throw new BrokerError('T212_BAD_RESPONSE', `Unexpected response shape from ${path.split('?')[0]}`);
       return { page: validateItems(envelope.data.items, schema), next: envelope.data.nextPagePath || undefined };
     });
-    yield* pages;
   }
 
   /** `nextPagePath` must stay on the API host and under the equity API; anything else is not followed. */

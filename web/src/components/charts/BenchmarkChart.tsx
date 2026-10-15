@@ -16,16 +16,24 @@ export const benchmarkSeriesName = (benchmark: string) => (name: unknown) => {
   return name === 'benchmark' ? benchmark : 'Invested';
 };
 
+/** Text alternative for the chart: portfolio value over the period, plus the benchmark's end value when there is one. */
+function benchmarkSummary(points: readonly BenchmarkPoint[], currency: string, benchmark: string): string {
+  const first = points[0];
+  const last = points.at(-1);
+  if (!first || !last) return 'No history available.';
+  let text = `Portfolio value from ${formatDate(first.date)} to ${formatDate(last.date)}: ${formatMoney(first.portfolio, currency)} to ${formatMoney(last.portfolio, currency)}`;
+  if (last.benchmark !== null && last.benchmark !== undefined) {
+    text += `, against ${benchmark} replayed with the same cash flows: ${formatMoney(last.benchmark, currency)}`;
+  }
+  return `${text}.`;
+}
+
 export function BenchmarkChart({ points, currency, benchmark }: Readonly<Props>) {
   const { theme } = useTheme();
   const c = analyticsTheme(theme);
-  const first = points[0];
-  const last = points.at(-1);
-  const hasBenchmark = last?.benchmark !== null && last?.benchmark !== undefined;
-  const summary =
-    first && last
-      ? `Portfolio value from ${formatDate(first.date)} to ${formatDate(last.date)}: ${formatMoney(first.portfolio, currency)} to ${formatMoney(last.portfolio, currency)}${hasBenchmark ? `, against ${benchmark} replayed with the same cash flows: ${formatMoney(last.benchmark!, currency)}` : ''}.`
-      : 'No history available.';
+  const lastBenchmark = points.at(-1)?.benchmark;
+  const hasBenchmark = lastBenchmark !== null && lastBenchmark !== undefined;
+  const summary = benchmarkSummary(points, currency, benchmark);
   const nameOf = benchmarkSeriesName(benchmark);
 
   return (

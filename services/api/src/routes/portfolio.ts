@@ -63,7 +63,8 @@ export async function loadFx(deps: Deps, transactions: readonly Transaction[]): 
   const today = isoDay(deps.now());
   // Base-currency-only portfolios never convert anything, so they skip the history query.
   const needsHistory = transactions.some((t) => t.currency !== base);
-  const first = transactions.reduce<string>((min, t) => (t.date < min ? t.date : min), today);
+  let first = today;
+  for (const t of transactions) if (t.date < first) first = t.date;
   const [latest, fxHistory] = await Promise.all([
     deps.repo.getFx(base),
     needsHistory ? deps.repo.getFxHistory(base, addDays(first, -FX_LOOKBACK_DAYS), today) : [],

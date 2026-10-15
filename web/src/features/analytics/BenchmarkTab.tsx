@@ -52,9 +52,9 @@ function BenchmarkContent({ data }: Readonly<{ data: AnalyticsBenchmarkResponse 
   return (
     <div className="space-y-4">
       {data.benchmark.message && (
-        <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100">
+        <output className="block rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100">
           {data.benchmark.message}
-        </p>
+        </output>
       )}
       <BenchmarkChart points={data.points} currency={data.baseCurrency} benchmark={data.benchmark.symbol} />
       <ComparisonStats data={data} />

@@ -317,6 +317,11 @@ function RenameForm({ portfolio, onDone }: Readonly<{ portfolio: Portfolio; onDo
   const [error, setError] = useState<string | null>(null);
   const rename = useRenamePortfolio();
   const inputId = `rename-${portfolio.portfolioId}`;
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -351,11 +356,11 @@ function RenameForm({ portfolio, onDone }: Readonly<{ portfolio: Portfolio; onDo
       <div className="flex flex-wrap gap-2">
         <input
           id={inputId}
+          ref={inputRef}
           className="input min-w-0 flex-1"
           value={name}
           maxLength={80}
           autoComplete="off"
-          autoFocus
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? `${inputId}-error` : undefined}
           onKeyDown={onKeyDown}

@@ -31,15 +31,22 @@ function SettingsForm({ portfolioId, initial, onClose }: Readonly<{ portfolioId:
 
   return (
     <form onSubmit={submit} noValidate aria-label="Portfolio settings" className="space-y-4">
-      <label className="flex items-start gap-2 text-sm">
-        <input type="checkbox" className="mt-1" checked={trackCash} onChange={(e) => setTrackCash(e.target.checked)} />
-        <span>
-          <span className="font-medium">Track cash</span>
-          <span className="muted block text-xs">
+      <div className="flex items-start gap-2 text-sm">
+        <input
+          id="ps-cash"
+          type="checkbox"
+          className="mt-1"
+          checked={trackCash}
+          aria-describedby="ps-cash-hint"
+          onChange={(e) => setTrackCash(e.target.checked)}
+        />
+        <div>
+          <label className="font-medium" htmlFor="ps-cash">Track cash</label>
+          <span id="ps-cash-hint" className="muted block text-xs">
             Deposits, withdrawals, fees and interest build a cash balance; buys, sells and dividends move it. Cash counts in the totals. Off = cash entries are ignored.
           </span>
-        </span>
-      </label>
+        </div>
+      </div>
       <div>
         <label className="label" htmlFor="ps-rate">Default dividend withholding tax (%)</label>
         <input id="ps-rate" className="input" inputMode="decimal" placeholder="e.g. 15" value={rate} onChange={(e) => setRate(e.target.value)} />
@@ -70,7 +77,7 @@ export function PortfolioSettingsDialog({ portfolioId, portfolioName, onClose }:
 
   let body;
   if (isError) body = <p role="alert" className="text-sm text-red-700 dark:text-red-300">{errorMessage(error)}</p>;
-  else if (isPending) body = <p role="status" className="muted text-sm">Loading settings…</p>;
+  else if (isPending) body = <output className="muted block text-sm">Loading settings…</output>;
   else body = <SettingsForm portfolioId={portfolioId} initial={data} onClose={onClose} />;
 
   return (

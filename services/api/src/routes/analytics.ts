@@ -49,7 +49,8 @@ interface Needs {
 
 async function loadEod(ctx: RouteContext, transactions: readonly Transaction[], extra: string | undefined): Promise<Record<string, EodPrice[]>> {
   const today = isoDay(ctx.deps.now());
-  const first = transactions.reduce<string>((min, t) => (t.date < min ? t.date : min), today);
+  let first = today;
+  for (const t of transactions) if (t.date < first) first = t.date;
   const symbols = [...new Set([...transactions.map((t) => t.symbol), ...(extra ? [extra] : [])])];
   const from = addDays(first, -EOD_LOOKBACK_DAYS);
   const series = await Promise.all(symbols.map((s) => ctx.deps.repo.getEod(s, from, today)));

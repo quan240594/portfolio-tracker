@@ -52,7 +52,7 @@ function refineTransactionShape(t: z.infer<typeof transactionFields>, ctx: z.Ref
   const issue = (path: string, message: string) => ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message });
   if (isCashTransactionType(t.type)) {
     if (t.symbol !== cashSymbol(t.currency)) issue('symbol', `Cash movements use the symbol ${cashSymbol(t.currency)}`);
-    if (!(t.price > 0)) issue('price', 'Price must be greater than 0 (use 1 and put the amount in quantity)');
+    if (t.price <= 0) issue('price', 'Price must be greater than 0 (use 1 and put the amount in quantity)');
   } else if (isCashSymbol(t.symbol) || isCustomSymbol(t.symbol)) {
     issue('symbol', 'CASH.* and CUSTOM:* symbols are reserved');
   }

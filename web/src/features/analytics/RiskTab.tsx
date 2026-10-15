@@ -13,7 +13,7 @@ const BENCHMARK_OPTIONS = BENCHMARK_SYMBOLS.map((s) => ({ value: s, label: s }))
 const drawdownText = (d: AnalyticsRiskResponse['maxDrawdown']): string => (d ? formatPercent(d.depthPct) : '—');
 
 function drawdownDetail(d: AnalyticsRiskResponse['maxDrawdown']): string {
-  if (!d || d.peakDate === null || d.troughDate === null) return 'No decline since you started.';
+  if (d?.peakDate == null || d.troughDate == null) return 'No decline since you started.';
   const recovery = d.recoveryDate ? `recovered ${formatDate(d.recoveryDate)}` : 'not yet recovered';
   return `Peak ${formatDate(d.peakDate)}, low ${formatDate(d.troughDate)}, ${recovery}.`;
 }
@@ -31,14 +31,14 @@ function RiskContent({ data }: Readonly<{ data: AnalyticsRiskResponse }>) {
   return (
     <div className="space-y-4">
       {!enough && (
-        <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100">
+        <output className="block rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-100">
           Risk figures need at least {MIN_RISK_OBSERVATIONS} trading days of history; you have {data.observations}.
-        </p>
+        </output>
       )}
       {data.benchmark.message && (
-        <p role="status" className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-800 dark:bg-slate-900">
+        <output className="block rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-800 dark:bg-slate-900">
           {data.benchmark.message}
-        </p>
+        </output>
       )}
       <TableShell caption="Risk metrics" columns={[{ label: 'Metric' }, { label: 'Value', align: 'right' }, { label: 'What it means' }]}>
         {rows.map((r) => (

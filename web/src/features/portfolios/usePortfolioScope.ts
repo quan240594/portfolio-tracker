@@ -2,16 +2,15 @@ import { useCallback, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ALL_PORTFOLIOS, DEFAULT_PORTFOLIO_ID, portfolioIdSchema, type Portfolio } from '@portfolio/shared';
 import { usePortfolios } from '../../api/hooks';
-import type { Scope } from '../../api/client';
 
 /** URL search param holding the selected scope (`all` or a portfolio id). */
 export const PORTFOLIO_PARAM = 'portfolio';
 export const PORTFOLIO_STORAGE_KEY = 'pt-portfolio';
 export const ALL_PORTFOLIOS_LABEL = 'All portfolios';
 
-const isScope = (v: string | null): v is Scope => !!v && (v === ALL_PORTFOLIOS || portfolioIdSchema.safeParse(v).success);
+const isScope = (v: string | null): v is string => !!v && (v === ALL_PORTFOLIOS || portfolioIdSchema.safeParse(v).success);
 
-export function readStoredScope(): Scope | null {
+export function readStoredScope(): string | null {
   try {
     const v = localStorage.getItem(PORTFOLIO_STORAGE_KEY);
     return isScope(v) ? v : null;
@@ -20,7 +19,7 @@ export function readStoredScope(): Scope | null {
   }
 }
 
-function storeScope(scope: Scope) {
+function storeScope(scope: string) {
   try {
     localStorage.setItem(PORTFOLIO_STORAGE_KEY, scope);
   } catch {
@@ -29,7 +28,7 @@ function storeScope(scope: Scope) {
 }
 
 /** Portfolio preselected for new transactions/imports: the scoped one, else the default (or first) portfolio. */
-export function defaultTargetPortfolio(scope: Scope, portfolios: readonly Portfolio[] | undefined): string {
+export function defaultTargetPortfolio(scope: string, portfolios: readonly Portfolio[] | undefined): string {
   if (!portfolios) return scope === ALL_PORTFOLIOS ? DEFAULT_PORTFOLIO_ID : scope;
   if (portfolios.some((p) => p.portfolioId === scope)) return scope;
   return (portfolios.find((p) => p.portfolioId === DEFAULT_PORTFOLIO_ID) ?? portfolios[0])?.portfolioId ?? DEFAULT_PORTFOLIO_ID;
@@ -49,16 +48,16 @@ export function usePortfolioScope() {
   const portfolios = portfoliosQuery.data?.portfolios;
 
   const fromUrl = params.get(PORTFOLIO_PARAM);
-  const requested: Scope = isScope(fromUrl) ? fromUrl : (readStoredScope() ?? ALL_PORTFOLIOS);
+  const requested = isScope(fromUrl) ? fromUrl : (readStoredScope() ?? ALL_PORTFOLIOS);
   const unknown = requested !== ALL_PORTFOLIOS && !!portfolios && !portfolios.some((p) => p.portfolioId === requested);
-  const scope: Scope = unknown ? ALL_PORTFOLIOS : requested;
+  const scope = unknown ? ALL_PORTFOLIOS : requested;
   const current = portfolios?.find((p) => p.portfolioId === scope);
   // A single portfolio is only queried once it is known to exist (or the list could not be loaded).
   const ready = scope === ALL_PORTFOLIOS || !!current || portfoliosQuery.isError;
   const scopeName = scope === ALL_PORTFOLIOS ? ALL_PORTFOLIOS_LABEL : (current?.name ?? '');
 
   const setScope = useCallback(
-    (next: Scope) => {
+    (next: string) => {
       storeScope(next);
       setParams((p) => {
         const n = new URLSearchParams(p);

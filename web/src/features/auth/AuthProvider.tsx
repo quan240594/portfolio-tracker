@@ -34,15 +34,20 @@ export function AuthProvider({
   children,
 }: Readonly<{ config?: AuthConfig; loadService?: LoadAuthService; children: ReactNode }>) {
   if (config.mode === 'none') return <AuthContext.Provider value={DISABLED_AUTH}>{children}</AuthContext.Provider>;
-  if (config.mode === 'invalid') {
-    const broken: AuthContextValue = { ...DISABLED_AUTH, enabled: true, status: 'signedOut', configError: config.reason };
-    return <AuthContext.Provider value={broken}>{children}</AuthContext.Provider>;
-  }
+  if (config.mode === 'invalid') return <InvalidConfigAuthProvider reason={config.reason}>{children}</InvalidConfigAuthProvider>;
   return (
     <CognitoAuthProvider config={config} loadService={loadService}>
       {children}
     </CognitoAuthProvider>
   );
+}
+
+function InvalidConfigAuthProvider({ reason, children }: Readonly<{ reason: string; children: ReactNode }>) {
+  const broken = useMemo<AuthContextValue>(
+    () => ({ ...DISABLED_AUTH, enabled: true, status: 'signedOut', configError: reason }),
+    [reason],
+  );
+  return <AuthContext.Provider value={broken}>{children}</AuthContext.Provider>;
 }
 
 function CognitoAuthProvider({
