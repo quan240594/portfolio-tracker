@@ -6,7 +6,7 @@ import { addTransaction, getSeed } from '../mocks/db';
 import { ASSET_DETAILS } from '../mocks/assetDetails';
 import { server } from '../mocks/server';
 import { formatMoney } from '../lib/format';
-import { renderApp, sp } from '../test/utils';
+import { mainNav, openPortfolioMenu, renderApp, sp } from '../test/utils';
 
 const serverError = () => HttpResponse.json({ error: { code: 'INTERNAL', message: 'Boom' } }, { status: 500 });
 
@@ -407,6 +407,9 @@ describe('routing', () => {
   it('keeps the nav on Assets', async () => {
     renderApp('/assets/AAPL');
     await screen.findByRole('heading', { level: 1, name: 'Apple Inc.' });
-    expect(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Assets' })).toHaveAttribute('aria-current', 'page');
+    const user = userEvent.setup();
+    const trigger = await openPortfolioMenu(user);
+    expect(trigger).toHaveAttribute('data-active', 'true');
+    expect(within(mainNav()).getByRole('link', { name: 'Assets' })).toHaveAttribute('aria-current', 'page');
   });
 });

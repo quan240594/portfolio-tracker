@@ -1,14 +1,15 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { renderApp, renderWithProviders } from '../../test/utils';
+import { gotoViaNav, renderApp, renderWithProviders } from '../../test/utils';
 import { server } from '../../mocks/server';
 import { getPortfolio } from '../../mocks/db';
 import { PORTFOLIO_STORAGE_KEY, defaultTargetPortfolio, readStoredScope, usePortfolioScope } from './usePortfolioScope';
 import type { Portfolio } from '@portfolio/shared';
 
 const switcher = () => screen.getByRole('combobox', { name: 'Portfolio' });
-const navLink = (name: string) => within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name });
+// Menu links are hidden while the Portfolio menu is closed; only their hrefs are inspected here.
+const navLink = (name: string) => within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name, hidden: true });
 const optionsOf = (select: HTMLElement) => within(select).getAllByRole('option').map((o) => o.textContent);
 
 /** Records the `portfolioId` query param of every analytics request. */
@@ -50,7 +51,7 @@ describe('PortfolioSwitcher', () => {
     expect(await screen.findByText(/^Trading 212 · values in EUR/)).toBeInTheDocument();
     await waitFor(() => expect(seen.some((s) => s.path === '/api/portfolio' && s.portfolioId === 'trading-212')).toBe(true));
 
-    await user.click(navLink('Holdings'));
+    await gotoViaNav(user, 'Holdings');
     expect(router.state.location.pathname).toBe('/holdings');
     expect(router.state.location.search).toBe('?portfolio=trading-212');
     expect(await screen.findByText(/^Trading 212 · 4 positions/)).toBeInTheDocument();

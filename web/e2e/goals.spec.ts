@@ -1,11 +1,12 @@
 import { expect, test } from '@playwright/test';
+import { gotoViaNav } from './nav';
 
 const VERDICT = /Achievable in \d+ years? \(by \d{4}\)|Not reached within the horizon|Goal already reached/;
 
 test.describe('Goals (mock mode)', () => {
   test('plan a goal: results, preview, save, CSV download and reset', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Goals' }).click();
+    await gotoViaNav(page, 'Goals');
     await expect(page).toHaveURL(/\/goals$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Goals' })).toBeVisible();
 

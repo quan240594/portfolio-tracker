@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { mainNav, openPortfolioMenu } from './nav';
 
 // Runs against the GitHub Pages build (see playwright.pages.config.ts): sub-path base + MSW demo mode + 404.html.
 const BASE = '/portfolio-tracker/';
@@ -55,7 +56,8 @@ test.describe('GitHub Pages build (demo mode under /portfolio-tracker/)', () => 
     expect(sw.script).toMatch(new RegExp(`${BASE}mockServiceWorker\\.js$`));
     expect(sw.controlled).toBe(true);
 
-    const nav = page.getByRole('navigation', { name: 'Main' });
+    const nav = mainNav(page);
+    await openPortfolioMenu(page);
     await expect(nav.getByRole('link', { name: 'Holdings' })).toHaveAttribute('href', `${BASE}holdings`);
     await nav.getByRole('link', { name: 'Holdings' }).click();
     await expect(page).toHaveURL(new RegExp(`${BASE}holdings$`));

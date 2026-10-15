@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test, type Page } from '@playwright/test';
+import { gotoViaNav } from './nav';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const isoDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -16,7 +17,7 @@ const clickLabel = (page: Page, role: 'checkbox' | 'radio', name: string) => pag
 test.describe('Calendar (mock mode)', () => {
   test('month grid, navigation, filters, overflow, event details and the .ics download', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Calendar' }).click();
+    await gotoViaNav(page, 'Calendar');
     await expect(page).toHaveURL(/\/calendar$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Calendar' })).toBeVisible();
     await expect(page).toHaveTitle(/Calendar · Portfolio Tracker/);

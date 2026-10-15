@@ -5,7 +5,7 @@ import type { GoalResponse } from '@portfolio/shared';
 import { API_BASE_URL } from '../config';
 import { server } from '../mocks/server';
 import { resetDb } from '../mocks/db';
-import { renderApp, sp } from '../test/utils';
+import { gotoViaNav, renderApp, sp } from '../test/utils';
 
 const goalsUrl = (path = '') => `${API_BASE_URL}/goals${path}`;
 const VERDICT = /Achievable in \d+ years? \(by \d{4}\)|Not reached within the horizon|Goal already reached/;
@@ -366,7 +366,7 @@ describe('GoalsPage', () => {
   it('is reachable from the main navigation', async () => {
     const user = userEvent.setup();
     renderApp('/');
-    await user.click(await screen.findByRole('link', { name: 'Goals' }));
+    await gotoViaNav(user, 'Goals');
     expect(await screen.findByRole('heading', { name: 'Goals' })).toBeInTheDocument();
     await screen.findByText(VERDICT, { selector: 'output' });
     await waitFor(() => expect(document.title).toBe('Goals · Portfolio Tracker'));

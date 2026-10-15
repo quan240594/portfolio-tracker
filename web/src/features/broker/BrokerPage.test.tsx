@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import type { BrokerStatusResponse } from '@portfolio/shared';
-import { renderApp, renderWithProviders } from '../../test/utils';
+import { gotoViaNav, renderApp, renderWithProviders } from '../../test/utils';
 import { server } from '../../mocks/server';
 import { resetBrokerMock } from '../../mocks/broker';
 import { createPortfolio } from '../../mocks/db';
@@ -28,7 +28,7 @@ describe('Trading 212 page', () => {
   it('is reachable from the navigation and titled', async () => {
     const user = userEvent.setup();
     renderApp('/');
-    await user.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Brokers' }));
+    await gotoViaNav(user, 'Brokers');
     expect(await screen.findByRole('heading', { level: 1, name: 'Trading 212' })).toBeInTheDocument();
     expect(document.title).toBe('Trading 212 · Portfolio Tracker');
   });

@@ -1,9 +1,10 @@
 import { expect, test } from '@playwright/test';
+import { gotoViaNav } from './nav';
 
 test.describe('Trading 212 connection (mock mode, simulated)', () => {
   test('connects with masked fields, syncs and disconnects without persisting the secret', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Brokers' }).click();
+    await gotoViaNav(page, 'Brokers');
     await expect(page).toHaveTitle(/Trading 212 · Portfolio Tracker/);
     await expect(page.getByText('Demo mode: the connection is simulated')).toBeVisible();
 

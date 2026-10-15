@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { gotoViaNav } from './nav';
 
 test.describe('Portfolio management (mock mode)', () => {
   test('rebalance: pick a portfolio, see the drift and get buy-only trades', async ({ page }) => {
@@ -47,7 +48,7 @@ test.describe('Portfolio management (mock mode)', () => {
     const widget = page.getByRole('region', { name: 'Watchlist' });
     await expect(widget.getByText('NVDA')).toBeVisible();
 
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Watchlist' }).click();
+    await gotoViaNav(page, 'Watchlist');
     await expect(page.getByRole('heading', { level: 1, name: 'Watchlist' })).toBeVisible();
     const table = page.getByRole('table', { name: 'Watchlist' });
     await expect(table.getByRole('rowheader', { name: /NVDA/ })).toBeVisible();

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { mainNav, openPortfolioMenu, portfolioTrigger } from './nav';
 
 // Mock mode demo data: the main portfolio holds ASML.AS, BTC-EUR and the ETFs; "Trading 212" holds AAPL, MSFT, KO and JNJ.
 
@@ -27,8 +28,10 @@ test.describe('Assets → securities list and asset detail (mock mode)', () => {
     await expect(page).toHaveURL(/\/assets\/MSFT\?portfolio=trading-212$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Microsoft Corporation' })).toBeVisible();
     await expect(page).toHaveTitle('MSFT · Asset detail · Portfolio Tracker');
-    // The nav keeps one Assets item, still highlighted.
-    await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Assets' })).toHaveAttribute('aria-current', 'page');
+    // The Portfolio group and its Assets item stay highlighted.
+    await expect(portfolioTrigger(page)).toHaveAttribute('data-active', 'true');
+    await openPortfolioMenu(page);
+    await expect(mainNav(page).getByRole('link', { name: 'Assets' })).toHaveAttribute('aria-current', 'page');
     await expect(page.getByRole('region', { name: 'My positions' }).getByRole('listitem', { name: 'Trading 212 position' })).toBeVisible();
   });
 

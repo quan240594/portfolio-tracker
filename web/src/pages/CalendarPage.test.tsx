@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { addIsoDays, calendarMonthOf, computeAnalyticsSummary, type GetCalendarResponse } from '@portfolio/shared';
-import { renderApp, renderWithProviders, sp } from '../test/utils';
+import { gotoViaNav, renderApp, renderWithProviders, sp } from '../test/utils';
 import { server } from '../mocks/server';
 import { getAnalyticsData, resetDb } from '../mocks/db';
 import { formatMoney } from '../lib/format';
@@ -250,7 +250,7 @@ describe('CalendarPage', () => {
 
   it('is reachable from the main navigation', async () => {
     renderApp('/');
-    await userEvent.click(await screen.findByRole('link', { name: 'Calendar' }));
+    await gotoViaNav(userEvent.setup(), 'Calendar');
     expect(await screen.findByRole('heading', { level: 1, name: 'Calendar' })).toBeInTheDocument();
   });
 });
