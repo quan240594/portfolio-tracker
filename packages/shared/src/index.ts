@@ -22,3 +22,5 @@ export * from './async.js';
 export * from './broker.js';
 export * from './growth-api.js';
 export * from './growth.js';
+export * from './goals-api.js';
+export * from './goals.js';
