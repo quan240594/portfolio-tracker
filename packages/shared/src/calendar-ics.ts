@@ -10,7 +10,7 @@ const encoder = new TextEncoder();
 
 /** Escapes a TEXT value: backslash, semicolon, comma and line breaks (RFC 5545 §3.3.11). */
 export function escapeIcsText(value: string): string {
-  return value.replaceAll('\\', '\\\\').replaceAll(';', '\\;').replaceAll(',', '\\,').replaceAll(/\r\n|\r|\n/g, '\\n');
+  return value.replaceAll('\\', String.raw`\\`).replaceAll(';', String.raw`\;`).replaceAll(',', String.raw`\,`).replaceAll(/\r\n|\r|\n/g, String.raw`\n`);
 }
 
 /**
@@ -45,7 +45,8 @@ export function icsTimestamp(now: Date): string {
 
 function summaryOf(e: CalendarEvent): string {
   const label = e.type === 'SPLIT' || e.type === 'CORPORATE_ACTION' ? e.description : CALENDAR_TYPE_LABELS[e.type];
-  const amount = e.expectedAmount === undefined ? '' : ` · ${roundTo(e.expectedAmount).toFixed(2)} ${e.status === 'PAID' ? 'received' : 'expected'}`;
+  const verb = e.status === 'PAID' ? 'received' : 'expected';
+  const amount = e.expectedAmount === undefined ? '' : ` · ${roundTo(e.expectedAmount).toFixed(2)} ${verb}`;
   return `${e.symbol} · ${label}${amount}`;
 }
 
