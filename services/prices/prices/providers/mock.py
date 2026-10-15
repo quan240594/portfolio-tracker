@@ -205,11 +205,12 @@ class MockProvider:
                 )
         if profile.asset_class != "STOCK":
             return profile
-        return replace(
+        enriched: InstrumentProfile = replace(
             profile,
             pe_ratio=self._pe_ratio(symbol),
             fundamentals_as_of=self._now().astimezone(UTC).date().isoformat(),
         )
+        return enriched
 
     def _schedule(self, symbol: str) -> tuple[tuple[int, ...], int, float, int] | None:
         if symbol in DIVIDEND_SCHEDULES:
