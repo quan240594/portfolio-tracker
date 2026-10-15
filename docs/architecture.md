@@ -963,3 +963,57 @@ earlier get them lazily: each scheduled refresh fetches the details of **at most
 missing or older than 30 days (`PROFILE_DETAILS_PER_RUN`, `PROFILE_DETAILS_TTL_DAYS`) and updates only those attributes
 (never name/sector/country), also stamping symbols the provider does not know so they are not retried every run. At four
 runs a day that is at most four profile calls a day in total; the API itself never calls a provider.
+
+## Dividend growth trend and forecast
+
+The "Dividend growth" card on `/dividends` can also show the **forecast** (declared and estimated payments of the next 12 months) and a **trend line**.
+Controls in the card header: a native radio pair **By year** (the existing grouped Jan–Dec chart, default) / **Timeline**, and a native checkbox
+**Show forecast** (default on, disabled while the forecast data is not available).
+
+**Decision: computed in the web from data the page already has, no API change.** The forecast is `futureMonths` of
+`GET /dividends/overview` (shared through the query cache with the Future payments card, so no extra request) and the history is `byMonth` of
+`GET /analytics/dividend-growth`. Extending `GET /analytics/dividend-growth` would have forced it to value the portfolio (holdings, quotes, FX,
+declared/estimated schedules), which is what the overview already does; two server-side copies could drift apart. The maths is pure and typed in
+`packages/shared/src/dividend-forecast.ts` (`buildGrowthTimeline`, `linearFit`, `completeHistory`, `trailingAverages`, `averageByCalendarMonth`),
+the view models in `web/src/features/dividends/growthForecast.ts`, the components in `GrowthCharts.tsx` / `GrowthForecastParts.tsx`.
+"Today" is `overview.asOf` (falls back to `growthStats.asOf`, then the browser date), so the forecast and the history use the same current month.
+While the overview loads the card shows the chart without forecast ("Loading forecast…"); when it fails: "Forecast unavailable" with a retry.
+
+**Definitions** (all amounts are net, base currency, per calendar month; months without dividends are 0):
+
+| Term | Definition |
+|---|---|
+| History | every complete month from the first month with a dividend to the month before today. The current month is partial and never takes part in the average or the trend |
+| Forecast | the 12 `futureMonths` (current month included): `declared` + `estimated`. The current month shows received so far + what is still expected |
+| 12-month average | mean of the last 12 history months (fewer at the start), drawn from the 6th history month on |
+| Trend | least squares `y = a + b·x` over the last up to 24 history months (`x = 0` for the oldest; `b = Σ(x − x̄)(y − ȳ) / Σ(x − x̄)²`, `a = ȳ − b·x̄`); needs ≥ 6 months of history, otherwise `null` and the card says "Needs at least 6 months of dividend history to show a trend." |
+| Trend line | the fitted values over the fit window, extended dashed ("Trend (projected)") over the current month and the forecast months, each `max(0, a + b·x)` rounded to cents |
+| "Trend: +€ Y/month per year" | `12 × b`: how much the monthly income rises (or falls) per year; the raw slope, not the clamped line |
+| Average of years | By-year view only: per calendar month the mean over the shown years in which that month is a complete history month; months with one such year only are left out; hidden with < 6 months of history |
+
+**By year view.** The forecast bars are stacked on the matching year: the rest of the current year on top of its received bars (declared = calendar blue,
+estimated = calendar yellow with a dashed edge, each with a darker edge; same colours as the calendar and Future payments) and the following months in an extra
+"2027 (forecast)" series (a stack of its own, so it sits in the fourth slot of each month). Received bars keep the existing per-year colours. The "Average of years"
+dashed line is drawn because it is cheap and unambiguous (one value per calendar month); the *trend* is not drawn here: a straight line over a Jan–Dec axis
+that repeats every year would not mean anything, so it stays in the Timeline view.
+**Timeline view.** One chronological series: the last 24 complete months (the trend's fit window), the current month and the 12 forecast months; received bars in
+teal, forecast bars as above, 12-month average (solid grey), trend (solid indigo) and projected trend (dashed). The chart starts scrolled to the right on a phone.
+"Show forecast" off removes the forecast bars and the projected trend; the fitted trend over the history stays.
+
+**Summary line** under the toggles: `Forecast next 12 months: € X (declared € A, estimated € B) · Trend: +€ Y/month per year`. X, A and B are
+`summary.forward12m`, `declared` and `estimated` of the overview, i.e. exactly the Future payments card. The bars are the cent-rounded months, so they can differ
+from the headline by a few cents (demo: bars € 479,21 against € 479,16); a unit test pins this (< € 0,10). The trend part is left out without 6 months of history.
+
+**Accessibility.** The chart's `aria-label` summarises received years, forecast and trend. The legend is plain HTML (swatch + text, "(forecast)", dashed
+edge for estimated, dashed vs solid lines), drawn above the chart outside its horizontal scroll area so it wraps on a phone; tooltips repeat the swatch with a text label
+("2027 forecast · Declared"). "Show data table" holds the existing year table and, with the forecast on, a second table (Period, Received, Declared, Estimated,
+Trend) whose forecast rows say "Forecast" in the period; the Timeline's single table has the same columns. The calculation, formulas and limits are in the card's
+"How is this calculated?" disclosure. The page never scrolls sideways (e2e at 1440, 390 and 320 px).
+
+**Limitations.** An extrapolation of the past, not a promise: dividends can be cut, skipped or raised, estimated payments repeat last year's schedule at the latest
+per-share amount, and a short or irregular history gives a weak trend. Not investment advice.
+
+**Demo and tests.** The demo needs no extra mock: the existing MSW handlers for `/analytics/dividend-growth` and `/dividends/overview` run the shared calculators on the
+fixtures (about 3.3 years of history). With the clock pinned to 2026-10-15 the demo shows € 479,16 (declared € 270,48, estimated € 208,68) and a trend of +€ 8,15/month per year.
+Unit tests: `dividend-forecast.test.ts` (no history, < 6 months, gaps, falling trend clamped at 0, leap day, year boundary, no future events), `growthForecast.test.ts` (view models,
+reconciliation with `summary.forward12m`), `growthCards.test.tsx` (components and the card); e2e: `web/e2e/dividend-growth-trend.spec.ts`.
