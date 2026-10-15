@@ -105,7 +105,7 @@ function FutureHeader({ data }: Readonly<{ data: DividendsOverviewResponse }>) {
 const futureName = (name: unknown) => (name === 'declared' ? 'Declared' : 'Estimated');
 
 /** Tooltip row label: a colour swatch plus the name, so the pastel colours do not have to carry the text. */
-function FutureKey({ name, c }: Readonly<{ name: unknown; c: ReturnType<typeof useDividendTheme> }>) {
+export function FutureKey({ name, c }: Readonly<{ name: unknown; c: ReturnType<typeof useDividendTheme> }>) {
   const declared = name === 'declared';
   return (
     <span className="inline-flex items-center gap-1.5">
@@ -123,8 +123,13 @@ interface LegendEntry {
   value?: unknown;
 }
 
+/** Tooltip row for one status: the amount and its swatch + name. */
+export function futureTooltipRow(ccy: string, c: ReturnType<typeof useDividendTheme>) {
+  return (value: unknown, name: unknown): [string, React.JSX.Element] => [formatMoney(Number(value), ccy), <FutureKey key={String(name)} name={name} c={c} />];
+}
+
 /** Own legend: recharts paints its default legend text in the (pastel) bar colour, which is unreadable on white. */
-function FutureLegend({ payload, c }: Readonly<{ payload?: readonly LegendEntry[]; c: ReturnType<typeof useDividendTheme> }>) {
+export function FutureLegend({ payload, c }: Readonly<{ payload?: readonly LegendEntry[]; c: ReturnType<typeof useDividendTheme> }>) {
   return (
     <ul className="m-0 flex list-none justify-center gap-4 p-0 text-xs" style={{ color: c.text }}>
       {(payload ?? []).map((entry) => (
@@ -155,7 +160,7 @@ function FuturePayments({ data }: Readonly<{ data: DividendsOverviewResponse }>)
               contentStyle={c.tooltip}
               itemStyle={{ color: c.text }}
               labelFormatter={(m) => formatMonth(String(m))}
-              formatter={(v: unknown, name: unknown) => [formatMoney(Number(v), ccy), <FutureKey key={String(name)} name={name} c={c} />]}
+              formatter={futureTooltipRow(ccy, c)}
             />
             <Legend content={<FutureLegend c={c} />} />
             <ReferenceLine y={summary.monthlyAverage} stroke={c.invested} strokeDasharray="5 4" ifOverflow="extendDomain" />
