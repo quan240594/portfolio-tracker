@@ -1,7 +1,7 @@
 import { screen } from '@testing-library/react';
 import { defaultGoalSettings, projectGoal } from '@portfolio/shared';
 import { renderWithProviders } from '../../test/utils';
-import { GoalChart, goalChartMax, goalChartSummary, goalLineColours, goalSeriesName, yearLabel } from './GoalChart';
+import { GoalChart, goalChartMax, goalChartSummary, goalLineColours, goalSeriesName } from './GoalChart';
 
 const TODAY = '2026-10-15';
 const projection = projectGoal({
@@ -27,11 +27,10 @@ describe('GoalChart', () => {
     expect(goalChartMax(projection)).toBe(Math.max(...projection.rows.map((r) => r.goal)) * 1.5);
   });
 
-  it('names the series and years', () => {
+  it('names the series', () => {
     expect(goalSeriesName('plan')).toBe('Your plan');
     expect(goalSeriesName('goal')).toBe('Goal (inflation-adjusted)');
     expect(goalSeriesName('other')).toBe('other');
-    expect(yearLabel(2030)).toBe('2030');
   });
 
   it('uses distinct colours per series in both themes', () => {

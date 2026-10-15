@@ -8,7 +8,6 @@ import { GOAL_MEASURE, verdictText } from './goalText';
 
 const SERIES_NAMES: Record<string, string> = { plan: 'Your plan', safe: 'Safe', alternative: 'Alternative', goal: 'Goal (inflation-adjusted)' };
 export const goalSeriesName = (name: unknown): string => SERIES_NAMES[String(name)] ?? String(name);
-export const yearLabel = (year: unknown): string => String(year);
 
 export function goalLineColours(theme: Theme): Record<GoalPlanId | 'goal', string> {
   const c = analyticsTheme(theme);
@@ -45,7 +44,7 @@ export function GoalChart({ projection }: Readonly<{ projection: GoalProjection 
             <CartesianGrid stroke={c.grid} vertical={false} />
             <XAxis dataKey="year" type="number" domain={['dataMin', 'dataMax']} allowDecimals={false} minTickGap={28} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
             <YAxis domain={[0, goalChartMax(projection)]} allowDataOverflow tickFormatter={compactMoneyTick(baseCurrency)} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={76} />
-            <Tooltip contentStyle={tooltipStyle(c)} labelFormatter={yearLabel} formatter={moneyTooltip(baseCurrency, goalSeriesName)} />
+            <Tooltip contentStyle={tooltipStyle(c)} labelFormatter={String} formatter={moneyTooltip(baseCurrency, goalSeriesName)} />
             <Legend formatter={goalSeriesName} wrapperStyle={{ fontSize: 12 }} />
             <ReferenceLine x={projection.targetYear} stroke={c.axis} strokeWidth={1} label={{ value: `Target year ${projection.targetYear}`, fill: c.axis, fontSize: 11, position: 'top' }} />
             <Line type="monotone" dataKey="goal" stroke={colours.goal} strokeWidth={2} strokeDasharray="6 4" dot={false} isAnimationActive={false} />
