@@ -4,7 +4,9 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
     exclude: ['**/*.int.test.ts', 'node_modules/**', 'dist/**'],
-    env: { LOG_LEVEL: 'SILENT' },
+    // Hermetic AWS: never pick up the developer's profile/SSO session (an AWS_PROFILE in the shell makes the SDK
+    // skip the static test credentials and fail once the SSO token expires). Tests stub what they need.
+    env: { LOG_LEVEL: 'SILENT', AWS_PROFILE: '', AWS_SHARED_CREDENTIALS_FILE: '/dev/null', AWS_CONFIG_FILE: '/dev/null' },
     coverage: {
       provider: 'v8',
       include: ['src/**'],
