@@ -142,8 +142,12 @@ export function loadLocalCredentials(deps: LocalCredentialDeps): Trading212Crede
 export class LocalCredentialSource implements CredentialSource {
   constructor(private readonly deps: LocalCredentialDeps) {}
 
-  // async so errors thrown while reading become rejections.
-  async get(): Promise<Trading212Credentials> {
-    return loadLocalCredentials(this.deps);
+  /** Errors thrown while reading (missing file, empty values) are returned as rejections, never thrown synchronously. */
+  get(): Promise<Trading212Credentials> {
+    try {
+      return Promise.resolve(loadLocalCredentials(this.deps));
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 }
