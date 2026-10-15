@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 test.describe('Analytics → Metrics (mock mode)', () => {
   test('shows the five cards, explains the method and follows benchmark and portfolio scope', async ({ page }) => {
-    await page.goto('/analytics');
+    await page.goto('/analytics?tab=metrics');
     const tabs = page.getByRole('tablist', { name: 'Analytics' });
     await expect(tabs.getByRole('tab', { name: 'Metrics' })).toHaveAttribute('aria-selected', 'true');
 

@@ -96,7 +96,7 @@ test.describe('GitHub Pages build (demo mode under /portfolio-tracker/)', () => 
 
   test('the Metrics tab renders its five cards from the mock backend', async ({ page }) => {
     const errors = trackErrors(page);
-    await page.goto(`${BASE}analytics`);
+    await page.goto(`${BASE}analytics?tab=metrics`);
     await expect(page.getByRole('tab', { name: 'Metrics', selected: true })).toBeVisible();
     await expect(page.getByTestId('twr-value')).toHaveText(/^[+\u2212]\d+,\d%$/);
     await expect(page.getByTestId('pe-value')).toHaveText(/^\d+,\d×$/);
