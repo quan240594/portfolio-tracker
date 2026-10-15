@@ -235,7 +235,7 @@ export function HoldingsTable({ holdings, currency }: Readonly<Props>) {
                   <div className="muted text-xs">{formatWeight(h.weight)} of portfolio</div>
                 </div>
               </div>
-              <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+              <dl className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-x-4 gap-y-2 text-xs">
                 <div>
                   <dt className="muted">Quantity</dt>
                   <dd className="tabular-nums">{formatQuantity(h.quantity)}</dd>

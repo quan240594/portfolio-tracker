@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { gotoViaNav } from './nav';
 
 const firstRowSymbol = (page: Page) =>
   page.getByRole('table').getByRole('rowheader').first().locator('span.font-semibold');
@@ -37,7 +38,7 @@ test.describe('Portfolio Tracker (mock mode)', () => {
 
   test('navigate to holdings and sort the table', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Holdings' }).click();
+    await gotoViaNav(page, 'Holdings');
     await expect(page).toHaveURL(/\/holdings$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Holdings' })).toBeVisible();
 
@@ -97,7 +98,7 @@ test.describe('Portfolio Tracker (mock mode)', () => {
     await expect(row).toHaveCount(1);
     await expect(row).toContainText('€ 806,90');
 
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Holdings' }).click();
+    await gotoViaNav(page, 'Holdings');
     await expect(page.getByRole('table').getByRole('rowheader')).toHaveCount(13);
     await expect(page.getByRole('rowheader', { name: /SAP\.DE/ })).toBeVisible();
   });
@@ -155,7 +156,7 @@ test.describe('Portfolio Tracker (mock mode)', () => {
     await expect(page.getByRole('table')).toContainText('IWDA.AS');
 
     // Nav links keep the scope; holdings only contain the new position.
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Holdings' }).click();
+    await gotoViaNav(page, 'Holdings');
     await expect(page).toHaveURL(/\/holdings\?portfolio=/);
     await expect(page.getByText(/^Pension · 1 positions/)).toBeVisible();
     await expect(page.getByRole('table').getByRole('rowheader')).toHaveCount(1);

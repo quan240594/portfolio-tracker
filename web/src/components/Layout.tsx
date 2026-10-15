@@ -1,23 +1,10 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useTheme } from '../theme/ThemeProvider';
+import { MainNav } from './MainNav';
 import { USE_MOCKS } from '../config';
 import { AccountMenu } from '../features/auth/AccountMenu';
 import { PortfolioSwitcher } from '../features/portfolios/PortfolioSwitcher';
 import { usePortfolioScope, usePortfolioScopeSync } from '../features/portfolios/usePortfolioScope';
-
-const NAV = [
-  { to: '/', label: 'Dashboard', end: true },
-  { to: '/holdings', label: 'Holdings' },
-  { to: '/dividends', label: 'Dividends' },
-  { to: '/calendar', label: 'Calendar' },
-  { to: '/transactions', label: 'Transactions' },
-  { to: '/analytics', label: 'Analytics' },
-  { to: '/goals', label: 'Goals' },
-  { to: '/rebalance', label: 'Rebalance' },
-  { to: '/assets', label: 'Assets' },
-  { to: '/watchlist', label: 'Watchlist' },
-  { to: '/brokers', label: 'Brokers' },
-];
 
 function Logo() {
   return (
@@ -103,27 +90,7 @@ export function Layout() {
             <ThemeToggle />
             <AccountMenu />
           </div>
-          <nav aria-label="Main" className="order-last w-full overflow-x-auto sm:order-none sm:w-auto">
-            <ul className="flex gap-1">
-              {NAV.map((item) => (
-                <li key={item.to}>
-                  <NavLink
-                    to={withScope(item.to)}
-                    end={item.end}
-                    className={({ isActive }) =>
-                      `block rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors ${
-                        isActive
-                          ? 'bg-brand-50 text-brand-700 dark:bg-brand-600/20 dark:text-brand-100'
-                          : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
-                      }`
-                    }
-                  >
-                    {item.label}
-                  </NavLink>
-                </li>
-              ))}
-            </ul>
-          </nav>
+          <MainNav withScope={withScope} />
         </div>
       </header>
       <main id="main" tabIndex={-1} className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 focus:outline-none sm:px-6">

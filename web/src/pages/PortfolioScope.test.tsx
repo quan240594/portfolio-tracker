@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { computeDividendsOverview } from '@portfolio/shared';
-import { renderApp } from '../test/utils';
+import { gotoViaNav, renderApp } from '../test/utils';
 import { server } from '../mocks/server';
 import { createPortfolio, getAnalyticsData, getDividends, getHoldings, listTransactions } from '../mocks/db';
 import { formatMoney } from '../lib/format';
@@ -49,7 +49,7 @@ describe('portfolio-scoped pages', () => {
     );
     expect(screen.queryByRole('rowheader', { name: /VWRL/ })).not.toBeInTheDocument();
 
-    await user.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Dividends' }));
+    await gotoViaNav(user, 'Dividends');
     const income = await screen.findByRole('region', { name: 'Dividends' });
     expect(await within(income).findByTestId('kpi-income')).toHaveTextContent(sp(formatMoney(computeDividendsOverview(getAnalyticsData('trading-212')).summary.forward12m, 'EUR')));
     expect(await screen.findByTestId('received-total')).toHaveTextContent(sp(formatMoney(getDividends('trading-212').received.reduce((s, p) => s + p.amount, 0), 'EUR')));
@@ -64,16 +64,15 @@ describe('portfolio-scoped pages', () => {
     expect(screen.getByRole('link', { name: 'Add transaction' })).toHaveAttribute('href', `/transactions?action=add&portfolio=${p.portfolioId}`);
     expect(screen.getByRole('link', { name: 'Import CSV' })).toHaveAttribute('href', `/transactions?action=import&portfolio=${p.portfolioId}`);
 
-    const nav = screen.getByRole('navigation', { name: 'Main' });
-    await user.click(within(nav).getByRole('link', { name: 'Holdings' }));
+    await gotoViaNav(user, 'Holdings');
     expect(await screen.findByRole('heading', { name: 'No open positions in Pension' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Add transaction' })).toHaveAttribute('href', `/transactions?action=add&portfolio=${p.portfolioId}`);
 
-    await user.click(within(nav).getByRole('link', { name: 'Dividends' }));
+    await gotoViaNav(user, 'Dividends');
     expect(await screen.findByRole('heading', { name: 'No dividends in Pension yet' })).toBeInTheDocument();
     expect(screen.getByText(/^Pension · amounts in EUR/)).toBeInTheDocument();
 
-    await user.click(within(nav).getByRole('link', { name: 'Transactions' }));
+    await gotoViaNav(user, 'Transactions');
     expect(await screen.findByRole('heading', { name: 'No transactions in Pension yet' })).toBeInTheDocument();
     expect(screen.getByText(/^Pension · buys, sells and dividends/)).toBeInTheDocument();
   });

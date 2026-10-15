@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { gotoViaNav } from './nav';
 
 test.describe('Analytics (mock mode)', () => {
   test('dashboard shows IRR, passive income, insights and movers; the analytics page walks through every tab', async ({ page }) => {
@@ -16,7 +17,7 @@ test.describe('Analytics (mock mode)', () => {
     await cards.first().getByRole('button', { name: /^Dismiss insight/ }).click();
     await expect(page.getByRole('button', { name: /^Show \d+ dismissed$/ })).toBeVisible();
 
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Analytics' }).click();
+    await gotoViaNav(page, 'Analytics');
     await expect(page).toHaveURL(/\/analytics$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Analytics' })).toBeVisible();
     const tabs = page.getByRole('tablist', { name: 'Analytics' });

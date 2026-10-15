@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App, createQueryClient, titleFor } from './App';
 import { ApiError } from './api/client';
-import { renderApp } from './test/utils';
+import { gotoViaNav, mainNav, renderApp } from './test/utils';
 
 describe('App routing', () => {
   it('renders the 404 page for unknown routes with a link back to the dashboard', async () => {
@@ -21,7 +21,7 @@ describe('App routing', () => {
   it('navigates via the main nav, marks the active link, updates the title and moves focus to <main>', async () => {
     const user = userEvent.setup();
     renderApp('/');
-    const nav = screen.getByRole('navigation', { name: 'Main' });
+    const nav = mainNav();
     expect(within(nav).getByRole('link', { name: 'Dashboard' })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('main')).not.toHaveFocus();
 
@@ -31,9 +31,9 @@ describe('App routing', () => {
       ['Transactions', 'Transactions'],
       ['Dashboard', 'Dashboard'],
     ] as const) {
-      await user.click(within(nav).getByRole('link', { name: label }));
+      await gotoViaNav(user, label);
       expect(await screen.findByRole('heading', { level: 1, name: title })).toBeInTheDocument();
-      expect(within(nav).getByRole('link', { name: label })).toHaveAttribute('aria-current', 'page');
+      expect(within(nav).getByRole('link', { name: label, hidden: true })).toHaveAttribute('aria-current', 'page');
       expect(document.title).toBe(`${title} · Portfolio Tracker`);
       expect(screen.getByRole('main')).toHaveFocus();
     }
@@ -77,13 +77,13 @@ describe('App routing', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Holdings' })).toBeInTheDocument();
     await waitFor(() => expect(document.title).toBe('Holdings · Portfolio Tracker'));
 
-    const nav = screen.getByRole('navigation', { name: 'Main' });
-    expect(within(nav).getByRole('link', { name: 'Holdings' })).toHaveAttribute('aria-current', 'page');
-    expect(within(nav).getByRole('link', { name: 'Holdings' })).toHaveAttribute('href', '/portfolio-tracker/holdings');
+    const nav = mainNav();
+    expect(within(nav).getByRole('link', { name: 'Holdings', hidden: true })).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByRole('link', { name: 'Holdings', hidden: true })).toHaveAttribute('href', '/portfolio-tracker/holdings');
     expect(within(nav).getByRole('link', { name: 'Dashboard' })).toHaveAttribute('href', '/portfolio-tracker');
     expect(screen.getByRole('link', { name: 'Portfolio Tracker' })).toHaveAttribute('href', '/portfolio-tracker');
 
-    await user.click(within(nav).getByRole('link', { name: 'Transactions' }));
+    await gotoViaNav(user, 'Transactions');
     expect(await screen.findByRole('heading', { level: 1, name: 'Transactions' })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe('/portfolio-tracker/transactions');
     expect(document.title).toBe('Transactions · Portfolio Tracker');

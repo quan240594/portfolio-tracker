@@ -9,7 +9,7 @@ import { usePortfolioScope } from '../portfolios/usePortfolioScope';
 function MoverList({ title, movers, empty, currency }: Readonly<{ title: string; movers: readonly Mover[]; empty: string; currency: string }>) {
   const id = `movers-${title.replaceAll(/\W+/g, '-').toLowerCase()}`;
   return (
-    <section className="card p-4" aria-labelledby={id}>
+    <section className="card min-w-0 p-4" aria-labelledby={id}>
       <h2 id={id} className="mb-3 font-semibold">
         {title}
       </h2>
