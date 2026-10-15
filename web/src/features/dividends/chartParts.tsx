@@ -3,12 +3,21 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { useTheme } from '../../theme/ThemeProvider';
 import { analyticsTheme, tooltipStyle } from '../../components/charts/analyticsTheme';
 import { formatMoney } from '../../lib/format';
+import { incomeColours } from '../calendar/calendarColours';
 
-/** Chart colours of the dividends page: the analytics palette plus a lighter shade for estimated income. */
+/** Chart colours of the dividends page: the analytics palette plus the calendar's status colours (declared = pastel blue, estimated = pastel yellow, each with a darker edge), so a status looks the same on both pages. */
 export function useDividendTheme() {
   const { theme } = useTheme();
   const c = analyticsTheme(theme);
-  return { ...c, estimated: theme === 'dark' ? '#4c51bf' : '#a5b4fc', tooltip: tooltipStyle(c) };
+  const { declared, estimated } = incomeColours(theme);
+  return {
+    ...c,
+    declared: declared.fill,
+    declaredEdge: declared.stroke,
+    estimated: estimated.fill,
+    estimatedEdge: estimated.stroke,
+    tooltip: tooltipStyle(c),
+  };
 }
 
 /** Width of one bar slot; charts with more bars than fit scroll sideways instead of squeezing the labels. */

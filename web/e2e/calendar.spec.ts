@@ -92,6 +92,8 @@ test.describe('Calendar (mock mode)', () => {
     await expect(events(page).getByRole('button', { name: /^AAPL,/ })).toHaveCount(0);
     await expect(events(page).getByRole('button', { name: /^NVDA,/ }).first()).toBeVisible();
     await page.getByLabel('Show').selectOption('all');
+    // wait until the holdings events are back, or the download below can still use the watchlist scope
+    await expect(events(page).getByRole('button', { name: /^AAPL,/ }).first()).toBeVisible();
 
     // Download: fetched with the app's credentials and saved as a file.
     const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download .ics' }).click()]);

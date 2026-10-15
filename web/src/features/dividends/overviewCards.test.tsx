@@ -8,7 +8,8 @@ import { getAnalyticsData } from '../../mocks/db';
 import { formatMoney, formatPercent, formatWeight } from '../../lib/format';
 import { DiversificationCard } from './DiversificationCard';
 import { ConsistencyCard, scoreBreakdown } from './ConsistencyCard';
-import { AverageGrowthCard, FuturePaymentsCard, growthBars } from './GrowthAndFuture';
+import { AverageGrowthCard, FutureKey, FutureLegend, FuturePaymentsCard, futureTooltipRow, growthBars } from './GrowthAndFuture';
+import { useDividendTheme } from './chartParts';
 import { DividendsKpi, YieldKpi } from './YieldKpis';
 import { YieldPayoutCard } from './YieldPayoutCard';
 
@@ -357,5 +358,31 @@ describe('FuturePaymentsCard', () => {
     renderWithProviders(<FuturePaymentsCard />, { route: '/dividends?portfolio=trading-212' });
     expect(await screen.findByTestId('future-total')).toHaveTextContent(sp(formatMoney(trading.summary.forward12m, 'EUR')));
     expect(trading.summary.forward12m).not.toBe(overview().summary.forward12m);
+  });
+});
+
+describe('future payments colour key', () => {
+  function KeyHarness() {
+    const c = useDividendTheme();
+    const [amount, key] = futureTooltipRow('EUR', c)(12.5, 'estimated');
+    return (
+      <>
+        <FutureLegend payload={[{ value: 'declared' }, { value: 'estimated' }]} c={c} />
+        <FutureLegend c={c} />
+        <FutureKey name="declared" c={c} />
+        <p data-testid="row">{amount}</p>
+        {key}
+      </>
+    );
+  }
+
+  it('names every status next to its swatch, solid for declared and dashed for estimated', () => {
+    const { container } = renderWithProviders(<KeyHarness />);
+    expect(screen.getAllByText('Declared').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('Estimated').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByTestId('row')).toHaveTextContent(sp(formatMoney(12.5, 'EUR')));
+    const swatches = [...container.querySelectorAll<HTMLElement>('span[aria-hidden="true"]')];
+    expect(swatches.some((s) => s.style.border.includes('dashed'))).toBe(true);
+    expect(swatches.some((s) => s.style.border.includes('solid'))).toBe(true);
   });
 });
