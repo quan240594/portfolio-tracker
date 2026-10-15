@@ -10,7 +10,6 @@ import hashlib
 import math
 import random
 from collections.abc import Callable, Sequence
-from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 
 from ..errors import SymbolNotFoundError
@@ -205,12 +204,17 @@ class MockProvider:
                 )
         if profile.asset_class != "STOCK":
             return profile
-        enriched: InstrumentProfile = replace(
-            profile,
+        return InstrumentProfile(
+            symbol=profile.symbol,
+            name=profile.name,
+            asset_class=profile.asset_class,
+            currency=profile.currency,
+            sector=profile.sector,
+            country=profile.country,
+            exchange=profile.exchange,
             pe_ratio=self._pe_ratio(symbol),
             fundamentals_as_of=self._now().astimezone(UTC).date().isoformat(),
         )
-        return enriched
 
     def _schedule(self, symbol: str) -> tuple[tuple[int, ...], int, float, int] | None:
         if symbol in DIVIDEND_SCHEDULES:
