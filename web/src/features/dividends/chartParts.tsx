@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { useTheme } from '../../theme/ThemeProvider';
 import { analyticsTheme, tooltipStyle } from '../../components/charts/analyticsTheme';
@@ -28,13 +28,19 @@ interface FrameProps {
   testId: string;
   bars?: number;
   height?: string;
+  /** Start scrolled to the right edge (a series whose newest part matters most). */
+  scrollToEnd?: boolean;
   children: ReactNode;
 }
 
 /** Accessible chart container: the label is the text alternative; wide charts scroll horizontally. */
-export function ChartFrame({ label, testId, bars = 0, height = 'h-72', children }: Readonly<FrameProps>) {
+export function ChartFrame({ label, testId, bars = 0, height = 'h-72', scrollToEnd = false, children }: Readonly<FrameProps>) {
+  const scroller = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (scrollToEnd && scroller.current) scroller.current.scrollLeft = scroller.current.scrollWidth;
+  }, [scrollToEnd]);
   return (
-    <div className="overflow-x-auto">
+    <div ref={scroller} className="overflow-x-auto">
       <div role="img" aria-label={label} data-testid={testId} className={`${height} w-full`} style={{ minWidth: bars * SLOT_PX }}>
         {children}
       </div>
@@ -46,37 +52,46 @@ interface TableProps {
   caption: string;
   columns: readonly string[];
   rows: readonly (readonly ReactNode[])[];
+  className?: string;
 }
 
-/** The chart's numbers as a table, one click away: the keyboard / screen reader alternative to the graphic. */
-export function ChartDataTable({ caption, columns, rows }: Readonly<TableProps>) {
+/** A plain data table (the numbers behind a chart). */
+export function DataGrid({ caption, columns, rows, className = '' }: Readonly<TableProps>) {
+  return (
+    <table className={`w-full text-xs ${className}`}>
+      <caption className="sr-only">{caption}</caption>
+      <thead>
+        <tr className="muted border-b border-slate-200 text-left dark:border-slate-800">
+          {columns.map((c, i) => (
+            <th key={c} scope="col" className={`py-1.5 pr-3 font-medium ${i === 0 ? '' : 'text-right'}`}>
+              {c}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={String(row[0])} className="border-b border-slate-100 last:border-0 dark:border-slate-800/60">
+            {row.map((cell, i) => (
+              <td key={columns[i]} className={`py-1.5 pr-3 tabular-nums ${i === 0 ? 'font-medium' : 'text-right'}`}>
+                {cell}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/** The chart's numbers as a table, one click away: the keyboard / screen reader alternative to the graphic. `extra` adds more tables below the first. */
+export function ChartDataTable({ caption, columns, rows, extra }: Readonly<TableProps & { extra?: ReactNode }>) {
   return (
     <details className="mt-2 text-xs">
       <summary className="muted w-fit cursor-pointer rounded px-1 select-none hover:text-slate-900 dark:hover:text-white">Show data table</summary>
       <div className="mt-2 max-h-64 overflow-auto">
-        <table className="w-full text-xs">
-          <caption className="sr-only">{caption}</caption>
-          <thead>
-            <tr className="muted border-b border-slate-200 text-left dark:border-slate-800">
-              {columns.map((c, i) => (
-                <th key={c} scope="col" className={`py-1.5 pr-3 font-medium ${i === 0 ? '' : 'text-right'}`}>
-                  {c}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={String(row[0])} className="border-b border-slate-100 last:border-0 dark:border-slate-800/60">
-                {row.map((cell, i) => (
-                  <td key={columns[i]} className={`py-1.5 pr-3 tabular-nums ${i === 0 ? 'font-medium' : 'text-right'}`}>
-                    {cell}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DataGrid caption={caption} columns={columns} rows={rows} />
+        {extra}
       </div>
     </details>
   );
