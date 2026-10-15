@@ -51,27 +51,30 @@ export function apiUrl(path: string, query?: Record<string, string | undefined>)
   return url.toString();
 }
 
+/** Single entry point for every API call: adds the Cognito token (when signed in) and maps transport failures. */
+async function send(path: string, query: Record<string, string | undefined> | undefined, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(apiUrl(path, query), { ...init, headers: { ...init.headers, ...(await authorizationHeaders()) } });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    throw new ApiError(0, 'NETWORK_ERROR', 'Could not reach the server. Check your connection and try again.');
+  }
+}
+
 export async function request<T>(
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   opts: { query?: Record<string, string | undefined>; body?: unknown; signal?: AbortSignal } = {},
 ): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(apiUrl(path, opts.query), {
-      method,
-      headers: {
-        Accept: 'application/json',
-        ...(await authorizationHeaders()),
-        ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      },
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-      signal: opts.signal,
-    });
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') throw err;
-    throw new ApiError(0, 'NETWORK_ERROR', 'Could not reach the server. Check your connection and try again.');
-  }
+  const res = await send(path, opts.query, {
+    method,
+    headers: {
+      Accept: 'application/json',
+      ...(opts.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+    },
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    signal: opts.signal,
+  });
 
   if (res.status === 204) return undefined as T;
   const data = await parseBody(res);
@@ -79,6 +82,28 @@ export async function request<T>(
   if (res.status === 401) notifyUnauthorized();
   if (!res.ok) throw toApiError(res, data);
   return data as T;
+}
+
+export interface TextDownload {
+  text: string;
+  headers: Headers;
+}
+
+/** GET a non-JSON document (CSV, .ics) with the same auth header and error handling as `request`. Downloads must use this, never a bare `fetch`. */
+export async function requestText(path: string, opts: { accept: string; query?: Record<string, string | undefined>; signal?: AbortSignal }): Promise<TextDownload> {
+  const res = await send(path, opts.query, { method: 'GET', headers: { Accept: opts.accept }, signal: opts.signal });
+  const text = await res.text();
+  if (res.status === 401) notifyUnauthorized();
+  if (!res.ok) throw toApiError(res, safeJson(text));
+  return { text, headers: res.headers };
+}
+
+function safeJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
 }
 
 async function parseBody(res: Response): Promise<unknown> {
@@ -93,7 +118,7 @@ async function parseBody(res: Response): Promise<unknown> {
 }
 
 function toApiError(res: Response, data: unknown): ApiError {
-  if (isErrorBody(data)) return new ApiError(res.status, data.error.code, data.error.message, data.error.details);
+  if (isErrorBody(data)) return new ApiError(res.status, data.error.code ?? `HTTP_${res.status}`, data.error.message, data.error.details);
   return new ApiError(res.status, `HTTP_${res.status}`, res.statusText || `Request failed with status ${res.status}`);
 }
 

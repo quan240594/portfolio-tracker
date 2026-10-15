@@ -7,12 +7,15 @@ import { getPortfolio } from '../mocks/db';
 import { formatMoney } from '../lib/format';
 import { sp } from '../test/utils';
 import * as form from '../features/management/form';
+import { setAuthTokenHooks } from '../features/auth/tokenHooks';
 
 function stubDownload() {
   return vi.spyOn(form, 'downloadFile').mockImplementation(() => undefined);
 }
 
 describe('TransactionsPage management actions', () => {
+  afterEach(() => setAuthTokenHooks(undefined));
+
   it('shows splits and cash movements without unit price or fee', async () => {
     renderApp('/transactions?portfolio=trading-212');
     const split = (await screen.findByText('SPLIT')).closest('tr')!;
@@ -52,11 +55,60 @@ describe('TransactionsPage management actions', () => {
 
     server.use(http.get('/api/export/transactions', () => new HttpResponse('nope', { status: 500 })));
     await user.click(screen.getByRole('button', { name: 'Export CSV' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Export failed (HTTP 500).');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Internal Server Error');
 
     server.use(http.get('/api/export/transactions', () => HttpResponse.error()));
     await user.click(screen.getByRole('button', { name: 'Export CSV' }));
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Could not reach the server'));
+  });
+
+  it('exports with the Cognito bearer token and saves the file', async () => {
+    setAuthTokenHooks({ getToken: () => Promise.resolve('id-token-123'), onUnauthorized: vi.fn() });
+    const auth: (string | null)[] = [];
+    server.use(
+      http.get('/api/export/transactions', ({ request }) => {
+        auth.push(request.headers.get('authorization'));
+        return new HttpResponse('date,type\n', { headers: { 'content-type': 'text/csv' } });
+      }),
+    );
+    const user = userEvent.setup();
+    const download = stubDownload();
+    renderApp('/transactions?portfolio=default');
+    await screen.findByRole('table');
+    await user.click(screen.getByRole('button', { name: 'Export CSV' }));
+    await waitFor(() => expect(download).toHaveBeenCalledWith('transactions-default.csv', 'date,type\n', 'text/csv'));
+    expect(auth).toEqual(['Bearer id-token-123']);
+  });
+
+  it.each([401, 403, 500])('shows an error and saves no file when the export answers HTTP %i', async (status) => {
+    const onUnauthorized = vi.fn();
+    setAuthTokenHooks({ getToken: () => Promise.resolve('id-token-123'), onUnauthorized });
+    server.use(http.get('/api/export/transactions', () => HttpResponse.json({ error: { code: 'DENIED', message: `Denied ${status}` } }, { status })));
+    const user = userEvent.setup();
+    const download = stubDownload();
+    renderApp('/transactions?portfolio=default');
+    await screen.findByRole('table');
+    await user.click(screen.getByRole('button', { name: 'Export CSV' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(`Denied ${status}`);
+    expect(download).not.toHaveBeenCalled();
+    expect(onUnauthorized).toHaveBeenCalledTimes(status === 401 ? 1 : 0);
+  });
+
+  it('still exports in demo mode, where there is no token', async () => {
+    const auth: (string | null)[] = [];
+    server.use(
+      http.get('/api/export/transactions', ({ request }) => {
+        auth.push(request.headers.get('authorization'));
+        return new HttpResponse('date,type\n');
+      }),
+    );
+    const user = userEvent.setup();
+    const download = stubDownload();
+    renderApp('/transactions?portfolio=default');
+    await screen.findByRole('table');
+    await user.click(screen.getByRole('button', { name: 'Export CSV' }));
+    await waitFor(() => expect(download).toHaveBeenCalled());
+    expect(auth).toEqual([null]);
   });
 
   it('only offers settings for a single portfolio', async () => {
