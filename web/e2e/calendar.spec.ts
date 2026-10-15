@@ -143,8 +143,15 @@ test.describe('Calendar page width on narrow screens', () => {
         await page.goto(`/calendar?view=${view}`);
         await expect(page.getByTestId('calendar-income-chart')).toBeVisible();
         await expect(events(page).getByRole(view === 'calendar' ? 'table' : 'heading').first()).toBeVisible();
-        const { scrollWidth, innerWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth }));
-        expect(scrollWidth).toBeLessThanOrEqual(innerWidth);
+        const { scrollWidth, innerWidth, wide } = await page.evaluate(() => ({
+          scrollWidth: document.documentElement.scrollWidth,
+          innerWidth: window.innerWidth,
+          wide: [...document.querySelectorAll('body *')]
+            .filter((el) => el.getBoundingClientRect().right > window.innerWidth + 0.5)
+            .slice(0, 6)
+            .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 60)} right=${Math.round(el.getBoundingClientRect().right)}`),
+        }));
+        expect(scrollWidth, `elements past the viewport: ${wide.join(' | ')}`).toBeLessThanOrEqual(innerWidth);
         if (view === 'calendar') {
           // The grid scrolls inside its own wrapper and its events stay reachable.
           const wrapper = events(page).getByRole('table').locator('xpath=..');
