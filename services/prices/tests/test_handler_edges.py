@@ -62,6 +62,9 @@ class FakeRepo:
     def put_profile(self, profile: Any) -> None:
         self.profiles.append(profile)
 
+    def stale_profile_details(self, symbols: list[str], cutoff: str) -> list[str]:
+        return []
+
 
 class FakeProvider:
     name = "fake"

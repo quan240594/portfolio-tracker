@@ -20,6 +20,7 @@ from .keys import (
     fx_day_item,
     fx_item,
     fx_pk,
+    profile_details,
     profile_item,
     profile_key,
     quote_from_item,
@@ -89,6 +90,32 @@ class Repository:
     def symbols_with_profile(self, symbols: Sequence[str]) -> set[str]:
         items = self._batch_get([profile_key(s) for s in symbols], projection="PK")
         return {str(i["PK"]).removeprefix("TICKER#") for i in items}
+
+    def stale_profile_details(self, symbols: Sequence[str], cutoff: str) -> list[str]:
+        """Symbols with a PROFILE item whose optional details were never fetched or before `cutoff`
+        (YYYY-MM-DD), never-fetched first."""
+        if not symbols:
+            return []
+        items = self._batch_get([profile_key(s) for s in symbols], projection="PK, detailsAsOf")
+        stale = [
+            (str(i.get("detailsAsOf", "")), str(i["PK"]).removeprefix("TICKER#"))
+            for i in items
+            if str(i.get("detailsAsOf", "")) < cutoff
+        ]
+        return [symbol for _, symbol in sorted(stale)]
+
+    def put_profile_details(self, symbol: str, profile: InstrumentProfile | None, as_of: str) -> None:
+        """Stores only the optional details (+ their fetch date) on the existing PROFILE item, so a refresh
+        can never degrade the name/sector/country written at enrichment. `profile` None = nothing found."""
+        values = {**profile_details(profile), "detailsAsOf": as_of}
+        names = {f"#f{i}": k for i, k in enumerate(values)}
+        self.table.update_item(
+            Key=profile_key(symbol),
+            UpdateExpression="SET " + ", ".join(f"#f{i} = :v{i}" for i in range(len(values))),
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues={f":v{i}": v for i, v in enumerate(values.values())},
+            ConditionExpression="attribute_exists(PK)",
+        )
 
     def put_quote(self, quote: Quote) -> None:
         self.table.put_item(Item=quote_item(quote))

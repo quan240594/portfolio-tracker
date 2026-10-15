@@ -900,3 +900,66 @@ exactly as before), and the first buys of AAPL, MSFT, KO, VWRL.AS and JNJ (and t
 Provider-style dividend events still cover ~900 days; the user's received payments go back further. The e2e tests pin the clock
 (`page.clock.setFixedTime`) to 2026-10-15, where the demo shows Q3 2026 vs Q2 2026 +65,5 % (€ 131,51 vs € 79,48), 12 months Oct 2025 – Sep 2026
 vs Oct 2024 – Sep 2025 +16,7 % (€ 413,58 vs € 354,52) and CAGR 2023 → 2025 +92,0 % (€ 95,81 → € 353,31).
+## Asset detail
+
+`/assets/:symbol` (symbol URL-encoded: `ASML.AS`, `BTC-EUR`) shows one security: header (monogram, price, day change, key
+statistics, watchlist action), **Overview** (benchmarks bar, price history, key figures, the user's positions, about the
+company) and **Dividends** (`?tab=dividends`). `/assets` lists "Securities in your portfolio" above the custom assets. The
+list is **derived from the holdings query** of the selected scope (`GET /holdings`, the same cache as the Holdings page, so
+every transaction/portfolio change refreshes it through `invalidatePortfolioData`); cash and custom assets are not
+securities. "Include sold positions" adds `GET /securities/closed` (key `['holdings', scope, 'closed']`, invalidated with
+the holdings). The symbols in the Holdings table link to the same page. Pure maths in `packages/shared/src/asset-detail.ts`
+(contract and query schemas in `asset-detail-api.ts`); routes in `services/api/src/routes/securities.ts`; the demo's MSW
+handlers (`web/src/mocks/securitiesHandlers.ts`) call the same functions on the demo data. No new tables, IAM or
+infrastructure (the API Gateway `$default` route covers the paths).
+
+| Endpoint | Content |
+|---|---|
+| `GET /assets/{symbol}` | public: `profile`, `quote`, `stats`, `dividends` (events newest first, per-year totals). Same for every scope. |
+| `GET /assets/{symbol}/history?range=&benchmarks=&portfolioId=` | `points` (close, % since the first point), aligned `benchmarks[]` + `options[]` (the Growth shapes), `markers` (the user's BUY/SELL/DIVIDEND in the scope), `coverage` |
+| `GET /assets/{symbol}/positions?portfolioId=` | `positions[]` (one per portfolio that holds or held the symbol), `totals` (only with more than one), `received[]` dividends |
+| `GET /securities/closed?portfolioId=` | symbols traded in the scope but no longer held, with realised result and dividends |
+
+A symbol with no stored profile, quote or closes (and, for history, no transaction of the user) is `404 NOT_FOUND`, as are
+`CASH.*`/`CUSTOM:*`; a malformed query or an unknown `?portfolioId=` is `400`/`404` as elsewhere. All handlers use `ctx.userId`
+only: the detail is public data, history/positions/closed read the caller's own transactions.
+
+**Ranges and benchmarks** are the Growth view's: `range` = `7D 1M 3M 6M YTD 1Y 5Y ALL` (default `1Y`), `benchmarks` = at most
+3 symbols, omitted = `IWDA.AS`, empty = none, selection shared with the Growth tab through `?benchmarks=` and `sessionStorage`
+(`BenchmarksBar`, `RangeButtons`, `ChartOrTable` are reused). The series is the stored end-of-day closes, downsampled to at
+most 400 points. Prices are in the instrument's currency; **Performance %** is the price change since the first point (no
+dividends) and the benchmarks are rebased the same way (carried forward over their non-trading days), so lines compare even
+across currencies. **Price** mode shows the closes only (benchmarks need the shared percent scale). Markers: BUY cost (incl.
+fee), SELL proceeds (net of fee) and DIVIDEND net received, converted at the transaction's rate (broker rate → ECB fixing →
+latest); `plotDate` snaps a marker to the first series point on or after the date. `coverage.limited` is set when the range
+starts before the first stored close.
+
+**Positions** reuse `calculatePortfolio` on the symbol's transactions per portfolio: shares, cost per share (EUR at purchase
+rates, plus the instrument currency), value (latest rate), `capitalGain` = unrealised + realised, `profit` = capital gain +
+dividends, `profitPct` over everything ever invested in the position, `weight` = value ÷ total value of that portfolio
+(including cash and custom assets, like the holdings weights). A closed position keeps its realised profit and dividends
+and has no weight ("Sold out"). Dividends are net of withholding tax.
+
+**Data we can and cannot source.** Every figure is `null` (shown as "—", announced to screen readers as "not available") when it
+cannot be sourced from the free data already stored or derived from it; nothing is estimated.
+
+| Field | Source |
+|---|---|
+| name, sector, country, exchange, currency | `PROFILE` item (existing) |
+| description, P/E, EPS, beta, market cap | optional `PROFILE` fields; Alpha Vantage `OVERVIEW` (US stocks) and Twelve Data `/profile` (description). Absent for ETFs, crypto, most non-US stocks |
+| ISIN | optional `PROFILE` field; EODHD `/search` result (non-US listings). Absent where the provider does not return it |
+| price, day change | `QUOTE#LATEST`, else the last two stored closes |
+| dividend yield, annual payout | derived: dividend events with ex-date in the last 365 days ÷ price (same currency only) |
+| next ex-dividend date and amount | stored `DIV#` events with a future ex-date (the price service stores one year ahead) |
+| payout ratio | derived: annual payout ÷ EPS (positive EPS, same currency) |
+| dividend growth (CAGR), increase streak | derived from **complete** calendar years of stored events (at most 5 steps); the running year and a first stored year with fewer payments than the year after it are partial. Only about 2 years are stored, so these are usually 1–2 steps or "—" |
+| next earnings date | **not available**: no free provider call is stored (the field is reserved and always `null`) |
+| history depth | stored closes only (about one year from enrichment plus the daily quotes since); `5Y`/`All` show what exists and `coverage.limited` explains it |
+
+**Lazy profile details (prices service).** `InstrumentProfile` gained the optional fields `description`, `isin`, `marketCap`,
+`eps`, `beta`, `peRatio` and `detailsAsOf` (YYYY-MM-DD fetch date). They come out of calls the service already makes
+(Alpha Vantage `OVERVIEW`, EODHD `/search`, Twelve Data `/profile`), so enrichment costs no extra requests. Symbols enriched
+earlier get them lazily: each scheduled refresh fetches the details of **at most one** tracked symbol whose `detailsAsOf` is
+missing or older than 30 days (`PROFILE_DETAILS_PER_RUN`, `PROFILE_DETAILS_TTL_DAYS`) and updates only those attributes
+(never name/sector/country), also stamping symbols the provider does not know so they are not retried every run. At four
+runs a day that is at most four profile calls a day in total; the API itself never calls a provider.

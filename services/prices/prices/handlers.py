@@ -31,6 +31,10 @@ STALE_AFTER = timedelta(hours=24)
 HISTORY_DAYS = 365
 DIVIDEND_LOOKBACK_DAYS = 730
 DIVIDEND_LOOKAHEAD_DAYS = 365
+# Optional company details (description, P/E, EPS, ...) are refreshed lazily: a few symbols per scheduled run,
+# each at most once per TTL, so the quota-limited profile providers see a trickle, never a burst.
+PROFILE_DETAILS_TTL_DAYS = 30
+PROFILE_DETAILS_PER_RUN = 1
 
 
 @dataclass
@@ -205,6 +209,7 @@ def run_scheduled_refresh(deps: Deps, now: datetime) -> dict[str, Any]:
     in_eu_window = amsterdam_hour(now) in deps.settings.eu_refresh_hours
     due, skipped = _select_due_symbols(deps, symbols, now, in_eu_window)
     refreshed, failed = _refresh_quotes(deps, due, skipped)
+    details_refreshed = refresh_profile_details(deps, symbols, now)
     for symbol, error in sorted(failed.items()):
         log.warning("symbol refresh failed", extra={"symbol": symbol, "error": error})
 
@@ -218,6 +223,7 @@ def run_scheduled_refresh(deps: Deps, now: datetime) -> dict[str, Any]:
         "fxUpdated": fx_ok,
         "fxDaysWritten": fx_days_written,
         "fxHistoryOk": fx_history_ok,
+        "profileDetailsRefreshed": details_refreshed,
         "eventPublished": published,
         "euWindow": in_eu_window,
         "failedSymbols": sorted(failed),
@@ -225,6 +231,46 @@ def run_scheduled_refresh(deps: Deps, now: datetime) -> dict[str, Any]:
     }
     log.info("scheduled refresh complete", extra={"summary": summary})
     return summary
+
+
+def _fetch_details(deps: Deps, symbol: str) -> tuple[bool, InstrumentProfile | None]:
+    """(done, profile); `done` is False after a retryable failure, so a later run tries again."""
+    try:
+        return True, deps.provider.get_profile(symbol)
+    except SymbolNotFoundError:
+        return True, None
+    except ProviderError as exc:
+        if exc.retryable:
+            log.warning(
+                "profile details unavailable; retrying later", extra={"symbol": symbol, "error": str(exc)}
+            )
+            return False, None
+        return True, None
+
+
+def refresh_profile_details(deps: Deps, symbols: list[str], now: datetime) -> list[str]:
+    """Fetch the optional company details of the stalest tracked symbols (at most PROFILE_DETAILS_PER_RUN).
+
+    Never raises. A symbol the provider does not know is marked fetched too, so it is not retried each run.
+    """
+    today = now.astimezone(UTC).date()
+    cutoff = (today - timedelta(days=PROFILE_DETAILS_TTL_DAYS)).isoformat()
+    try:
+        stale = deps.repo.stale_profile_details(symbols, cutoff)[:PROFILE_DETAILS_PER_RUN]
+    except (ClientError, BotoCoreError):
+        log.exception("profile details lookup failed")
+        return []
+    refreshed: list[str] = []
+    for symbol in stale:
+        done, profile = _fetch_details(deps, symbol)
+        if not done:
+            continue
+        try:
+            deps.repo.put_profile_details(symbol, profile, today.isoformat())
+            refreshed.append(symbol)
+        except (ClientError, BotoCoreError):
+            log.exception("profile details write failed", extra={"symbol": symbol})
+    return refreshed
 
 
 def eod_from_quote(quote: Quote) -> EodPrice:
@@ -267,6 +313,14 @@ def _quote_from_history(symbol: str, history: list[EodPrice], source: str) -> Qu
     return Quote(symbol, last.close, prev, last.currency, iso_datetime(as_of), f"{source}-eod")
 
 
+def _profile_or_fallback(symbol: str, profile: InstrumentProfile | None, today: date) -> InstrumentProfile:
+    """The provider's profile stamped with today's fetch date, else the minimal one from the symbol."""
+    if profile is None:
+        log.info("using fallback profile", extra={"symbol": symbol})
+        return minimal_profile(symbol)
+    return profile.with_details_as_of(today.isoformat())
+
+
 def enrich_symbol(deps: Deps, symbol: str, now: datetime) -> bool:
     """Fetch & store everything for a new symbol. Returns True when enriched, False when skipped
     (non-retryable). Raises _RetryableError for throttling / 5xx / storage errors.
@@ -301,9 +355,7 @@ def enrich_symbol(deps: Deps, symbol: str, now: datetime) -> bool:
             raise batch.failed[symbol]
         quote = batch.quotes.get(symbol) or _quote_from_history(symbol, history, provider.name)
 
-        if profile is None:
-            profile = minimal_profile(symbol)
-            log.info("using fallback profile", extra={"symbol": symbol})
+        profile = _profile_or_fallback(symbol, profile, today)
         deps.repo.put_eods(history)
         deps.repo.put_dividends(dividends)
         if quote is not None:

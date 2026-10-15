@@ -22,6 +22,7 @@ import { AuthProvider } from './features/auth/AuthProvider';
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
 const GoalsPage = lazy(() => import('./pages/GoalsPage'));
 const CalendarPage = lazy(() => import('./pages/CalendarPage').then((m) => ({ default: m.CalendarPage })));
+const AssetDetailPage = lazy(() => import('./pages/AssetDetailPage'));
 
 const TITLES: Record<string, string> = {
   '/': 'Dashboard',
@@ -32,16 +33,30 @@ const TITLES: Record<string, string> = {
   '/analytics': 'Analytics',
   '/goals': 'Goals',
   '/rebalance': 'Rebalance',
-  '/assets': 'Custom assets',
+  '/assets': 'Assets',
   '/watchlist': 'Watchlist',
   '/brokers': 'Trading 212',
 };
+
+const ASSET_DETAIL_PREFIX = '/assets/';
+
+/** Title of a route: `/assets/<symbol>` shows the (decoded) symbol, unknown paths are "Not found". */
+export function titleFor(pathname: string): string {
+  if (pathname.startsWith(ASSET_DETAIL_PREFIX) && pathname.length > ASSET_DETAIL_PREFIX.length) {
+    try {
+      return `${decodeURIComponent(pathname.slice(ASSET_DETAIL_PREFIX.length))} · Asset detail`;
+    } catch {
+      return 'Asset detail';
+    }
+  }
+  return TITLES[pathname] ?? 'Not found';
+}
 
 /** Updates the document title and moves focus to <main> on navigation (screen-reader friendly). */
 function RouteAnnouncer() {
   const { pathname } = useLocation();
   useEffect(() => {
-    document.title = `${TITLES[pathname] ?? 'Not found'} · Portfolio Tracker`;
+    document.title = `${titleFor(pathname)} · Portfolio Tracker`;
   }, [pathname]);
   useEffect(() => {
     const main = document.getElementById('main');
@@ -94,6 +109,14 @@ export const routes: RouteObject[] = [
       },
       { path: 'rebalance', element: <RebalancePage /> },
       { path: 'assets', element: <AssetsPage /> },
+      {
+        path: 'assets/:symbol',
+        element: (
+          <Suspense fallback={<LoadingRegion label="Loading security"><Skeleton className="h-96 w-full" /></LoadingRegion>}>
+            <AssetDetailPage />
+          </Suspense>
+        ),
+      },
       { path: 'watchlist', element: <WatchlistPage /> },
       { path: 'brokers', element: <BrokerPage /> },
       { path: '*', element: <NotFoundPage /> },

@@ -14,6 +14,7 @@ import {
 import { brokerHandlers } from './broker';
 import * as db from './db';
 import { analyticsHandlers } from './analyticsHandlers';
+import { securitiesHandlers } from './securitiesHandlers';
 import { dividendsOverviewHandlers } from './dividendsOverviewHandlers';
 import { growthHandlers } from './growthHandlers';
 import { goalsHandlers } from './goals-handlers';
@@ -157,5 +158,6 @@ export const handlers: HttpHandler[] = [
 
   ...managementHandlers,
   ...goalsHandlers,
+  ...securitiesHandlers,
   ...brokerHandlers,
 ];

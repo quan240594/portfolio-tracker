@@ -12,6 +12,7 @@ from typing import Any
 from ..errors import ProviderError, RateLimitError
 from ..httpclient import DailyQuota, HttpClient, TokenBucket
 from ..models import DividendEvent, EodPrice, InstrumentProfile, Quote
+from .base import as_float, clean_text
 from .twelvedata import COUNTRY_NAMES, asset_class_from_type
 
 log = logging.getLogger(__name__)
@@ -81,6 +82,11 @@ class AlphaVantageProvider:
             exchange=data.get("Exchange") or None,
             pe_ratio=pe_ratio,
             fundamentals_as_of=self._now().astimezone(UTC).date().isoformat() if pe_ratio else None,
+            # Company details come from the same OVERVIEW call: no extra provider traffic.
+            description=clean_text(data.get("Description")),
+            market_cap=_positive_ratio(data.get("MarketCapitalization")),
+            eps=as_float(data.get("EPS")),
+            beta=as_float(data.get("Beta")),
         )
 
     def _unsupported(self, what: str, symbol: str) -> ProviderError:

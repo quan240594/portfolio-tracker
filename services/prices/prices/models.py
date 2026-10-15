@@ -14,6 +14,9 @@ WIRE_NAMES = {
     "pay_date": "payDate",
     "pe_ratio": "peRatio",
     "fundamentals_as_of": "fundamentalsAsOf",
+    # Optional company details (asset detail page).
+    "market_cap": "marketCap",
+    "details_as_of": "detailsAsOf",
 }
 
 ASSET_CLASSES = ("STOCK", "ETF", "CRYPTO", "BOND", "CASH", "OTHER")
@@ -81,10 +84,38 @@ class InstrumentProfile:
     # Trailing-twelve-month price/earnings ratio (positive only) and the YYYY-MM-DD it was fetched.
     pe_ratio: float | None = None
     fundamentals_as_of: str | None = None
+    # Optional company details: absent unless a provider supplies them. `details_as_of` (YYYY-MM-DD) is the
+    # fetch date that drives the lazy refresh TTL.
+    description: str | None = None
+    isin: str | None = None
+    market_cap: float | None = None
+    eps: float | None = None
+    beta: float | None = None
+    details_as_of: str | None = None
 
     def __post_init__(self) -> None:
         if self.asset_class not in ASSET_CLASSES:
             raise ValueError(f"invalid assetClass {self.asset_class!r}")
+
+    def with_details_as_of(self, day: str) -> InstrumentProfile:
+        """Copy of the profile stamped with the date its optional details were fetched."""
+        return InstrumentProfile(
+            symbol=self.symbol,
+            name=self.name,
+            asset_class=self.asset_class,
+            currency=self.currency,
+            sector=self.sector,
+            country=self.country,
+            exchange=self.exchange,
+            pe_ratio=self.pe_ratio,
+            fundamentals_as_of=self.fundamentals_as_of,
+            description=self.description,
+            isin=self.isin,
+            market_cap=self.market_cap,
+            eps=self.eps,
+            beta=self.beta,
+            details_as_of=day,
+        )
 
 
 @dataclass(frozen=True)

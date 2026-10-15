@@ -8,6 +8,7 @@ import { ErrorState } from '../components/ErrorState';
 import { PageHeader } from '../components/Layout';
 import { LoadingRegion, Skeleton } from '../components/Skeleton';
 import { AssetDialog, ASSET_CLASS_LABELS } from '../features/assets/AssetDialog';
+import { SecuritiesSection } from '../features/assets/SecuritiesSection';
 import { ValuationsDialog } from '../features/assets/ValuationsDialog';
 import { RequirePortfolio } from '../features/management/RequirePortfolio';
 import { formatDate, formatMoney, formatPercent } from '../lib/format';
@@ -93,8 +94,15 @@ function Assets({ portfolioId }: Readonly<{ portfolioId: string }>) {
 export function AssetsPage() {
   return (
     <>
-      <PageHeader title="Custom assets" description="Real estate, savings, P2P loans and private equity with a manual value, included in your totals and allocation." />
-      <RequirePortfolio what="Custom assets">{({ portfolioId }) => <Assets portfolioId={portfolioId} />}</RequirePortfolio>
+      <PageHeader title="Assets" description="The securities you hold, plus real estate, savings, P2P loans and private equity that you value by hand." />
+      <SecuritiesSection />
+      <section aria-labelledby="custom-assets-title">
+        <h2 id="custom-assets-title" className="mb-1 text-lg font-semibold">
+          Custom assets
+        </h2>
+        <p className="muted mb-4 text-sm">Manual values, included in your totals and allocation.</p>
+        <RequirePortfolio what="Custom assets">{({ portfolioId }) => <Assets portfolioId={portfolioId} />}</RequirePortfolio>
+      </section>
     </>
   );
 }

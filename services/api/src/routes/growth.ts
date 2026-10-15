@@ -25,7 +25,7 @@ const RECENT_PRICE_DAYS = 45;
 const isMarketSymbol = (symbol: string): boolean => !symbol.startsWith(CASH_SYMBOL_PREFIX) && !symbol.startsWith(CUSTOM_SYMBOL_PREFIX);
 
 /** Tracked symbols (held + watchlist), the selected benchmarks and the suggestions, flagged by whether prices exist. */
-async function benchmarkOptions(ctx: RouteContext, data: AnalyticsData, selected: readonly string[]): Promise<GrowthBenchmarkOption[]> {
+export async function benchmarkOptions(ctx: RouteContext, data: Pick<AnalyticsData, 'transactions' | 'eod' | 'today'>, selected: readonly string[]): Promise<GrowthBenchmarkOption[]> {
   const { repo, mgmt } = ctx.deps;
   const watchlist = await mgmt.listWatchlist(ctx.userId);
   const symbols = [

@@ -84,3 +84,25 @@ def as_float(value: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return f if math.isfinite(f) else None
+
+
+MAX_DESCRIPTION_CHARS = 2000
+ISIN_LENGTH = 12
+
+
+def clean_text(value: object, limit: int = MAX_DESCRIPTION_CHARS) -> str | None:
+    """Provider free text → trimmed string capped at `limit`; placeholders like "None" or "-" mean absent."""
+    if not isinstance(value, str):
+        return None
+    text = " ".join(value.split())
+    if not text or text.upper() in ("NONE", "N/A", "NA", "-"):
+        return None
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def valid_isin(value: object) -> str | None:
+    """12 upper-case letters/digits, or None."""
+    if not isinstance(value, str):
+        return None
+    isin = value.strip().upper()
+    return isin if len(isin) == ISIN_LENGTH and isin.isalnum() and isin.isascii() else None

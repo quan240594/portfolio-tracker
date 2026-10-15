@@ -51,7 +51,7 @@ export function parseBenchmarkList(raw: string): string[] | null {
   return symbols.length > MAX_GROWTH_BENCHMARKS ? null : symbols;
 }
 
-const benchmarkListSchema = z
+export const benchmarkListSchema = z
   .string()
   .optional()
   .transform((raw, ctx) => {

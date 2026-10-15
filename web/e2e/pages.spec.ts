@@ -124,6 +124,22 @@ test.describe('GitHub Pages build (demo mode under /portfolio-tracker/)', () => 
     expect(errors.filter((e) => !isExpectedDeepLink404(e))).toEqual([]);
   });
 
+  test('a cold visit to an asset detail page works, symbols with dots and dashes included', async ({ page }) => {
+    const errors = trackErrors(page);
+    for (const [symbol, name] of [['ASML.AS', 'ASML Holding N.V.'], ['BTC-EUR', 'Bitcoin']] as const) {
+      const res = await page.goto(`${BASE}assets/${symbol}`);
+      expect(res?.status()).toBe(404);
+      await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
+      await expect(page).toHaveTitle(`${symbol} · Asset detail · Portfolio Tracker`);
+      await expect(page.getByTestId('asset-price-chart')).toBeVisible();
+      await expect(page.getByRole('region', { name: 'My positions' }).getByRole('listitem')).toBeVisible();
+    }
+    await page.goto(`${BASE}assets`);
+    await expect(page.getByRole('region', { name: 'Securities in your portfolio' }).getByRole('link', { name: 'AAPL', exact: true })).toHaveAttribute('href', `${BASE}assets/AAPL`);
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    expect(errors.filter((e) => !isExpectedDeepLink404(e))).toEqual([]);
+  });
+
   test('mutations work in memory and reset on reload', async ({ page }) => {
     await page.goto(`${BASE}transactions`);
     await expect(page.getByRole('heading', { level: 1, name: 'Transactions' })).toBeVisible();

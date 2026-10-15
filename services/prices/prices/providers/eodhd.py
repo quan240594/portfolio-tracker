@@ -24,7 +24,7 @@ from ..symbols import (
     exchange_suffix,
     price_currency_for,
 )
-from .base import as_float, chunks, clamp_range
+from .base import as_float, chunks, clamp_range, valid_isin
 from .twelvedata import asset_class_from_type
 
 log = logging.getLogger(__name__)
@@ -154,6 +154,7 @@ class EodhdProvider:
             if match.get("Country") not in (None, "", "USA")
             else country_for(symbol),
             exchange=exchange_for(symbol) or match.get("Exchange"),
+            isin=valid_isin(match.get("ISIN")),
         )
 
     def get_dividends(self, symbol: str, start: date, end: date) -> list[DividendEvent]:
