@@ -211,7 +211,7 @@ function Toolbar({ query, onQuery, includeSold, onIncludeSold }: Readonly<{ quer
       </div>
       <label htmlFor={soldId} className="flex items-center gap-2 pb-2 text-sm">
         <input id={soldId} type="checkbox" className="h-4 w-4 rounded border-slate-300 accent-brand-600" checked={includeSold} onChange={(e) => onIncludeSold(e.target.checked)} />
-        Include sold positions
+        <span>Include sold positions</span>
       </label>
     </div>
   );
