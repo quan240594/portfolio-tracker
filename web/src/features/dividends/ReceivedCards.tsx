@@ -134,11 +134,7 @@ export function ReceivedCards() {
         query={query}
         loadingLabel="Loading received dividends"
         errorTitle="Could not load dividends"
-        info={
-          <>
-            <p>Net dividends received per holding in the period selected on the left, largest first. Holdings that were sold since still show the dividends they paid.</p>
-          </>
-        }
+        info={<p>Net dividends received per holding in the period selected on the left, largest first. Holdings that were sold since still show the dividends they paid.</p>}
       >
         {(data) => <ByHolding data={data} period={period} />}
       </QueryCard>

@@ -25,7 +25,8 @@ function AverageGrowth({ data }: Readonly<{ data: DividendsOverviewResponse }>) 
   const bars = growthBars(data);
   if (bars.length === 0) return <EmptyNote>Not enough payment history yet: growth needs two full years of payments.</EmptyNote>;
   const skipped = data.holdings.length - bars.length;
-  const label = `Average annual dividend growth per share, ${bars.length} holdings: ${bars.map((b) => `${b.symbol} ${formatPercent(b.growthPct, { signed: true, digits: 1 })}`).join(', ')}.`;
+  const summary = bars.map((b) => `${b.symbol} ${formatPercent(b.growthPct, { signed: true, digits: 1 })}`).join(', ');
+  const label = `Average annual dividend growth per share, ${bars.length} holdings: ${summary}.`;
   return (
     <>
       <ChartFrame label={label} testId="growth-cagr-chart" bars={bars.length}>

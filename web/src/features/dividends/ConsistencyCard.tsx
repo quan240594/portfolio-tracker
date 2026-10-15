@@ -124,7 +124,8 @@ function Consistency({ data }: Readonly<{ data: DividendsOverviewResponse }>) {
   if (holdings.length === 0) return <EmptyNote>No dividend-paying holdings yet.</EmptyNote>;
   const counts = BADGE_ORDER.map((badge) => ({ badge, count: holdings.filter((h) => h.consistency.badge === badge).length })).filter((c) => c.count > 0);
   const slices = counts.map((c) => ({ key: c.badge, label: BADGES[c.badge].label, value: c.count, color: BADGES[c.badge].color }));
-  const label = `Holdings by payment consistency: ${counts.map((c) => `${c.count} ${BADGES[c.badge].label}`).join(', ')}.`;
+  const summary = counts.map((c) => `${c.count} ${BADGES[c.badge].label}`).join(', ');
+  const label = `Holdings by payment consistency: ${summary}.`;
   return (
     <div className="space-y-4">
       <p className="muted text-xs">Based on your payment history, not a forecast or advice.</p>

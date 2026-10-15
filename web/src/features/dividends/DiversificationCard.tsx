@@ -13,7 +13,8 @@ function Diversification({ data }: Readonly<{ data: DividendsOverviewResponse }>
   if (all.length === 0) return <EmptyNote>No expected dividend income to divide yet.</EmptyNote>;
   const total = all.reduce((s, x) => s + x.value, 0);
   const slices = topSlices(all).map((s, i) => ({ ...s, color: s.key === '__other' ? OTHER_COLOR : SERIES_COLORS[i % SERIES_COLORS.length]!, share: s.value / total }));
-  const label = `Share of forward annual dividend income by holding: ${slices.map((s) => `${s.label} ${formatWeight(s.share)}`).join(', ')}.`;
+  const summary = slices.map((s) => `${s.label} ${formatWeight(s.share)}`).join(', ');
+  const label = `Share of forward annual dividend income by holding: ${summary}.`;
   return (
     <div className="grid grid-cols-1 items-center gap-6 md:grid-cols-[14rem_minmax(0,1fr)]">
       <Donut slices={slices} label={label} testId="income-donut" />

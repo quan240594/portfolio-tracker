@@ -50,7 +50,8 @@ export interface ReceivedBucket {
 /** Net dividends received per month/quarter/year over the period, without gaps between the first bucket and today's. */
 export function receivedSeries(received: readonly DividendPayment[], period: ReceivedPeriod, granularity: Granularity, today: string): ReceivedBucket[] {
   const payments = paymentsInPeriod(received, period, today);
-  const first = payments.reduce((min, p) => (p.date < min ? p.date : min), today);
+  let first = today;
+  for (const p of payments) if (p.date < first) first = p.date;
   const start = periodStart(period, today) ?? first;
   const totals = new Map<number, number>();
   for (const p of payments) {
