@@ -30,6 +30,7 @@ import {
   type Transaction,
   type TransactionType,
 } from '@portfolio/shared';
+import { calendarSeedItems } from './calendar-seed.js';
 
 const LOCAL_ENV: Record<string, string> = {
   TABLE_NAME: 'portfolio-tracker-local',
@@ -440,6 +441,8 @@ export async function seed({ doc, tableName, userId = 'demo', today = iso(new Da
     const ev: DividendEvent = { symbol, exDate: addDays(today, exOff), payDate: addDays(today, payOff), amount, currency: inst.profile.currency };
     items.push({ ...keys.dividendEvent(symbol, ev.exDate), entityType: ENTITY.dividendEvent, ...ev });
   }
+
+  items.push(...calendarSeedItems(today, now));
 
   for (const day of fxDays) items.push({ ...keys.fxDay(day.base, day.date), entityType: ENTITY.fxDay, ...day });
   // LATEST mirrors the newest daily fixing so market values and history agree.

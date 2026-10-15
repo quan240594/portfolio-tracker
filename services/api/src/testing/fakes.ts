@@ -7,6 +7,8 @@ import type {
   InstrumentProfile,
   Portfolio,
   Quote,
+  StoredEarningsEvent,
+  StoredSplitEvent,
   Transaction,
   TransactionsChangedDetail,
 } from '@portfolio/shared';
@@ -26,6 +28,8 @@ export class InMemoryRepository implements Repository {
   fxDays: FxDay[] = [];
   eod: EodPrice[] = [];
   dividendEvents: DividendEvent[] = [];
+  earningsEvents: StoredEarningsEvent[] = [];
+  splitEvents: StoredSplitEvent[] = [];
   users = new Set<string>();
   tracked = new Map<string, string>();
   imports = new Map<string, ImportStatus>();
@@ -94,6 +98,10 @@ export class InMemoryRepository implements Repository {
   }
   getDividendEvents(symbol: string) {
     return Promise.resolve(this.dividendEvents.filter((e) => e.symbol === symbol));
+  }
+  getCalendarEvents(symbols: string[], from: string, to: string) {
+    const inRange = (e: { symbol: string; date: string }) => symbols.includes(e.symbol) && e.date >= from && e.date <= to;
+    return Promise.resolve({ earnings: this.earningsEvents.filter(inRange), splits: this.splitEvents.filter(inRange) });
   }
   registerUser(userId: string) {
     this.users.add(userId);

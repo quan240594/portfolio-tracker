@@ -21,11 +21,13 @@ import { AuthProvider } from './features/auth/AuthProvider';
 // Charts and calculators of the analytics page stay out of the main bundle until it is visited.
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
 const GoalsPage = lazy(() => import('./pages/GoalsPage'));
+const CalendarPage = lazy(() => import('./pages/CalendarPage').then((m) => ({ default: m.CalendarPage })));
 
 const TITLES: Record<string, string> = {
   '/': 'Dashboard',
   '/holdings': 'Holdings',
   '/dividends': 'Dividends',
+  '/calendar': 'Calendar',
   '/transactions': 'Transactions',
   '/analytics': 'Analytics',
   '/goals': 'Goals',
@@ -65,6 +67,14 @@ export const routes: RouteObject[] = [
       { index: true, element: <DashboardPage /> },
       { path: 'holdings', element: <HoldingsPage /> },
       { path: 'dividends', element: <DividendsPage /> },
+      {
+        path: 'calendar',
+        element: (
+          <Suspense fallback={<LoadingRegion label="Loading calendar"><Skeleton className="h-96 w-full" /></LoadingRegion>}>
+            <CalendarPage />
+          </Suspense>
+        ),
+      },
       { path: 'transactions', element: <TransactionsPage /> },
       {
         path: 'analytics',

@@ -135,3 +135,14 @@ FX_PROVIDER=frankfurter .venv/bin/python -m prices.local fx-backfill   # real EC
 
 Defaults: `AWS_ENDPOINT_URL=http://localhost:4566`, `TABLE_NAME`/`EVENT_BUS_NAME=portfolio-tracker-local`,
 region `eu-west-1`, dummy credentials, `MARKET_DATA_PROVIDER=mock`; any env var you set wins.
+
+### Calendar refresh (`prices.calendar_handlers.calendar_refresh`)
+
+A third Lambda from the same zip (daily EventBridge Scheduler, see `infra/terraform/calendar.tf`): one Alpha Vantage
+`EARNINGS_CALENDAR` call for every tracked US ticker → `EARN#{date}` items, then splits (and a dividend re-check) for a
+budgeted, round-robin subset of the tracked tickers via EODHD → `SPLIT#{date}` / `DIV#{exDate}` items. Budgets are per UTC
+day and persisted in DynamoDB (`CALENDAR_ALPHAVANTAGE_DAILY_CALLS` default 1, `CALENDAR_EODHD_DAILY_CALLS` default 8,
+`CALENDAR_RECHECK_DAYS` default 7, `CALENDAR_EARNINGS_HORIZON` default `12month`, `CALENDAR_REFRESH_DIVIDENDS` default
+`true`). Code: `calendar_config.py`, `calendar_models.py` (item shapes), `calendar_providers.py` (sources, mock),
+`calendar_repository.py`, `calendar_handlers.py`. Locally: `python -m prices.calendar_handlers`. Design, free-tier research and
+coverage gaps: [docs/architecture.md](../../docs/architecture.md#calendar).

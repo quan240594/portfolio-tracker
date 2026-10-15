@@ -17,6 +17,7 @@ import { analyticsHandlers } from './analyticsHandlers';
 import { dividendsOverviewHandlers } from './dividendsOverviewHandlers';
 import { growthHandlers } from './growthHandlers';
 import { goalsHandlers } from './goals-handlers';
+import { calendarHandlers } from './calendarHandlers';
 import { categoryAllocation, managementHandlers } from './management-handlers';
 import { api, errorResponse, guard, latency } from './utils';
 
@@ -35,6 +36,7 @@ export const handlers: HttpHandler[] = [
   ...analyticsHandlers,
   ...dividendsOverviewHandlers,
   ...growthHandlers,
+  ...calendarHandlers,
   http.get(api('/health'), () => HttpResponse.json({ status: 'ok' })),
 
   http.get(api('/portfolios'), async () => {
