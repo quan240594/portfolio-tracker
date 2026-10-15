@@ -149,9 +149,9 @@ describe('EventList', () => {
     expect(headings.map((h) => h.textContent)).toEqual(['donderdag 15 oktober 2026Today', 'dinsdag 20 oktober 2026']);
     const first = screen.getByRole('region', { name: /donderdag 15 oktober 2026/ });
     expect(within(first).getAllByRole('listitem')).toHaveLength(2);
-    expect(first).toHaveTextContent('Paid');
+    expect(first).toHaveTextContent('Received');
     expect(first).toHaveTextContent('Estimated');
-    expect(within(first).getByText('Received', { exact: false })).toBeInTheDocument();
+    expect(within(first).getAllByText('Received', { exact: false })).toHaveLength(2);
     await userEvent.click(within(first).getByRole('button', { name: /AAPL, Earnings, estimated/ }));
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'b' }));
   });

@@ -1,14 +1,14 @@
-import { Bar, BarChart, CartesianGrid, Legend, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, CartesianGrid, ComposedChart, Legend, LabelList, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { CalendarMonth, CalendarSummary } from '@portfolio/shared';
 import { KpiCard } from '../../components/KpiCard';
 import { chartTheme } from '../../components/charts/palette';
-import { compactMoneyTick, moneyTooltip, monthLabel } from '../../components/charts/chartFormatters';
+import { compactMoneyTick } from '../../components/charts/chartFormatters';
 import { LoadingRegion, Skeleton } from '../../components/Skeleton';
 import { formatMoney, formatMonth, formatPercent } from '../../lib/format';
 import { useTheme } from '../../theme/ThemeProvider';
-
-const SERIES_NAMES: Readonly<Record<string, string>> = { paid: 'Paid', declared: 'Declared', estimated: 'Estimated' };
-export const seriesName = (key: unknown): string => SERIES_NAMES[String(key)] ?? String(key);
+import { incomeColours } from './calendarColours';
+import { IncomeTooltip, legendLabel } from './IncomeTooltip';
+import { incomeRows, seriesName, useNarrowScreen } from './incomeChartModel';
 
 export function CalendarKpis({ summary, currency, loading }: Readonly<{ summary?: CalendarSummary; currency: string; loading: boolean }>) {
   return (
@@ -21,38 +21,34 @@ export function CalendarKpis({ summary, currency, loading }: Readonly<{ summary?
   );
 }
 
-/** Income by month: paid (solid), declared (outlined) and estimated (hatched), with the monthly average as a line. */
+/** Income by month, stacked: received (green), declared (blue) and estimated (yellow, dashed outline); dashed average line. */
 export function IncomeChart({ monthly, average, currency }: Readonly<{ monthly: readonly CalendarMonth[]; average: number; currency: string }>) {
   const { theme } = useTheme();
+  const narrow = useNarrowScreen();
   const c = chartTheme(theme);
+  const colours = incomeColours(theme);
+  const rows = incomeRows(monthly, currency, narrow);
   const total = monthly.reduce((s, m) => s + m.total, 0);
   const label = `Dividend income per month over ${monthly.length} months: ${formatMoney(total, currency)} in total, ${formatMoney(average, currency)} on average.`;
+  const tooltip = <IncomeTooltip currency={currency} colours={colours} background={c.tooltipBg} border={c.tooltipBorder} text={c.text} />;
   return (
     <figure className="m-0">
-      <div role="img" aria-label={label} className="h-64 w-full" data-testid="calendar-income-chart">
+      <div role="img" aria-label={label} className="h-72 w-full" data-testid="calendar-income-chart">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={monthly as CalendarMonth[]} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-            <defs>
-              <pattern id="calendar-estimated" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
-                <rect width="6" height="6" fill={c.upcoming} fillOpacity={0.22} />
-                <line x1="0" y1="0" x2="0" y2="6" stroke={c.upcoming} strokeWidth="2.5" />
-              </pattern>
-            </defs>
+          <ComposedChart data={rows} margin={{ top: 22, right: 30, bottom: 0, left: 0 }}>
             <CartesianGrid stroke={c.grid} vertical={false} />
             <XAxis dataKey="month" tickFormatter={formatMonth} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
             <YAxis tickFormatter={compactMoneyTick(currency)} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={52} />
-            <Tooltip
-              cursor={{ fill: c.grid, opacity: 0.5 }}
-              contentStyle={{ background: c.tooltipBg, border: `1px solid ${c.tooltipBorder}`, borderRadius: 8, color: c.text, fontSize: 12 }}
-              labelFormatter={monthLabel}
-              formatter={moneyTooltip(currency, seriesName)}
-            />
-            <Legend formatter={seriesName} wrapperStyle={{ fontSize: 12 }} />
-            <Bar dataKey="paid" stackId="income" fill={c.received} isAnimationActive={false} />
-            <Bar dataKey="declared" stackId="income" fill={c.value} fillOpacity={0.35} stroke={c.value} strokeWidth={1.5} isAnimationActive={false} />
-            <Bar dataKey="estimated" stackId="income" fill="url(#calendar-estimated)" stroke={c.upcoming} strokeDasharray="3 2" radius={[4, 4, 0, 0]} isAnimationActive={false} />
-            <ReferenceLine y={average} stroke={c.text} strokeDasharray="5 4" label={{ value: 'Average', position: 'insideTopLeft', fill: c.text, fontSize: 11 }} />
-          </BarChart>
+            <Tooltip cursor={{ fill: c.grid, opacity: 0.5 }} content={tooltip} />
+            <Legend formatter={legendLabel} wrapperStyle={{ fontSize: 12 }} />
+            <Bar dataKey="paid" stackId="income" fill={colours.paid.fill} stroke={colours.paid.stroke} strokeWidth={1} isAnimationActive={false} />
+            <Bar dataKey="declared" stackId="income" fill={colours.declared.fill} stroke={colours.declared.stroke} strokeWidth={1} isAnimationActive={false} />
+            <Bar dataKey="estimated" stackId="income" fill={colours.estimated.fill} stroke={colours.estimated.stroke} strokeWidth={1.5} strokeDasharray="4 2" isAnimationActive={false} />
+            <Line dataKey="total" stroke="none" dot={false} activeDot={false} legendType="none" tooltipType="none" isAnimationActive={false}>
+              <LabelList dataKey="label" position="top" fill={c.text} fontSize={10} />
+            </Line>
+            <ReferenceLine y={average} stroke={c.text} strokeDasharray="5 4" label={{ value: 'avg', position: 'right', fill: c.text, fontSize: 11 }} />
+          </ComposedChart>
         </ResponsiveContainer>
       </div>
       <figcaption className="sr-only">Dividend income per month</figcaption>
@@ -61,9 +57,9 @@ export function IncomeChart({ monthly, average, currency }: Readonly<{ monthly: 
         <thead>
           <tr>
             <th scope="col">Month</th>
-            <th scope="col">Paid</th>
-            <th scope="col">Declared</th>
-            <th scope="col">Estimated</th>
+            <th scope="col">{seriesName('paid')}</th>
+            <th scope="col">{seriesName('declared')}</th>
+            <th scope="col">{seriesName('estimated')}</th>
           </tr>
         </thead>
         <tbody>

@@ -845,8 +845,14 @@ earnings and splits.
 ### Web
 
 `/calendar` (`web/src/pages/CalendarPage.tsx`, `web/src/features/calendar/`): month navigator, range (this month / next 12
-months, the latter as a list), event-type toggles with colour **and** shape **and** letter (E, P, R, S, C), status toggles, scope select, a
+months, the latter as a list), event-type toggles with a marker shape **and** letter (E, P, R, S, C; one neutral colour), status toggles, scope select, a
 Calendar/List toggle (list is the default below 640 px), a Monday-first month grid built as a real `<table>` (buttons inside cells, "+N more"
-opens the day), the month's expected dividends, four KPIs, a 12-month paid/declared/estimated chart with the average line,
+opens the day), the month's expected dividends, four KPIs, a 12-month received/declared/estimated stacked chart (value label per bar, dashed `avg` line, per-status tooltip),
 event dialogs and a coverage `<details>`. View, month, range and filters live in the URL; type/status/scope filters apply
 client-side to one loaded range, the `.ics` download sends them to the API. Amounts follow the portfolio scope selector.
+
+**Colour language.** The *status* carries the colour everywhere on the page (chips, list rows, status filters, chart,
+legend, tooltip); the event *type* is told by marker shape and letter. `PAID` is shown as **Received** (pastel green, `#dcfce7`
+fill / `#14532d` text), `ESTIMATED` as **Estimated** (pastel yellow, `#fef9c3` / `#422006`, always with a dashed outline and italic
+chip text so colour is never the only cue), `CONFIRMED` as **Confirmed** / **Declared** (pastel blue, `#dbeafe` / `#1e3a8a`);
+dark theme uses muted fills with light text (all text ≥ 4.5:1, see `calendarColours.ts`). The API enum values are unchanged.

@@ -36,51 +36,47 @@ export interface EventMeta {
   /** One letter inside the marker, so colour is never the only signal. */
   letter: string;
   shape: MarkerShape;
-  /** Tailwind classes of the chip / row accent (border + background + text), light and dark. */
-  accent: string;
   /** Fill of the marker shape. */
   fill: string;
 }
+
+/** One neutral marker colour: the type is told by shape and letter, the colours are reserved for the status. */
+const MARKER_FILL = 'fill-slate-700 dark:fill-slate-200';
 
 export const EVENT_META: Readonly<Record<CalendarEventType, EventMeta>> = {
   EX_DIVIDEND: {
     label: 'Ex-dividend',
     letter: 'E',
     shape: 'circle',
-    accent: 'border-amber-500 bg-amber-50 text-amber-950 dark:border-amber-400 dark:bg-amber-950/40 dark:text-amber-100',
-    fill: 'fill-amber-600 dark:fill-amber-400',
+    fill: MARKER_FILL,
   },
   DIVIDEND_PAY: {
     label: 'Dividend payment',
     letter: 'P',
     shape: 'square',
-    accent: 'border-emerald-600 bg-emerald-50 text-emerald-950 dark:border-emerald-400 dark:bg-emerald-950/40 dark:text-emerald-100',
-    fill: 'fill-emerald-600 dark:fill-emerald-400',
+    fill: MARKER_FILL,
   },
   EARNINGS: {
     label: 'Earnings',
     letter: 'R',
     shape: 'diamond',
-    accent: 'border-indigo-500 bg-indigo-50 text-indigo-950 dark:border-indigo-400 dark:bg-indigo-950/40 dark:text-indigo-100',
-    fill: 'fill-indigo-600 dark:fill-indigo-400',
+    fill: MARKER_FILL,
   },
   SPLIT: {
     label: 'Stock split',
     letter: 'S',
     shape: 'triangle',
-    accent: 'border-sky-500 bg-sky-50 text-sky-950 dark:border-sky-400 dark:bg-sky-950/40 dark:text-sky-100',
-    fill: 'fill-sky-600 dark:fill-sky-400',
+    fill: MARKER_FILL,
   },
   CORPORATE_ACTION: {
     label: 'Corporate action',
     letter: 'C',
     shape: 'hexagon',
-    accent: 'border-rose-500 bg-rose-50 text-rose-950 dark:border-rose-400 dark:bg-rose-950/40 dark:text-rose-100',
-    fill: 'fill-rose-600 dark:fill-rose-400',
+    fill: MARKER_FILL,
   },
 };
 
-export const STATUS_LABELS: Readonly<Record<CalendarStatus, string>> = { CONFIRMED: 'Confirmed', ESTIMATED: 'Estimated', PAID: 'Paid' };
+export const STATUS_LABELS: Readonly<Record<CalendarStatus, string>> = { CONFIRMED: 'Confirmed', ESTIMATED: 'Estimated', PAID: 'Received' };
 export const SCOPE_LABELS: Readonly<Record<CalendarScope, string>> = { holdings: 'My holdings', watchlist: 'Watchlist', all: 'Holdings and watchlist' };
 
 const SOURCE_LABELS: Readonly<Record<string, string>> = {

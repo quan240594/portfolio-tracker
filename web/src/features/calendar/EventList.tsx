@@ -1,16 +1,9 @@
 import type { CalendarEvent } from '@portfolio/shared';
 import { formatDate } from '../../lib/format';
-import { EVENT_META, STATUS_LABELS, eventAriaLabel, groupByDate, isEstimated } from './calendarModel';
+import { STATUS_LABELS, eventAriaLabel, groupByDate } from './calendarModel';
+import { STATUS_CHIP, chipClasses } from './calendarColours';
 import { EventMarker } from './EventMarker';
 import { eventDetailLine, expectedLabel } from './eventText';
-
-const DASHED_ROW = 'border border-l-4 border-dashed [border-left-style:solid]';
-
-const STATUS_BADGE: Record<CalendarEvent['status'], string> = {
-  CONFIRMED: 'border-slate-300 text-slate-600 dark:border-slate-700 dark:text-slate-300',
-  ESTIMATED: 'border-dashed border-slate-400 text-slate-600 dark:border-slate-500 dark:text-slate-300',
-  PAID: 'border-emerald-600 bg-emerald-50 text-emerald-800 dark:border-emerald-500 dark:bg-emerald-950/40 dark:text-emerald-200',
-};
 
 interface RowProps {
   event: CalendarEvent;
@@ -27,7 +20,8 @@ export function EventRow({ event, baseCurrency, onSelect }: Readonly<RowProps>) 
         type="button"
         onClick={() => onSelect(event)}
         aria-label={eventAriaLabel(event, amount)}
-        className={`flex w-full items-center gap-3 rounded-lg border-l-4 px-3 py-2 text-left text-sm hover:brightness-95 ${EVENT_META[event.type].accent} ${isEstimated(event) ? DASHED_ROW : ''}`}
+        className={`flex w-full items-center gap-3 rounded-lg border-l-4 px-3 py-2 text-left text-sm hover:brightness-95 ${chipClasses(event.status)}`}
+        data-status={event.status}
       >
         <EventMarker type={event.type} className="h-5 w-5" />
         <span className="min-w-0 flex-1">
@@ -43,7 +37,7 @@ export function EventRow({ event, baseCurrency, onSelect }: Readonly<RowProps>) 
               {amount}
             </span>
           )}
-          <span className={`rounded-full border px-2 py-px text-[11px] font-medium ${STATUS_BADGE[event.status]}`}>{STATUS_LABELS[event.status]}</span>
+          <span className={`rounded-full border px-2 py-px text-[11px] font-medium ${STATUS_CHIP[event.status]} ${event.status === 'ESTIMATED' ? 'border-dashed' : ''}`}>{STATUS_LABELS[event.status]}</span>
         </span>
       </button>
     </li>

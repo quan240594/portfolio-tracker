@@ -1,14 +1,12 @@
 import { addIsoDays, calendarMonthOf, type CalendarEvent } from '@portfolio/shared';
 import { formatDate } from '../../lib/format';
 import { EVENT_META, eventAriaLabel, isDividend, isEstimated, monthGrid } from './calendarModel';
+import { chipClasses } from './calendarColours';
 import { EventMarker } from './EventMarker';
 import { expectedLabel } from './eventText';
 
 /** Chips shown per day before the rest collapses into "+N more". */
 export const MAX_CHIPS_PER_DAY = 3;
-
-/** Estimated: dashed outline and italic text, keeping the solid accent bar on the left. */
-export const DASHED = 'border border-l-4 border-dashed [border-left-style:solid] italic';
 
 const MONDAY = '2024-01-01';
 const WEEKDAYS = Array.from({ length: 7 }, (_, i) => addIsoDays(MONDAY, i));
@@ -21,7 +19,7 @@ interface ChipProps {
 
 function EventChip({ event, baseCurrency, onSelect }: Readonly<ChipProps>) {
   const amount = isDividend(event) ? expectedLabel(event, baseCurrency) : undefined;
-  const dashed = isEstimated(event) ? DASHED : '';
+  const italic = isEstimated(event) ? 'italic' : '';
   const title = [event.symbol, EVENT_META[event.type].label, amount].filter(Boolean).join(' · ');
   return (
     <button
@@ -29,7 +27,8 @@ function EventChip({ event, baseCurrency, onSelect }: Readonly<ChipProps>) {
       onClick={() => onSelect(event)}
       aria-label={eventAriaLabel(event, amount)}
       title={title}
-      className={`flex w-full min-w-0 items-center gap-1 rounded border-l-4 px-1 py-0.5 text-left text-xs leading-tight hover:brightness-95 ${EVENT_META[event.type].accent} ${dashed}`}
+      className={`flex w-full min-w-0 items-center gap-1 rounded border-l-4 px-1 py-1.5 text-left sm:py-0.5 text-xs leading-tight hover:brightness-95 ${chipClasses(event.status)} ${italic}`}
+      data-status={event.status}
     >
       <EventMarker type={event.type} className="h-3.5 w-3.5" />
       <span className="truncate font-semibold">{event.symbol}</span>
@@ -57,7 +56,7 @@ function DayCell({ date, month, today, events, baseCurrency, onSelectEvent, onSe
   const dayNumber = isToday ? 'bg-brand-600 text-white' : 'text-slate-700 dark:text-slate-300';
 
   return (
-    <td className={`h-28 min-w-0 border border-slate-200 p-1 align-top dark:border-slate-800 ${background} ${inMonth ? '' : 'opacity-70'}`} data-date={date}>
+    <td className={`h-32 min-w-0 sm:h-28 border border-slate-200 p-1 align-top dark:border-slate-800 ${background} ${inMonth ? '' : 'opacity-70'}`} data-date={date}>
       <div className="mb-1 flex justify-end">
         <span aria-current={isToday ? 'date' : undefined} className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-xs font-semibold ${dayNumber}`}>
           <span aria-hidden="true">{formatDate(date, { day: 'numeric' })}</span>
@@ -73,7 +72,7 @@ function DayCell({ date, month, today, events, baseCurrency, onSelectEvent, onSe
             type="button"
             onClick={() => onSelectDay(date)}
             aria-label={`${hidden} more on ${formatDate(date, { day: 'numeric', month: 'long' })}`}
-            className="rounded px-1 py-0.5 text-left text-xs font-medium text-brand-700 hover:bg-slate-100 dark:text-brand-400 dark:hover:bg-slate-800"
+            className="rounded px-1 py-1.5 text-left text-xs font-medium text-brand-700 sm:py-0.5 hover:bg-slate-100 dark:text-brand-400 dark:hover:bg-slate-800"
           >
             +{hidden} more
           </button>
@@ -100,8 +99,9 @@ export function MonthGrid({ month, today, events, baseCurrency, onSelectEvent, o
   const monthLabel = formatDate(`${month}-01`, { month: 'long', year: 'numeric' });
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[42rem] table-fixed border-collapse">
+    // `relative` makes the wrapper the containing block of the sr-only (absolute) texts, so they are clipped with the table instead of widening the page.
+    <div className="relative overflow-x-auto">
+      <table className="w-full min-w-[49rem] table-fixed border-collapse">
         <caption className="sr-only">{`Calendar events in ${monthLabel}, Monday to Sunday`}</caption>
         <thead>
           <tr>

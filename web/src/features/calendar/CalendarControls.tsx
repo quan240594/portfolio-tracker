@@ -2,6 +2,7 @@ import { useId } from 'react';
 import { CALENDAR_EVENT_TYPES, CALENDAR_SCOPES, CALENDAR_STATUSES, calendarMonthOf, type CalendarEventType, type CalendarScope, type CalendarStatus } from '@portfolio/shared';
 import { formatDate } from '../../lib/format';
 import { EVENT_META, SCOPE_LABELS, STATUS_LABELS, shiftMonth, type CalendarRange, type CalendarUiState, type CalendarView } from './calendarModel';
+import { STATUS_CHIP } from './calendarColours';
 import { EventMarker } from './EventMarker';
 
 interface ToggleOption<T extends string> {
@@ -49,7 +50,7 @@ export function TypeFilter({ value, onChange }: Readonly<{ value: readonly Calen
       <div className="flex flex-wrap gap-1.5">
         {CALENDAR_EVENT_TYPES.map((type) => {
           const checked = value.includes(type);
-          const accent = checked ? EVENT_META[type].accent : 'border-slate-300 dark:border-slate-700';
+          const accent = checked ? 'border-slate-500 bg-slate-100 dark:bg-slate-800' : 'border-slate-300 dark:border-slate-700';
           return (
             <CheckPill key={type} checked={checked} onChange={() => onChange(toggled(value, type, CALENDAR_EVENT_TYPES))} className={accent}>
               <EventMarker type={type} className="h-3.5 w-3.5" />
@@ -70,7 +71,7 @@ export function StatusFilter({ value, onChange }: Readonly<{ value: readonly Cal
         {CALENDAR_STATUSES.map((status) => {
           const checked = value.includes(status);
           const dashed = status === 'ESTIMATED' ? 'border-dashed' : '';
-          const base = checked ? 'border-slate-500 bg-slate-100 dark:bg-slate-800' : 'border-slate-300 dark:border-slate-700';
+          const base = checked ? STATUS_CHIP[status] : 'border-slate-300 dark:border-slate-700';
           return (
             <CheckPill key={status} checked={checked} onChange={() => onChange(toggled(value, status, CALENDAR_STATUSES))} className={`${base} ${dashed}`}>
               {STATUS_LABELS[status]}

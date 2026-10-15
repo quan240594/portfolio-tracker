@@ -5,7 +5,10 @@ import type { CalendarMonth, CalendarSummary } from '@portfolio/shared';
 import { ThemeProvider } from '../../theme/ThemeProvider';
 import { renderWithProviders, sp } from '../../test/utils';
 import { FilterBar, MonthNavigator, ScopeSelect, StatusFilter, ToggleGroup, TypeFilter, ViewToolbar } from './CalendarControls';
-import { CalendarKpis, CoverageNotes, IncomeChart, IncomeChartCard, seriesName } from './CalendarOverview';
+import { CalendarKpis, CoverageNotes, IncomeChart, IncomeChartCard } from './CalendarOverview';
+import { IncomeTooltip, legendLabel } from './IncomeTooltip';
+import { chipClasses, incomeColours } from './calendarColours';
+import { incomeRows, seriesName, shortAmount } from './incomeChartModel';
 import { parseCalendarState, type CalendarUiState } from './calendarModel';
 
 const TODAY = '2026-10-15';
@@ -58,7 +61,7 @@ describe('filters', () => {
         <ScopeSelect value="all" onChange={onScope} />
       </>,
     );
-    await userEvent.click(screen.getByRole('checkbox', { name: 'Paid' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Received' }));
     expect(onStatus).toHaveBeenCalledWith(['CONFIRMED', 'PAID']);
     await userEvent.click(screen.getByRole('checkbox', { name: 'Confirmed' }));
     expect(onStatus).toHaveBeenLastCalledWith([]);
@@ -170,10 +173,67 @@ describe('CalendarOverview', () => {
   });
 
   it('names the chart series', () => {
-    expect(seriesName('paid')).toBe('Paid');
+    expect(seriesName('paid')).toBe('Received');
     expect(seriesName('declared')).toBe('Declared');
     expect(seriesName('estimated')).toBe('Estimated');
     expect(seriesName('other')).toBe('other');
+    render(legendLabel('paid'));
+    expect(screen.getByText('Received')).toHaveClass('text-slate-700');
+  });
+
+  it('labels bars with a short amount, hiding zero bars and, on narrow screens, every other bar', () => {
+    const rows = [
+      { month: '2026-08', paid: 0, declared: 0, estimated: 0, total: 0 },
+      { month: '2026-09', paid: 56, declared: 0, estimated: 0, total: 56 },
+      { month: '2026-10', paid: 0, declared: 0, estimated: 1234, total: 1234 },
+      { month: '2026-11', paid: 0, declared: 0, estimated: 7, total: 7 },
+    ];
+    expect(incomeRows(rows, 'EUR', false).map((r) => sp(r.label))).toEqual(['', '€ 56', '€ 1,2K', '€ 7']);
+    expect(incomeRows(rows, 'EUR', true).map((r) => sp(r.label))).toEqual(['', '', '€ 1,2K', '']);
+    expect(sp(shortAmount(55.6, 'EUR'))).toBe('€ 56');
+  });
+
+  it('uses the narrow-screen media query for the chart labels', () => {
+    const original = globalThis.matchMedia;
+    globalThis.matchMedia = ((query: string) => ({ matches: true, media: query, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof matchMedia;
+    try {
+      render(
+        <ThemeProvider>
+          <IncomeChart monthly={monthly} average={45.08} currency="EUR" />
+        </ThemeProvider>,
+      );
+      expect(screen.getByTestId('calendar-income-chart')).toBeInTheDocument();
+    } finally {
+      globalThis.matchMedia = original;
+    }
+  });
+
+  it('lists every status and the total in the month tooltip', () => {
+    const props = { currency: 'EUR', colours: incomeColours('light'), background: '#fff', border: '#ccc', text: '#000' };
+    const row = monthly[1]!;
+    const { rerender } = render(<IncomeTooltip {...props} active payload={[{ payload: row }]} />);
+    const tip = screen.getByTestId('calendar-income-tooltip');
+    expect(tip).toHaveTextContent('Received');
+    expect(tip).toHaveTextContent('Declared');
+    expect(tip).toHaveTextContent('Estimated');
+    expect(tip).toHaveTextContent(sp('€ 20,00'));
+    expect(tip).toHaveTextContent(`Total${sp('€ 25,00')}`);
+    rerender(<IncomeTooltip {...props} active={false} payload={[{ payload: row }]} />);
+    expect(screen.queryByTestId('calendar-income-tooltip')).not.toBeInTheDocument();
+    rerender(<IncomeTooltip {...props} active payload={[]} />);
+    expect(screen.queryByTestId('calendar-income-tooltip')).not.toBeInTheDocument();
+  });
+
+  it('colours statuses green, yellow (dashed) and blue in both themes', () => {
+    expect(chipClasses('PAID')).toContain('bg-[#dcfce7]');
+    expect(chipClasses('ESTIMATED')).toContain('bg-[#fef9c3]');
+    expect(chipClasses('ESTIMATED')).toContain('border-dashed');
+    expect(chipClasses('CONFIRMED')).toContain('bg-[#dbeafe]');
+    expect(chipClasses('PAID')).not.toContain('border-dashed');
+    expect(incomeColours('light').paid.fill).toBe('#86d9a0');
+    expect(incomeColours('light').estimated.fill).toBe('#fde68a');
+    expect(incomeColours('dark').paid.stroke).toBe('#6ee7a0');
+    expect(incomeColours('dark').estimated.stroke).toBe('#facc15');
   });
 
   it('shows a skeleton until the income data is there', () => {

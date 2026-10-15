@@ -134,3 +134,25 @@ test.describe('Calendar on a phone', () => {
     await expect(page.getByRole('dialog')).toBeVisible();
   });
 });
+
+test.describe('Calendar page width on narrow screens', () => {
+  for (const width of [390, 320]) {
+    for (const view of ['calendar', 'list']) {
+      test(`the page never scrolls horizontally at ${width}px in the ${view} view`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 800 });
+        await page.goto(`/calendar?view=${view}`);
+        await expect(page.getByTestId('calendar-income-chart')).toBeVisible();
+        await expect(events(page).getByRole(view === 'calendar' ? 'table' : 'heading').first()).toBeVisible();
+        const { scrollWidth, innerWidth } = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth }));
+        expect(scrollWidth).toBeLessThanOrEqual(innerWidth);
+        if (view === 'calendar') {
+          // The grid scrolls inside its own wrapper and its events stay reachable.
+          const wrapper = events(page).getByRole('table').locator('xpath=..');
+          expect(await wrapper.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+          await events(page).getByRole('table').getByRole('button').first().scrollIntoViewIfNeeded();
+          expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(innerWidth);
+        }
+      });
+    }
+  }
+});
