@@ -161,6 +161,22 @@ describe('calculateDividendGrowth', () => {
   it('gives no growth across a gap year and handles no dividends', () => {
     const gap = calculateDividendGrowth([div('2023-05-01', { fee: 0 }), div('2025-05-01', { fee: 0 })], timeline, TODAY);
     expect(gap.byYear.map((y) => y.yoyPct)).toEqual([null, null]);
-    expect(calculateDividendGrowth([tx({})], timeline, TODAY)).toEqual({ baseCurrency: 'EUR', byYear: [], byMonth: [], perShare: [] });
+    expect(calculateDividendGrowth([tx({})], timeline, TODAY)).toEqual({
+      baseCurrency: 'EUR',
+      byYear: [],
+      byMonth: [],
+      perShare: [],
+      growthStats: { asOf: TODAY, qoq: null, yoy: null, cagr: null },
+    });
+  });
+
+  it('adds growth stats built from the same monthly totals', () => {
+    // 2026-04-01: latest complete quarter Q1 2026 (15) vs Q4 2025 (0); first complete year 2024 (10) → 2025 (38)
+    expect(g.growthStats).toMatchObject({
+      asOf: '2026-04-01',
+      qoq: { current: { from: '2026-01', to: '2026-03', amount: 15 }, previous: { amount: 0 }, change: 15, pct: null },
+      yoy: { basis: 'TTM', current: { from: '2025-04', to: '2026-03', amount: 27 }, previous: { from: '2024-04', to: '2025-03', amount: 26 }, change: 1, pct: 3.85 },
+      cagr: { startYear: 2024, endYear: 2025, startAmount: 10, endAmount: 38, years: 1, pct: 280 },
+    });
   });
 });

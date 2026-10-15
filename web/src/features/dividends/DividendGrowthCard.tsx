@@ -6,6 +6,7 @@ import { formatMoney } from '../../lib/format';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
 import { ChartDataTable, ChartFrame, useDividendTheme } from './chartParts';
 import { EmptyNote, QueryCard } from './DividendCard';
+import { GrowthStats } from './GrowthStats';
 import { yearComparison } from './receivedSeries';
 
 /** Colour of a year, newest first: the current year stands out, earlier years fade. */
@@ -39,6 +40,7 @@ function YearColumns({ data }: Readonly<{ data: AnalyticsDividendGrowthResponse 
           </BarChart>
         </ResponsiveContainer>
       </ChartFrame>
+      {data.growthStats && <GrowthStats stats={data.growthStats} currency={ccy} />}
       <ChartDataTable
         caption="Dividends received per calendar month and year"
         columns={['Month', ...years]}
@@ -63,6 +65,7 @@ export function DividendGrowthCard() {
         <>
           <p>Net dividends received in each calendar month, with the last three years side by side (years without payments are left out), so you can see how each month grows.</p>
           <p>Source: your DIVIDEND transactions, converted to EUR at the rate of the payment date. The current year is incomplete.</p>
+          <p>Below the chart: quarter over quarter, year over year and the all-time compound growth of the dividends you received. Only complete periods count; see each figure for how it is calculated.</p>
         </>
       }
     >

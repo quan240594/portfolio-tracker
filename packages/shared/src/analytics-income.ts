@@ -1,6 +1,7 @@
 /** Passive-income forecast and dividend growth, derived from DIVIDEND transactions and announced events. */
 import { FxTimeline } from './fx.js';
 import { addIsoDays, daysBetween, DAYS_PER_YEAR, ratioToPct, roundTo, transactionAmount } from './analytics.js';
+import { calculateDividendGrowthStats, type DividendGrowthStats } from './dividend-growth-stats.js';
 import type { DividendEvent, Holding, Transaction } from './types.js';
 
 // --- Passive income --------------------------------------------------------------------------------
@@ -176,6 +177,8 @@ export interface DividendGrowth {
   /** Every month from the first to the last payment (gaps filled with 0). */
   byMonth: DividendMonth[];
   perShare: DividendPerShareSeries[];
+  /** QoQ, YoY and CAGR of the net amounts in `byMonth`; absent in responses of older servers. */
+  growthStats?: DividendGrowthStats;
 }
 
 const growthPct = (current: number, previous: number | undefined): number | null =>
@@ -236,6 +239,7 @@ export function calculateDividendGrowth(transactions: readonly Transaction[], ti
     sumInto(monthTotals, t.date.slice(0, 7), amount);
   }
   const currentYear = today.slice(0, 4);
+  const byMonth = monthRows(monthTotals);
   return {
     baseCurrency: timeline.base,
     byYear: [...yearTotals.entries()]
@@ -247,7 +251,8 @@ export function calculateDividendGrowth(transactions: readonly Transaction[], ti
         yoyPct: growthPct(total, yearTotals.get(previousYear(year))),
         partial: year === currentYear,
       })),
-    byMonth: monthRows(monthTotals),
+    byMonth,
     perShare: perShareSeries(dividends, currentYear),
+    growthStats: calculateDividendGrowthStats(new Map(byMonth.map((m) => [m.month, m.total])), today),
   };
 }

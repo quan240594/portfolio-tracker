@@ -52,8 +52,15 @@ export const INSTRUMENTS: InstrumentSeed[] = [
 export const STALE_SYMBOLS = new Set(['IWDA.AS']);
 
 const HISTORY_DAYS = 400;
+/**
+ * Prices, FX fixings and the user's long-held dividend payers reach back this far (3+ years), so the Dividends page can
+ * show year-over-year and compound growth. The newest `HISTORY_DAYS` are generated exactly as before.
+ */
+const LONG_HISTORY_DAYS = 1_200;
 /** Past dividend events reach further back than the transactions, like the ~2 years the data provider returns. */
 const EVENT_HISTORY_DAYS = 900;
+/** Days ago the demo's first (long-term) holdings were bought and funded. */
+const FIRST_BUY_DAYS_AGO = { deposit: 1_160, AAPL: 1_150, MSFT: 1_130, KO: 1_110, VWRL: 1_100, JNJ: 1_090, JNJ_SPLIT: 1_080 } as const;
 
 /**
  * EUR/USD (USD per 1 EUR) drifts from ~1.04 a year ago to ~1.17 today: the euro strengthened, so US
@@ -130,7 +137,7 @@ function buildEod(seed: InstrumentSeed, today: string): EodPrice[] {
   const prices: EodPrice[] = [];
   let price = seed.price;
   const dailyDrift = seed.annualDrift / 365;
-  for (let i = 0; i <= HISTORY_DAYS; i++) {
+  for (let i = 0; i <= LONG_HISTORY_DAYS; i++) {
     const date = addDays(today, -i);
     if (!seed.tradesWeekends && isWeekend(date)) continue;
     prices.push({ symbol: seed.symbol, date, close: round(price, dpDigits), currency: seed.currency });
@@ -142,8 +149,18 @@ function buildEod(seed: InstrumentSeed, today: string): EodPrice[] {
 
 /** Seeded daily EUR/USD fixings with a linear trend plus small noise; weekends are skipped like the ECB. */
 export function buildFxHistory(today: string): FxDay[] {
-  const rnd = mulberry32(hash('EURUSD'));
   const days: FxDay[] = [];
+  // Older than HISTORY_DAYS: a separate noise stream and a gentle trend (1.085 → 1.035), so the newest year is unchanged.
+  const olderRnd = mulberry32(hash('EURUSD-older'));
+  const olderSpan = LONG_HISTORY_DAYS - HISTORY_DAYS;
+  for (let i = LONG_HISTORY_DAYS; i > HISTORY_DAYS; i--) {
+    const date = addDays(today, -i);
+    const noise = (olderRnd() - 0.5) * 0.008;
+    if (isWeekend(date)) continue;
+    const trend = USD_PER_EUR_START + (0.05 * (i - HISTORY_DAYS)) / olderSpan;
+    days.push({ base: BASE_CURRENCY, date, rates: { USD: round(trend + noise, 4) } });
+  }
+  const rnd = mulberry32(hash('EURUSD'));
   for (let i = HISTORY_DAYS; i >= 0; i--) {
     const date = addDays(today, -i);
     const noise = (rnd() - 0.5) * 0.008;
@@ -256,19 +273,19 @@ export function createSeed(now: Date = new Date()): MockSeed {
   const cash = (type: 'DEPOSIT' | 'WITHDRAWAL' | 'INTEREST' | 'FEE', daysAgo: number, amount: number, note?: string) =>
     push({ date: tradingDay(addDays(today, -daysAgo)), type, symbol: cashSymbol('EUR'), quantity: amount, price: 1, fee: 0, currency: 'EUR', ...(note ? { note } : {}) });
 
-  cash('DEPOSIT', 400, 30_000, 'Initial deposit');
+  cash('DEPOSIT', FIRST_BUY_DAYS_AGO.deposit, 30_000, 'Initial deposit');
   cash('DEPOSIT', 270, 15_000);
   cash('DEPOSIT', 100, 8_000, 'Extra savings');
   cash('WITHDRAWAL', 45, 1_000, 'Holiday');
   cash('INTEREST', 30, 14.2, 'Interest on cash');
   cash('FEE', 12, 4.95, 'Account fee');
-  trade('BUY', 'VWRL.AS', 378, 80, 2, { note: 'Initial core position' });
-  trade('BUY', 'AAPL', 372, 25, 1, { note: 'Broker FX rate', brokerFx: true });
-  trade('BUY', 'MSFT', 365, 12, 1);
-  trade('BUY', 'KO', 358, 60, 1);
+  trade('BUY', 'VWRL.AS', FIRST_BUY_DAYS_AGO.VWRL, 80, 2, { note: 'Initial core position' });
+  trade('BUY', 'AAPL', FIRST_BUY_DAYS_AGO.AAPL, 25, 1, { note: 'Broker FX rate', brokerFx: true });
+  trade('BUY', 'MSFT', FIRST_BUY_DAYS_AGO.MSFT, 12, 1);
+  trade('BUY', 'KO', FIRST_BUY_DAYS_AGO.KO, 60, 1);
   // 2-for-1 split of JNJ shortly after the purchase: 15 pre-split shares at twice the adjusted price become 30.
-  trade('BUY', 'JNJ', 341, 15, 1, { note: 'Bought before the 2-for-1 split', unadjusted: 2 });
-  push({ date: tradingDay(addDays(today, -330)), type: 'SPLIT', symbol: 'JNJ', quantity: 2, price: 0, fee: 0, currency: 'USD', note: '2-for-1 stock split' });
+  trade('BUY', 'JNJ', FIRST_BUY_DAYS_AGO.JNJ, 15, 1, { note: 'Bought before the 2-for-1 split', unadjusted: 2 });
+  push({ date: tradingDay(addDays(today, -FIRST_BUY_DAYS_AGO.JNJ_SPLIT)), type: 'SPLIT', symbol: 'JNJ', quantity: 2, price: 0, fee: 0, currency: 'USD', note: '2-for-1 stock split' });
   trade('BUY', 'BTC-EUR', 330, 0.15, 4.5);
   trade('BUY', 'IWDA.AS', 301, 100, 2);
   trade('BUY', 'ASML.AS', 279, 6, 2);
@@ -284,11 +301,10 @@ export function createSeed(now: Date = new Date()): MockSeed {
   const dividendEvents: DividendEvent[] = [];
   for (const s of DIVIDEND_SCHEDULES) {
     const currency = profiles[s.symbol]!.currency;
-    for (const daysAgo of paymentDaysAgo(s, EVENT_HISTORY_DAYS)) {
+    for (const daysAgo of paymentDaysAgo(s, LONG_HISTORY_DAYS)) {
       const perShare = amountPaid(s, daysAgo);
-      // Past events (also from before the demo's transactions); the payments the user received are the ones in the history.
-      dividendEvents.push({ symbol: s.symbol, exDate: addDays(today, -daysAgo - 14), payDate: addDays(today, -daysAgo), amount: perShare, currency });
-      if (daysAgo >= HISTORY_DAYS) continue;
+      // Past events reach back like the data provider's (also from before the demo's transactions); the user's own payments go back further.
+      if (daysAgo < EVENT_HISTORY_DAYS) dividendEvents.push({ symbol: s.symbol, exDate: addDays(today, -daysAgo - 14), payDate: addDays(today, -daysAgo), amount: perShare, currency });
       const date = tradingDay(addDays(today, -daysAgo));
       const held = buildPositions(transactions, addDays(date, -14)).get(s.symbol)?.quantity ?? 0;
       if (held <= 0) continue;
