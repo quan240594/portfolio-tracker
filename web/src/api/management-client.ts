@@ -18,22 +18,10 @@ import {
   type UpdatePortfolioSettingsRequest,
   type WatchlistItem,
 } from '@portfolio/shared';
-import { ApiError, apiUrl, request, scopeQuery } from './client';
+import { request, requestText, scopeQuery } from './client';
 
 const seg = encodeURIComponent;
 const base = (portfolioId: string) => `/portfolios/${seg(portfolioId)}`;
-
-/** GET a text document (CSV export) with the same error handling as `request`. */
-async function requestText(path: string, query?: Record<string, string | undefined>): Promise<string> {
-  let res: Response;
-  try {
-    res = await fetch(apiUrl(path, query));
-  } catch {
-    throw new ApiError(0, 'NETWORK_ERROR', 'Could not reach the server. Check your connection and try again.');
-  }
-  if (!res.ok) throw new ApiError(res.status, `HTTP_${res.status}`, `Export failed (HTTP ${res.status}).`);
-  return res.text();
-}
 
 export const managementApi = {
   getSettings: (portfolioId: string, signal?: AbortSignal) => request<PortfolioSettings>('GET', `${base(portfolioId)}/settings`, { signal }),
@@ -74,6 +62,7 @@ export const managementApi = {
   addWatchlist: (body: AddWatchlistRequest) => request<WatchlistItem>('POST', '/watchlist', { body }),
   removeWatchlist: (symbol: string) => request<void>('DELETE', `/watchlist/${seg(symbol)}`),
 
-  exportTransactionsCsv: (scope: string) => requestText('/export/transactions', scopeQuery(scope)),
+  exportTransactionsCsv: async (scope: string, signal?: AbortSignal) =>
+    (await requestText('/export/transactions', { accept: 'text/csv', query: scopeQuery(scope), signal })).text,
   exportBackup: () => request<BackupResponse>('GET', '/export/backup'),
 };

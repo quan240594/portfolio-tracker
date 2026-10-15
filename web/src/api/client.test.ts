@@ -1,6 +1,9 @@
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
-import { ApiError, api, apiUrl, errorMessage, request, uploadCsv } from './client';
+import { setAuthTokenHooks } from '../features/auth/tokenHooks';
+import { ApiError, api, apiUrl, errorMessage, request, requestText, uploadCsv } from './client';
+
+afterEach(() => setAuthTokenHooks(undefined));
 
 describe('api client', () => {
   it('builds URLs against the configured base', () => {
@@ -172,6 +175,81 @@ describe('uploadCsv', () => {
       code: 'UPLOAD_FAILED',
       message: 'Uploading the file failed. Check your connection and try again.',
     });
+  });
+});
+
+describe('authorization', () => {
+  const signIn = (onUnauthorized = vi.fn()) => setAuthTokenHooks({ getToken: () => Promise.resolve('id-token-123'), onUnauthorized });
+
+  it('sends the bearer token on JSON requests only when signed in', async () => {
+    const seen: (string | null)[] = [];
+    server.use(
+      http.get('/api/health', ({ request: req }) => {
+        seen.push(req.headers.get('authorization'));
+        return HttpResponse.json({ status: 'ok' });
+      }),
+    );
+    await request('GET', '/health');
+    signIn();
+    await request('GET', '/health');
+    expect(seen).toEqual([null, 'Bearer id-token-123']);
+  });
+});
+
+describe('requestText', () => {
+  const csv = 'date,type\n2026-01-01,BUY\n';
+
+  it('sends the bearer token, the Accept type and the query, and returns the text and headers', async () => {
+    setAuthTokenHooks({ getToken: () => Promise.resolve('id-token-123'), onUnauthorized: vi.fn() });
+    let seen: { auth: string | null; accept: string | null; portfolioId: string | null } | undefined;
+    server.use(
+      http.get('/api/export/transactions', ({ request: req }) => {
+        seen = { auth: req.headers.get('authorization'), accept: req.headers.get('accept'), portfolioId: new URL(req.url).searchParams.get('portfolioId') };
+        return new HttpResponse(csv, { headers: { 'content-type': 'text/csv', 'content-disposition': 'attachment; filename="t.csv"' } });
+      }),
+    );
+    const res = await requestText('/export/transactions', { accept: 'text/csv', query: { portfolioId: 'p1' } });
+    expect(res.text).toBe(csv);
+    expect(res.headers.get('content-disposition')).toBe('attachment; filename="t.csv"');
+    expect(seen).toEqual({ auth: 'Bearer id-token-123', accept: 'text/csv', portfolioId: 'p1' });
+  });
+
+  it('sends no Authorization header without a token (demo / mock mode)', async () => {
+    let auth: string | null = 'unset';
+    server.use(
+      http.get('/api/export/transactions', ({ request: req }) => {
+        auth = req.headers.get('authorization');
+        return new HttpResponse(csv);
+      }),
+    );
+    await expect(requestText('/export/transactions', { accept: 'text/csv' })).resolves.toMatchObject({ text: csv });
+    expect(auth).toBeNull();
+  });
+
+  it('signs the user out on 401 and surfaces the error envelope', async () => {
+    const onUnauthorized = vi.fn();
+    setAuthTokenHooks({ getToken: () => Promise.resolve(undefined), onUnauthorized });
+    server.use(http.get('/api/export/transactions', () => HttpResponse.json({ error: { code: 'UNAUTHENTICATED', message: 'Authentication required' } }, { status: 401 })));
+    await expect(requestText('/export/transactions', { accept: 'text/csv' })).rejects.toMatchObject({ status: 401, code: 'UNAUTHENTICATED', message: 'Authentication required' });
+    expect(onUnauthorized).toHaveBeenCalledOnce();
+  });
+
+  it.each([403, 500])('throws an ApiError for HTTP %i instead of returning the body as a file', async (status) => {
+    const onUnauthorized = vi.fn();
+    setAuthTokenHooks({ getToken: () => Promise.resolve('t'), onUnauthorized });
+    server.use(http.get('/api/export/transactions', () => new HttpResponse('<html>denied</html>', { status, statusText: 'Nope' })));
+    const err = await requestText('/export/transactions', { accept: 'text/csv' }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status, code: `HTTP_${status}`, message: 'Nope' });
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it('maps network failures and rethrows aborts', async () => {
+    server.use(http.get('/api/export/transactions', () => HttpResponse.error()));
+    await expect(requestText('/export/transactions', { accept: 'text/csv' })).rejects.toMatchObject({ status: 0, code: 'NETWORK_ERROR' });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(requestText('/export/transactions', { accept: 'text/csv', signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
   });
 });
 
