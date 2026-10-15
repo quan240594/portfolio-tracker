@@ -119,6 +119,11 @@ function FutureKey({ name, c }: Readonly<{ name: unknown; c: ReturnType<typeof u
   );
 }
 
+/** Legend text in the normal text colour: recharts would otherwise paint it in the (pastel) bar colour, which is unreadable on white. */
+function FutureLegendText({ name, c }: Readonly<{ name: unknown; c: ReturnType<typeof useDividendTheme> }>) {
+  return <span style={{ color: c.text }}>{futureName(name)}</span>;
+}
+
 function FuturePayments({ data }: Readonly<{ data: DividendsOverviewResponse }>) {
   const c = useDividendTheme();
   const ccy = data.baseCurrency;
@@ -140,7 +145,7 @@ function FuturePayments({ data }: Readonly<{ data: DividendsOverviewResponse }>)
               labelFormatter={(m) => formatMonth(String(m))}
               formatter={(v: unknown, name: unknown) => [formatMoney(Number(v), ccy), <FutureKey key={String(name)} name={name} c={c} />]}
             />
-            <Legend formatter={futureName} wrapperStyle={{ fontSize: 12 }} />
+            <Legend formatter={(name: unknown) => <FutureLegendText name={name} c={c} />} wrapperStyle={{ fontSize: 12 }} />
             <ReferenceLine y={summary.monthlyAverage} stroke={c.invested} strokeDasharray="5 4" ifOverflow="extendDomain" />
             <Bar dataKey="declared" stackId="f" fill={c.declared} stroke={c.declaredEdge} isAnimationActive={false} />
             <Bar dataKey="estimated" stackId="f" fill={c.estimated} stroke={c.estimatedEdge} strokeDasharray="4 3" radius={[4, 4, 0, 0]} isAnimationActive={false} />
