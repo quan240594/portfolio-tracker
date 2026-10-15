@@ -19,11 +19,13 @@ test.describe('Analytics (mock mode)', () => {
     await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Analytics' }).click();
     await expect(page).toHaveURL(/\/analytics$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Analytics' })).toBeVisible();
+    const tabs = page.getByRole('tablist', { name: 'Analytics' });
+    await expect(tabs.getByRole('tab', { name: 'Growth', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByTestId('growth-value-chart')).toBeVisible();
+    await tabs.getByRole('tab', { name: 'Returns' }).click();
     await expect(page.getByRole('table', { name: /Returns per year/ })).toBeVisible();
     await page.getByRole('radio', { name: 'Month' }).click();
     await expect(page.getByRole('table', { name: /Returns per month/ })).toBeVisible();
-
-    const tabs = page.getByRole('tablist', { name: 'Analytics' });
     await tabs.getByRole('tab', { name: 'Risk' }).click();
     await expect(page.getByRole('table', { name: 'Risk metrics' })).toBeVisible();
     await tabs.getByRole('tab', { name: 'Benchmark' }).click();

@@ -4,11 +4,13 @@ import { SegmentedControl } from '../components/SegmentedControl';
 import { BenchmarkTab } from '../features/analytics/BenchmarkTab';
 import { DividendGrowthTab } from '../features/analytics/DividendGrowthTab';
 import { GoalTab } from '../features/analytics/GoalTab';
+import { GrowthTab } from '../features/growth/GrowthTab';
 import { ReturnsTab } from '../features/analytics/ReturnsTab';
 import { RiskTab } from '../features/analytics/RiskTab';
 import { usePortfolioScope } from '../features/portfolios/usePortfolioScope';
 
 export const ANALYTICS_TABS = [
+  { value: 'growth', label: 'Growth' },
   { value: 'returns', label: 'Returns' },
   { value: 'risk', label: 'Risk' },
   { value: 'benchmark', label: 'Benchmark' },
@@ -19,6 +21,7 @@ export type AnalyticsTab = (typeof ANALYTICS_TABS)[number]['value'];
 
 export const TAB_PARAM = 'tab';
 const PANELS: Record<AnalyticsTab, () => React.JSX.Element> = {
+  growth: GrowthTab,
   returns: ReturnsTab,
   risk: RiskTab,
   benchmark: BenchmarkTab,
@@ -31,12 +34,12 @@ export const isAnalyticsTab = (v: string | null): v is AnalyticsTab => ANALYTICS
 const PANEL_ID = 'analytics-panel';
 const ID_PREFIX = 'analytics-tab';
 
-/** Analytics hub: returns, risk, benchmark comparison, dividend growth and the income goal, one tab each (`?tab=`). */
+/** Analytics hub: growth (default), returns, risk, benchmark comparison, dividend growth and the income goal, one tab each (`?tab=`). */
 export default function AnalyticsPage() {
   const [params, setParams] = useSearchParams();
   const { scopeName } = usePortfolioScope();
   const requested = params.get(TAB_PARAM);
-  const tab: AnalyticsTab = isAnalyticsTab(requested) ? requested : 'returns';
+  const tab: AnalyticsTab = isAnalyticsTab(requested) ? requested : 'growth';
   const Panel = PANELS[tab];
 
   const select = (next: AnalyticsTab) =>
@@ -56,7 +59,7 @@ export default function AnalyticsPage() {
         <div className="overflow-x-auto">
           <SegmentedControl variant="tabs" size="md" label="Analytics" options={ANALYTICS_TABS} value={tab} onChange={select} panelId={PANEL_ID} idPrefix={ID_PREFIX} />
         </div>
-        <div id={PANEL_ID} role="tabpanel" aria-labelledby={`${ID_PREFIX}-${tab}`} className="card p-4">
+        <div id={PANEL_ID} role="tabpanel" aria-labelledby={`${ID_PREFIX}-${tab}`} className={tab === 'growth' ? undefined : 'card p-4'}>
           <Panel />
         </div>
       </div>

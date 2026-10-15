@@ -568,3 +568,33 @@ and used by the help text on the page; known-value tests pin the behaviour.
 Demo mode: the MSW handler runs `computeDividendsOverview` on the demo fixtures. The fixtures give the dividend payers
 different growth, a cut, an irregular payer and a recent payer, plus ~2.5 years of past dividend events, so every card shows
 meaningful data.
+## Growth
+
+First and default tab of `/analytics` (`?tab=growth`): benchmark chips, portfolio value, cumulative performance, monthly
+return dynamics and the return per holding. Pure maths in `packages/shared/src/growth.ts` (contract and query schemas in
+`growth-api.ts`); routes in `services/api/src/routes/growth.ts`; the demo's MSW handlers (`web/src/mocks/growthHandlers.ts`)
+call the same functions on the demo data. No new tables, IAM or infrastructure.
+
+| Endpoint (accept `?portfolioId=`) | Content |
+|---|---|
+| `GET /analytics/growth?range=&benchmarks=a,b,c` | `period` (start/end value, invested, gain, TWR), `series` (value, invested, cumulative return %), one aligned `benchmarks[]` series each (`available:false` + `message` without prices), `headline`, `monthly` returns, selectable benchmark `options` |
+| `GET /analytics/holdings-performance?range=` | return % and gain per open holding, best first |
+
+`range` = `7D 1M 3M 6M YTD 1Y 5Y ALL` (default `1Y`; never before the first investment). `benchmarks` holds at most 3 symbols;
+omitted = `IWDA.AS`, empty = none; an invalid list is a `400 VALIDATION_ERROR`, an unknown portfolio a `404`. Series are
+downsampled to at most 400 points.
+
+- **Portfolio value** = market value plus dividends received since the start of the range; **invested** = start value plus
+  net purchases (BUY/SELL only; deposits, withdrawals, fees, interest and splits are no flows, see "Scope with cash tracking").
+- **Benchmarks** are replayed with identical cash flows (`replay` of `/analytics/benchmark`): the start value buys the
+  benchmark on day one, later flows trade it that day. The benchmark shows price only. Missing symbols never fail the page.
+- **Cumulative return** = chained daily TWR rebased to 0 % on the first day; benchmarks are their price return rebased the same way.
+- **Headline** = first benchmark with data: gain minus the gain of the same money in the benchmark (€) and the return
+  difference in percentage points.
+- **Monthly returns** = TWR per calendar month (current month so far); web: last 12 months or one calendar year.
+- **Holdings** = TWR plus money made per open holding from the range start, or from the first purchase when bought inside the
+  range (`sincePurchase`); closed positions and positions bought on the last day are omitted.
+- FX: transactions at their own rate, value history at the ECB fixing of each day (see "Currency conversion").
+- **Benchmark options**: tracked symbols (held, watchlist, selected) with end-of-day data first, then five suggested index
+  ETFs (`BENCHMARK_SUGGESTIONS`) that work once tracked: add the symbol to the Watchlist. The selection lives in `?benchmarks=`
+  and `sessionStorage` (`pt-growth-benchmarks`).

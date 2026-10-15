@@ -15,6 +15,7 @@ import { brokerHandlers } from './broker';
 import * as db from './db';
 import { analyticsHandlers } from './analyticsHandlers';
 import { dividendsOverviewHandlers } from './dividendsOverviewHandlers';
+import { growthHandlers } from './growthHandlers';
 import { categoryAllocation, managementHandlers } from './management-handlers';
 import { api, errorResponse, guard, latency } from './utils';
 
@@ -32,6 +33,7 @@ function scopeOf(request: Request): string | undefined {
 export const handlers: HttpHandler[] = [
   ...analyticsHandlers,
   ...dividendsOverviewHandlers,
+  ...growthHandlers,
   http.get(api('/health'), () => HttpResponse.json({ status: 'ok' })),
 
   http.get(api('/portfolios'), async () => {
