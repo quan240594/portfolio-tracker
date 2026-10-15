@@ -94,6 +94,17 @@ test.describe('GitHub Pages build (demo mode under /portfolio-tracker/)', () => 
     expect(errors.filter((e) => !isExpectedDeepLink404(e))).toEqual([]);
   });
 
+  test('the Metrics tab renders its five cards from the mock backend', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto(`${BASE}analytics?tab=metrics`);
+    await expect(page.getByRole('tab', { name: 'Metrics', selected: true })).toBeVisible();
+    await expect(page.getByTestId('twr-value')).toHaveText(/^[+\u2212]\d+,\d%$/);
+    await expect(page.getByTestId('pe-value')).toHaveText(/^\d+,\d×$/);
+    await expect(page.getByTestId('pe-coverage')).toContainText('Based on 4 of 5 stocks');
+    await expect(page.getByRole('meter')).toHaveCount(4);
+    expect(errors.filter((e) => !isExpectedDeepLink404(e))).toEqual([]);
+  });
+
   test('mutations work in memory and reset on reload', async ({ page }) => {
     await page.goto(`${BASE}transactions`);
     await expect(page.getByRole('heading', { level: 1, name: 'Transactions' })).toBeVisible();

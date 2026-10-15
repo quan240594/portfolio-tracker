@@ -388,7 +388,7 @@ def test_coingecko_history_and_profile(
 
 
 def av(http_factory: Callable[[str], Any]) -> AlphaVantageProvider:
-    return AlphaVantageProvider(KEY, http=http_factory("alphavantage"), bucket=free_bucket())
+    return AlphaVantageProvider(KEY, http=http_factory("alphavantage"), bucket=free_bucket(), now=lambda: NOW)
 
 
 def test_alphavantage_overview(opener: FakeOpener, http_factory: Callable[[str], Any]) -> None:
@@ -426,6 +426,48 @@ def test_alphavantage_overview(opener: FakeOpener, http_factory: Callable[[str],
     ):
         with pytest.raises(ProviderError):
             call()
+
+
+@pytest.mark.parametrize(
+    ("overview_pe", "expected"),
+    [
+        ("34.21", 34.21),
+        ("None", None),
+        ("-", None),
+        ("0", None),
+        ("-12.5", None),
+        ("abc", None),
+        ("inf", None),
+        ("", None),
+        (None, None),
+        (25, 25.0),
+    ],
+)
+def test_alphavantage_overview_pe_ratio(
+    opener: FakeOpener, http_factory: Callable[[str], Any], overview_pe: object, expected: float | None
+) -> None:
+    overview: dict[str, object] = {"Symbol": "AAPL", "AssetType": "Common Stock", "Name": "Apple Inc"}
+    if overview_pe is not None:
+        overview["PERatio"] = overview_pe
+    opener.add("OVERVIEW", [overview])
+    profile = av(http_factory).get_profile("AAPL")
+    assert profile.pe_ratio == expected
+    assert profile.fundamentals_as_of == (NOW.date().isoformat() if expected else None)
+
+
+def test_alphavantage_overview_without_pe_field(
+    opener: FakeOpener, http_factory: Callable[[str], Any]
+) -> None:
+    opener.add("OVERVIEW", [{"Symbol": "SPY", "AssetType": "ETF", "Name": "SPDR"}])
+    profile = av(http_factory).get_profile("SPY")
+    assert (profile.asset_class, profile.pe_ratio, profile.fundamentals_as_of) == ("ETF", None, None)
+
+
+def test_alphavantage_default_clock(opener: FakeOpener, http_factory: Callable[[str], Any]) -> None:
+    opener.add("OVERVIEW", [{"Symbol": "AAPL", "AssetType": "Common Stock", "PERatio": "30"}])
+    provider = AlphaVantageProvider(KEY, http=http_factory("alphavantage"), bucket=free_bucket())
+    profile = provider.get_profile("AAPL")
+    assert profile.pe_ratio == 30.0 and profile.fundamentals_as_of
 
 
 # --------------------------------------------------------------------------- Frankfurter

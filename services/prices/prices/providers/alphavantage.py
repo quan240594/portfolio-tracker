@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
-from datetime import date
+from collections.abc import Callable
+from datetime import UTC, date, datetime
 from typing import Any
 
 from ..errors import ProviderError, RateLimitError
@@ -23,6 +25,15 @@ def _title(value: str | None) -> str | None:
     return value.title() if value.isupper() else value
 
 
+def _positive_ratio(value: object) -> float | None:
+    """OVERVIEW numbers are strings; "None", "-", "0", negatives and garbage all mean "no usable value"."""
+    try:
+        number = float(str(value))
+    except ValueError:
+        return None
+    return number if math.isfinite(number) and number > 0 else None
+
+
 class AlphaVantageProvider:
     name = "alphavantage"
 
@@ -33,8 +44,10 @@ class AlphaVantageProvider:
         http: HttpClient | None = None,
         quota: DailyQuota | None = None,
         bucket: TokenBucket | None = None,
+        now: Callable[[], datetime] | None = None,
     ) -> None:
         self._key = api_key
+        self._now = now or (lambda: datetime.now(UTC))
         self._http = http or HttpClient(self.name)
         self._quota = quota or DailyQuota(int(os.environ.get("ALPHAVANTAGE_DAILY_LIMIT", "25")), self.name)
         self._bucket = bucket or TokenBucket(5, 5 / 60.0)
@@ -56,6 +69,8 @@ class AlphaVantageProvider:
         if "Error Message" in data or not data.get("Symbol"):
             return None
         country = data.get("Country") or None
+        # Trailing-twelve-month P/E from the same OVERVIEW call: no extra provider traffic.
+        pe_ratio = _positive_ratio(data.get("PERatio"))
         return InstrumentProfile(
             symbol=symbol,
             name=data.get("Name") or symbol,
@@ -64,6 +79,8 @@ class AlphaVantageProvider:
             sector=_title(data.get("Sector")),
             country=COUNTRY_NAMES.get(country, country) if country else None,
             exchange=data.get("Exchange") or None,
+            pe_ratio=pe_ratio,
+            fundamentals_as_of=self._now().astimezone(UTC).date().isoformat() if pe_ratio else None,
         )
 
     def _unsupported(self, what: str, symbol: str) -> ProviderError:

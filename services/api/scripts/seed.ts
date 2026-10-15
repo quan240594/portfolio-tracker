@@ -49,8 +49,8 @@ interface InstrumentSeed {
 }
 
 const INSTRUMENTS: InstrumentSeed[] = [
-  { profile: { symbol: 'AAPL', name: 'Apple Inc.', assetClass: 'STOCK', sector: 'Technology', country: 'United States', exchange: 'NASDAQ', currency: 'USD' }, p0: 185, drift: 0.08, sigma: 0.014 },
-  { profile: { symbol: 'MSFT', name: 'Microsoft Corp.', assetClass: 'STOCK', sector: 'Technology', country: 'United States', exchange: 'NASDAQ', currency: 'USD' }, p0: 375, drift: 0.1, sigma: 0.013 },
+  { profile: { symbol: 'AAPL', name: 'Apple Inc.', assetClass: 'STOCK', sector: 'Technology', country: 'United States', exchange: 'NASDAQ', currency: 'USD', peRatio: 33.4 }, p0: 185, drift: 0.08, sigma: 0.014 },
+  { profile: { symbol: 'MSFT', name: 'Microsoft Corp.', assetClass: 'STOCK', sector: 'Technology', country: 'United States', exchange: 'NASDAQ', currency: 'USD', peRatio: 34.9 }, p0: 375, drift: 0.1, sigma: 0.013 },
   { profile: { symbol: 'ASML.AS', name: 'ASML Holding N.V.', assetClass: 'STOCK', sector: 'Technology', country: 'Netherlands', exchange: 'Euronext Amsterdam', currency: 'EUR' }, p0: 680, drift: 0.06, sigma: 0.02 },
   { profile: { symbol: 'VWRL.AS', name: 'Vanguard FTSE All-World UCITS ETF', assetClass: 'ETF', sector: 'Diversified', country: 'Global', exchange: 'Euronext Amsterdam', currency: 'EUR' }, p0: 105, drift: 0.09, sigma: 0.008 },
   { profile: { symbol: 'IWDA.AS', name: 'iShares Core MSCI World UCITS ETF', assetClass: 'ETF', sector: 'Diversified', country: 'Global', exchange: 'Euronext Amsterdam', currency: 'EUR' }, p0: 82, drift: 0.09, sigma: 0.008 },
@@ -385,7 +385,7 @@ export async function seed({ doc, tableName, userId = 'demo', today = iso(new Da
   for (const inst of INSTRUMENTS) {
     const { symbol, currency } = inst.profile;
     items.push(
-      { ...keys.profile(symbol), entityType: ENTITY.profile, ...inst.profile },
+      { ...keys.profile(symbol), entityType: ENTITY.profile, ...inst.profile, ...(inst.profile.peRatio === undefined ? {} : { fundamentalsAsOf: today }) },
       { ...keys.trackedTicker(symbol), entityType: ENTITY.trackedTicker, symbol, currency, createdAt: now, updatedAt: now },
     );
     const series = [...closes.get(symbol)!.entries()];

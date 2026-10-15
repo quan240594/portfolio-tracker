@@ -53,6 +53,10 @@ export interface InstrumentProfile {
   country?: string;
   exchange?: string;
   currency: string;
+  /** Trailing-twelve-month price/earnings ratio; absent when unknown or not positive (ETFs, crypto, loss makers). */
+  peRatio?: number;
+  /** YYYY-MM-DD the `peRatio` was fetched. */
+  fundamentalsAsOf?: string;
 }
 
 export interface EodPrice {

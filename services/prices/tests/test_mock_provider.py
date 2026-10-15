@@ -95,6 +95,23 @@ def test_profiles() -> None:
     assert p.get_profile("DOGE-USD").asset_class == "CRYPTO"
 
 
+def test_stock_profiles_carry_a_deterministic_pe_ratio() -> None:
+    p = provider()
+    aapl = p.get_profile("AAPL")
+    assert (aapl.pe_ratio, aapl.fundamentals_as_of) == (34.2, "2026-10-13")
+    generic = p.get_profile("FOO.PA")
+    assert generic.pe_ratio is not None and 8 <= generic.pe_ratio < 38
+    assert generic.pe_ratio == provider().get_profile("FOO.PA").pe_ratio
+    assert provider(SATURDAY).get_profile("AAPL").fundamentals_as_of == "2026-10-17"
+
+
+def test_non_stocks_have_no_pe_ratio() -> None:
+    p = provider()
+    for symbol in ("VWRL.AS", "IWDA.AS", "BTC-EUR", "DOGE-USD"):
+        profile = p.get_profile(symbol)
+        assert (profile.pe_ratio, profile.fundamentals_as_of) == (None, None)
+
+
 def test_dividends() -> None:
     p = provider()
     aapl = p.get_dividends("AAPL", date(2024, 10, 13), date(2027, 10, 13))

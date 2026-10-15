@@ -1,6 +1,7 @@
 import { delay, http, HttpResponse, type HttpHandler } from 'msw';
 import {
   analyticsBenchmarkQuerySchema,
+  analyticsMetricsQuerySchema,
   analyticsGoalQuerySchema,
   analyticsReturnsQuerySchema,
   analyticsRiskQuerySchema,
@@ -8,6 +9,7 @@ import {
   computeBenchmark,
   computeDividendGrowth,
   computeGoal,
+  computeMetrics,
   computeReturns,
   computeRisk,
   portfolioScopeSchema,
@@ -50,6 +52,7 @@ export const analyticsHandlers: HttpHandler[] = [
   http.get(api('/returns'), ({ request }) => respond(request, analyticsReturnsQuerySchema, (q, data) => computeReturns(data, q.period))),
   http.get(api('/risk'), ({ request }) => respond(request, analyticsRiskQuerySchema, (q, data) => computeRisk(data, q.benchmark))),
   http.get(api('/benchmark'), ({ request }) => respond(request, analyticsBenchmarkQuerySchema, (q, data) => computeBenchmark(data, q.benchmark, q.range))),
+  http.get(api('/metrics'), ({ request }) => respond(request, analyticsMetricsQuerySchema, (q, data) => computeMetrics(data, q.benchmark))),
   http.get(api('/dividend-growth'), ({ request }) => respond(request, portfolioScopeSchema, (_q, data) => computeDividendGrowth(data))),
   http.get(api('/goal'), ({ request }) => respond(request, analyticsGoalQuerySchema, ({ portfolioId: _scope, ...q }, data) => computeGoal(data, q))),
 ];

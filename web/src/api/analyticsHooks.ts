@@ -13,6 +13,7 @@ export const analyticsKeys = {
   returns: (scope: string, period: ReturnPeriod) => [ANALYTICS_ROOT_KEY, scope, 'returns', period] as const,
   risk: (scope: string, benchmark: string) => [ANALYTICS_ROOT_KEY, scope, 'risk', benchmark] as const,
   benchmark: (scope: string, benchmark: string, range: HistoryRange) => [ANALYTICS_ROOT_KEY, scope, 'benchmark', benchmark, range] as const,
+  metrics: (scope: string, benchmark: string) => [ANALYTICS_ROOT_KEY, scope, 'metrics', benchmark] as const,
   dividendGrowth: (scope: string) => [ANALYTICS_ROOT_KEY, scope, 'dividend-growth'] as const,
   goal: (scope: string, params: AnalyticsGoalParams) => [ANALYTICS_ROOT_KEY, scope, 'goal', params] as const,
 };
@@ -45,6 +46,14 @@ export const useAnalyticsBenchmark = (scope: string, benchmark: string, range: H
   useQuery({
     queryKey: analyticsKeys.benchmark(scope, benchmark, range),
     queryFn: ({ signal }) => analyticsApi.benchmark(scope, benchmark, range, signal),
+    placeholderData: keepPreviousData,
+    enabled,
+  });
+
+export const useAnalyticsMetrics = (scope: string, benchmark: string, { enabled = true }: ReadOptions = {}) =>
+  useQuery({
+    queryKey: analyticsKeys.metrics(scope, benchmark),
+    queryFn: ({ signal }) => analyticsApi.metrics(scope, benchmark, signal),
     placeholderData: keepPreviousData,
     enabled,
   });

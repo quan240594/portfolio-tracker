@@ -250,7 +250,11 @@ def test_enrichment_only_for_missing_profiles(infra: Infra) -> None:
         "sector": "Technology",
         "country": "United States",
         "exchange": "NASDAQ",
+        "peRatio": Decimal("34.2"),
+        "fundamentalsAsOf": "2026-10-13",
     }
+    btc = infra.get("TICKER#BTC-EUR", "PROFILE")
+    assert "peRatio" not in btc and "fundamentalsAsOf" not in btc
     eods = [i for i in infra.items("TICKER#AAPL") if i["SK"].startswith("EOD#")]
     assert 250 <= len(eods) <= 262
     assert all(
