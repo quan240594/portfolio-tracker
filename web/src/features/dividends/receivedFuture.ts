@@ -160,7 +160,7 @@ export interface ChartRow extends TimelinePeriod {
 
 /** Adds the value labels (compact EUR above the stack), thinned to every n-th bar when the labels are wider than a bar slot. */
 export function chartRows(periods: readonly TimelinePeriod[], currency: string, slotPx: number): ChartRow[] {
-  const all = periods.map((p) => barLabel(p.total, false, currency));
+  const all = periods.map((p) => barLabel(p.total, currency));
   const step = labelStep(all, slotPx);
   return periods.map((p, i) => ({ ...p, barLabel: i % step === 0 ? all[i]! : '' }));
 }
@@ -177,7 +177,7 @@ const NICE_STEPS = [1, 2, 5, 10];
 
 /** A value axis from 0 to a round maximum ≥ `max` with about `count` evenly spaced ticks: the scale the fixed axis and the scrolling bars share. */
 export function niceAxis(max: number, count = 4): { max: number; ticks: number[] } {
-  if (!(max > 0)) return { max: 1, ticks: [0, 1] };
+  if (Number.isNaN(max) || max <= 0) return { max: 1, ticks: [0, 1] };
   const rough = max / count;
   const magnitude = 10 ** Math.floor(Math.log10(rough));
   const step = (NICE_STEPS.find((n) => n * magnitude >= rough) ?? 10) * magnitude;

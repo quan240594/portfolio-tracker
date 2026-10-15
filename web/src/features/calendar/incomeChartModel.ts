@@ -20,14 +20,14 @@ export function shortAmount(value: number, currency: string): string {
   return formatMoney(value, currency, value >= 1000 ? { compact: true } : { maxDigits: 0 });
 }
 
-/** The label above one bar: empty for a zero bar or when `skipped` (the bar lost the thinning of overlapping labels). */
-export function barLabel(total: number, skipped: boolean, currency: string): string {
-  return total < MIN_LABEL_AMOUNT || skipped ? '' : shortAmount(total, currency);
+/** The label above one bar: empty for a zero bar. */
+export function barLabel(total: number, currency: string): string {
+  return total < MIN_LABEL_AMOUNT ? '' : shortAmount(total, currency);
 }
 
 /** Adds the bar label per month; on narrow screens only every other bar gets one so labels never touch. */
 export function incomeRows(monthly: readonly CalendarMonth[], currency: string, narrow: boolean): IncomeRow[] {
-  return monthly.map((m, i) => ({ ...m, label: barLabel(m.total, narrow && i % 2 === 1, currency) }));
+  return monthly.map((m, i) => ({ ...m, label: narrow && i % 2 === 1 ? '' : barLabel(m.total, currency) }));
 }
 
 const NARROW_QUERY = '(max-width: 640px)';

@@ -191,7 +191,7 @@ describe('CalendarOverview', () => {
     expect(incomeRows(rows, 'EUR', false).map((r) => sp(r.label))).toEqual(['', '€ 56', '€ 1,2K', '€ 7']);
     expect(incomeRows(rows, 'EUR', true).map((r) => sp(r.label))).toEqual(['', '', '€ 1,2K', '']);
     expect(sp(shortAmount(55.6, 'EUR'))).toBe('€ 56');
-    expect([barLabel(0.2, false, 'EUR'), barLabel(55.6, true, 'EUR'), sp(barLabel(55.6, false, 'EUR'))]).toEqual(['', '', '€ 56']);
+    expect([barLabel(0.2, 'EUR'), sp(barLabel(55.6, 'EUR'))]).toEqual(['', '€ 56']);
   });
 
   it('uses the narrow-screen media query for the chart labels', () => {

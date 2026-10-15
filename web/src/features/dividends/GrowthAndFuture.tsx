@@ -117,7 +117,7 @@ export function FutureKey({ name, c }: Readonly<{ name: unknown; c: ReturnType<t
     return (
       <span className="inline-flex items-center gap-1.5">
         <span aria-hidden="true" className="inline-block w-4 border-t-2 border-dashed" style={{ borderColor: c.text }} />
-        avg
+        <span>avg</span>
       </span>
     );
   }
