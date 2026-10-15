@@ -104,6 +104,21 @@ function FutureHeader({ data }: Readonly<{ data: DividendsOverviewResponse }>) {
 
 const futureName = (name: unknown) => (name === 'declared' ? 'Declared' : 'Estimated');
 
+/** Tooltip row label: a colour swatch plus the name, so the pastel colours do not have to carry the text. */
+function FutureKey({ name, c }: Readonly<{ name: unknown; c: ReturnType<typeof useDividendTheme> }>) {
+  const declared = name === 'declared';
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        aria-hidden="true"
+        className="h-2.5 w-2.5 rounded-sm"
+        style={{ background: declared ? c.declared : c.estimated, border: `1px ${declared ? 'solid' : 'dashed'} ${declared ? c.declaredEdge : c.estimatedEdge}` }}
+      />
+      {futureName(name)}
+    </span>
+  );
+}
+
 function FuturePayments({ data }: Readonly<{ data: DividendsOverviewResponse }>) {
   const c = useDividendTheme();
   const ccy = data.baseCurrency;
@@ -121,13 +136,14 @@ function FuturePayments({ data }: Readonly<{ data: DividendsOverviewResponse }>)
             <Tooltip
               cursor={{ fill: c.grid, opacity: 0.5 }}
               contentStyle={c.tooltip}
+              itemStyle={{ color: c.text }}
               labelFormatter={(m) => formatMonth(String(m))}
-              formatter={(v: unknown, name: unknown) => [formatMoney(Number(v), ccy), futureName(name)]}
+              formatter={(v: unknown, name: unknown) => [formatMoney(Number(v), ccy), <FutureKey key={String(name)} name={name} c={c} />]}
             />
             <Legend formatter={futureName} wrapperStyle={{ fontSize: 12 }} />
-            <ReferenceLine y={summary.monthlyAverage} stroke={c.benchmark} strokeDasharray="5 4" ifOverflow="extendDomain" />
-            <Bar dataKey="declared" stackId="f" fill={c.value} isAnimationActive={false} />
-            <Bar dataKey="estimated" stackId="f" fill={c.estimated} radius={[4, 4, 0, 0]} isAnimationActive={false} />
+            <ReferenceLine y={summary.monthlyAverage} stroke={c.invested} strokeDasharray="5 4" ifOverflow="extendDomain" />
+            <Bar dataKey="declared" stackId="f" fill={c.declared} stroke={c.declaredEdge} isAnimationActive={false} />
+            <Bar dataKey="estimated" stackId="f" fill={c.estimated} stroke={c.estimatedEdge} strokeDasharray="4 3" radius={[4, 4, 0, 0]} isAnimationActive={false} />
           </BarChart>
         </ResponsiveContainer>
       </ChartFrame>
