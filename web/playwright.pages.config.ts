@@ -1,8 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// Parallel worktrees must not share a server: set E2E_PAGES_PORT to a free port of your own.
 // E2E against the GitHub Pages build (`pnpm build:pages`), served under /portfolio-tracker/ by a static server that
 // mimics Pages (404.html fallback for deep links). Run via `pnpm test:e2e:pages`, which builds first.
-const PORT = 4180;
+const PORT = Number(process.env.E2E_PAGES_PORT ?? 4180);
 const PAGES_BASE = '/portfolio-tracker/';
 
 export default defineConfig({

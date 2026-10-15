@@ -105,6 +105,25 @@ test.describe('GitHub Pages build (demo mode under /portfolio-tracker/)', () => 
     expect(errors.filter((e) => !isExpectedDeepLink404(e))).toEqual([]);
   });
 
+  test('the calendar renders from the demo backend under the sub-path', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto(`${BASE}calendar`);
+    await expect(page.getByRole('heading', { level: 1, name: 'Calendar' })).toBeVisible();
+    await expect(page).toHaveTitle(/Calendar · Portfolio Tracker/);
+    await expectDemoBanner(page);
+    await expect(page.getByRole('region', { name: 'Annual income' }).getByTestId('kpi-value')).toHaveText(/€\s[\d.]+,\d{2}$/);
+    const grid = page.getByRole('region', { name: 'Events' }).getByRole('table');
+    await expect(grid).toBeVisible();
+    await expect(grid.getByRole('button').first()).toBeVisible();
+    await page.getByRole('radio', { name: 'Next 12 months' }).locator('xpath=ancestor::label').click();
+    await page.getByRole('region', { name: 'Events' }).getByRole('button', { name: /^MSFT, Stock split/ }).click();
+    await expect(page.getByRole('dialog', { name: 'MSFT · Stock split' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download .ics' }).click()]);
+    expect(download.suggestedFilename()).toMatch(/\.ics$/);
+    expect(errors.filter((e) => !isExpectedDeepLink404(e))).toEqual([]);
+  });
+
   test('mutations work in memory and reset on reload', async ({ page }) => {
     await page.goto(`${BASE}transactions`);
     await expect(page.getByRole('heading', { level: 1, name: 'Transactions' })).toBeVisible();

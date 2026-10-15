@@ -10,6 +10,7 @@ import {
   type QueryCommandInput,
 } from '@aws-sdk/lib-dynamodb';
 import {
+  calendarKeys,
   drain,
   ENTITY,
   fromItem,
@@ -27,6 +28,9 @@ import {
   type InstrumentProfile,
   type Portfolio,
   type Quote,
+  type StoredCalendarEvents,
+  type StoredEarningsEvent,
+  type StoredSplitEvent,
   type Transaction,
 } from '@portfolio/shared';
 
@@ -55,6 +59,8 @@ export interface Repository {
   getFxHistory(base: string, from: string, to: string): Promise<FxDay[]>;
   getEod(symbol: string, from: string, to: string): Promise<EodPrice[]>;
   getDividendEvents(symbol: string): Promise<DividendEvent[]>;
+  /** Stored earnings and split events of `symbols` dated `from`..`to` (inclusive, YYYY-MM-DD); see calendarKeys. */
+  getCalendarEvents(symbols: string[], from: string, to: string): Promise<StoredCalendarEvents>;
   registerUser(userId: string): Promise<void>;
   /** `currency` may be omitted when unknown (watchlist symbols). */
   trackTickers(tickers: { symbol: string; currency?: string }[]): Promise<void>;
@@ -272,6 +278,22 @@ export class DynamoRepository implements Repository {
       ExpressionAttributeValues: { ':pk': keys.tickerPk(symbol), ':sk': keys.dividendPrefix },
     });
     return items.map((i) => fromItem<DividendEvent>(i));
+  }
+
+  async getCalendarEvents(symbols: string[], from: string, to: string): Promise<StoredCalendarEvents> {
+    const between = (symbol: string, key: typeof calendarKeys.earnings) =>
+      this.queryAll({
+        KeyConditionExpression: 'PK = :pk AND SK BETWEEN :from AND :to',
+        ExpressionAttributeValues: { ':pk': calendarKeys.tickerPk(symbol), ':from': key(symbol, from).SK, ':to': key(symbol, to).SK },
+      });
+    const [earnings, splits] = await Promise.all([
+      Promise.all(symbols.map((s) => between(s, calendarKeys.earnings))),
+      Promise.all(symbols.map((s) => between(s, calendarKeys.split))),
+    ]);
+    return {
+      earnings: earnings.flat().map((i) => fromItem<StoredEarningsEvent>(i)),
+      splits: splits.flat().map((i) => fromItem<StoredSplitEvent>(i)),
+    };
   }
 
   async registerUser(userId: string): Promise<void> {

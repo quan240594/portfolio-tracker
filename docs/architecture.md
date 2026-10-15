@@ -708,3 +708,151 @@ Web: form (goal type, target, achieve-by year, monthly contribution, expandable 
 results (verdict, chart with data-table alternative, insight chips, year-by-year `<table>` with CSV download, parameters
 panel). While the form is valid and unsaved for 400 ms the page shows a stateless `POST /goals/calculate` preview.
 Not investment advice.
+## Calendar
+
+Ex-dividend and payment dates, earnings reports, stock splits and other share adjustments of the user's holdings (and,
+optionally, the watchlist), on `/calendar` (month grid or list) and as an `.ics` download. The logic is pure and lives in
+`packages/shared` (`calendar.ts` merging and totals, `calendar-api.ts` contract and query schema, `calendar-ics.ts`
+iCalendar writer); `services/api/src/routes/calendar.ts` and the MSW demo handlers (`web/src/mocks/calendarHandlers.ts`) load
+their data and call the same `buildCalendar`, so the GitHub Pages demo shows what a deployment shows.
+
+```mermaid
+flowchart LR
+  SCH[EventBridge Scheduler<br/>daily 05:30 Amsterdam] --> CAL[prices-calendar Lambda<br/>Python]
+  CAL -- 1 call: EARNINGS_CALENDAR --> AV[(Alpha Vantage)]
+  CAL -- splits + dividends, budgeted --> EOD[(EODHD)]
+  CAL -- EARN# / SPLIT# / DIV# / CAL#STATE --> DDB[(DynamoDB)]
+  W[Web /calendar] -- GET /calendar, /calendar.ics --> API[api Lambda]
+  API -- ticker partitions, TXN#, watchlist --> DDB
+```
+
+### Event types and statuses
+
+| `CalendarEventType` | Date | Source |
+|---|---|---|
+| `EX_DIVIDEND` | ex-date | stored `DIV#` item (estimated ones: pay date minus the usual ex-to-pay lag) |
+| `DIVIDEND_PAY` | pay date (the ex-date when no pay date is known) | stored `DIV#` item, your own `DIVIDEND` transaction (`PAID`), or a projection (`ESTIMATED`) |
+| `EARNINGS` | report date; fiscal period end, EPS estimate, time of day `BMO`/`AMC`/`unknown` when the source has them | stored `EARN#` item |
+| `SPLIT` | ex-split date, ratio `toFactor`-for-`fromFactor` (forward and reverse) | stored `SPLIT#` item, or your own `SPLIT` transaction |
+| `CORPORATE_ACTION` | the date of an irregular share adjustment | a `SPLIT#` item whose ratio is not a plain split |
+
+`status`: `CONFIRMED` (announced by a provider, or recorded by you; earnings dates are the provider's *expected* dates and
+count as `ESTIMATED` until the day has passed), `ESTIMATED` (a projection) and `PAID` (a dividend you received). Every event
+has `origin` `HOLDING` (the symbol is in your transactions) or `WATCHLIST`, a stable `id` (also the `.ics` UID) and a `source`.
+
+**What is and is not covered.** Splits and reverse splits with whole-number ratios (`calendarSplitKind`: both factors whole and
+at most 20, or 1-for-N up to 100) are `SPLIT`. EODHD also records stock dividends, spin-off adjustments and reorganisations in
+its split feed with ratios such as 104/100 or 1281/1000; those are shown as `CORPORATE_ACTION` ("Share adjustment …").
+**Mergers, spin-offs as such, symbol changes and rights issues are not available from any free source and are not shown.**
+Earnings dates are US-listed companies only: `ASML.AS`, `SAP.DE`, … get none (Alpha Vantage lists the US ADR `ASML`, which is
+a different instrument and is deliberately not mapped). The same notes ship in every response as `coverage` and in the page's
+"What does this calendar cover?" section.
+
+### Free data sources (researched 15 Oct 2026)
+
+| Candidate | Result |
+|---|---|
+| **Alpha Vantage `EARNINGS_CALENDAR`** (used) | One CSV call returns every company's expected report for `horizon=3month\|6month\|12month` (`symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay`; the live `demo` key returned ~4,600 rows for 3 months, `timeOfTheDay` is `pre-market`, `post-market` or empty, `estimate` often empty). Free tier: 25 API requests/day ("Support" FAQ), shared with the profile enrichment that already uses it. One call a day serves every tracked ticker. US-listed only. Throttling comes back as HTTP 200 with a JSON `Information`/`Note` body, which the parser turns into a rate-limit error. |
+| **EODHD `/splits/{symbol}`** (used) and `/div/{symbol}` (re-used) | Both are in the Free plan (history limited to 1 year), 1 API call each. Free plan: **20 calls/day and 20/min** (pricing page); the same key also serves the quote refresh and enrichment. Split ratio is `"new/old"` (`"4.000000/1.000000"`). Unverified: whether the free plan returns future-dated splits for every exchange; the stored ones are whatever the feed lists. |
+| EODHD calendar API (`/calendar/earnings`, `/calendar/splits`, …) | **Not free**: "Corporate calendar" is included from the Fundamentals plan up (pricing page). |
+| Twelve Data `/earnings_calendar`, `/splits`, `/splits_calendar`, `/dividends_calendar` | Splits and dividend calendars need the **Grow plan** (docs); `earnings_calendar` costs 40 credits per request against the Basic plan's 8 credits/minute, and Basic data may not be displayed to users. Not used. |
+| Finnhub `/calendar/earnings` | Free, but US-only (`international` is not free), a one-month window on the free tier, and needs a fourth API key. `/stock/split` and `/stock/dividend` are **premium**. Not used. |
+
+### Quota design
+
+Both budgets are **per UTC day, persisted in DynamoDB** (`CALENDAR` / `BUDGET#{provider}`: `{day, used}`, spent with a conditional
+`UpdateItem`), so Lambda retries, manual runs and concurrent invocations cannot overspend a provider's free tier.
+
+* **Alpha Vantage**: `CALENDAR_ALPHAVANTAGE_DAILY_CALLS` (default 1). The call is skipped when no tracked symbol is a US ticker.
+  A failed call is not retried the same day (the budget stays spent); the next daily run tries again.
+* **EODHD**: `CALENDAR_EODHD_DAILY_CALLS` (default 8 of the 20): a symbol check costs 2 calls (splits + dividends; 1 with
+  `CALENDAR_REFRESH_DIVIDENDS=false`), so about 4 symbols a day. Symbols are checked **round-robin, oldest first**: each
+  symbol's `CAL#STATE` marker holds `splitsCheckedAt`; a symbol is due again after `CALENDAR_RECHECK_DAYS` (default 7) and a
+  symbol whose last attempt failed (`splitsFailedAt`) goes to the back of the queue so one broken ticker cannot starve the
+  rest. A provider rate limit (HTTP 402/429) stops the run; other per-symbol failures are logged, counted and skipped.
+  Crypto is never checked. With ~30 tracked symbols every symbol is revisited about every 8 days.
+* Re-running is idempotent: items are keyed by symbol and date, and report dates the provider no longer lists (the company
+  rescheduled) are removed for the symbols that are in the feed. Past reports stay as history.
+* Dividends: the enrichment only fetched dividends once per new symbol, so the calendar refresh re-checks them within the
+  same EODHD budget; otherwise newly declared dividends would never appear.
+
+`MARKET_DATA_PROVIDER=mock` swaps all of this for a deterministic offline source (`MockCalendarSource`: report dates 5–60 days
+out for US tickers, an upcoming split for `NVDA` and `AAPL`, the mock market's dividends) and no budgets.
+
+### DynamoDB items (single table, written by `services/prices/prices/calendar_handlers.py`)
+
+| Entity | PK | SK | entityType | Fields |
+|---|---|---|---|---|
+| Earnings event | `TICKER#{symbol}` | `EARN#{date}` | `EARNINGS_EVENT` | `symbol`, `date`, `name?`, `fiscalPeriodEnd?`, `epsEstimate?` (N), `currency?`, `timeOfDay` (`BMO`/`AMC`/`unknown`), `source`, `updatedAt` |
+| Split event | `TICKER#{symbol}` | `SPLIT#{date}` | `SPLIT_EVENT` | `symbol`, `date`, `fromFactor` (N), `toFactor` (N), `source`, `updatedAt` |
+| Symbol marker | `TICKER#{symbol}` | `CAL#STATE` | `CALENDAR_STATE` | `splitsCheckedAt`, `dividendsCheckedAt`, `splitsFailedAt` |
+| Daily budget | `CALENDAR` | `BUDGET#{provider}` | `CALENDAR_BUDGET` | `day`, `used` |
+
+Dividend events stay `DIV#{exDate}` (`DIVIDEND_EVENT`). Keys for the first two live in `calendarKeys`
+(`packages/shared/src/calendar.ts`) and `prices/calendar_models.py`. All symbols come from the `TRACKED` registry, which holds
+holdings and watchlist symbols alike.
+
+### Building the calendar (`buildCalendar`)
+
+* **Dividends** (declared): one `EX_DIVIDEND` and, with a pay date, one `DIVIDEND_PAY` per stored event. For symbols you hold the
+  quantity is the position **the day before the ex-date** (the current position for a future ex-date); with no shares at that
+  time the event is skipped. The expected amount is `quantity × per share`, converted at the latest FX rate for future dates
+  and at the ex-date fixing for past ones (see "Currency conversion"), **net of the withholding tax observed over the last 12
+  months** — the rule of `calculatePassiveIncome`, so event amounts add up to the analytics figures (the existing Dividends
+  page shows gross upcoming amounts). Exactly one event of a dividend carries `countsAsIncome` (the pay event, else the ex
+  event); chart and month totals count only those.
+* **Paid**: a `DIVIDEND` transaction within 7 days of a declared pay date (60 days after the ex-date when there is no pay
+  date) turns that pay event into `PAID` with the amount actually received (net, at the transaction's FX rate); other
+  dividend transactions appear as stand-alone `PAID` events.
+* **Estimated**: for a holding that paid within the last 12 months, the payments its history implies that no declared event
+  covers (`paymentsPerYear` frequency, latest per-share amount, projected by whole intervals from the last payment, within the
+  next 12 months). They are `ESTIMATED` pay events plus, when stored events show the usual ex-to-pay lag, estimated ex-dates.
+* **Splits**: your own `SPLIT` transactions win over a stored split within 3 days; the same split in several portfolios counts once.
+* **Summary** (`annualIncome`, `monthlyAverage`, `dailyAverage`, `yieldPct`, `yieldOnCostPct`, `declared`, `estimated`) is
+  `calculatePassiveIncome` of the holdings (÷ 12, ÷ 365); **monthly** has 12 months starting 3 months before the current one with
+  `paid`/`declared`/`estimated`/`total` per month (by pay date). Neither depends on the query's filters. They can differ slightly
+  from each other because the summary windows declared events by ex-date and the chart buckets by pay date.
+
+### Endpoints
+
+| Route (both accept `?portfolioId=`, omitted or `all` = combined) | Behaviour |
+|---|---|
+| `GET /calendar?from=&to=&types=&status=&scope=` | `{ baseCurrency, from, to, events[], summary, monthly[], coverage: { earnings, corporateActions } }` |
+| `GET /calendar.ics?…` (same filters) | `text/calendar; charset=utf-8`, `Content-Disposition: attachment; filename="portfolio-calendar-{from}_{to}.ics"` |
+
+`from`/`to`: `YYYY-MM-DD`; default range = current month ± 1 month (`from` alone spans the following month, `to` alone the
+preceding one); at most **400 days** inclusive. `types`: comma-separated `CALENDAR_EVENT_TYPES`, `status`:
+`CONFIRMED|ESTIMATED|PAID`, `scope`: `holdings|watchlist|all` (default). Invalid values answer `400 VALIDATION_ERROR` in the standard
+envelope, an unknown portfolio `404`, a missing FX rate `503 FX_UNAVAILABLE`. Identity is `ctx.userId` only; transactions and
+watchlist are the caller's, and the shared ticker partitions hold no user data. No new route infrastructure: the paths are covered by
+the API Gateway `$default` route.
+
+The `.ics` file has one all-day `VEVENT` per event (`DTSTART;VALUE=DATE`, `DTEND` the next day because it is exclusive, stable
+`UID:{event id}@portfolio-tracker`, escaped text, UTF-8, CRLF, lines folded at 75 octets without splitting characters,
+`STATUS:TENTATIVE` for estimates). Calendar apps cannot send the JWT, so this is a **download** (the web app fetches it with the
+token and saves the file), **not a subscription URL**; re-importing updates events by UID instead of duplicating them.
+
+### Infrastructure (`infra/terraform/calendar.tf`)
+
+Lambda `portfolio-tracker-prices-calendar-{env}` (same `prices.zip`, `python3.12`, arm64, handler
+`prices.calendar_handlers.calendar_refresh`, own log group, the `prices-refresh` environment and IAM statements — DynamoDB
+read/write, SSM API keys) and a daily EventBridge Scheduler schedule `cron(30 5 * * ? *)` in `Europe/Amsterdam` (one retry).
+Variables: `calendar_cron`, `calendar_timeout`, `calendar_alphavantage_daily_calls`, `calendar_eodhd_daily_calls`,
+`calendar_recheck_days`, `calendar_earnings_horizon`; `terraform test` covers them (`tests/calendar.tftest.hcl`). Locally:
+`cd services/prices && python -m prices.calendar_handlers` (mock provider) after `pnpm --filter @portfolio/api seed`, which also seeds
+earnings and splits.
+
+### Web
+
+`/calendar` (`web/src/pages/CalendarPage.tsx`, `web/src/features/calendar/`): month navigator, range (this month / next 12
+months, the latter as a list), event-type toggles with a marker shape **and** letter (E, P, R, S, C; one neutral colour), status toggles, scope select, a
+Calendar/List toggle (list is the default below 640 px), a Monday-first month grid built as a real `<table>` (buttons inside cells, "+N more"
+opens the day), the month's expected dividends, four KPIs, a 12-month received/declared/estimated stacked chart (value label per bar, dashed `avg` line, per-status tooltip),
+event dialogs and a coverage `<details>`. View, month, range and filters live in the URL; type/status/scope filters apply
+client-side to one loaded range, the `.ics` download sends them to the API. Amounts follow the portfolio scope selector.
+
+**Colour language.** The *status* carries the colour everywhere on the page (chips, list rows, status filters, chart,
+legend, tooltip); the event *type* is told by marker shape and letter. `PAID` is shown as **Received** (pastel green, `#dcfce7`
+fill / `#14532d` text), `ESTIMATED` as **Estimated** (pastel yellow, `#fef9c3` / `#422006`, always with a dashed outline and italic
+chip text so colour is never the only cue), `CONFIRMED` as **Confirmed** / **Declared** (pastel blue, `#dbeafe` / `#1e3a8a`);
+dark theme uses muted fills with light text (all text ≥ 4.5:1, see `calendarColours.ts`). The API enum values are unchanged.

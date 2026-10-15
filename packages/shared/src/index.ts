@@ -24,3 +24,6 @@ export * from './growth-api.js';
 export * from './growth.js';
 export * from './goals-api.js';
 export * from './goals.js';
+export * from './calendar.js';
+export * from './calendar-api.js';
+export * from './calendar-ics.js';
