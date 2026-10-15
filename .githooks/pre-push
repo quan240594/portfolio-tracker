@@ -27,6 +27,15 @@ if [ -n "$(git status --porcelain)" ]; then
   exit 1
 fi
 
+# Tests do not typecheck (vitest strips types), so a type error would only surface in CI. ~20s.
+echo "pre-push: typechecking..."
+# shellcheck disable=SC1091
+. scripts/use-supported-node.sh
+if ! pnpm -r --if-present typecheck >/dev/null 2>&1; then
+  echo "pre-push: typecheck failed, aborting push (run: pnpm -r --if-present typecheck)." >&2
+  exit 1
+fi
+
 # Regenerate coverage so the scan reflects the code being pushed, same as CI.
 echo "pre-push: running test coverage (TS + Python)..."
 if ! scripts/coverage.sh; then
