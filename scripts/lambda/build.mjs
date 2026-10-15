@@ -1,5 +1,5 @@
 // Bundles a service's Lambda handler to <service>/dist/<name>/index.mjs (ESM, node22). The AWS SDK is bundled to pin its version.
-// Usage: node scripts/lambda/build.mjs <api|ingest>
+// Usage: node scripts/lambda/build.mjs <api|ingest|broker-sync>
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveService } from './service.mjs';

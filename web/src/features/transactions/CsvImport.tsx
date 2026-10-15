@@ -1,6 +1,6 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { CSV_HEADER, downloadSampleCsv } from './sampleCsv';
-import { useCsvImport, type CsvImportOptions } from './useCsvImport';
+import { useCsvImport, type Conversion, type CsvImportOptions } from './useCsvImport';
 import { defaultTargetPortfolio, portfolioName, usePortfolioScope } from '../portfolios/usePortfolioScope';
 
 interface Props extends CsvImportOptions {
@@ -45,6 +45,10 @@ export function CsvImport({ onDone, ...options }: Readonly<Props>) {
         <p className="muted mt-2 text-xs" data-testid="csv-fxrate-help">
           <code>fxRate</code>: units of the trade currency per 1 EUR, as on your broker statement (e.g. 1.0842 for USD). Leave it empty
           for EUR trades, or to use the ECB rate of the trade date.
+        </p>
+        <p className="muted mt-2 text-xs" data-testid="csv-trading212-help">
+          Trading 212 &quot;History&quot; exports (Activity → History → Export) are recognised by their header and converted in your browser.
+          Trades and dividends are imported; deposits, withdrawals and interest are skipped.
         </p>
         <button type="button" className="mt-2 text-xs font-medium text-brand-600 underline hover:text-brand-700 dark:text-brand-400" onClick={downloadSampleCsv}>
           Download sample CSV
@@ -107,6 +111,7 @@ export function CsvImport({ onDone, ...options }: Readonly<Props>) {
               Imported {state.result.importedCount ?? 0} of {state.result.rowCount ?? 0} rows from {state.result.fileName} into{' '}
               {portfolioName(portfolios, state.result.portfolioId ?? portfolioId)}.
             </p>
+            <ConversionNotes conversion={state.conversion} />
           </div>
         )}
       </div>
@@ -115,6 +120,7 @@ export function CsvImport({ onDone, ...options }: Readonly<Props>) {
         <div role="alert" className="space-y-2 rounded-lg border border-red-200 bg-red-50 p-3 text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100">
           <p className="font-semibold">✕ Import failed — nothing was imported</p>
           <p>Fix the rows below and upload the file again.</p>
+          {state.conversion && <p className="text-xs">Row numbers refer to the converted Trading 212 rows (trades and dividends only, oldest first).</p>}
           {!!state.result.errors?.length && (
             <div className="max-h-56 overflow-auto rounded-md bg-white/70 dark:bg-slate-950/50">
               <table className="w-full text-left text-xs">
@@ -157,6 +163,28 @@ export function CsvImport({ onDone, ...options }: Readonly<Props>) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** What the Trading 212 converter left out, so a short import is never a surprise. */
+function ConversionNotes({ conversion }: Readonly<{ conversion: Conversion | undefined }>) {
+  if (!conversion) return null;
+  const ignored = conversion.ignored.reduce((sum, i) => sum + i.count, 0);
+  return (
+    <div className="mt-2 space-y-1 text-xs" data-testid="trading212-conversion">
+      <p>Trading 212 export recognised: {conversion.imported} trade/dividend rows converted.</p>
+      {ignored > 0 && <p>Skipped {ignored} other rows ({conversion.ignored.map((i) => `${i.action} ×${i.count}`).join(', ')}).</p>}
+      {conversion.unmapped.length > 0 && (
+        <p>
+          Not imported, market could not be determined: {conversion.unmapped.map((u) => `${u.ticker} ×${u.count}`).join(', ')}. Use the Trading 212 sync to import
+          these.
+        </p>
+      )}
+      {conversion.invalid.length > 0 && <p>{conversion.invalid.length} rows were invalid and skipped.</p>}
+      {conversion.warnings.map((w) => (
+        <p key={w}>{w}</p>
+      ))}
     </div>
   );
 }

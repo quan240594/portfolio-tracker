@@ -1,5 +1,5 @@
 // Zips <service>/dist/<name>/ into <service>/dist/<name>.zip with index.mjs at the zip root (Lambda handler: index.handler).
-// Usage: node scripts/lambda/package.mjs <api|ingest>
+// Usage: node scripts/lambda/package.mjs <api|ingest|broker-sync>
 import { createWriteStream, existsSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveService } from './service.mjs';

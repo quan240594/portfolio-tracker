@@ -58,6 +58,7 @@ jobs:
         run: |
           pnpm --filter @portfolio/api package
           pnpm --filter @portfolio/ingest package
+          pnpm --filter @portfolio/broker-sync package
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}

@@ -14,6 +14,7 @@ const NAV = [
   { to: '/rebalance', label: 'Rebalance' },
   { to: '/assets', label: 'Assets' },
   { to: '/watchlist', label: 'Watchlist' },
+  { to: '/brokers', label: 'Brokers' },
 ];
 
 function Logo() {

@@ -1,3 +1,4 @@
+import type { BrokerDeps } from './broker-deps.js';
 import type { Config } from './config.js';
 import type { EventPublisher } from './events.js';
 import type { UploadUrlSigner } from './presigner.js';
@@ -9,6 +10,8 @@ export interface Deps {
   mgmt: ManagementRepository;
   events: EventPublisher;
   signer: UploadUrlSigner;
+  /** Trading 212 sync; routes answer 503 when absent. */
+  broker?: BrokerDeps;
   config: Pick<Config, 'baseCurrency' | 'authMode' | 'demoUserId' | 'corsAllowedOrigin'>;
   now: () => Date;
   uuid: () => string;
