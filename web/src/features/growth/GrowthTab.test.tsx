@@ -202,26 +202,26 @@ describe('Benchmarks bar', () => {
     expect(select).toHaveAttribute('aria-expanded', 'false');
     await user.click(select);
     expect(select).toHaveAttribute('aria-expanded', 'true');
-    const list = within(bar).getByRole('listbox', { name: 'Benchmarks' });
-    expect(list).toHaveAttribute('aria-multiselectable', 'true');
-    expect(within(list).getByRole('option', { name: /IWDA\.AS/ })).toHaveAttribute('aria-selected', 'true');
-    expect(within(list).getAllByRole('group').map((g) => g.getAttribute('aria-label'))).toEqual(['With price data', 'Suggestions and watchlist without price data']);
+    const list = within(bar).getByRole('group', { name: 'Benchmarks' });
+    expect(select).toHaveAttribute('aria-controls', list.parentElement!.id);
+    expect(within(list).getByRole('checkbox', { name: /IWDA\.AS/ })).toBeChecked();
+    expect(within(list).getAllByRole('group').map((g) => within(g).getByText(/^(With|Suggestions).*price data$/).textContent)).toEqual(['With price data', 'Suggestions and watchlist without price data']);
 
-    await user.click(within(list).getByRole('option', { name: /VWRL\.AS/ }));
+    await user.click(within(list).getByRole('checkbox', { name: /VWRL\.AS/ }));
     expect(router.state.location.search).toBe('?benchmarks=IWDA.AS%2CVWRL.AS');
     expect(sessionStorage.getItem(BENCHMARKS_STORAGE_KEY)).toBe('IWDA.AS,VWRL.AS');
     await waitFor(() => expect(seen.some((q) => q.get('benchmarks') === 'IWDA.AS,VWRL.AS')).toBe(true));
     expect(await within(card('Portfolio value')).findByText('VWRL.AS')).toBeInTheDocument();
 
-    await user.click(within(list).getByRole('option', { name: /AAPL/ }));
+    await user.click(within(list).getByRole('checkbox', { name: /AAPL/ }));
     expect(sessionStorage.getItem(BENCHMARKS_STORAGE_KEY)).toBe('IWDA.AS,VWRL.AS,AAPL');
     expect(within(bar).getByText('You can compare with at most 3 benchmarks.')).toBeInTheDocument();
-    const blocked = within(list).getByRole('option', { name: /ASML\.AS/ });
-    expect(blocked).toHaveAttribute('aria-disabled', 'true');
+    const blocked = within(list).getByRole('checkbox', { name: /ASML\.AS/ });
+    expect(blocked).toBeDisabled();
     await user.click(blocked);
     expect(sessionStorage.getItem(BENCHMARKS_STORAGE_KEY)).toBe('IWDA.AS,VWRL.AS,AAPL');
 
-    await user.click(within(list).getByRole('option', { name: /AAPL/ }));
+    await user.click(within(list).getByRole('checkbox', { name: /AAPL/ }));
     await user.click(within(bar).getByRole('button', { name: 'Remove VWRL.AS' }));
     expect(sessionStorage.getItem(BENCHMARKS_STORAGE_KEY)).toBe('IWDA.AS');
     await user.click(within(bar).getByRole('button', { name: 'Remove IWDA.AS' }));
@@ -231,30 +231,32 @@ describe('Benchmarks bar', () => {
     expect(seen.some((q) => q.get('benchmarks') === '')).toBe(true);
   });
 
-  it('moves through the options with the arrow keys and closes with Escape or an outside click', async () => {
+  it('tabs through the options and closes with Escape or an outside click', async () => {
     renderApp('/analytics');
     const bar = await screen.findByRole('region', { name: 'Benchmarks' });
     const user = userEvent.setup();
     const select = within(bar).getByRole('button', { name: 'Select' });
     await user.click(select);
-    const options = within(bar).getAllByRole('option');
+    const options = within(bar).getAllByRole('checkbox');
     options[0]!.focus();
-    await user.keyboard('{ArrowDown}');
-    expect(options[1]).toHaveFocus();
-    await user.keyboard('{ArrowUp}{ArrowUp}');
-    expect(options[0]).toHaveFocus();
     await user.keyboard('{Tab}');
+    expect(options[1]).toHaveFocus();
+    await user.keyboard('{Shift>}{Tab}{/Shift}');
+    expect(options[0]).toHaveFocus();
+    const before = (options[0] as HTMLInputElement).checked;
+    await user.keyboard('{ }');
+    expect((options[0] as HTMLInputElement).checked).toBe(!before);
     await user.keyboard('{Escape}');
-    expect(within(bar).queryByRole('listbox')).not.toBeInTheDocument();
+    expect(within(bar).queryByRole('group', { name: 'Benchmarks' })).not.toBeInTheDocument();
     expect(select).toHaveFocus();
 
     await user.keyboard('{Escape}');
     await user.click(select);
     await user.click(document.body);
-    expect(within(bar).queryByRole('listbox')).not.toBeInTheDocument();
+    expect(within(bar).queryByRole('group', { name: 'Benchmarks' })).not.toBeInTheDocument();
     await user.click(select);
     await user.click(select);
-    expect(within(bar).queryByRole('listbox')).not.toBeInTheDocument();
+    expect(within(bar).queryByRole('group', { name: 'Benchmarks' })).not.toBeInTheDocument();
   });
 
   it('restores the selection of this session and ignores an invalid URL value', async () => {
@@ -295,7 +297,7 @@ describe('Benchmarks bar', () => {
     expect(sp(screen.getByText(/^Your portfolio is (ahead of|behind) IWDA\.AS by /).textContent!)).toContain('IWDA.AS');
     const user = userEvent.setup();
     await user.click(within(bar).getByRole('button', { name: 'Select' }));
-    expect(within(bar).getByRole('option', { name: /VWCE\.DE/ })).toHaveTextContent('no price data yet');
+    expect(within(bar).getByRole('checkbox', { name: /VWCE\.DE/ }).closest('label')).toHaveTextContent('no price data yet');
   });
 
   it('uses plural wording when several benchmarks have no data', async () => {
@@ -310,7 +312,7 @@ describe('Benchmarks bar', () => {
     renderApp('/analytics');
     const bar = await screen.findByRole('region', { name: 'Benchmarks' });
     await userEvent.setup().click(within(bar).getByRole('button', { name: 'Select' }));
-    expect(within(bar).getAllByRole('option').map((o) => o.textContent)).toEqual(
+    expect(within(bar).getAllByRole('checkbox').map((o) => o.closest('label')!.textContent)).toEqual(
       expect.arrayContaining([expect.stringContaining('IWDA.AS · iShares Core MSCI World'), expect.stringContaining('SXR8.DE · iShares Core S&P 500')]),
     );
   });

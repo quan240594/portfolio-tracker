@@ -65,7 +65,7 @@ export function DynamicsChart({ months, benchmarks, summary }: Readonly<Props>) 
               {data.map((d) => (
                 <Cell key={String(d.label)} fill={Number(d.portfolio) >= 0 ? c.gain : c.loss} />
               ))}
-              <LabelList dataKey="portfolio" content={(p) => <PercentLabel {...p} gain={c.gain} loss={c.loss} />} />
+              <LabelList dataKey="portfolio" content={<PercentLabel gain={c.gain} loss={c.loss} />} />
             </Bar>
             {benchmarks.map((b) => (
               <Bar key={b.symbol} dataKey={returnKey(b.index)} name={b.symbol} fill={colors[b.index % colors.length]} radius={[3, 3, 0, 0]} isAnimationActive={false} />

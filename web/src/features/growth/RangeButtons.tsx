@@ -4,7 +4,8 @@ import { RANGE_LABELS } from './growthFormat';
 /** Range selector: plain toggle buttons (`aria-pressed`), each reachable with Tab. */
 export function RangeButtons({ label, value, onChange }: Readonly<{ label: string; value: GrowthRange; onChange: (range: GrowthRange) => void }>) {
   return (
-    <div role="group" aria-label={label} className="inline-flex flex-wrap gap-0.5 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
+    <fieldset className="inline-flex min-w-0 flex-wrap gap-0.5 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
+      <legend className="sr-only">{label}</legend>
       {GROWTH_RANGES.map((r) => (
         <button
           key={r}
@@ -20,7 +21,7 @@ export function RangeButtons({ label, value, onChange }: Readonly<{ label: strin
           {RANGE_LABELS[r]}
         </button>
       ))}
-    </div>
+    </fieldset>
   );
 }
 
@@ -29,7 +30,7 @@ export function CompareToggle({ checked, onChange, disabled }: Readonly<{ checke
   return (
     <label className="inline-flex items-center gap-2 text-xs font-medium">
       <input type="checkbox" className="h-4 w-4 rounded border-slate-300 accent-brand-600" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
-      Compare
+      <span>Compare</span>
     </label>
   );
 }

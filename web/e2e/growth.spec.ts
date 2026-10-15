@@ -37,9 +37,9 @@ test.describe('Analytics → Growth (mock mode)', () => {
     await page.goto('/analytics');
     const bar = page.getByRole('region', { name: 'Benchmarks' });
     await bar.getByRole('button', { name: 'Select' }).click();
-    await bar.getByRole('option', { name: /VWRL\.AS/ }).click();
+    await bar.locator('label', { hasText: /VWRL\.AS/ }).click();
     await page.keyboard.press('Escape');
-    await expect(bar.getByRole('listbox')).toBeHidden();
+    await expect(bar.getByRole('group', { name: 'Benchmarks' })).toBeHidden();
     await expect(page).toHaveURL(/benchmarks=IWDA\.AS%2CVWRL\.AS/);
     await expect(bar.getByRole('list', { name: 'Selected benchmarks' }).getByRole('listitem')).toHaveCount(2);
 
@@ -50,6 +50,21 @@ test.describe('Analytics → Growth (mock mode)', () => {
     await bar.getByRole('button', { name: 'Remove VWRL.AS' }).click();
     await expect(bar.getByRole('list', { name: 'Selected benchmarks' }).getByRole('listitem')).toHaveCount(1);
   });
+
+  for (const width of [1440, 390]) {
+    test(`keeps the benchmark picker inside the viewport at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto('/analytics');
+      const bar = page.getByRole('region', { name: 'Benchmarks' });
+      await bar.getByRole('button', { name: 'Select' }).click();
+      const options = bar.getByRole('group', { name: 'Benchmarks' });
+      await expect(options).toBeVisible();
+      const panel = await options.locator('xpath=..').boundingBox();
+      expect(panel).not.toBeNull();
+      expect(panel!.x).toBeGreaterThanOrEqual(0);
+      expect(panel!.x + panel!.width).toBeLessThanOrEqual(width);
+    });
+  }
 
   test('follows the portfolio scope', async ({ page }) => {
     await page.goto('/analytics?portfolio=trading-212');

@@ -57,7 +57,7 @@ export function HoldingsChart({ rows, summary }: Readonly<{ rows: readonly Holdi
               {rows.map((r) => (
                 <Cell key={r.symbol} fill={r.returnPct >= 0 ? c.gain : c.loss} />
               ))}
-              <LabelList dataKey="returnPct" content={(p) => <BarValueLabel {...p} gain={c.gain} loss={c.loss} />} />
+              <LabelList dataKey="returnPct" content={<BarValueLabel gain={c.gain} loss={c.loss} />} />
             </Bar>
           </BarChart>
         </ResponsiveContainer>
