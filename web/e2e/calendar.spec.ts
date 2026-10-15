@@ -147,7 +147,14 @@ test.describe('Calendar page width on narrow screens', () => {
           scrollWidth: document.documentElement.scrollWidth,
           innerWidth: window.innerWidth,
           wide: [...document.querySelectorAll('body *')]
-            .filter((el) => el.getBoundingClientRect().right > window.innerWidth + 0.5)
+            .filter((el) => {
+              if (el.getBoundingClientRect().right <= window.innerWidth + 0.5) return false;
+              // skip anything clipped by a scrolling ancestor: it cannot widen the page
+              for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+                if (getComputedStyle(p).overflowX !== 'visible') return false;
+              }
+              return true;
+            })
             .slice(0, 6)
             .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 60)} right=${Math.round(el.getBoundingClientRect().right)}`),
         }));
