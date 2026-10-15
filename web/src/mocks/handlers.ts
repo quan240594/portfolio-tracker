@@ -16,6 +16,7 @@ import * as db from './db';
 import { analyticsHandlers } from './analyticsHandlers';
 import { dividendsOverviewHandlers } from './dividendsOverviewHandlers';
 import { growthHandlers } from './growthHandlers';
+import { goalsHandlers } from './goals-handlers';
 import { categoryAllocation, managementHandlers } from './management-handlers';
 import { api, errorResponse, guard, latency } from './utils';
 
@@ -153,5 +154,6 @@ export const handlers: HttpHandler[] = [
   }),
 
   ...managementHandlers,
+  ...goalsHandlers,
   ...brokerHandlers,
 ];

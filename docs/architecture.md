@@ -653,3 +653,58 @@ today, so there is no extra provider traffic (free tier: 25 calls/day). Profiles
 *new* symbol, so existing profiles get a P/E when they are re-enriched (delete the `PROFILE` item of a symbol to have it
 fetched again); until then the card says earnings data is missing. Values older than 90 days are flagged in the card. The mock
 provider returns deterministic P/Es for stocks only; ETFs and crypto never have one. Twelve Data and EODHD profiles carry no P/E.
+## Goals
+
+A saved, fuller version of the Analytics "Income goal" tab: one goal per user and scope (a portfolio or all portfolios
+combined) that is loaded on page open and **recalculated with today's data**, so the projection follows the portfolio.
+Pure maths in `packages/shared/src/goals.ts`, contract/schemas/keys in `goals-api.ts`, API in
+`services/api/src/routes/goals.ts` (persistence via `ManagementRepository.getGoal/putGoal/deleteGoal`), web in
+`web/src/features/goals/` + `pages/GoalsPage.tsx` (`/goals`, lazy-loaded). The GitHub Pages demo uses the same shared
+functions through MSW (`web/src/mocks/goals-handlers.ts`, goals in memory). No new infrastructure or IAM.
+
+| Endpoint (all accept `?portfolioId=`, omitted/`all` = combined) | Content |
+|---|---|
+| `GET /goals` | `{ saved, updatedAt, settings, projection }`: the saved settings (or the defaults) and today's projection |
+| `PUT /goals` | body = settings; validates, saves, returns the same as GET |
+| `DELETE /goals` | removes the saved goal (`204`, also when none exists) |
+| `POST /goals/calculate` | body = settings; stateless preview `{ settings, projection }`, nothing is written |
+
+Errors use the standard envelope: `400 VALIDATION_ERROR` (zod issues with `path` in `details`), `404` for an unknown portfolio.
+
+**Item** (`PK = USER#{userId}`, `SK = GOAL#{portfolioId|all}`, `entityType = GOAL`; keys in `goalKeys`): `GoalSettings`
+(`goalType` `value|income`, `targetAmount`, `targetYear`, `monthlyContribution`, `priceReturnPct`, `startYieldPct`
+(null = the portfolio's current forward yield), `dividendGrowthPct`, `yieldOnNewMoneyPct`, `inflationPct`,
+`adjustForInflation`, `reinvestDividends`) plus `userId`, `portfolioId`, `createdAt`, `updatedAt`. Identity comes from
+`ctx.userId` and the validated scope only. Deleting a portfolio removes its goal with the rest of its management data
+(`deletePortfolioData`); the `all` goal stays. A stored target year that has passed moves to next year; unreadable items
+fall back to the defaults.
+
+**Validation** (`goalSettingsSchemaFor(today)`): target > 0 and ≤ 1e9, target year between next year and 60 years ahead,
+contribution 0..1e6, every rate 0..30 %.
+
+**Model** (monthly steps, year-end points, rows from "today" up to the target year + 20 years, at most 60):
+
+- Starting value, forward income and yield come from the Analytics calculators (`computeGoal`: `calculatePortfolio`,
+  passive income), so the scope rules are the same as Analytics (cash balances, custom assets and non-investment flows
+  are not part of the holdings; splits are applied to positions only).
+- *Value goal*: value × (1+price return)^(1/12) + contribution + (when reinvesting) the dividends of the month; the
+  dividend run-rate grows at the dividend growth rate, and contributions/reinvested dividends buy extra income at the yield
+  on new money.
+- *Income goal*: the Analytics income projection (`projectIncomeGoal`'s unshifted scenario), so results equal the
+  Analytics Goal tab for equivalent inputs (tested; with inflation off "Your plan" equals its Base scenario). Price return
+  plays no role here.
+- *Inflation*: the goal in year *n* is `target × (1+inflation)^n` when "adjust goal for inflation" is on (default 2 %);
+  contributions stay flat nominal amounts.
+- *Scenarios*: **Your plan** = the entered parameters; **Safe** = −2 pp price return, −1 pp dividend growth, −0.5 pp yield
+  on new money; **Alternative** = +2 / +1 / +0.5 pp (`GOAL_SCENARIO_ADJUSTMENTS`, rates never below 0). Dividend cuts are
+  not modelled.
+- *Reached*: the first whole year in which a scenario's value/income is at least the (inflated) goal; the verdict follows
+  "Your plan" (on time, years early/later, or not within the horizon). `earlierScenario` is the other scenario that beats
+  the plan.
+- *Required contribution*: the smallest whole-euro monthly amount (bisection on 0..€ 1.000.000, `solveRequiredContribution`)
+  for which "Your plan" reaches the goal in the target year; `none-needed` when 0 suffices, `unattainable` beyond the cap.
+
+Web: form (goal type, target, achieve-by year, monthly contribution, expandable "Returns and inflation") next to the
+results (verdict, chart with data-table alternative, insight chips, year-by-year `<table>` with CSV download, parameters
+panel). While the form is valid and unsaved for 400 ms the page shows a stateless `POST /goals/calculate` preview.
+Not investment advice.

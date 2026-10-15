@@ -105,6 +105,7 @@ describe('DynamoManagementRepository', () => {
       'ASSET#p1#a1',
       'CATASSIGN#p1#AAPL',
       'CATEGORY#p1#c1',
+      'GOAL#p1',
       'PSETTINGS#p1',
     ]);
   });

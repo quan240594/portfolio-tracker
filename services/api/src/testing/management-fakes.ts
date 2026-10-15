@@ -1,4 +1,4 @@
-import type { Category, CategoryAssignment, CustomAsset, PortfolioSettings, WatchlistEntry } from '@portfolio/shared';
+import type { Category, CategoryAssignment, CustomAsset, GoalItem, PortfolioSettings, WatchlistEntry } from '@portfolio/shared';
 import type { ManagementRepository } from '../management-repository.js';
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -10,6 +10,7 @@ export class InMemoryManagementRepository implements ManagementRepository {
   assignments: CategoryAssignment[] = [];
   assets: CustomAsset[] = [];
   watchlist: WatchlistEntry[] = [];
+  goals: GoalItem[] = [];
 
   getSettings(userId: string, portfolioId: string) {
     return Promise.resolve(clone(this.settings.find((s) => s.userId === userId && s.portfolioId === portfolioId) ?? null));
@@ -73,11 +74,23 @@ export class InMemoryManagementRepository implements ManagementRepository {
     this.watchlist = this.watchlist.filter((w) => !(w.userId === userId && w.symbol === symbol));
     return Promise.resolve(this.watchlist.length < before);
   }
+  getGoal(userId: string, scope: string) {
+    return Promise.resolve(clone(this.goals.find((g) => g.userId === userId && g.portfolioId === scope) ?? null));
+  }
+  putGoal(goal: GoalItem) {
+    this.goals = [...this.goals.filter((g) => !(g.userId === goal.userId && g.portfolioId === goal.portfolioId)), clone(goal)];
+    return Promise.resolve();
+  }
+  deleteGoal(userId: string, scope: string) {
+    this.goals = this.goals.filter((g) => !(g.userId === userId && g.portfolioId === scope));
+    return Promise.resolve();
+  }
   async deletePortfolioData(userId: string, portfolioId: string) {
     this.settings = this.settings.filter((s) => !(s.userId === userId && s.portfolioId === portfolioId));
     this.categories = this.categories.filter((c) => !(c.userId === userId && c.portfolioId === portfolioId));
     this.assignments = this.assignments.filter((a) => !(a.userId === userId && a.portfolioId === portfolioId));
     this.assets = this.assets.filter((a) => !(a.userId === userId && a.portfolioId === portfolioId));
+    this.goals = this.goals.filter((g) => !(g.userId === userId && g.portfolioId === portfolioId));
     await Promise.resolve();
   }
 }

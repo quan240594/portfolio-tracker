@@ -136,6 +136,27 @@ test.describe('GitHub Pages build (demo mode under /portfolio-tracker/)', () => 
     expect(errors.filter((e) => !isExpectedDeepLink404(e))).toEqual([]);
   });
 
+  test('the goals page plans and saves a goal in memory, and a reload resets it', async ({ page }) => {
+    const errors = trackErrors(page);
+    const res = await page.goto(`${BASE}goals`);
+    expect(res?.status()).toBe(404);
+    await expect(page.getByRole('heading', { level: 1, name: 'Goals' })).toBeVisible();
+    await expect(page).toHaveTitle(/Goals · Portfolio Tracker/);
+    await expect(page.locator('output').filter({ hasText: /Achievable in \d+ years? \(by \d{4}\)|Not reached within the horizon|Goal already reached/ })).toBeVisible();
+    await expect(page.getByTestId('goal-chart')).toBeVisible();
+    await expect(page.getByRole('table', { name: /Annual income per year/ })).toBeVisible();
+
+    await page.getByLabel('Monthly contribution (€)').fill('900');
+    await page.getByRole('button', { name: 'Save and calculate' }).click();
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: /Contributions/ })).toContainText('900/month');
+
+    await page.reload();
+    await expect(page.getByLabel('Monthly contribution (€)')).toHaveValue('250');
+    await expect(page.getByRole('button', { name: 'Reset' })).toBeDisabled();
+    expect(errors.filter((e) => !isExpectedDeepLink404(e))).toEqual([]);
+  });
+
   test('the bare project URL without trailing slash redirects into the app', async ({ page }) => {
     await page.goto(BASE.replace(/\/$/, ''));
     await expect(page).toHaveURL(new RegExp(`${BASE}$`));

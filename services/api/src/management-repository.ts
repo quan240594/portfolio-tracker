@@ -7,12 +7,15 @@ import {
   type QueryCommandInput,
 } from '@aws-sdk/lib-dynamodb';
 import {
+  GOAL_ENTITY,
   MANAGEMENT_ENTITY,
   fromItem,
+  goalKeys,
   managementKeys,
   type Category,
   type CategoryAssignment,
   type CustomAsset,
+  type GoalItem,
   type PortfolioSettings,
   type WatchlistEntry,
 } from '@portfolio/shared';
@@ -39,7 +42,11 @@ export interface ManagementRepository {
   /** Create-only put; resolves false when the symbol is already on the watchlist. */
   addWatchlistEntry(entry: WatchlistEntry): Promise<boolean>;
   deleteWatchlistEntry(userId: string, symbol: string): Promise<boolean>;
-  /** Removes settings, categories, assignments and custom assets of a deleted portfolio. */
+  /** The saved goal of a scope (a portfolio id or `all`). */
+  getGoal(userId: string, scope: string): Promise<GoalItem | null>;
+  putGoal(goal: GoalItem): Promise<void>;
+  deleteGoal(userId: string, scope: string): Promise<void>;
+  /** Removes settings, categories, assignments, custom assets and the goal of a deleted portfolio. */
   deletePortfolioData(userId: string, portfolioId: string): Promise<void>;
 }
 
@@ -160,6 +167,19 @@ export class DynamoManagementRepository implements ManagementRepository {
     }
   }
 
+  async getGoal(userId: string, scope: string): Promise<GoalItem | null> {
+    const res = await this.doc.send(new GetCommand({ TableName: this.tableName, Key: goalKeys.goal(userId, scope), ConsistentRead: true }));
+    return res.Item ? fromItem<GoalItem>(res.Item) : null;
+  }
+
+  async putGoal(goal: GoalItem): Promise<void> {
+    await this.put(goalKeys.goal(goal.userId, goal.portfolioId), GOAL_ENTITY, goal);
+  }
+
+  async deleteGoal(userId: string, scope: string): Promise<void> {
+    await this.remove(goalKeys.goal(userId, scope));
+  }
+
   async deletePortfolioData(userId: string, portfolioId: string): Promise<void> {
     const [categories, assignments, assets] = await Promise.all([
       this.listCategories(userId, portfolioId),
@@ -171,6 +191,7 @@ export class DynamoManagementRepository implements ManagementRepository {
       ...categories.map((c) => this.remove(managementKeys.category(userId, portfolioId, c.categoryId))),
       ...assets.map((a) => this.remove(managementKeys.customAsset(userId, portfolioId, a.assetId))),
       this.remove(managementKeys.settings(userId, portfolioId)),
+      this.deleteGoal(userId, portfolioId),
     ]);
   }
 }
