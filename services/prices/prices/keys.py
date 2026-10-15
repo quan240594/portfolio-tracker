@@ -114,6 +114,15 @@ def profile_item(p: InstrumentProfile) -> dict[str, Any]:
     return {**profile_key(p.symbol), "entityType": ENTITY_PROFILE, **_flat(p)}
 
 
+PROFILE_DETAIL_FIELDS = ("description", "isin", "marketCap", "eps", "beta", "peRatio")
+
+
+def profile_details(p: InstrumentProfile | None) -> dict[str, Any]:
+    """The optional company details of a profile as DynamoDB values (absent ones are left out)."""
+    flat = _flat(p) if p is not None else {}
+    return {k: flat[k] for k in PROFILE_DETAIL_FIELDS if k in flat}
+
+
 def dividend_item(d: DividendEvent) -> dict[str, Any]:
     return {**dividend_key(d.symbol, d.ex_date), "entityType": ENTITY_DIVIDEND_EVENT, **_flat(d)}
 

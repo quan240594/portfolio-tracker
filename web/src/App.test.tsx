@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { App, createQueryClient } from './App';
+import { App, createQueryClient, titleFor } from './App';
 import { ApiError } from './api/client';
 import { renderApp } from './test/utils';
 
@@ -115,5 +115,16 @@ describe('createQueryClient', () => {
     const q = createQueryClient().getDefaultOptions().queries!;
     expect(q.refetchOnWindowFocus).toBe(false);
     expect(q.staleTime).toBe(30_000);
+  });
+});
+
+describe('titleFor', () => {
+  it('maps known routes, asset detail pages and unknown paths', () => {
+    expect(titleFor('/assets')).toBe('Assets');
+    expect(titleFor('/assets/ASML.AS')).toBe('ASML.AS · Asset detail');
+    expect(titleFor('/assets/BTC%2DEUR')).toBe('BTC-EUR · Asset detail');
+    expect(titleFor('/assets/%E0%A4%A')).toBe('Asset detail');
+    expect(titleFor('/assets/')).toBe('Not found');
+    expect(titleFor('/nope')).toBe('Not found');
   });
 });

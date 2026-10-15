@@ -252,6 +252,7 @@ def test_enrichment_only_for_missing_profiles(infra: Infra) -> None:
         "exchange": "NASDAQ",
         "peRatio": Decimal("34.2"),
         "fundamentalsAsOf": "2026-10-13",
+        "detailsAsOf": "2026-10-13",
     }
     btc = infra.get("TICKER#BTC-EUR", "PROFILE")
     assert "peRatio" not in btc and "fundamentalsAsOf" not in btc

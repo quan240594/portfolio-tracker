@@ -15,7 +15,7 @@ from ..errors import ProviderError, RateLimitError, RetryableProviderError, Symb
 from ..httpclient import DailyQuota, HttpClient, TokenBucket
 from ..models import DividendEvent, EodPrice, InstrumentProfile, Quote, iso_datetime, normalize_currency
 from ..symbols import country_for
-from .base import as_float, chunks, clamp_range
+from .base import as_float, chunks, clamp_range, clean_text
 
 log = logging.getLogger(__name__)
 
@@ -194,6 +194,7 @@ class TwelveDataProvider:
             sector=raw.get("sector") or None,
             country=COUNTRY_NAMES.get(country, country) if country else None,
             exchange=raw.get("exchange") or None,
+            description=clean_text(raw.get("description")),
         )
 
     def get_dividends(self, symbol: str, start: date, end: date) -> list[DividendEvent]:

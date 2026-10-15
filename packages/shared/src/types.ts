@@ -57,6 +57,18 @@ export interface InstrumentProfile {
   peRatio?: number;
   /** YYYY-MM-DD the `peRatio` was fetched. */
   fundamentalsAsOf?: string;
+
+  // Optional company details for the asset detail page: absent when no provider supplies them.
+  description?: string;
+  /** ISIN of the instrument (12 characters). */
+  isin?: string;
+  /** In `currency`, whole units. */
+  marketCap?: number;
+  /** Trailing-twelve-month earnings per share, in `currency`. */
+  eps?: number;
+  beta?: number;
+  /** YYYY-MM-DD the optional details above were last fetched; drives the lazy refresh TTL. */
+  detailsAsOf?: string;
 }
 
 export interface EodPrice {

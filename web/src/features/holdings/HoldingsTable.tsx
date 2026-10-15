@@ -1,11 +1,26 @@
 import { useId, useMemo, useState } from 'react';
-import { isCustomSymbol, type Holding } from '@portfolio/shared';
+import { Link } from 'react-router-dom';
+import { isCustomSymbol, isMarketSymbol, type Holding } from '@portfolio/shared';
 import { Change } from '../../components/Change';
 import { formatMoney, formatPercent, formatQuantity, formatWeight } from '../../lib/format';
+import { assetPath } from '../asset-detail/assetFormat';
+import { usePortfolioScope } from '../portfolios/usePortfolioScope';
 import { sortHoldings, type SortDir, type SortKey } from './sortHoldings';
 
 /** Custom assets have an internal `CUSTOM:<id>` symbol; show a readable label instead. */
 const holdingLabel = (h: Holding) => (isCustomSymbol(h.symbol) ? 'Custom asset' : h.symbol);
+
+/** Market securities link to their detail page; cash and custom assets have none. */
+function HoldingSymbol({ holding, to }: Readonly<{ holding: Holding; to: string }>) {
+  if (!isMarketSymbol(holding.symbol)) return <span className="font-semibold">{holdingLabel(holding)}</span>;
+  return (
+    <span className="font-semibold">
+      <Link to={to} className="underline-offset-2 hover:underline">
+        {holding.symbol}
+      </Link>
+    </span>
+  );
+}
 
 interface Column {
   key: SortKey;
@@ -98,6 +113,7 @@ interface Props {
 
 export function HoldingsTable({ holdings, currency }: Readonly<Props>) {
   const hintId = useId();
+  const { withScope } = usePortfolioScope();
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'marketValue', dir: 'desc' });
   const sorted = useMemo(() => sortHoldings(holdings, sort.key, sort.dir), [holdings, sort]);
 
@@ -143,7 +159,7 @@ export function HoldingsTable({ holdings, currency }: Readonly<Props>) {
               <tr key={h.symbol} className="border-b border-slate-100 last:border-0 hover:bg-slate-50 dark:border-slate-800/60 dark:hover:bg-slate-800/40">
                 <th scope="row" className="px-3 py-2.5 text-left font-normal">
                   <div className="flex items-center gap-2">
-                    <span className="font-semibold">{holdingLabel(h)}</span>
+                    <HoldingSymbol holding={h} to={withScope(assetPath(h.symbol))} />
                     {h.priceStale && <StaleBadge />}
                   </div>
                   <div className="muted max-w-[16rem] truncate text-xs">{h.name}</div>
@@ -209,7 +225,7 @@ export function HoldingsTable({ holdings, currency }: Readonly<Props>) {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-semibold">{holdingLabel(h)}</span>
+                    <HoldingSymbol holding={h} to={withScope(assetPath(h.symbol))} />
                     {h.priceStale && <StaleBadge />}
                   </div>
                   <div className="muted truncate text-xs">{h.name}</div>
