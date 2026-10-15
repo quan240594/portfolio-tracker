@@ -519,3 +519,52 @@ same sanity check (rate must agree with the row's amounts, otherwise it is dropp
   above Trading 212's `walletImpact.totalCost` for every open position, consistent with the 0.15 % currency-conversion fee, which
   Trading 212 appears not to count as cost; dividend withholding derived as gross − net clusters around 15 % (US treaty rate),
   with outliers only on cent-sized payments (rounding).
+
+## Dividends page
+
+`/dividends` is a dashboard (top to bottom): Yield and Dividends KPIs next to a Yield / payout chart; passive income
+diversification; payment consistency; average annual growth next to future payments; dividends received over time next to
+received by holding; calendar-month comparison of the last three years (`GET /analytics/dividend-growth`); and the payment
+history (received and upcoming, collapsible). Every card has an info tip with the metric, source and assumptions, loading /
+error (retry) / empty states, a chart text alternative and a "Show data table" disclosure. Everything follows the portfolio
+scope (`?portfolioId=`, omitted or `all` = combined). Code: `web/src/features/dividends/`.
+
+Data sources: `GET /dividends` (received, upcoming, monthly; the received cards group client-side by period and
+granularity), `GET /analytics/dividend-growth` (calendar-month comparison), portfolio categories (`GET
+/portfolios/{id}/categories`, single portfolio only, for "group by categories") and one new read endpoint:
+
+`GET /dividends/overview[?portfolioId=]` → `DividendsOverviewResponse` (`packages/shared/src/dividends-overview.ts`, computed by the
+pure `computeDividendsOverview`, route in `services/api/src/routes/dividends-overview.ts`, mocked by `web/src/mocks/dividendsOverviewHandlers.ts`;
+same error envelope and scope rules as the other reads, no new infrastructure):
+
+| Field | Meaning |
+|---|---|
+| `summary` | `forward12m` (= `passiveIncome.forward12m` of `/analytics/summary`), `declared`, `estimated`, `monthlyAverage`, `yieldOnValuePct`, `yieldOnCostPct`, `last12m` (net received in the last 12 months) and `growthVsLast12mPct` (forward vs `last12m`; null without `last12m`) |
+| `holdings[]` | current holdings that pay or paid dividends, largest forward income first: forward income (declared / estimated / share), yield on value and on cost, market value, cost basis, net received (12 months / ever), `growthPct` (per-share CAGR) and `consistency` |
+| `futureMonths[]` | 12 months from the current one: declared and estimated income per month; sums to `summary.forward12m`. Declared income sits in the pay month (or ex-month without pay date). Estimated income takes the schedule of the last payment shifted a year (`paymentsPerYear` slots), minus the slots announced events fill. The window is 365 days, so a payment in this calendar month next year counts in the first bar |
+
+Forward income is declared plus estimated, net of the withholding tax seen in the last 12 months (see `calculatePassiveIncome`).
+EODHD dividend events cover about two years of history, which is why the per-holding history merges the received payments with
+the stored *past* events (an event within 20 days of a received payment is the same payment).
+
+### Payment consistency score
+
+Replaces a proprietary dividend rating (which needs company fundamentals we do not have). It is computed only from the
+user's own data and is **not a forecast or advice**. Per holding, from its payment history (received payments plus past events,
+one point per payment date; per-share amounts in the paying currency) it adds up four parts to 0-100:
+
+| Part | Max | Rule |
+|---|---|---|
+| History | 30 | 6 points for each of the last 5 years (12-month periods counted back from today) with at least one payment |
+| Regularity | 30 | gaps between payments: 30 when their variation (standard deviation ÷ mean) is ≤ 0.05, falling linearly to 0 at 0.5; a wait since the last payment longer than 1.5 × the median gap counts as one more gap; 15 with fewer than 3 payments |
+| Cuts | 25 | 25 − 13 per cut (floor 0). A *year* is a block of consecutive payments (as many as the implied payments per year: 1, 2, 4 or 12, newest block first, at most 6); a cut is a year whose per-share total is more than 0.5 % below the year before; 12 without two full years |
+| Growth | 15 | 3 points for each consecutive year (newest first, at most 5) whose per-share total is more than 0.5 % above the year before |
+
+Badges: **Reliable** ≥ 70, **OK** 40-69, **Irregular** < 40, **New** with fewer than 2 known payments (no score). The score is
+rounded per part so the parts add up exactly. `growthPct` is the compound growth of the per-share total over the same full
+years. Special dividends count as regular payments. The constants are exported from `dividends-overview.ts` (`CONSISTENCY_*`)
+and used by the help text on the page; known-value tests pin the behaviour.
+
+Demo mode: the MSW handler runs `computeDividendsOverview` on the demo fixtures. The fixtures give the dividend payers
+different growth, a cut, an irregular payer and a recent payer, plus ~2.5 years of past dividend events, so every card shows
+meaningful data.

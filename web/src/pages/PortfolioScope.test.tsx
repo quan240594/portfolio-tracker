@@ -1,8 +1,9 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { computeDividendsOverview } from '@portfolio/shared';
 import { renderApp } from '../test/utils';
 import { server } from '../mocks/server';
-import { createPortfolio, getDividends, getHoldings, listTransactions } from '../mocks/db';
+import { createPortfolio, getAnalyticsData, getDividends, getHoldings, listTransactions } from '../mocks/db';
 import { formatMoney } from '../lib/format';
 import { sp } from '../test/utils';
 
@@ -49,8 +50,9 @@ describe('portfolio-scoped pages', () => {
     expect(screen.queryByRole('rowheader', { name: /VWRL/ })).not.toBeInTheDocument();
 
     await user.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Dividends' }));
-    const received = await screen.findByRole('region', { name: 'Total received' });
-    expect(within(received).getByTestId('kpi-value')).toHaveTextContent(sp(formatMoney(getDividends('trading-212').totalReceived, 'EUR')));
+    const income = await screen.findByRole('region', { name: 'Dividends' });
+    expect(await within(income).findByTestId('kpi-income')).toHaveTextContent(sp(formatMoney(computeDividendsOverview(getAnalyticsData('trading-212')).summary.forward12m, 'EUR')));
+    expect(await screen.findByTestId('received-total')).toHaveTextContent(sp(formatMoney(getDividends('trading-212').received.reduce((s, p) => s + p.amount, 0), 'EUR')));
   });
 
   it('shows empty states naming an empty portfolio, with links that keep the scope', async () => {
