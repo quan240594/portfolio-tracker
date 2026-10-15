@@ -20,12 +20,14 @@ export function shortAmount(value: number, currency: string): string {
   return formatMoney(value, currency, value >= 1000 ? { compact: true } : { maxDigits: 0 });
 }
 
+/** The label above one bar: empty for a zero bar. */
+export function barLabel(total: number, currency: string): string {
+  return total < MIN_LABEL_AMOUNT ? '' : shortAmount(total, currency);
+}
+
 /** Adds the bar label per month; on narrow screens only every other bar gets one so labels never touch. */
 export function incomeRows(monthly: readonly CalendarMonth[], currency: string, narrow: boolean): IncomeRow[] {
-  return monthly.map((m, i) => {
-    const hidden = m.total < MIN_LABEL_AMOUNT || (narrow && i % 2 === 1);
-    return { ...m, label: hidden ? '' : shortAmount(m.total, currency) };
-  });
+  return monthly.map((m, i) => ({ ...m, label: narrow && i % 2 === 1 ? '' : barLabel(m.total, currency) }));
 }
 
 const NARROW_QUERY = '(max-width: 640px)';

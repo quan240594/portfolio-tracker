@@ -50,6 +50,11 @@ describe('GET /dividends/overview', () => {
     expect(body.futureMonths).toHaveLength(12);
     expect(body.futureMonths.find((m) => m.month === '2026-09')).toEqual({ month: '2026-09', declared: 50, estimated: 0 });
     expect(body.futureMonths.find((m) => m.month === '2027-03')).toEqual({ month: '2027-03', declared: 0, estimated: 50 });
+    // the same income per holding: the per-holding amounts add up to the forward income
+    expect(body.futureByHolding).toEqual([
+      { month: '2026-09', symbol: 'VWRL.AS', declared: 50, estimated: 0 },
+      { month: '2027-03', symbol: 'VWRL.AS', declared: 0, estimated: 50 },
+    ]);
   });
 
   it('honours ?portfolioId= and never leaks other users or unknown portfolios', async () => {
@@ -60,6 +65,7 @@ describe('GET /dividends/overview', () => {
     expect(usd.holdings).toEqual([]);
     expect(usd.summary.forward12m).toBe(0);
     expect(usd.futureMonths).toHaveLength(12);
+    expect(usd.futureByHolding).toEqual([]);
     const all = json(await handler(apiEvent('GET', '/dividends/overview', { query: { portfolioId: 'all' } })));
     expect(all.holdings.map((h) => h.symbol)).toEqual(['VWRL.AS']);
     expect((await handler(apiEvent('GET', '/dividends/overview', { query: { portfolioId: 'nope' } }))).statusCode).toBe(404);

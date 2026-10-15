@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { CalendarMonth } from '@portfolio/shared';
 import { formatMoney, formatMonth } from '../../lib/format';
 import { INCOME_SERIES, seriesName } from './incomeChartModel';
@@ -13,13 +14,36 @@ interface TooltipProps {
   text: string;
 }
 
-/** Month tooltip listing the amount per status (zero rows are kept so the three statuses always read the same) and the total. */
-export function IncomeTooltip({ active, payload, currency, colours, background, border, text }: Readonly<TooltipProps>) {
-  const row = payload?.[0]?.payload;
-  if (!active || !row) return null;
+interface ShellProps {
+  title: string;
+  testId: string;
+  background: string;
+  border: string;
+  text: string;
+  children: ReactNode;
+}
+
+/** The tooltip box shared by the calendar income chart and the dividends chart. */
+export function TooltipShell({ title, testId, background, border, text, children }: Readonly<ShellProps>) {
   return (
-    <div className="rounded-lg border px-3 py-2 text-xs shadow-md" style={{ background, borderColor: border, color: text }} data-testid="calendar-income-tooltip">
-      <p className="mb-1 font-semibold">{formatMonth(row.month)}</p>
+    <div className="rounded-lg border px-3 py-2 text-xs shadow-md" style={{ background, borderColor: border, color: text }} data-testid={testId}>
+      <p className="mb-1 font-semibold">{title}</p>
+      {children}
+    </div>
+  );
+}
+
+export interface StatusValues {
+  paid: number;
+  declared: number;
+  estimated: number;
+  total: number;
+}
+
+/** Amount per status (zero rows are kept so the three statuses always read the same: swatch + name, not colour only) and the total. */
+export function StatusAmounts({ row, currency, colours, border }: Readonly<{ row: StatusValues; currency: string; colours: IncomeColours; border: string }>) {
+  return (
+    <>
       <ul className="m-0 list-none p-0">
         {INCOME_SERIES.map((key) => (
           <li key={key} className="flex items-center justify-between gap-4">
@@ -39,7 +63,18 @@ export function IncomeTooltip({ active, payload, currency, colours, background, 
         <span>Total</span>
         <span className="tabular-nums">{formatMoney(row.total, currency)}</span>
       </p>
-    </div>
+    </>
+  );
+}
+
+/** Month tooltip of the calendar income chart. */
+export function IncomeTooltip({ active, payload, currency, colours, background, border, text }: Readonly<TooltipProps>) {
+  const row = payload?.[0]?.payload;
+  if (!active || !row) return null;
+  return (
+    <TooltipShell title={formatMonth(row.month)} testId="calendar-income-tooltip" background={background} border={border} text={text}>
+      <StatusAmounts row={row} currency={currency} colours={colours} border={border} />
+    </TooltipShell>
   );
 }
 

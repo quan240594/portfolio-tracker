@@ -1,19 +1,22 @@
 import { useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import type { GetDividendsResponse } from '@portfolio/shared';
+import type { DividendsOverviewResponse, GetDividendsResponse } from '@portfolio/shared';
 import { useDividends } from '../../api/hooks';
+import { QueryBoundary } from '../../components/QueryBoundary';
 import { SegmentedControl } from '../../components/SegmentedControl';
 import { compactMoneyTick } from '../../components/charts/chartFormatters';
 import { formatMoney } from '../../lib/format';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
 import { ChartDataTable, ChartFrame, useDividendTheme } from './chartParts';
 import { EmptyNote, QueryCard } from './DividendCard';
+import { receivedFutureTimeline } from './receivedFuture';
+import { ReceivedTimeline } from './ReceivedTimeline';
+import { useScopedDividendsOverview } from './useDividendsOverview';
 import {
   GRANULARITIES,
   PERIODS,
   paymentsInPeriod,
   receivedByHolding,
-  receivedSeries,
   type Granularity,
   type ReceivedPeriod,
 } from './receivedSeries';
@@ -53,33 +56,73 @@ function AmountBars({ data, currency, title, testId, caption, column }: Readonly
 
 const PERIOD_NAMES: Record<ReceivedPeriod, string> = { all: 'all time', '12m': 'the last 12 months', ytd: 'this year to date' };
 
-function Total({ amount, currency, period }: Readonly<{ amount: number; currency: string; period: ReceivedPeriod }>) {
+interface TotalProps {
+  amount: number;
+  currency: string;
+  period: ReceivedPeriod;
+  /** Net income expected in the next 12 months; shown next to the received total when the future is part of the chart. */
+  upcoming?: number;
+}
+
+/** Headline: what was received in the period (never mixed with the future) and, next to it, the upcoming 12 months. */
+function Total({ amount, currency, period, upcoming }: Readonly<TotalProps>) {
   return (
-    <p className="mb-2 text-sm">
-      <span className="text-lg font-semibold tabular-nums" data-testid="received-total">
-        {formatMoney(amount, currency)}
-      </span>{' '}
-      <span className="muted">received {PERIOD_NAMES[period]}</span>
+    <p className="mb-2 flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm">
+      <span>
+        <span className="text-lg font-semibold tabular-nums" data-testid="received-total">
+          {formatMoney(amount, currency)}
+        </span>{' '}
+        <span className="muted">received {PERIOD_NAMES[period]}</span>
+      </span>
+      {upcoming !== undefined && (
+        <span>
+          <span className="muted">Upcoming 12 months</span>{' '}
+          <span className="text-lg font-semibold tabular-nums" data-testid="received-upcoming-total">
+            {formatMoney(upcoming, currency)}
+          </span>
+        </span>
+      )}
     </p>
   );
 }
 
-function OverTime({ data, period, granularity }: Readonly<{ data: GetDividendsResponse; period: ReceivedPeriod; granularity: Granularity }>) {
+interface TimelineViewProps {
+  data: GetDividendsResponse;
+  period: ReceivedPeriod;
+  granularity: Granularity;
+  /** The overview whose future months are appended; undefined = received history only. */
+  overview?: DividendsOverviewResponse;
+}
+
+function TimelineView({ data, period, granularity, overview }: Readonly<TimelineViewProps>) {
   const today = todayIso();
   const total = paymentsInPeriod(data.received, period, today).reduce((s, p) => s + p.amount, 0);
-  if (data.received.length === 0) return <EmptyNote>No dividends received yet.</EmptyNote>;
+  const future = overview && { months: overview.futureMonths, byHolding: overview.futureByHolding };
+  const periods = receivedFutureTimeline(data.received, period, granularity, today, future);
+  const summary = overview?.summary;
   return (
     <>
-      <Total amount={total} currency={data.baseCurrency} period={period} />
-      <AmountBars
-        data={receivedSeries(data.received, period, granularity, today)}
-        currency={data.baseCurrency}
-        title="Dividends received over time"
-        testId="received-time-chart"
-        caption="Dividends received per period"
-        column="Period"
-      />
+      <Total amount={total} currency={data.baseCurrency} period={period} upcoming={summary?.forward12m} />
+      <ReceivedTimeline periods={periods} currency={data.baseCurrency} granularity={granularity} upcoming={summary && { total: summary.forward12m, declared: summary.declared, estimated: summary.estimated }} />
     </>
+  );
+}
+
+interface OverTimeProps {
+  data: GetDividendsResponse;
+  period: ReceivedPeriod;
+  granularity: Granularity;
+  includeFuture: boolean;
+  overviewQuery: ReturnType<typeof useScopedDividendsOverview>;
+}
+
+function OverTime({ data, period, granularity, includeFuture, overviewQuery }: Readonly<OverTimeProps>) {
+  if (data.received.length === 0) return <EmptyNote>No dividends received yet.</EmptyNote>;
+  if (!includeFuture) return <TimelineView data={data} period={period} granularity={granularity} />;
+  return (
+    <QueryBoundary query={overviewQuery} loadingLabel="Loading upcoming payments" errorTitle="Could not load upcoming payments" skeletonClassName="h-72 w-full">
+      {(overview) => <TimelineView data={data} period={period} granularity={granularity} overview={overview} />}
+    </QueryBoundary>
   );
 }
 
@@ -104,6 +147,8 @@ export function ReceivedCards() {
   const query = useDividends(scope, { enabled: ready });
   const [period, setPeriod] = useState<ReceivedPeriod>('all');
   const [granularity, setGranularity] = useState<Granularity>('month');
+  const [includeFuture, setIncludeFuture] = useState(true);
+  const overviewQuery = useScopedDividendsOverview();
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -117,16 +162,22 @@ export function ReceivedCards() {
           <>
             <SegmentedControl label="Period" options={PERIODS} value={period} onChange={setPeriod} />
             <SegmentedControl label="Granularity" options={GRANULARITIES} value={granularity} onChange={setGranularity} />
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" className="h-4 w-4 rounded border-slate-300 accent-brand-600" checked={includeFuture} onChange={(e) => setIncludeFuture(e.target.checked)} />
+              <span>Include future payments</span>
+            </label>
           </>
         }
         info={
           <>
-            <p>Net dividends you received (after withholding tax, converted to EUR at the rate of the payment date), per month, quarter or year, for the selected period.</p>
-            <p>Source: the DIVIDEND transactions in this portfolio scope. Announced but unpaid dividends are under Future payments.</p>
+            <p>Net dividends you received (after withholding tax, converted to EUR at the rate of the payment date), per month, quarter or year, for the selected period. The headline counts only what was received.</p>
+            <p>With &quot;Include future payments&quot; the next 12 months follow on the same axis: declared (announced) and estimated (implied by your payment history, not announced) income, net, at the latest exchange rate, the same figures as the Future payments card. The period that contains today stacks what you received so far with what is still expected, so its bar shows the full expected total. Amounts above the bars are rounded; the table has the exact figures.</p>
+            <p>The dashed &quot;avg&quot; line is the average received per completed month, quarter or year in the view (the period in progress and the upcoming ones are not counted).</p>
+            <p>Source: the DIVIDEND transactions in this portfolio scope and the dividend events behind Future payments.</p>
           </>
         }
       >
-        {(data) => <OverTime data={data} period={period} granularity={granularity} />}
+        {(data) => <OverTime data={data} period={period} granularity={granularity} includeFuture={includeFuture} overviewQuery={overviewQuery} />}
       </QueryCard>
       <QueryCard
         id="div-received-holding"

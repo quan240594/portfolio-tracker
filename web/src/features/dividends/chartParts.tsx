@@ -5,13 +5,15 @@ import { analyticsTheme, tooltipStyle } from '../../components/charts/analyticsT
 import { formatMoney } from '../../lib/format';
 import { incomeColours } from '../calendar/calendarColours';
 
-/** Chart colours of the dividends page: the analytics palette plus the calendar's status colours (declared = pastel blue, estimated = pastel yellow, each with a darker edge), so a status looks the same on both pages. */
+/** Chart colours of the dividends page: the analytics palette plus the calendar's status colours (received = pastel green, declared = pastel blue, estimated = pastel yellow, each with a darker edge), so a status looks the same on both pages. */
 export function useDividendTheme() {
   const { theme } = useTheme();
   const c = analyticsTheme(theme);
-  const { declared, estimated } = incomeColours(theme);
+  const { paid, declared, estimated } = incomeColours(theme);
   return {
     ...c,
+    paid: paid.fill,
+    paidEdge: paid.stroke,
     declared: declared.fill,
     declaredEdge: declared.stroke,
     estimated: estimated.fill,
@@ -21,7 +23,7 @@ export function useDividendTheme() {
 }
 
 /** Width of one bar slot; charts with more bars than fit scroll sideways instead of squeezing the labels. */
-const SLOT_PX = 44;
+export const SLOT_PX = 44;
 
 interface FrameProps {
   label: string;
@@ -30,20 +32,36 @@ interface FrameProps {
   height?: string;
   /** Start scrolled to the right edge (a series whose newest part matters most). */
   scrollToEnd?: boolean;
+  /** Index of the bar to scroll to the middle of a wide chart (e.g. the current period); the start when omitted. */
+  focusBar?: number;
+  /** A fixed value axis shown left of the scrolling bars, so it stays in view while the chart scrolls. */
+  axis?: ReactNode;
   children: ReactNode;
 }
 
 /** Accessible chart container: the label is the text alternative; wide charts scroll horizontally. */
-export function ChartFrame({ label, testId, bars = 0, height = 'h-72', scrollToEnd = false, children }: Readonly<FrameProps>) {
+export function ChartFrame({ label, testId, bars = 0, height = 'h-72', scrollToEnd = false, focusBar, axis, children }: Readonly<FrameProps>) {
   const scroller = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (scrollToEnd && scroller.current) scroller.current.scrollLeft = scroller.current.scrollWidth;
-  }, [scrollToEnd]);
-  return (
-    <div ref={scroller} className="overflow-x-auto">
+    const el = scroller.current;
+    if (!el) return;
+    if (scrollToEnd) el.scrollLeft = el.scrollWidth;
+    else if (focusBar !== undefined && bars > 0) el.scrollLeft = (focusBar + 0.5) * (el.scrollWidth / bars) - el.clientWidth / 2;
+  }, [scrollToEnd, focusBar, bars]);
+  const scrolling = (
+    <div ref={scroller} className="min-w-0 flex-1 overflow-x-auto">
       <div role="img" aria-label={label} data-testid={testId} className={`${height} w-full`} style={{ minWidth: bars * SLOT_PX }}>
         {children}
       </div>
+    </div>
+  );
+  if (!axis) return scrolling;
+  return (
+    <div className="flex">
+      <div aria-hidden="true" className={`${height} w-14 shrink-0`}>
+        {axis}
+      </div>
+      {scrolling}
     </div>
   );
 }
