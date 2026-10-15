@@ -87,6 +87,10 @@ test.describe('GitHub Pages build (demo mode under /portfolio-tracker/)', () => 
     await expect(page.getByRole('heading', { level: 1, name: 'Dividends' })).toBeVisible();
     await expect(page).toHaveTitle(/Dividends · Portfolio Tracker/);
     await expectDemoBanner(page);
+    // The demo's mock backend serves the new overview endpoint under the sub-path too.
+    await expect(page.getByTestId('kpi-income')).toHaveText(/^€\s[\d.]+,\d{2}$/);
+    await expect(page.getByTestId('future-chart')).toBeVisible();
+    await expect(page.getByRole('alert')).toHaveCount(0);
     expect(errors.filter((e) => !isExpectedDeepLink404(e))).toEqual([]);
   });
 

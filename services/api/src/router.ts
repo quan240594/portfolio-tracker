@@ -1,4 +1,4 @@
-import { ANALYTICS_ROUTES, API_ROUTES, MANAGEMENT_ROUTES } from '@portfolio/shared';
+import { ANALYTICS_ROUTES, API_ROUTES, DIVIDENDS_ROUTES, MANAGEMENT_ROUTES } from '@portfolio/shared';
 import { HttpError, type RouteResult } from './lib/http.js';
 import type { RouteContext } from './deps.js';
 import * as portfolio from './routes/portfolio.js';
@@ -6,15 +6,17 @@ import * as portfolios from './routes/portfolios.js';
 import * as transactions from './routes/transactions.js';
 import * as imports from './routes/imports.js';
 import { analyticsHandlers } from './routes/analytics.js';
+import { dividendsOverviewHandlers } from './routes/dividends-overview.js';
 import { managementHandlers } from './routes/management.js';
 import * as brokers from './routes/brokers.js';
 
 export type RouteHandler = (ctx: RouteContext) => Promise<RouteResult>;
-const ROUTES = { ...API_ROUTES, ...ANALYTICS_ROUTES, ...MANAGEMENT_ROUTES };
+const ROUTES = { ...API_ROUTES, ...ANALYTICS_ROUTES, ...MANAGEMENT_ROUTES, ...DIVIDENDS_ROUTES };
 type RouteName = keyof typeof ROUTES;
 
 const handlers: Record<RouteName, RouteHandler> = {
   ...analyticsHandlers,
+  ...dividendsOverviewHandlers,
   ...managementHandlers,
   health: () => Promise.resolve({ statusCode: 200, body: { status: 'ok' } }),
   listPortfolios: portfolios.listPortfolios,

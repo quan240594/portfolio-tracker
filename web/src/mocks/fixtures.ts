@@ -52,6 +52,8 @@ export const INSTRUMENTS: InstrumentSeed[] = [
 export const STALE_SYMBOLS = new Set(['IWDA.AS']);
 
 const HISTORY_DAYS = 400;
+/** Past dividend events reach further back than the transactions, like the ~2 years the data provider returns. */
+const EVENT_HISTORY_DAYS = 900;
 
 /**
  * EUR/USD (USD per 1 EUR) drifts from ~1.04 a year ago to ~1.17 today: the euro strengthened, so US
@@ -168,16 +170,34 @@ interface DividendSchedule {
   /** Days ago of the most recent payment. */
   lastPaidDaysAgo: number;
   withholding: number;
+  /** Yearly change of the per-share amount, going forward in time (negative = the dividend was cut). */
+  growth?: number;
+  /** Days between payments, newest gap first (cycled), instead of `everyDays`: an irregular payer. */
+  gaps?: number[];
+  /** Number of payments so far, for a payer that only just started. */
+  payments?: number;
 }
 
 const DIVIDEND_SCHEDULES: DividendSchedule[] = [
-  { symbol: 'AAPL', perShare: 0.25, everyDays: 91, lastPaidDaysAgo: 48, withholding: 0.15 },
-  { symbol: 'MSFT', perShare: 0.83, everyDays: 91, lastPaidDaysAgo: 27, withholding: 0.15 },
-  { symbol: 'KO', perShare: 0.485, everyDays: 91, lastPaidDaysAgo: 62, withholding: 0.15 },
-  { symbol: 'JNJ', perShare: 1.24, everyDays: 91, lastPaidDaysAgo: 13, withholding: 0.15 },
-  { symbol: 'VWRL.AS', perShare: 0.36, everyDays: 91, lastPaidDaysAgo: 34, withholding: 0 },
-  { symbol: 'ASML.AS', perShare: 1.52, everyDays: 182, lastPaidDaysAgo: 75, withholding: 0.15 },
+  { symbol: 'AAPL', perShare: 0.25, everyDays: 91, lastPaidDaysAgo: 48, withholding: 0.15, growth: 0.04 },
+  { symbol: 'MSFT', perShare: 0.83, everyDays: 91, lastPaidDaysAgo: 27, withholding: 0.15, growth: 0.1 },
+  { symbol: 'KO', perShare: 0.485, everyDays: 91, lastPaidDaysAgo: 62, withholding: 0.15, growth: 0.05 },
+  // An irregular payer that cut its dividend, an ETF whose distribution fell, and a stock that only paid once so far.
+  { symbol: 'JNJ', perShare: 1.24, everyDays: 91, lastPaidDaysAgo: 13, withholding: 0.15, growth: -0.06, gaps: [91, 150, 60, 180, 91] },
+  { symbol: 'VWRL.AS', perShare: 0.36, everyDays: 91, lastPaidDaysAgo: 34, withholding: 0, growth: -0.03 },
+  { symbol: 'ASML.AS', perShare: 1.52, everyDays: 182, lastPaidDaysAgo: 75, withholding: 0.15, payments: 1 },
 ];
+
+/** Days ago of every payment of a schedule, newest first, down to `maxDaysAgo`. */
+function paymentDaysAgo(s: DividendSchedule, maxDaysAgo: number): number[] {
+  const days: number[] = [];
+  const gaps = s.gaps ?? [s.everyDays];
+  for (let daysAgo = s.lastPaidDaysAgo; daysAgo < maxDaysAgo && days.length < (s.payments ?? Infinity); daysAgo += gaps[(days.length - 1) % gaps.length]!) days.push(daysAgo);
+  return days;
+}
+
+/** Per-share amount paid `daysAgo` days ago: the current amount, reduced/raised by `growth` for every year back. */
+const amountPaid = (s: DividendSchedule, daysAgo: number): number => round(s.perShare / (1 + (s.growth ?? 0)) ** Math.floor(daysAgo / 365), 4);
 
 export function createSeed(now: Date = new Date()): MockSeed {
   const today = isoDay(now);
@@ -263,12 +283,16 @@ export function createSeed(now: Date = new Date()): MockSeed {
   const dividendEvents: DividendEvent[] = [];
   for (const s of DIVIDEND_SCHEDULES) {
     const currency = profiles[s.symbol]!.currency;
-    for (let daysAgo = s.lastPaidDaysAgo; daysAgo < HISTORY_DAYS; daysAgo += s.everyDays) {
+    for (const daysAgo of paymentDaysAgo(s, EVENT_HISTORY_DAYS)) {
+      const perShare = amountPaid(s, daysAgo);
+      // Past events (also from before the demo's transactions); the payments the user received are the ones in the history.
+      dividendEvents.push({ symbol: s.symbol, exDate: addDays(today, -daysAgo - 14), payDate: addDays(today, -daysAgo), amount: perShare, currency });
+      if (daysAgo >= HISTORY_DAYS) continue;
       const date = tradingDay(addDays(today, -daysAgo));
       const held = buildPositions(transactions, addDays(date, -14)).get(s.symbol)?.quantity ?? 0;
       if (held <= 0) continue;
-      const gross = held * s.perShare;
-      push({ date, type: 'DIVIDEND', symbol: s.symbol, quantity: held, price: s.perShare, fee: round(gross * s.withholding, 2), currency });
+      const gross = held * perShare;
+      push({ date, type: 'DIVIDEND', symbol: s.symbol, quantity: held, price: perShare, fee: round(gross * s.withholding, 2), currency });
     }
     const nextPay = addDays(today, s.everyDays - s.lastPaidDaysAgo);
     dividendEvents.push({ symbol: s.symbol, exDate: addDays(nextPay, -14), payDate: nextPay, amount: s.perShare, currency });

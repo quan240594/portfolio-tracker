@@ -1,13 +1,18 @@
 import type { DividendPayment } from '@portfolio/shared';
 import { useDividends } from '../api/hooks';
 import { PageHeader } from '../components/Layout';
-import { KpiCard } from '../components/KpiCard';
 import { ErrorState } from '../components/ErrorState';
 import { EmptyState } from '../components/EmptyState';
-import { LoadingRegion, Skeleton } from '../components/Skeleton';
-import { DividendBarChart } from '../components/charts/DividendBarChart';
+import { Skeleton } from '../components/Skeleton';
 import { BASE_CURRENCY, formatDate, formatMoney } from '../lib/format';
 import { usePortfolioScope } from '../features/portfolios/usePortfolioScope';
+import { ConsistencyCard } from '../features/dividends/ConsistencyCard';
+import { DiversificationCard } from '../features/dividends/DiversificationCard';
+import { DividendGrowthCard } from '../features/dividends/DividendGrowthCard';
+import { AverageGrowthCard, FuturePaymentsCard } from '../features/dividends/GrowthAndFuture';
+import { ReceivedCards } from '../features/dividends/ReceivedCards';
+import { DividendsKpi, YieldKpi } from '../features/dividends/YieldKpis';
+import { YieldPayoutCard } from '../features/dividends/YieldPayoutCard';
 
 function PaymentsTable({ payments, currency, caption }: Readonly<{ payments: DividendPayment[]; currency: string; caption: string }>) {
   return (
@@ -73,65 +78,74 @@ function ReceivedList({ received, currency }: Readonly<{ received?: DividendPaym
   );
 }
 
+/** Received and upcoming payments in a collapsible section at the bottom of the page. */
+function PaymentHistory({ query }: Readonly<{ query: ReturnType<typeof useDividends> }>) {
+  const { data, isError, error, refetch } = query;
+  return (
+    <details className="card group p-4" open>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-lg [&::-webkit-details-marker]:hidden">
+        <h2 id="div-history" className="font-semibold">
+          Payment history
+        </h2>
+        <span aria-hidden="true" className="muted text-xs group-open:hidden">Show</span>
+        <span aria-hidden="true" className="muted hidden text-xs group-open:inline">Hide</span>
+      </summary>
+      <div className="mt-4">
+        {isError ? (
+          <ErrorState error={error} onRetry={() => void refetch()} title="Could not load dividends" />
+        ) : (
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <section aria-labelledby="div-upcoming">
+              <h3 id="div-upcoming" className="mb-3 text-sm font-semibold">Upcoming</h3>
+              <UpcomingList upcoming={data?.upcoming} currency={data?.baseCurrency ?? BASE_CURRENCY} />
+            </section>
+            <section aria-labelledby="div-received">
+              <h3 id="div-received" className="mb-3 text-sm font-semibold">Received</h3>
+              <ReceivedList received={data?.received} currency={data?.baseCurrency ?? BASE_CURRENCY} />
+            </section>
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
 export function DividendsPage() {
   const { scope, ready, scopeName, current } = usePortfolioScope();
-  const { data, isPending, isError, error, refetch } = useDividends(scope, { enabled: ready });
+  const query = useDividends(scope, { enabled: ready });
+  const { data } = query;
   const ccy = data?.baseCurrency ?? BASE_CURRENCY;
   const amountsIn = scopeName ? `${scopeName} · amounts in ${ccy}` : `Amounts in ${ccy}`;
-
-  if (isError) {
-    return (
-      <>
-        <PageHeader title="Dividends" description={scopeName || undefined} />
-        <ErrorState error={error} onRetry={() => void refetch()} title="Could not load dividends" />
-      </>
-    );
-  }
-
   const empty = data?.received.length === 0 && data.upcoming.length === 0;
 
   return (
     <>
-      <PageHeader title="Dividends" description={`${amountsIn} (per-share amounts in the paying currency). Received amounts are net of withholding tax; upcoming amounts are gross estimates.`} />
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <KpiCard loading={isPending} label="Total received" value={data && formatMoney(data.totalReceived, ccy)} hint="All time" />
-          <KpiCard loading={isPending} label="Last 12 months" value={data && formatMoney(data.last12Months, ccy)} />
-          <KpiCard
-            loading={isPending}
-            label="Projected next 12 months"
-            value={data && formatMoney(data.projectedNext12Months, ccy)}
-            hint={data && `≈ ${formatMoney(data.projectedNext12Months / 12, ccy)} per month`}
-          />
-        </div>
-
-        {empty ? (
-          <EmptyState title={current ? `No dividends in ${current.name} yet` : 'No dividends yet'} description="Dividend transactions and announced payouts for your holdings will show up here." />
-        ) : (
-          <>
-            <section className="card p-4" aria-labelledby="div-monthly">
-              <h2 id="div-monthly" className="mb-3 font-semibold">Monthly dividends</h2>
-              {isPending ? (
-                <LoadingRegion label="Loading chart"><Skeleton className="h-72 w-full" /></LoadingRegion>
-              ) : (
-                <DividendBarChart monthly={data.monthly} currency={ccy} />
-              )}
-            </section>
-
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-              <section className="card p-4" aria-labelledby="div-upcoming">
-                <h2 id="div-upcoming" className="mb-3 font-semibold">Upcoming</h2>
-                <UpcomingList upcoming={data?.upcoming} currency={ccy} />
-              </section>
-
-              <section className="card p-4" aria-labelledby="div-received">
-                <h2 id="div-received" className="mb-3 font-semibold">Received</h2>
-                <ReceivedList received={data?.received} currency={ccy} />
-              </section>
+      <PageHeader title="Dividends" description={`${amountsIn} (per-share amounts in the paying currency). Received amounts are net of withholding tax; forward income is declared plus estimated.`} />
+      {empty ? (
+        <EmptyState title={current ? `No dividends in ${current.name} yet` : 'No dividends yet'} description="Dividend transactions and announced payouts for your holdings will show up here." />
+      ) : (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="flex flex-col gap-4 lg:col-span-1">
+              <YieldKpi />
+              <DividendsKpi />
             </div>
-          </>
-        )}
-      </div>
+            <div className="lg:col-span-2">
+              <YieldPayoutCard />
+            </div>
+          </div>
+          <DiversificationCard />
+          <ConsistencyCard />
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <AverageGrowthCard />
+            <FuturePaymentsCard />
+          </div>
+          <ReceivedCards />
+          <DividendGrowthCard />
+          <PaymentHistory query={query} />
+        </div>
+      )}
     </>
   );
 }
+

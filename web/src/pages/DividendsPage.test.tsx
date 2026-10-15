@@ -1,32 +1,52 @@
 import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import type { GetDividendsResponse } from '@portfolio/shared';
+import { computeDividendsOverview, type GetDividendsResponse } from '@portfolio/shared';
 import { DividendsPage } from './DividendsPage';
 import { renderApp, renderWithProviders, sp } from '../test/utils';
 import { server } from '../mocks/server';
-import { getDividends } from '../mocks/db';
+import { getAnalyticsData, getDividends } from '../mocks/db';
 import { formatDate, formatMoney } from '../lib/format';
 
 const overview = (over: Partial<GetDividendsResponse> = {}): GetDividendsResponse => ({ ...getDividends(), ...over });
+const REGIONS = [
+  'Yield',
+  'Dividends',
+  'Yield / payout',
+  'Passive income diversification',
+  'Payment consistency',
+  'Average annual growth',
+  'Future payments',
+  'Dividends received',
+  'Dividends received by holding',
+  'Dividend growth',
+];
+
+afterEach(() => server.events.removeAllListeners());
 
 describe('DividendsPage', () => {
-  it('shows loading placeholders, then KPIs, chart, upcoming and received payments', async () => {
+  it('shows every card of the dashboard once the data has loaded', async () => {
+    const data = computeDividendsOverview(getAnalyticsData());
+    renderWithProviders(<DividendsPage />);
+    expect(screen.getByRole('region', { name: 'Yield' })).toHaveAttribute('aria-busy', 'true');
+    expect(await screen.findByTestId('kpi-income')).toHaveTextContent(sp(formatMoney(data.summary.forward12m, 'EUR')));
+    for (const name of REGIONS) expect(screen.getByRole('region', { name })).toBeInTheDocument();
+    expect(await screen.findByTestId('yield-payout-chart')).toBeInTheDocument();
+    expect(await screen.findByTestId('income-donut')).toBeInTheDocument();
+    expect(await screen.findByTestId('consistency-donut')).toBeInTheDocument();
+    expect(await screen.findByTestId('growth-cagr-chart')).toBeInTheDocument();
+    expect(await screen.findByTestId('future-chart')).toBeInTheDocument();
+    expect(await screen.findByTestId('received-time-chart')).toBeInTheDocument();
+    expect(await screen.findByTestId('received-holding-chart')).toBeInTheDocument();
+    expect(await screen.findByTestId('year-compare-chart')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('lists the upcoming and received payments in the payment history', async () => {
     const data = getDividends();
     renderWithProviders(<DividendsPage />);
-    expect(screen.getByRole('region', { name: 'Total received' })).toHaveAttribute('aria-busy', 'true');
-    expect(screen.getByText('Loading chart')).toBeInTheDocument();
 
-    const total = await screen.findByRole('region', { name: 'Total received' });
-    expect(await within(total).findByText(sp(formatMoney(data.totalReceived, 'EUR')))).toBeInTheDocument();
-    expect(within(total).getByText('All time')).toBeInTheDocument();
-    expect(within(screen.getByRole('region', { name: 'Last 12 months' })).getByText(sp(formatMoney(data.last12Months, 'EUR')))).toBeInTheDocument();
-    const projected = screen.getByRole('region', { name: 'Projected next 12 months' });
-    expect(within(projected).getByText(sp(`≈ ${formatMoney(data.projectedNext12Months / 12, 'EUR')} per month`))).toBeInTheDocument();
-
-    expect(screen.getByRole('img', { name: /^Monthly dividends across \d+ months/ })).toBeInTheDocument();
-
-    const upcoming = within(screen.getByRole('region', { name: 'Upcoming' })).getAllByRole('listitem');
+    const upcoming = await within(await screen.findByRole('region', { name: 'Upcoming' })).findAllByRole('listitem');
     expect(upcoming).toHaveLength(data.upcoming.length);
     const first = data.upcoming[0]!;
     expect(upcoming[0]).toHaveTextContent(first.symbol);
@@ -44,32 +64,48 @@ describe('DividendsPage', () => {
 
     // Per-share amounts stay in the paying currency; amounts are converted to EUR.
     expect(within(table).getByRole('columnheader', { name: 'Amount (EUR)' })).toBeInTheDocument();
-    const usd = [...data.received].reverse().findIndex((p) => p.currency === 'USD');
-    const usdPayment = [...data.received].reverse()[usd]!;
+    const reversed = [...data.received].reverse();
+    const usd = reversed.findIndex((p) => p.currency === 'USD');
     const usdCells = within(rows[usd]!).getAllByRole('cell');
-    expect(usdCells[2]).toHaveTextContent(sp(formatMoney(usdPayment.perShareLocal, 'USD', { maxDigits: 4 })));
+    expect(usdCells[2]).toHaveTextContent(sp(formatMoney(reversed[usd]!.perShareLocal, 'USD', { maxDigits: 4 })));
     expect(usdCells[2]).toHaveTextContent(/^US\$/);
-    expect(usdCells[3]).toHaveTextContent(new RegExp(`^${sp(formatMoney(usdPayment.amount, 'EUR'))}$`));
+    expect(usdCells[3]).toHaveTextContent(new RegExp(`^${sp(formatMoney(reversed[usd]!.amount, 'EUR'))}$`));
   });
 
-  it('shows an error and retries', async () => {
+  it('collapses the payment history', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<DividendsPage />);
+    const table = await screen.findByRole('table', { name: 'Received dividends, newest first' });
+    expect(table).toBeVisible();
+    await user.click(screen.getByText('Payment history'));
+    expect(table).not.toBeVisible();
+    await user.click(screen.getByText('Payment history'));
+    expect(table).toBeVisible();
+  });
+
+  it('shows errors per card and retries', async () => {
     const user = userEvent.setup();
     server.use(http.get('/api/dividends', () => new HttpResponse('upstream exploded', { status: 503, statusText: 'Service Unavailable' }), { once: true }));
     renderWithProviders(<DividendsPage />);
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('Could not load dividends');
-    expect(alert).toHaveTextContent('Service Unavailable');
+    const alerts = await screen.findAllByRole('alert');
+    // received over time, received by holding and the payment history all read GET /dividends
+    expect(alerts).toHaveLength(3);
+    expect(alerts[0]).toHaveTextContent('Could not load dividends');
+    expect(alerts[0]).toHaveTextContent('Service Unavailable');
+    // the other cards have their own data and are not affected
+    expect(await screen.findByTestId('kpi-income')).toBeInTheDocument();
 
-    await user.click(within(alert).getByRole('button', { name: 'Try again' }));
+    await user.click(within(alerts[0]!).getByRole('button', { name: 'Try again' }));
     expect(await screen.findByRole('table', { name: 'Received dividends, newest first' })).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('shows the empty state when there are no dividends at all', async () => {
+  it('shows the empty state instead of the dashboard when there are no dividends at all', async () => {
     server.use(http.get('/api/dividends', () => HttpResponse.json(overview({ received: [], upcoming: [], monthly: [], totalReceived: 0, last12Months: 0, projectedNext12Months: 0 }))));
     renderWithProviders(<DividendsPage />);
     expect(await screen.findByRole('heading', { name: 'No dividends yet' })).toBeInTheDocument();
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Yield' })).not.toBeInTheDocument();
   });
 
   it('handles no upcoming and no received dividends separately', async () => {
@@ -80,15 +116,41 @@ describe('DividendsPage', () => {
 
     server.use(http.get('/api/dividends', () => HttpResponse.json(overview({ received: [] }))));
     renderWithProviders(<DividendsPage />);
-    expect(await screen.findByText('No dividends received yet.')).toBeInTheDocument();
-    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    const history = await screen.findByRole('region', { name: 'Received' });
+    expect(await within(history).findByText('No dividends received yet.')).toBeInTheDocument();
+    expect(screen.queryByRole('table', { name: 'Received dividends, newest first' })).not.toBeInTheDocument();
+  });
+
+  it('queries every card for the selected portfolio, or for all portfolios', async () => {
+    const seen: { path: string; portfolioId: string | null }[] = [];
+    server.events.on('request:start', ({ request }) => {
+      const url = new URL(request.url);
+      if (/dividends|analytics/.test(url.pathname)) seen.push({ path: url.pathname, portfolioId: url.searchParams.get('portfolioId') });
+    });
+    const first = renderApp('/dividends?portfolio=trading-212');
+    expect(await screen.findByText(/^Trading 212 · amounts in EUR/)).toBeInTheDocument();
+    expect(await screen.findByTestId('year-compare-chart')).toBeInTheDocument();
+    expect(await screen.findByTestId('future-chart')).toBeInTheDocument();
+    expect(await screen.findByTestId('received-time-chart')).toBeInTheDocument();
+    for (const path of ['/api/dividends/overview', '/api/dividends', '/api/analytics/dividend-growth']) {
+      expect(seen.some((s) => s.path === path)).toBe(true);
+      expect(seen.filter((s) => s.path === path).every((s) => s.portfolioId === 'trading-212')).toBe(true);
+    }
+    first.unmount();
+
+    seen.length = 0;
+    renderApp('/dividends?portfolio=all');
+    expect(await screen.findByTestId('year-compare-chart')).toBeInTheDocument();
+    expect(await screen.findByTestId('future-chart')).toBeInTheDocument();
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((s) => s.portfolioId === null)).toBe(true);
   });
 
   it('is reachable from the router', async () => {
     renderApp('/dividends');
     expect(await screen.findByRole('heading', { level: 1, name: 'Dividends' })).toBeInTheDocument();
     expect(
-      screen.getByText('All portfolios · amounts in EUR (per-share amounts in the paying currency). Received amounts are net of withholding tax; upcoming amounts are gross estimates.'),
+      screen.getByText('All portfolios · amounts in EUR (per-share amounts in the paying currency). Received amounts are net of withholding tax; forward income is declared plus estimated.'),
     ).toBeInTheDocument();
   });
 });
