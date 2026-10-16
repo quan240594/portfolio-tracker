@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { CalendarMonth } from '@portfolio/shared';
+import { selectRows, visibleTotal, type SeriesSelection } from '../../components/charts/selection';
 import { formatMoney } from '../../lib/format';
 
 /** Visible names of the stacked series. The API field stays `paid`; the word shown to the user is "Received". */
@@ -7,6 +8,27 @@ const SERIES_NAMES: Readonly<Record<string, string>> = { paid: 'Received', decla
 export const seriesName = (key: unknown): string => SERIES_NAMES[String(key)] ?? String(key);
 
 export const INCOME_SERIES = ['paid', 'declared', 'estimated'] as const;
+export type IncomeSeries = (typeof INCOME_SERIES)[number];
+
+type IncomeSelection = Pick<SeriesSelection, 'isRowVisible' | 'isSeriesVisible'>;
+
+const cents = (value: number): number => Math.round(value * 100) / 100;
+
+/** The months that are not excluded, with the excluded statuses cleared and each month's total recomputed from what is left. */
+export function selectMonths(monthly: readonly CalendarMonth[], selection: IncomeSelection): CalendarMonth[] {
+  const everyStatus = INCOME_SERIES.every((key) => selection.isSeriesVisible(key));
+  return selectRows(monthly, (m) => m.month, selection).map((m) => {
+    if (everyStatus) return m;
+    const masked = { ...m, ...Object.fromEntries(INCOME_SERIES.filter((key) => !selection.isSeriesVisible(key)).map((key) => [key, 0])) };
+    return { ...masked, total: cents(visibleTotal(m, INCOME_SERIES, selection)) };
+  });
+}
+
+/** The dashed "avg" line: the supplied figure while everything is shown, otherwise the average over the months and statuses that are left. */
+export function selectedAverage(shown: readonly CalendarMonth[], average: number, filtered: boolean): number {
+  if (!filtered) return average;
+  return shown.length === 0 ? 0 : shown.reduce((sum, m) => sum + m.total, 0) / shown.length;
+}
 
 export interface IncomeRow extends CalendarMonth {
   /** Short label above the bar; empty when it is hidden (zero bar or no room on a narrow screen). */
