@@ -1,5 +1,6 @@
 import { useId, type CSSProperties } from 'react';
 import { formatMoney } from '../../lib/format';
+import type { LegendEntry } from '../../components/charts/selection';
 import { ToggleGroup } from '../calendar/CalendarControls';
 import { useDividendTheme } from './chartParts';
 import {
@@ -40,23 +41,9 @@ export function Swatch({ kind, color, c }: Readonly<{ kind: SwatchKind; color?: 
   return <span aria-hidden="true" className="inline-block h-2.5 w-2.5 rounded-sm" style={barStyle(kind, c, color)} />;
 }
 
-interface LegendProps {
-  items: readonly LegendItem[];
-  c: Theme;
-}
-
-/** Own legend, drawn above the chart (outside its horizontal scroll area, so it wraps and stays visible on a phone): swatch + readable text instead of recharts' legend text in the, often pastel, series colour. */
-export function GrowthLegend({ items, c }: Readonly<LegendProps>) {
-  return (
-    <ul className="m-0 mb-2 flex list-none flex-wrap justify-center gap-x-4 gap-y-1 p-0 text-xs" style={{ color: c.text }} data-testid="growth-legend">
-      {items.map((item) => (
-        <li key={item.key} className="inline-flex items-center gap-1.5">
-          <Swatch kind={item.swatch} color={item.color} c={c} />
-          {item.label}
-        </li>
-      ))}
-    </ul>
-  );
+/** Legend entries of the growth charts: swatch + readable text instead of recharts' legend text in the, often pastel, series colour. The keys are the series keys of the selection. */
+export function growthLegendEntries(items: readonly LegendItem[], c: Theme): LegendEntry[] {
+  return items.map((item) => ({ key: item.key, label: item.label, swatch: <Swatch kind={item.swatch} color={item.color} c={c} /> }));
 }
 
 interface TooltipEntry {

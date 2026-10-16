@@ -36,6 +36,8 @@ test.describe('Dividend growth: forecast and trend', () => {
     const growth = card(page);
     const legend = growth.getByTestId('growth-legend');
     await expect(growth.getByTestId('year-compare-chart')).toBeVisible();
+    // the checkbox is unchecked and disabled until the forecast has loaded: unchecking it earlier would be a no-op
+    await expect(growth.getByRole('checkbox', { name: 'Show forecast' })).toBeEnabled();
 
     await growth.getByRole('checkbox', { name: 'Show forecast' }).uncheck();
     await expect(legend).not.toContainText('forecast');
@@ -74,8 +76,8 @@ test.describe('Dividend growth: forecast and trend', () => {
     await growth.getByText('Show data table').click();
     const table = growth.getByRole('table', { name: 'Dividends received, forecast and trend per month' });
     await expect(table.getByRole('row')).toHaveCount(1 + 24 + 12);
-    await expect(table.getByRole('cell', { name: /Forecast \(month in progress\)/ })).toHaveCount(1);
-    await expect(table.getByRole('cell', { name: / · Forecast$/ })).toHaveCount(11);
+    await expect(table.getByRole('rowheader', { name: /Forecast \(month in progress\)/ })).toHaveCount(1);
+    await expect(table.getByRole('rowheader', { name: / · Forecast$/ })).toHaveCount(11);
   });
 
   test('documents the calculation and its limits', async ({ page }) => {

@@ -111,6 +111,31 @@ export function receivedFutureTimeline(
   return Array.from({ length: last - first + 1 }, (_, i) => toPeriod(first + i, periods.get(first + i) ?? emptyAccumulator(), granularity, current, breakdownKnown));
 }
 
+/** Series of the stacked bars, in stacking order: `paid` is "Received". */
+export const STATUS_SERIES = ['paid', 'declared', 'estimated'] as const;
+
+/** The id of a period as a table row / selection row; the granularity is part of it so a month never matches a quarter's number. */
+export const periodRowId = (granularity: Granularity, p: Pick<TimelinePeriod, 'key'>): string => `${granularity}:${p.key}`;
+
+/**
+ * The periods that are not excluded, with the excluded statuses cleared and the totals recomputed from what is left.
+ * The holdings behind a period add up over all statuses, so they are dropped while a status is excluded.
+ */
+export function selectPeriods(
+  periods: readonly TimelinePeriod[],
+  rowId: (p: TimelinePeriod) => string,
+  selection: { isRowVisible: (id: string) => boolean; isSeriesVisible: (key: string) => boolean },
+): TimelinePeriod[] {
+  const allStatuses = STATUS_SERIES.every((key) => selection.isSeriesVisible(key));
+  return periods
+    .filter((p) => selection.isRowVisible(rowId(p)))
+    .map((p) => {
+      if (allStatuses) return p;
+      const [paid, declared, estimated] = STATUS_SERIES.map((key) => (selection.isSeriesVisible(key) ? p[key] : 0));
+      return { ...p, paid: paid!, declared: declared!, estimated: estimated!, total: cents(paid! + declared! + estimated!), holdings: [] };
+    });
+}
+
 /** Totals over the timeline, for the headline and the accessible label. */
 export function timelineTotals(periods: readonly TimelinePeriod[]): { paid: number; declared: number; estimated: number } {
   let paid = 0;

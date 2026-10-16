@@ -15,7 +15,8 @@ import {
   type DividendsOverviewResponse,
 } from '@portfolio/shared';
 import { formatMoney, formatPercent } from '../../lib/format';
-import { ChartDataTable, Donut } from './chartParts';
+import { LegendSwatch, NothingSelected, SelectableDataTable, SelectableLegend, useSliceSelection, visibleSliceTotal, visibleSlices } from '../../components/charts/selection';
+import { Donut } from './chartParts';
 import { EmptyNote, QueryCard } from './DividendCard';
 import { useScopedDividendsOverview } from './useDividendsOverview';
 
@@ -119,35 +120,56 @@ function ConsistencyTable({ holdings, currency }: Readonly<{ holdings: readonly 
   );
 }
 
-function Consistency({ data }: Readonly<{ data: DividendsOverviewResponse }>) {
-  const { holdings } = data;
-  if (holdings.length === 0) return <EmptyNote>No dividend-paying holdings yet.</EmptyNote>;
-  const counts = BADGE_ORDER.map((badge) => ({ badge, count: holdings.filter((h) => h.consistency.badge === badge).length })).filter((c) => c.count > 0);
+/** The badge counts as a donut: a badge is a slice, a legend entry AND a table row; the centre shows the holdings left. */
+function ConsistencyBody({ data, counts }: Readonly<{ data: DividendsOverviewResponse; counts: readonly { badge: ConsistencyBadge; count: number }[] }>) {
   const slices = counts.map((c) => ({ key: c.badge, label: BADGES[c.badge].label, value: c.count, color: BADGES[c.badge].color }));
-  const summary = counts.map((c) => `${c.count} ${BADGES[c.badge].label}`).join(', ');
+  const selection = useSliceSelection(slices.map((s) => s.key));
+  const shown = visibleSlices(slices, selection);
+  const shownCount = visibleSliceTotal(slices, selection);
+  const summary = shown.map((s) => `${s.value} ${s.label}`).join(', ');
   const label = `Holdings by dividend safety: ${summary}.`;
+  const centre = (
+    <>
+      <span className="font-semibold tabular-nums">{shownCount}</span>
+      <span className="muted">holding{shownCount === 1 ? '' : 's'}</span>
+    </>
+  );
   return (
     <div className="space-y-4">
       <p className="muted text-xs">Based on your payment history, not a forecast or advice.</p>
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[16rem_minmax(0,1fr)]">
         <div>
-          <Donut slices={slices} label={label} testId="consistency-donut" format={(v) => `${v} holding${v === 1 ? '' : 's'}`} />
-          <ul className="mt-3 space-y-1 text-sm" aria-label="Holdings per badge">
-            {counts.map((c) => (
-              <li key={c.badge} className="flex items-center gap-2">
-                <span aria-hidden="true" className="h-2.5 w-2.5 rounded-sm" style={{ background: BADGES[c.badge].color }} />
-                <span>{BADGES[c.badge].label}</span>
-                <span className="ml-auto font-medium tabular-nums">{c.count}</span>
-              </li>
-            ))}
-          </ul>
+          <SelectableLegend
+            label="Holdings per badge"
+            testId="consistency-legend"
+            selection={selection}
+            entries={slices.map((s) => ({ key: s.key, label: `${s.label} (${s.value})`, swatch: <LegendSwatch color={s.color} /> }))}
+          />
+          {selection.nothingSelected ? (
+            <NothingSelected onShowAll={selection.reset} />
+          ) : (
+            <Donut slices={shown} label={label} testId="consistency-donut" format={(v) => `${v} holding${v === 1 ? '' : 's'}`} centre={centre} />
+          )}
         </div>
-        <ConsistencyTable holdings={holdings} currency={data.baseCurrency} />
+        <ConsistencyTable holdings={data.holdings} currency={data.baseCurrency} />
       </div>
       <ScoreHelp />
-      <ChartDataTable caption="Dividend safety badge counts" columns={['Badge', 'Holdings']} rows={counts.map((c) => [BADGES[c.badge].label, c.count])} />
+      <SelectableDataTable
+        caption="Dividend safety badge counts"
+        rowHeader="Badge"
+        columns={[{ key: 'holdings', label: 'Holdings', selectable: false }]}
+        selection={selection}
+        rows={counts.map((c) => ({ id: c.badge, header: BADGES[c.badge].label, cells: [c.count] }))}
+      />
     </div>
   );
+}
+
+function Consistency({ data }: Readonly<{ data: DividendsOverviewResponse }>) {
+  const { holdings } = data;
+  if (holdings.length === 0) return <EmptyNote>No dividend-paying holdings yet.</EmptyNote>;
+  const counts = BADGE_ORDER.map((badge) => ({ badge, count: holdings.filter((h) => h.consistency.badge === badge).length })).filter((c) => c.count > 0);
+  return <ConsistencyBody data={data} counts={counts} />;
 }
 
 export function ConsistencyCard() {

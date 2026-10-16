@@ -102,19 +102,6 @@ export function DataGrid({ caption, columns, rows, className = '' }: Readonly<Ta
   );
 }
 
-/** The chart's numbers as a table, one click away: the keyboard / screen reader alternative to the graphic. `extra` adds more tables below the first. */
-export function ChartDataTable({ caption, columns, rows, extra }: Readonly<TableProps & { extra?: ReactNode }>) {
-  return (
-    <details className="mt-2 text-xs">
-      <summary className="muted w-fit cursor-pointer rounded px-1 select-none hover:text-slate-900 dark:hover:text-white">Show data table</summary>
-      <div className="mt-2 max-h-64 overflow-auto">
-        <DataGrid caption={caption} columns={columns} rows={rows} />
-        {extra}
-      </div>
-    </details>
-  );
-}
-
 export interface DonutSlice {
   key: string;
   label: string;
@@ -128,12 +115,19 @@ interface DonutProps {
   testId: string;
   /** Tooltip value formatter; defaults to EUR amounts. */
   format?: (value: number) => string;
+  /** Text in the hole of the ring, e.g. the total of the slices shown; decorative (the label already says it). */
+  centre?: ReactNode;
 }
 
-export function Donut({ slices, label, testId, format = (v) => formatMoney(v, 'EUR') }: Readonly<DonutProps>) {
+export function Donut({ slices, label, testId, format = (v) => formatMoney(v, 'EUR'), centre }: Readonly<DonutProps>) {
   const c = useDividendTheme();
   return (
-    <div role="img" aria-label={label} data-testid={testId} className="mx-auto h-44 w-44 shrink-0 sm:h-52 sm:w-52">
+    <div role="img" aria-label={label} data-testid={testId} className="relative mx-auto h-44 w-44 shrink-0 sm:h-52 sm:w-52">
+      {centre && (
+        <div aria-hidden="true" data-testid={`${testId}-centre`} className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-10 text-center text-xs leading-tight">
+          {centre}
+        </div>
+      )}
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie data={slices as DonutSlice[]} dataKey="value" nameKey="label" innerRadius="60%" outerRadius="100%" paddingAngle={1.5} stroke="none" isAnimationActive={false}>

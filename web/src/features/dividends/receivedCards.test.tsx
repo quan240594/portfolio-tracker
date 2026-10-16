@@ -66,10 +66,10 @@ describe('ReceivedCards', () => {
     const card = screen.getByRole('region', { name: 'Dividends received' });
     await user.click(within(card).getByText('Show data table'));
     await user.click(screen.getByRole('radio', { name: 'Quarterly' }));
-    const cells = within(screen.getByRole('table', { name: 'Dividends received and upcoming per period' })).getAllByRole('cell');
+    const cells = within(screen.getByRole('table', { name: 'Dividends received and upcoming per period' })).getAllByRole('rowheader');
     expect(cells[0]).toHaveTextContent(/^Q[1-4] \d{2}$/);
     await user.click(screen.getByRole('radio', { name: 'Yearly' }));
-    const years = within(screen.getByRole('table', { name: 'Dividends received and upcoming per period' })).getAllByRole('cell');
+    const years = within(screen.getByRole('table', { name: 'Dividends received and upcoming per period' })).getAllByRole('rowheader');
     expect(years[0]).toHaveTextContent(/^\d{4}$/);
     expect(years.map((c) => c.textContent)).toContain(`${new Date().getFullYear() + 1} · Upcoming`);
   });
@@ -143,11 +143,11 @@ describe('ReceivedCards with future payments', () => {
       await user.click(screen.getByRole('radio', { name: granularity }));
       const rows = within(screen.getByRole('table', { name: 'Dividends received and upcoming per period' })).getAllByRole('row').slice(1);
       const expected = rows.map((r) => within(r).getAllByRole('cell').map((c) => numberIn(c.textContent)));
-      // Period | Received | Declared | Estimated | Total: the future columns add up to the Future payments total
+      // Received | Declared | Estimated | Total (after the period header): the future columns add up to the Future payments total
       // (each period is rounded to cents, so allow a cent per month)
-      const future = expected.reduce((s, [, , declared, estimated]) => s + declared! + estimated!, 0);
+      const future = expected.reduce((s, [, declared, estimated]) => s + declared! + estimated!, 0);
       expect(Math.abs(future - futureTotal)).toBeLessThanOrEqual(0.12);
-      for (const [, received, declared, estimated, total] of expected) expect(received! + declared! + estimated!).toBeCloseTo(total!, 1);
+      for (const [received, declared, estimated, total] of expected) expect(received! + declared! + estimated!).toBeCloseTo(total!, 1);
     }
   });
 
@@ -160,9 +160,9 @@ describe('ReceivedCards with future payments', () => {
     const rows = within(screen.getByRole('table', { name: 'Dividends received and upcoming per period' })).getAllByRole('row').slice(-12);
     rows.forEach((row, i) => {
       const cells = within(row).getAllByRole('cell').map((c) => c.textContent);
-      expect(cells[0]).toMatch(i === 0 ? /· Current$/ : /· Upcoming$/);
-      expect(numberIn(cells[2]!)).toBe(futureMonths[i]!.declared);
-      expect(numberIn(cells[3]!)).toBe(futureMonths[i]!.estimated);
+      expect(within(row).getByRole('rowheader').textContent).toMatch(i === 0 ? /· Current$/ : /· Upcoming$/);
+      expect(numberIn(cells[1]!)).toBe(futureMonths[i]!.declared);
+      expect(numberIn(cells[2]!)).toBe(futureMonths[i]!.estimated);
     });
   });
 
@@ -173,7 +173,7 @@ describe('ReceivedCards with future payments', () => {
     await user.click(within(screen.getByRole('region', { name: 'Dividends received' })).getByText('Show data table'));
     const table = screen.getByRole('table', { name: 'Dividends received and upcoming per period' });
     expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Period', 'Received', 'Declared', 'Estimated', 'Total']);
-    const periods = within(table).getAllByRole('row').slice(1).map((r) => within(r).getAllByRole('cell')[0]!.textContent);
+    const periods = within(table).getAllByRole('row').slice(1).map((r) => within(r).getByRole('rowheader').textContent);
     expect(periods.filter((p) => p!.endsWith('· Current'))).toHaveLength(1);
     expect(periods.filter((p) => p!.endsWith('· Upcoming')).length).toBeGreaterThanOrEqual(11);
   });

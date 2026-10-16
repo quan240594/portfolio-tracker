@@ -38,8 +38,17 @@ export interface YearForecastModel {
 
 const positive = (value: number): number | undefined => (value > 0 ? value : undefined);
 
-/** The grouped-by-year chart with the forecast bars of the current year's remainder and of the next year(s) added to the matching year's stack. */
-export function yearForecastModel(byMonth: AnalyticsDividendGrowthResponse['byMonth'], timeline: GrowthTimeline, showForecast: boolean, maxYears = 3): YearForecastModel {
+/**
+ * The grouped-by-year chart with the forecast bars of the current year's remainder and of the next year(s) added to the matching year's stack.
+ * `excludedYears` (the years the user left out of the chart) are not part of the "Average of years" line; the years and bars stay as they are.
+ */
+export function yearForecastModel(
+  byMonth: AnalyticsDividendGrowthResponse['byMonth'],
+  timeline: GrowthTimeline,
+  showForecast: boolean,
+  maxYears = 3,
+  excludedYears: readonly string[] = [],
+): YearForecastModel {
   const { years, rows } = yearComparison(byMonth, maxYears);
   const ahead = showForecast ? timeline.points.filter((p) => p.phase !== 'PAST' && p.declared + p.estimated > 0) : [];
   for (const p of ahead) {
@@ -47,13 +56,42 @@ export function yearForecastModel(byMonth: AnalyticsDividendGrowthResponse['byMo
     row[declaredKey(p.month.slice(0, 4))] = positive(p.declared);
     row[estimatedKey(p.month.slice(0, 4))] = positive(p.estimated);
   }
-  const average = averageByCalendarMonth(completeHistory(byMonth, timeline.asOf), years);
+  const average = averageByCalendarMonth(
+    completeHistory(byMonth, timeline.asOf),
+    years.filter((y) => !excludedYears.includes(y)),
+  );
   rows.forEach((row, i) => {
     row.average = average[i] ?? undefined;
   });
   const forecastYears = [...new Set(ahead.map((p) => p.month.slice(0, 4)))].sort((a, b) => a.localeCompare(b));
   const bars = [...new Set([...years, ...forecastYears])].sort((a, b) => a.localeCompare(b));
   return { years, forecastYears, bars, rows, hasAverage: average.some((v) => v !== null) };
+}
+
+/**
+ * Whether a data key of the grouped chart (`2026`, `2026-declared`, `2026-estimated`, `average`) is drawn under a selection.
+ * Legend keys: a year hides its received bar and its forecast stack, `declared` / `estimated` hide that status in every year,
+ * `<year>-forecast` hides the forecast of a year that only has forecast bars, `average` hides the line.
+ * `isVisible` answers true for keys the selection does not know.
+ */
+export function yearBarVisible(isVisible: (key: string) => boolean): (dataKey: string) => boolean {
+  return (dataKey) => {
+    if (dataKey === 'average') return isVisible('average');
+    const year = dataKey.slice(0, 4);
+    if (dataKey === year) return isVisible(year);
+    return isVisible(year) && isVisible(dataKey.slice(5)) && isVisible(`${year}-forecast`);
+  };
+}
+
+/** The months that are not excluded, with the hidden bars and lines cleared, so a tooltip only names what is drawn. */
+export function selectYearRows(rows: readonly YearRow[], isRowVisible: (month: string) => boolean, barVisible: (dataKey: string) => boolean): YearRow[] {
+  return rows
+    .filter((row) => isRowVisible(row.month))
+    .map((row) => {
+      const masked: YearRow = { month: row.month };
+      for (const [key, value] of Object.entries(row)) if (key !== 'month') masked[key] = barVisible(key) ? value : undefined;
+      return masked;
+    });
 }
 
 export type TooltipKind = 'received' | 'declared' | 'estimated' | 'average' | 'trend';

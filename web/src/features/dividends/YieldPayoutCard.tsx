@@ -6,7 +6,18 @@ import { SegmentedControl } from '../../components/SegmentedControl';
 import { compactMoneyTick } from '../../components/charts/chartFormatters';
 import { formatMoney, formatPercent } from '../../lib/format';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
-import { ChartDataTable, ChartFrame, useDividendTheme } from './chartParts';
+import {
+  LegendSwatch,
+  NothingSelected,
+  SelectableDataTable,
+  SelectableLegend,
+  selectRows,
+  useSeriesSelection,
+  type LegendEntry,
+  type SelectableColumn,
+  type SeriesSelection,
+} from '../../components/charts/selection';
+import { ChartFrame, useDividendTheme } from './chartParts';
 import { EmptyNote, QueryCard } from './DividendCard';
 import { yieldBars, type YieldBar, type YieldGroup, type YieldMetric } from './slices';
 import { useScopedDividendsOverview } from './useDividendsOverview';
@@ -25,54 +36,71 @@ const seriesName = (name: unknown, isYield: boolean): string => {
   return isYield ? 'Yield on value' : 'Amount per year';
 };
 
-function YieldPayoutChart({ bars, metric, currency }: Readonly<{ bars: readonly YieldBar[]; metric: YieldMetric; currency: string }>) {
+/** Series of the chart: the bars (yield or amount, per the selected metric) and, for the yield, the dots of the yield on cost. */
+const YIELD_SERIES = ['yield', 'onCost'];
+const AMOUNT_SERIES = ['amount'];
+
+interface ChartProps {
+  bars: readonly YieldBar[];
+  metric: YieldMetric;
+  currency: string;
+  selection: SeriesSelection;
+}
+
+function YieldPayoutChart({ bars, metric, currency, selection }: Readonly<ChartProps>) {
   const c = useDividendTheme();
   const isYield = metric === 'yield';
+  const barKey = isYield ? 'yield' : 'amount';
+  const showBar = selection.isSeriesVisible(barKey);
+  const showDots = isYield && selection.isSeriesVisible('onCost');
+  const shown = selectRows(bars, (b) => b.key, selection);
   const fmt = (v: number) => (isYield ? formatPercent(v) : formatMoney(v, currency));
-  const summary = bars.map((b) => `${b.label} ${fmt(isYield ? b.yieldPct : b.amount)}`).join(', ');
-  const label = `${isYield ? 'Dividend yield' : 'Forward annual dividend amount'} per ${bars.length} bars, highest first: ${summary}.`;
+  const summary = shown.map((b) => `${b.label} ${fmt(isYield ? b.yieldPct : b.amount)}`).join(', ');
+  const label = `${isYield ? 'Dividend yield' : 'Forward annual dividend amount'} per ${shown.length} bars, highest first: ${summary}.`;
+  const entries: LegendEntry[] = [{ key: barKey, label: seriesName('bar', isYield), swatch: <LegendSwatch color={c.value} /> }];
+  if (isYield) entries.push({ key: 'onCost', label: seriesName('onCostPct', isYield), swatch: <LegendSwatch shape="dot" color={c.benchmark} /> });
+  const columns: SelectableColumn[] = [
+    { key: 'yield', label: 'Yield', selectable: isYield },
+    { key: 'onCost', label: 'Yield on cost', selectable: isYield },
+    { key: 'amount', label: 'Per year', selectable: !isYield },
+  ];
   return (
     <>
-      <ChartFrame label={label} testId="yield-payout-chart" bars={bars.length}>
-        <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={bars as YieldBar[]} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-            <CartesianGrid stroke={c.grid} vertical={false} />
-            <XAxis dataKey="label" stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval={0} />
-            <YAxis
-              tickFormatter={isYield ? (v: number) => formatPercent(v, { digits: 1 }) : compactMoneyTick(currency)}
-              stroke={c.axis}
-              tick={{ fontSize: 11 }}
-              tickLine={false}
-              axisLine={false}
-              width={56}
-            />
-            <Tooltip
-              cursor={{ fill: c.grid, opacity: 0.5 }}
-              contentStyle={c.tooltip}
-              labelFormatter={(_l, payload) => payload[0]?.payload.name ?? ''}
-              formatter={(v: unknown, name: unknown) => [fmt(Number(v)), seriesName(name, isYield)]}
-            />
-            <Bar dataKey={isYield ? 'yieldPct' : 'amount'} fill={c.value} radius={[4, 4, 0, 0]} isAnimationActive={false} />
-            {isYield && <Line dataKey="onCostPct" stroke="none" dot={{ r: 4.5, fill: c.benchmark, stroke: c.tooltipBg, strokeWidth: 1.5 }} activeDot={{ r: 5 }} isAnimationActive={false} />}
-          </ComposedChart>
-        </ResponsiveContainer>
-      </ChartFrame>
-      <ul className="mt-1 flex flex-wrap justify-center gap-x-4 text-xs" aria-label="Legend">
-        <li className="flex items-center gap-1.5">
-          <span aria-hidden="true" className="h-2.5 w-2.5 rounded-sm" style={{ background: c.value }} />
-          {seriesName('bar', isYield)}
-        </li>
-        {isYield && (
-          <li className="flex items-center gap-1.5">
-            <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full" style={{ background: c.benchmark }} />
-            {seriesName('onCostPct', isYield)}
-          </li>
-        )}
-      </ul>
-      <ChartDataTable
+      <SelectableLegend entries={entries} selection={selection} testId="yield-payout-legend" />
+      {selection.nothingSelected ? (
+        <NothingSelected onShowAll={selection.reset} />
+      ) : (
+        <ChartFrame label={label} testId="yield-payout-chart" bars={shown.length}>
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={shown as YieldBar[]} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+              <CartesianGrid stroke={c.grid} vertical={false} />
+              <XAxis dataKey="label" stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval={0} />
+              <YAxis
+                tickFormatter={isYield ? (v: number) => formatPercent(v, { digits: 1 }) : compactMoneyTick(currency)}
+                stroke={c.axis}
+                tick={{ fontSize: 11 }}
+                tickLine={false}
+                axisLine={false}
+                width={56}
+              />
+              <Tooltip
+                cursor={{ fill: c.grid, opacity: 0.5 }}
+                contentStyle={c.tooltip}
+                labelFormatter={(_l, payload) => payload[0]?.payload.name ?? ''}
+                formatter={(v: unknown, name: unknown) => [fmt(Number(v)), seriesName(name, isYield)]}
+              />
+              {showBar && <Bar dataKey={isYield ? 'yieldPct' : 'amount'} fill={c.value} radius={[4, 4, 0, 0]} isAnimationActive={false} />}
+              {showDots && <Line dataKey="onCostPct" stroke="none" dot={{ r: 4.5, fill: c.benchmark, stroke: c.tooltipBg, strokeWidth: 1.5 }} activeDot={{ r: 5 }} isAnimationActive={false} />}
+            </ComposedChart>
+          </ResponsiveContainer>
+        </ChartFrame>
+      )}
+      <SelectableDataTable
         caption="Dividend yield and forward annual amount"
-        columns={['Name', 'Yield', 'Yield on cost', 'Per year']}
-        rows={bars.map((b) => [b.name, formatPercent(b.yieldPct), formatPercent(b.onCostPct), formatMoney(b.amount, currency)])}
+        rowHeader="Name"
+        columns={columns}
+        selection={selection}
+        rows={bars.map((b) => ({ id: b.key, header: b.name, cells: [formatPercent(b.yieldPct), formatPercent(b.onCostPct), formatMoney(b.amount, currency)] }))}
       />
     </>
   );
@@ -85,6 +113,10 @@ function YieldPayoutBody({ data }: Readonly<{ data: DividendsOverviewResponse }>
   const categories = useCategories(current?.portfolioId);
   const hasCategories = (categories.data?.categories.length ?? 0) > 0;
   const bars = yieldBars(data.holdings, metric, hasCategories ? group : 'holding', categories.data);
+  const selection = useSeriesSelection(
+    metric === 'yield' ? YIELD_SERIES : AMOUNT_SERIES,
+    bars.map((b) => b.key),
+  );
 
   return (
     <div>
@@ -92,7 +124,7 @@ function YieldPayoutBody({ data }: Readonly<{ data: DividendsOverviewResponse }>
         <SegmentedControl label="Show" options={METRICS} value={metric} onChange={setMetric} />
         {hasCategories && <SegmentedControl label="Group by" options={GROUPS} value={group} onChange={setGroup} />}
       </div>
-      {bars.length === 0 ? <EmptyNote>No dividend-paying holdings yet.</EmptyNote> : <YieldPayoutChart bars={bars} metric={metric} currency={data.baseCurrency} />}
+      {bars.length === 0 ? <EmptyNote>No dividend-paying holdings yet.</EmptyNote> : <YieldPayoutChart bars={bars} metric={metric} currency={data.baseCurrency} selection={selection} />}
     </div>
   );
 }
@@ -111,6 +143,7 @@ export function YieldPayoutCard() {
       info={
         <>
           <p>Bars show each holding&apos;s forward dividend yield (expected net income over the next 12 months ÷ market value); the dots show the yield on your cost. Switch to Amount for the expected income per year in EUR.</p>
+          <p>Click an entry in the legend, or a column or row header in the data table, to leave a series or a holding out of the chart.</p>
           <p>Group by Categories uses your portfolio categories (single portfolio only) and counts only dividend-paying holdings. Forward income = declared + estimated from payment frequency.</p>
         </>
       }
