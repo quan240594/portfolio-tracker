@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import type { CalendarMonth } from '@portfolio/shared';
 import { formatMoney, formatMonth } from '../../lib/format';
-import { INCOME_SERIES, seriesName } from './incomeChartModel';
+import { INCOME_SERIES, seriesName, type IncomeSeries } from './incomeChartModel';
 import type { IncomeColours } from './calendarColours';
 
 interface TooltipProps {
@@ -12,6 +12,8 @@ interface TooltipProps {
   background: string;
   border: string;
   text: string;
+  /** The statuses that are part of the chart (the others are excluded); default all three. */
+  statuses?: readonly IncomeSeries[];
 }
 
 interface ShellProps {
@@ -40,12 +42,12 @@ export interface StatusValues {
   total: number;
 }
 
-/** Amount per status (zero rows are kept so the three statuses always read the same: swatch + name, not colour only) and the total. */
-export function StatusAmounts({ row, currency, colours, border }: Readonly<{ row: StatusValues; currency: string; colours: IncomeColours; border: string }>) {
+/** Amount per (visible) status (zero rows are kept so the statuses always read the same: swatch + name, not colour only) and the total of those. */
+export function StatusAmounts({ row, currency, colours, border, statuses = INCOME_SERIES }: Readonly<{ row: StatusValues; currency: string; colours: IncomeColours; border: string; statuses?: readonly IncomeSeries[] }>) {
   return (
     <>
       <ul className="m-0 list-none p-0">
-        {INCOME_SERIES.map((key) => (
+        {statuses.map((key) => (
           <li key={key} className="flex items-center justify-between gap-4">
             <span className="flex items-center gap-1.5">
               <span
@@ -68,17 +70,12 @@ export function StatusAmounts({ row, currency, colours, border }: Readonly<{ row
 }
 
 /** Month tooltip of the calendar income chart. */
-export function IncomeTooltip({ active, payload, currency, colours, background, border, text }: Readonly<TooltipProps>) {
+export function IncomeTooltip({ active, payload, currency, colours, background, border, text, statuses }: Readonly<TooltipProps>) {
   const row = payload?.[0]?.payload;
   if (!active || !row) return null;
   return (
     <TooltipShell title={formatMonth(row.month)} testId="calendar-income-tooltip" background={background} border={border} text={text}>
-      <StatusAmounts row={row} currency={currency} colours={colours} border={border} />
+      <StatusAmounts row={row} currency={currency} colours={colours} border={border} statuses={statuses} />
     </TooltipShell>
   );
-}
-
-/** Legend text in the normal text colour (Recharts would colour it like the pale bar fill, which is unreadable). */
-export function legendLabel(value: unknown) {
-  return <span className="text-slate-700 dark:text-slate-200">{seriesName(value)}</span>;
 }

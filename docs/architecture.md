@@ -852,7 +852,7 @@ earnings and splits.
 `/calendar` (`web/src/pages/CalendarPage.tsx`, `web/src/features/calendar/`): month navigator, range (this month / next 12
 months, the latter as a list), event-type toggles with a marker shape **and** letter (E, P, R, S, C; one neutral colour), status toggles, scope select, a
 Calendar/List toggle (list is the default below 640 px), a Monday-first month grid built as a real `<table>` (buttons inside cells, "+N more"
-opens the day), the month's expected dividends, four KPIs, a 12-month received/declared/estimated stacked chart (value label per bar, dashed `avg` line, per-status tooltip),
+opens the day), the month's expected dividends, four KPIs, a 12-month received/declared/estimated stacked chart (value label per bar, dashed `avg` line, per-status tooltip; the legend and the "Show data table" headers include/exclude statuses and months, the KPIs and the grid keep describing the whole calendar),
 event dialogs and a coverage `<details>`. View, month, range and filters live in the URL; type/status/scope filters apply
 client-side to one loaded range, the `.ics` download sends them to the API. Amounts follow the portfolio scope selector.
 
@@ -1175,7 +1175,7 @@ time" headline. The by-year and timeline charts keep their own legend keys, so s
 | `components/charts/DividendGrowthChart.tsx` (Analytics, Dividend growth tab) | Dividends compared per year / month | previous, current | years / months | todo |
 | `components/charts/GoalChart.tsx` (Analytics, Goal tab) | Scenario lines | one per scenario id | none (years) | todo (series only) |
 | `features/goals/GoalChart.tsx` (Goals page) | Plan vs goal lines | goal, safe, alternative, plan | none (years) | todo (series only; hiding the goal line must not change the verdict text) |
-| `features/calendar/CalendarOverview.tsx` (`IncomeChart`, `incomeChartModel.ts`, `IncomeTooltip.tsx`, sr-only data table) | Calendar income per month | paid, declared, estimated | months | todo (reuse `selectPeriods`-style masking; wrap the sr-only table in a `div`) |
+| `features/calendar/CalendarOverview.tsx` (`IncomeChart`, `incomeChartModel.ts`, `IncomeTooltip.tsx`, sr-only data table) | Calendar income per month | paid, declared, estimated | months | stage 2 |
 | `features/asset-detail/PriceChart.tsx` | Price + benchmarks | price (symbol), one per benchmark | none (dates) | todo (series only) |
 | `features/asset-detail/DividendYearChart.tsx` | Dividends per year (asset detail) | complete, partial | years | todo |
 | `components/charts/ValueChart.tsx` (Dashboard) | Portfolio value area | value, invested | none (dates) | todo (series only) |

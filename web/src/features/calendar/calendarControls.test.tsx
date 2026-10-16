@@ -6,7 +6,7 @@ import { ThemeProvider } from '../../theme/ThemeProvider';
 import { renderWithProviders, sp } from '../../test/utils';
 import { FilterBar, MonthNavigator, ScopeSelect, StatusFilter, ToggleGroup, TypeFilter, ViewToolbar } from './CalendarControls';
 import { CalendarKpis, CoverageNotes, IncomeChart, IncomeChartCard } from './CalendarOverview';
-import { IncomeTooltip, legendLabel } from './IncomeTooltip';
+import { IncomeTooltip } from './IncomeTooltip';
 import { chipClasses, incomeColours } from './calendarColours';
 import { barLabel, incomeRows, seriesName, shortAmount } from './incomeChartModel';
 import { parseCalendarState, type CalendarUiState } from './calendarModel';
@@ -158,13 +158,15 @@ describe('CalendarOverview', () => {
     expect(screen.getByRole('region', { name: 'Annual income' })).toHaveAttribute('aria-busy', 'true');
   });
 
-  it('describes the chart for assistive technology with a data table', () => {
+  it('describes the chart for assistive technology with a data table', async () => {
+    const user = userEvent.setup();
     render(
       <ThemeProvider>
         <IncomeChart monthly={monthly} average={45.08} currency="EUR" />
       </ThemeProvider>,
     );
     expect(screen.getByRole('img', { name: /Dividend income per month over 2 months: .* in total, .* on average\./ })).toBeInTheDocument();
+    await user.click(screen.getByText('Show data table'));
     const table = screen.getByRole('table', { name: 'Dividend income per month' });
     const rows = within(table).getAllByRole('row');
     expect(rows).toHaveLength(3);
@@ -177,8 +179,6 @@ describe('CalendarOverview', () => {
     expect(seriesName('declared')).toBe('Declared');
     expect(seriesName('estimated')).toBe('Estimated');
     expect(seriesName('other')).toBe('other');
-    render(legendLabel('paid'));
-    expect(screen.getByText('Received')).toHaveClass('text-slate-700');
   });
 
   it('labels bars with a short amount, hiding zero bars and, on narrow screens, every other bar', () => {
