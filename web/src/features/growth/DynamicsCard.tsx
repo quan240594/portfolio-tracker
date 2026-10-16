@@ -1,22 +1,70 @@
 import { useState } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
-import type { AnalyticsGrowthResponse } from '@portfolio/shared';
+import type { AnalyticsGrowthResponse, GrowthMonthRow } from '@portfolio/shared';
 import { QueryBoundary } from '../../components/QueryBoundary';
 import { SegmentedControl } from '../../components/SegmentedControl';
-import { useTheme } from '../../theme/ThemeProvider';
+import { NothingSelected, SelectableLegend, SelectableTable, selectRows, useSeriesSelection } from '../../components/charts/selection';
+import { useTheme, type Theme } from '../../theme/ThemeProvider';
 import { analyticsTheme } from '../../components/charts/analyticsTheme';
 import { PanelHeader } from '../analytics/TableShell';
-import { ChartLegend } from './GrowthChart';
-import { signedLabel, DynamicsChart } from './DynamicsChart';
-import { GrowthTable } from './GrowthTable';
+import { DynamicsChart, dynamicsSummary, signedLabel } from './DynamicsChart';
 import { InfoNote } from './InfoNote';
 import { CompareToggle } from './RangeButtons';
 import { DYNAMICS_LAST_12M, availableBenchmarks, benchmarkColors, dynamicsMonths, dynamicsOptions, monthShortLabel } from './growthFormat';
+import { legendEntries, seriesKeys, shownLabels, visibleBenchmarks, type LineSeries } from './growthSelection';
 
 const TABLE_ID = 'growth-dynamics-table';
 
-function DynamicsContent({ data, compare }: Readonly<{ data: AnalyticsGrowthResponse; compare: boolean }>) {
+type Bench = { symbol: string; index: number };
+
+/** Series of the monthly bars: the portfolio (green/red by sign) and one per benchmark. */
+export function dynamicsSeries(bench: readonly Bench[], theme: Theme): LineSeries[] {
+  const colors = benchmarkColors(theme);
+  return [
+    { key: 'portfolio', color: analyticsTheme(theme).gain, label: 'Portfolio', detail: 'green = gain, red = loss' },
+    ...bench.map((b) => ({ key: b.symbol, color: colors[b.index % colors.length]!, label: b.symbol })),
+  ];
+}
+
+function DynamicsBody({ months, bench, details }: Readonly<{ months: readonly GrowthMonthRow[]; bench: readonly Bench[]; details: boolean }>) {
   const { theme } = useTheme();
+  const series = dynamicsSeries(bench, theme);
+  const selection = useSeriesSelection(
+    seriesKeys(series),
+    months.map((m) => m.month),
+  );
+  const shownMonths = selectRows(months, (m) => m.month, selection);
+  const shownBench = visibleBenchmarks(bench, selection);
+  const summary = dynamicsSummary(shownMonths, { portfolio: selection.isSeriesVisible('portfolio'), names: shownLabels(series, selection), hasHidden: selection.hasHidden });
+  const rows = [...months].reverse().map((m) => ({
+    id: m.month,
+    header: monthShortLabel(m.month),
+    cells: [signedLabel(m.portfolioPct, 2), ...bench.map((b) => signedLabel(m.benchmarks[b.symbol] ?? 0, 2))],
+  }));
+  return (
+    <>
+      <SelectableLegend entries={legendEntries(series, 'square')} selection={selection} label="Monthly return series" testId="growth-dynamics-legend" />
+      {selection.nothingSelected ? (
+        <NothingSelected onShowAll={selection.reset} />
+      ) : (
+        <DynamicsChart months={shownMonths} benchmarks={shownBench} showPortfolio={selection.isSeriesVisible('portfolio')} summary={summary} />
+      )}
+      <div id={TABLE_ID} className="mt-4" hidden={!details}>
+        {details && (
+          <SelectableTable
+            caption="Monthly returns, newest first"
+            rowHeader="Month"
+            columns={series.map(({ key, label }) => ({ key, label }))}
+            rows={rows}
+            selection={selection}
+          />
+        )}
+      </div>
+    </>
+  );
+}
+
+function DynamicsContent({ data, compare }: Readonly<{ data: AnalyticsGrowthResponse; compare: boolean }>) {
   const [selection, setSelection] = useState(DYNAMICS_LAST_12M);
   const [details, setDetails] = useState(false);
   const options = dynamicsOptions(data.monthly);
@@ -24,12 +72,6 @@ function DynamicsContent({ data, compare }: Readonly<{ data: AnalyticsGrowthResp
   const months = dynamicsMonths(data.monthly, active);
   if (data.monthly.length === 0) return <p className="muted py-8 text-center text-sm">Not enough history yet to show monthly returns.</p>;
 
-  const bench = compare ? availableBenchmarks(data) : [];
-  const t = analyticsTheme(theme);
-  const colors = benchmarkColors(theme);
-  const best = months.reduce((a, m) => (m.portfolioPct > a.portfolioPct ? m : a), months[0]!);
-  const summary = `Monthly portfolio return over ${months.length} months. Best month ${monthShortLabel(best.month)} ${signedLabel(best.portfolioPct)}.`;
-  const rows = [...months].reverse().map((m) => [monthShortLabel(m.month), signedLabel(m.portfolioPct, 2), ...bench.map((b) => signedLabel(m.benchmarks[b.symbol] ?? 0, 2))]);
   const toggleDetails = () => {
     setDetails((d) => !d);
     // The table appears below the chart: bring it into view once it is rendered.
@@ -44,16 +86,7 @@ function DynamicsContent({ data, compare }: Readonly<{ data: AnalyticsGrowthResp
           {details ? 'Hide details' : 'View details'}
         </button>
       </div>
-      <ChartLegend
-        items={[
-          { key: 'portfolio', color: t.gain, label: 'Portfolio', detail: 'green = gain, red = loss' },
-          ...bench.map((b) => ({ key: b.symbol, color: colors[b.index % colors.length]!, label: b.symbol })),
-        ]}
-      />
-      <DynamicsChart months={months} benchmarks={bench} summary={summary} />
-      <div id={TABLE_ID} className="mt-4" hidden={!details}>
-        {details && <GrowthTable caption="Monthly returns, newest first" columns={['Month', 'Portfolio', ...bench.map((b) => b.symbol)]} rows={rows} />}
-      </div>
+      <DynamicsBody months={months} bench={compare ? availableBenchmarks(data) : []} details={details} />
       <InfoNote>
         <p>
           Every column is the time-weighted return of one calendar month (the current month so far), so purchases and sales do not distort it and dividends count as

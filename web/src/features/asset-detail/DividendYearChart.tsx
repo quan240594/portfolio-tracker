@@ -1,5 +1,6 @@
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { AssetDividendYear } from '@portfolio/shared';
+import type { SeriesSelection } from '../../components/charts/selection';
 import { analyticsTheme, tooltipStyle } from '../../components/charts/analyticsTheme';
 import { formatMoney } from '../../lib/format';
 import { useTheme } from '../../theme/ThemeProvider';
@@ -18,14 +19,44 @@ export const perShareTick = (currency: string) => (v: number) => formatMoney(v, 
 
 export const yearSeriesName = (name: unknown) => (name === 'complete' ? 'Full year' : 'Partial year');
 
+export type YearKind = 'complete' | 'partial';
+
+export const yearKind = (y: AssetDividendYear): YearKind => (y.complete ? 'complete' : 'partial');
+
+/** Row id of a year: the table row and the bar share it. */
+export const yearId = (y: AssetDividendYear): string => String(y.year);
+
+/** The series that have data: a legend entry and a table column each (`complete`, `partial`). */
+export const yearSeriesKeys = (byYear: readonly AssetDividendYear[]): YearKind[] => (['complete', 'partial'] as const).filter((kind) => byYear.some((y) => yearKind(y) === kind));
+
+/** The years that stay in the chart: not excluded themselves, and their kind (full / partial) is not excluded either. */
+export const selectYears = (byYear: readonly AssetDividendYear[], selection: Pick<SeriesSelection, 'isRowVisible' | 'isSeriesVisible'>): AssetDividendYear[] =>
+  byYear.filter((y) => selection.isRowVisible(yearId(y)) && selection.isSeriesVisible(yearKind(y)));
+
+/** Text alternative of the chart, for the years that are drawn. */
+export function dividendYearLabel(byYear: readonly AssetDividendYear[], currency: string, symbol: string, hasHidden: boolean): string {
+  const perYear = byYear.map((y) => y.year + ' ' + formatMoney(y.perShare, currency, { maxDigits: 4 })).join(', ');
+  const selection = hasHidden ? ', current selection' : '';
+  return `Dividend per share of ${symbol} per year${selection}: ${perYear}.`;
+}
+
+interface Props {
+  /** The years to draw (the ones that are not excluded). */
+  byYear: readonly AssetDividendYear[];
+  currency: string;
+  showComplete: boolean;
+  showPartial: boolean;
+  label: string;
+}
+
 /** Dividend per share per calendar year. */
-export function DividendYearChart({ byYear, currency, symbol }: Readonly<{ byYear: readonly AssetDividendYear[]; currency: string; symbol: string }>) {
+export function DividendYearChart({ byYear, currency, showComplete, showPartial, label }: Readonly<Props>) {
   const { theme } = useTheme();
   const c = analyticsTheme(theme);
   const rows = yearRows(byYear);
-  const perYear = byYear.map((y) => y.year + ' ' + formatMoney(y.perShare, currency, { maxDigits: 4 })).join(', ');
-  const label = `Dividend per share of ${symbol} per year: ${perYear}.`;
   const format = (v: unknown, name: unknown): [string, string] => [formatMoney(Number(v), currency, { maxDigits: 4 }), yearSeriesName(name)];
+  // a year is one kind or the other, so whichever bar is drawn is the top of its stack
+  const top: [number, number, number, number] = [4, 4, 0, 0];
   return (
     <div role="img" aria-label={label} className="h-64 w-full" data-testid="asset-dividend-chart">
       <ResponsiveContainer width="100%" height="100%">
@@ -34,8 +65,8 @@ export function DividendYearChart({ byYear, currency, symbol }: Readonly<{ byYea
           <XAxis dataKey="year" stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
           <YAxis tickFormatter={perShareTick(currency)} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={64} />
           <Tooltip cursor={{ fill: c.grid, opacity: 0.5 }} contentStyle={tooltipStyle(c)} formatter={format} />
-          <Bar dataKey="complete" stackId="y" fill={c.received} isAnimationActive={false} />
-          <Bar dataKey="partial" stackId="y" fill={c.upcoming} radius={[4, 4, 0, 0]} isAnimationActive={false} />
+          {showComplete && <Bar dataKey="complete" stackId="y" fill={c.received} radius={top} isAnimationActive={false} />}
+          {showPartial && <Bar dataKey="partial" stackId="y" fill={c.upcoming} radius={top} isAnimationActive={false} />}
         </BarChart>
       </ResponsiveContainer>
     </div>

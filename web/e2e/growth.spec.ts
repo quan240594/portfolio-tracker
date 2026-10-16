@@ -46,7 +46,7 @@ test.describe('Analytics → Growth (mock mode)', () => {
     await page.reload();
     await expect(bar.getByRole('list', { name: 'Selected benchmarks' }).getByRole('listitem')).toHaveCount(2);
     // the legend entry only: a hover tooltip over the chart repeats the symbol
-    await expect(page.getByRole('region', { name: 'Portfolio value' }).locator('span.font-medium', { hasText: 'VWRL.AS' })).toBeVisible();
+    await expect(page.getByTestId('growth-value-legend').getByRole('button', { name: /^VWRL\.AS/ })).toBeVisible();
 
     await bar.getByRole('button', { name: 'Remove VWRL.AS' }).click();
     await expect(bar.getByRole('list', { name: 'Selected benchmarks' }).getByRole('listitem')).toHaveCount(1);

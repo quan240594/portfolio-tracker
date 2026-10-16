@@ -31,6 +31,8 @@ export interface LegendEntry {
   key: string;
   label: string;
   swatch: ReactNode;
+  /** Optional figure after the label (e.g. "€ 1.000 → € 1.200"): muted, not struck through, part of the toggle's accessible name. */
+  detail?: string;
   /** false = shown but not an include/exclude control (e.g. a derived line that has no state of its own). */
   toggleable?: boolean;
 }
@@ -51,6 +53,7 @@ function ToggleEntry({ entry, visible, onToggle }: Readonly<{ entry: LegendEntry
     <button type="button" aria-pressed={visible} onClick={onToggle} className={`${ITEM} cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800`}>
       <span className={visible ? '' : 'opacity-40'}>{entry.swatch}</span>
       <span className={visible ? '' : 'line-through'}>{entry.label}</span>
+      {entry.detail && <span className={`muted tabular-nums ${visible ? '' : 'opacity-40'}`}>{entry.detail}</span>}
     </button>
   );
 }
@@ -69,6 +72,7 @@ export function SelectableLegend({ entries, selection, label = 'Legend', testId 
               <span className={ITEM}>
                 {entry.swatch}
                 <span>{entry.label}</span>
+                {entry.detail && <span className="muted tabular-nums">{entry.detail}</span>}
               </span>
             ) : (
               <ToggleEntry entry={entry} visible={selection.isSeriesVisible(entry.key)} onToggle={() => selection.toggleSeries(entry.key)} />

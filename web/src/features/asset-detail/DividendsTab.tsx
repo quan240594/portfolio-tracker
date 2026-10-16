@@ -1,16 +1,15 @@
 import type { ReactNode } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
-import type { AssetDetailResponse, AssetPositionsResponse } from '@portfolio/shared';
+import type { AssetDetailResponse, AssetDividendYear, AssetPositionsResponse } from '@portfolio/shared';
 import { QueryBoundary } from '../../components/QueryBoundary';
 import { formatDate, formatMoney, formatPercent, formatQuantity } from '../../lib/format';
 import { TableShell, numCell, rowClass } from '../analytics/TableShell';
 import { ChartOrTable } from '../growth/ChartOrTable';
-import { ChartLegend } from '../growth/GrowthChart';
-import { GrowthTable } from '../growth/GrowthTable';
 import { InfoNote } from '../growth/InfoNote';
 import { useTheme } from '../../theme/ThemeProvider';
 import { analyticsTheme } from '../../components/charts/analyticsTheme';
-import { DividendYearChart } from './DividendYearChart';
+import { LegendSwatch, NothingSelected, SelectableLegend, SelectableTable, useSeriesSelection } from '../../components/charts/selection';
+import { DividendYearChart, dividendYearLabel, selectYears, yearId, yearKind, yearSeriesKeys, type YearKind } from './DividendYearChart';
 import { uniqueKeys } from './assetFormat';
 import { Figure } from './StatsSidebar';
 
@@ -39,11 +38,48 @@ function Kpis({ detail, received }: Readonly<{ detail: AssetDetailResponse; rece
   );
 }
 
-function PerYear({ detail }: Readonly<{ detail: AssetDetailResponse }>) {
+const YEAR_LABELS: Record<YearKind, string> = { complete: 'Full year', partial: 'Partial year' };
+
+function YearChartBlock({ byYear, currency, symbol }: Readonly<{ byYear: readonly AssetDividendYear[]; currency: string; symbol: string }>) {
   const { theme } = useTheme();
+  const c = analyticsTheme(theme);
+  const kinds = yearSeriesKeys(byYear);
+  const selection = useSeriesSelection(kinds, byYear.map(yearId));
+  const shown = selectYears(byYear, selection);
+  const swatches: Record<YearKind, string> = { complete: c.received, partial: c.upcoming };
+  const entries = kinds.map((kind) => ({ key: kind, label: YEAR_LABELS[kind], swatch: <LegendSwatch color={swatches[kind]} /> }));
+  const columns = [...kinds.map((kind) => ({ key: kind, label: YEAR_LABELS[kind] })), { key: 'payments', label: 'Payments', selectable: false }];
+  const rows = byYear.map((y) => {
+    const amount = formatMoney(y.perShare, currency, { maxDigits: 4 });
+    return { id: yearId(y), header: String(y.year), cells: [...kinds.map((kind) => (yearKind(y) === kind ? amount : '—')), String(y.payments)] };
+  });
+  return (
+    <>
+      <SelectableLegend entries={entries} selection={selection} label="Dividend per year series" testId="asset-dividend-legend" />
+      <ChartOrTable
+        id="asset-div-year-body"
+        chart={
+          shown.length === 0 || selection.nothingSelected ? (
+            <NothingSelected onShowAll={selection.reset} />
+          ) : (
+            <DividendYearChart
+              byYear={shown}
+              currency={currency}
+              showComplete={selection.isSeriesVisible('complete')}
+              showPartial={selection.isSeriesVisible('partial')}
+              label={dividendYearLabel(shown, currency, symbol, selection.hasHidden)}
+            />
+          )
+        }
+        table={<SelectableTable caption={`Dividend per share of ${symbol} per year`} rowHeader="Year" columns={columns} rows={rows} selection={selection} />}
+      />
+    </>
+  );
+}
+
+function PerYear({ detail }: Readonly<{ detail: AssetDetailResponse }>) {
   const { dividends, profile } = detail;
   const currency = dividends.currency ?? profile.currency;
-  const c = analyticsTheme(theme);
   return (
     <section aria-labelledby="asset-div-year-title" className="card p-4">
       <h2 id="asset-div-year-title" className="mb-3 font-semibold">
@@ -53,23 +89,7 @@ function PerYear({ detail }: Readonly<{ detail: AssetDetailResponse }>) {
         <p className="muted py-6 text-center text-sm">No dividends are stored for {profile.symbol}.</p>
       ) : (
         <>
-          <ChartLegend
-            items={[
-              { key: 'full', color: c.received, label: 'Full year' },
-              { key: 'partial', color: c.upcoming, label: 'Partial year' },
-            ]}
-          />
-          <ChartOrTable
-            id="asset-div-year-body"
-            chart={<DividendYearChart byYear={dividends.byYear} currency={currency} symbol={profile.symbol} />}
-            table={
-              <GrowthTable
-                caption={`Dividend per share of ${profile.symbol} per year`}
-                columns={['Year', 'Per share', 'Payments', 'Coverage']}
-                rows={dividends.byYear.map((y) => [String(y.year), formatMoney(y.perShare, currency, { maxDigits: 4 }), String(y.payments), y.complete ? 'Full year' : 'Partial year'])}
-              />
-            }
-          />
+          <YearChartBlock byYear={dividends.byYear} currency={currency} symbol={profile.symbol} />
           <InfoNote>
             <p>
               A year counts as partial while it is running, and for the first year we have stored when it holds fewer payments than the year after it

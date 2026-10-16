@@ -5,16 +5,16 @@ import { QueryBoundary } from '../../components/QueryBoundary';
 import { SegmentedControl } from '../../components/SegmentedControl';
 import { analyticsTheme } from '../../components/charts/analyticsTheme';
 import { formatDate, formatMoney, formatPercent, formatQuantity } from '../../lib/format';
-import { useTheme } from '../../theme/ThemeProvider';
+import { useTheme, type Theme } from '../../theme/ThemeProvider';
+import { SelectableTable, useSeriesSelection } from '../../components/charts/selection';
 import { PanelHeader, TableShell, numCell, rowClass } from '../analytics/TableShell';
-import { ChartOrTable } from '../growth/ChartOrTable';
-import { ChartLegend, type LegendItem } from '../growth/GrowthChart';
-import { GrowthTable } from '../growth/GrowthTable';
+import { SelectableChartOrTable } from '../growth/ChartOrTable';
 import { InfoNote } from '../growth/InfoNote';
 import { RangeButtons } from '../growth/RangeButtons';
 import { benchmarkColors } from '../growth/growthFormat';
+import { legendEntries, seriesKeys, shownLabels, visibleBenchmarks, type LineSeries } from '../growth/growthSelection';
 import { PriceChart } from './PriceChart';
-import { availableBenchmarks, chartRows, chartSummary, chartTableRows, plottedMarkers, type ChartMode } from './assetChartData';
+import { PRICE_KEY, availableBenchmarks, chartRows, chartSelectionSummary, chartSummary, plottedMarkers, selectableChartTable, type ChartMode } from './assetChartData';
 import { MARKER_LABELS, uniqueKeys } from './assetFormat';
 
 const MODE_OPTIONS = [
@@ -59,12 +59,13 @@ function TradesTable({ markers, currency, baseCurrency }: Readonly<{ markers: re
   );
 }
 
-function legendOf(data: AssetHistoryResponse, mode: ChartMode, theme: 'light' | 'dark'): LegendItem[] {
+/** Series of the chart: the security itself and, in the performance view, one line per benchmark (colour by the benchmark's index). */
+export function priceSeries(data: AssetHistoryResponse, mode: ChartMode, theme: Theme): LineSeries[] {
   const last = data.points.at(-1);
   const colors = benchmarkColors(theme);
   const bench = mode === 'performance' ? availableBenchmarks(data) : [];
   return [
-    { key: data.symbol, color: analyticsTheme(theme).value, label: data.symbol, detail: last ? formatPercent(last.pct, { signed: true }) : undefined },
+    { key: PRICE_KEY, color: analyticsTheme(theme).value, label: data.symbol, detail: last ? formatPercent(last.pct, { signed: true }) : undefined },
     ...bench.map(({ symbol, index }) => ({
       key: symbol,
       color: colors[index % colors.length]!,
@@ -87,23 +88,41 @@ function HistoryNotes({ data, mode }: Readonly<{ data: AssetHistoryResponse; mod
   );
 }
 
-function HistoryContent({ data, mode }: Readonly<{ data: AssetHistoryResponse; mode: ChartMode }>) {
+function HistoryBody({ data, mode }: Readonly<{ data: AssetHistoryResponse; mode: ChartMode }>) {
   const { theme } = useTheme();
-  if (data.points.length === 0) return <p className="muted py-8 text-center text-sm">No price history is stored for {data.symbol} in this period.</p>;
   const rows = chartRows(data, mode);
   const bench = mode === 'performance' ? availableBenchmarks(data) : [];
-  const table = chartTableRows(data, mode, TABLE_ROWS);
+  const series = priceSeries(data, mode, theme);
+  const selection = useSeriesSelection(seriesKeys(series));
+  const showPrice = selection.isSeriesVisible(PRICE_KEY);
+  const table = selectableChartTable(data, mode, TABLE_ROWS);
+  const what = mode === 'price' ? 'closing prices' : 'price change';
+  const summary = selection.hasHidden ? chartSelectionSummary(data, mode, shownLabels(series, selection)) : chartSummary(data, mode);
   const hasMarkers = data.markers.length > 0;
   return (
-    <div>
-      <ChartLegend items={legendOf(data, mode, theme)} />
-      <ChartOrTable
+    <>
+      <SelectableChartOrTable
         id="asset-price-body"
-        chart={<PriceChart rows={rows} mode={mode} benchmarks={bench} markers={plottedMarkers(data, rows)} currency={data.currency} summary={chartSummary(data, mode)} symbol={data.symbol} />}
-        table={<GrowthTable caption={`${data.symbol} ${mode === 'price' ? 'closing prices' : 'price change'} over time`} columns={table.columns} rows={table.rows} />}
+        entries={legendEntries(series)}
+        selection={selection}
+        legendTestId="asset-price-legend"
+        legendLabel="Price history series"
+        chart={
+          <PriceChart
+            rows={rows}
+            mode={mode}
+            benchmarks={visibleBenchmarks(bench, selection)}
+            showPrice={showPrice}
+            markers={plottedMarkers(data, rows)}
+            currency={data.currency}
+            summary={summary}
+            symbol={data.symbol}
+          />
+        }
+        table={<SelectableTable caption={`${data.symbol} ${what} over time`} rowHeader="Date" columns={table.columns} rows={table.rows} selection={selection} />}
       />
       <HistoryNotes data={data} mode={mode} />
-      {hasMarkers && <MarkerLegend />}
+      {hasMarkers && showPrice && <MarkerLegend />}
       {hasMarkers && <TradesTable markers={data.markers} currency={data.currency} baseCurrency={data.baseCurrency} />}
       <InfoNote>
         <p>
@@ -113,6 +132,15 @@ function HistoryContent({ data, mode }: Readonly<{ data: AssetHistoryResponse; m
         </p>
         <p>The markers show your own buys, sells and dividends of this security in the selected portfolio scope.</p>
       </InfoNote>
+    </>
+  );
+}
+
+function HistoryContent({ data, mode }: Readonly<{ data: AssetHistoryResponse; mode: ChartMode }>) {
+  if (data.points.length === 0) return <p className="muted py-8 text-center text-sm">No price history is stored for {data.symbol} in this period.</p>;
+  return (
+    <div>
+      <HistoryBody data={data} mode={mode} />
     </div>
   );
 }

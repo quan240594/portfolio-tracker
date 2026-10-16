@@ -3,17 +3,18 @@ import { DEFAULT_GROWTH_RANGE, downsampleEvenly, type AnalyticsGrowthResponse, t
 import { useGrowth } from '../../api/growthHooks';
 import { Change } from '../../components/Change';
 import { QueryBoundary } from '../../components/QueryBoundary';
+import { SelectableTable, useSeriesSelection } from '../../components/charts/selection';
 import { analyticsTheme } from '../../components/charts/analyticsTheme';
 import { useTheme, type Theme } from '../../theme/ThemeProvider';
 import { formatDate, formatPercent } from '../../lib/format';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
 import { PanelHeader } from '../analytics/TableShell';
-import { ChartLegend, GrowthChart, type LegendItem } from './GrowthChart';
-import { ChartOrTable } from './ChartOrTable';
-import { GrowthTable } from './GrowthTable';
+import { GrowthChart } from './GrowthChart';
+import { SelectableChartOrTable } from './ChartOrTable';
 import { InfoNote } from './InfoNote';
 import { CompareToggle, RangeButtons } from './RangeButtons';
-import { TABLE_ROWS, availableBenchmarks, benchmarkColors, growthRows, lastBenchmarkValue } from './growthFormat';
+import { TABLE_ROWS, availableBenchmarks, benchmarkColors, growthRows, lastBenchmarkValue, returnKey } from './growthFormat';
+import { legendEntries, selectionSummary, seriesKeys, shownLabels, visibleBenchmarks, type LineSeries } from './growthSelection';
 import { NO_TRANSACTIONS_TEXT } from './ValueCard';
 
 interface Compare {
@@ -21,7 +22,8 @@ interface Compare {
   onCompareChange: (compare: boolean) => void;
 }
 
-function legendOf(data: AnalyticsGrowthResponse, period: GrowthPeriod, compare: boolean, theme: Theme): LegendItem[] {
+/** Series of the return chart: the portfolio, plus one per benchmark while Compare is on. */
+export function performanceSeries(data: AnalyticsGrowthResponse, period: GrowthPeriod, compare: boolean, theme: Theme): LineSeries[] {
   const colors = benchmarkColors(theme);
   const benchmarks = compare ? availableBenchmarks(data) : [];
   return [
@@ -35,29 +37,46 @@ function legendOf(data: AnalyticsGrowthResponse, period: GrowthPeriod, compare: 
   ];
 }
 
-function PerformanceContent({ data, compare }: Readonly<{ data: AnalyticsGrowthResponse; compare: boolean }>) {
+function PerformanceChartBlock({ data, period, compare }: Readonly<{ data: AnalyticsGrowthResponse; period: GrowthPeriod; compare: boolean }>) {
   const { theme } = useTheme();
-  const { period } = data;
-  if (!period) return <p className="muted py-8 text-center text-sm">{NO_TRANSACTIONS_TEXT}</p>;
   const bench = compare ? availableBenchmarks(data) : [];
   const rows = growthRows(data);
-  const summary = `Cumulative time-weighted return from ${formatDate(period.from)} to ${formatDate(period.to)}: ${formatPercent(period.returnPct, { signed: true })}.`;
-  const tableRows = downsampleEvenly(rows, TABLE_ROWS).map((r) => [
-    formatDate(String(r.date)),
-    formatPercent(Number(r.returnPct), { signed: true }),
-    ...bench.map((b) => formatPercent(Number(r[`r${b.index}`]), { signed: true })),
-  ]);
+  const series = performanceSeries(data, period, compare, theme);
+  const selection = useSeriesSelection(seriesKeys(series));
+  const span = `from ${formatDate(period.from)} to ${formatDate(period.to)}`;
+  const whole = `Cumulative time-weighted return ${span}: ${formatPercent(period.returnPct, { signed: true })}.`;
+  const summary = selection.hasHidden ? selectionSummary('Cumulative time-weighted return', span, shownLabels(series, selection)) : whole;
+  const columns = series.map(({ key, label }) => ({ key, label }));
+  const tableRows = downsampleEvenly(rows, TABLE_ROWS).map((r) => ({
+    id: String(r.date),
+    header: formatDate(String(r.date)),
+    selectable: false,
+    cells: [formatPercent(Number(r.returnPct), { signed: true }), ...bench.map((b) => formatPercent(Number(r[returnKey(b.index)]), { signed: true }))],
+  }));
+  return (
+    <SelectableChartOrTable
+      id="growth-performance-body"
+      entries={legendEntries(series)}
+      selection={selection}
+      legendTestId="growth-performance-legend"
+      legendLabel="Portfolio performance series"
+      chart={
+        <GrowthChart rows={rows} benchmarks={visibleBenchmarks(bench, selection)} showPortfolio={selection.isSeriesVisible('portfolio')} kind="return" currency={data.baseCurrency} summary={summary} testId="growth-performance-chart" />
+      }
+      table={<SelectableTable caption="Cumulative return over time" rowHeader="Date" columns={columns} rows={tableRows} selection={selection} />}
+    />
+  );
+}
+
+function PerformanceContent({ data, compare }: Readonly<{ data: AnalyticsGrowthResponse; compare: boolean }>) {
+  const { period } = data;
+  if (!period) return <p className="muted py-8 text-center text-sm">{NO_TRANSACTIONS_TEXT}</p>;
   return (
     <div>
       <p className="muted mb-3 text-xs">
         {formatDate(period.from)} – {formatDate(period.to)} · Gain <Change amount={period.gain} pct={period.returnPct} currency={data.baseCurrency} className="text-xs" />
       </p>
-      <ChartLegend items={legendOf(data, period, compare, theme)} />
-      <ChartOrTable
-        id="growth-performance-body"
-        chart={<GrowthChart rows={rows} benchmarks={bench} kind="return" currency={data.baseCurrency} summary={summary} testId="growth-performance-chart" />}
-        table={<GrowthTable caption="Cumulative return over time" columns={['Date', 'Portfolio', ...bench.map((b) => b.symbol)]} rows={tableRows} />}
-      />
+      <PerformanceChartBlock data={data} period={period} compare={compare} />
       <InfoNote>
         <p>
           The line is the time-weighted return (TWR): daily returns are chained, with purchases and sales removed as cash flows, so it measures how your

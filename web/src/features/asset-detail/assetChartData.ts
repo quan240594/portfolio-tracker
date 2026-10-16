@@ -1,4 +1,5 @@
 import { downsampleEvenly, seriesExtremes, type AssetHistoryResponse, type AssetMarkerType } from '@portfolio/shared';
+import type { SelectableColumn, SelectableRow } from '../../components/charts/selection';
 import { formatDate, formatMoney, formatPercent } from '../../lib/format';
 import { MARKER_LABELS, uniqueKeys } from './assetFormat';
 
@@ -80,6 +81,15 @@ export function chartSummary(data: AssetHistoryResponse, mode: ChartMode): strin
   return `Price change of ${data.symbol} ${span}: ${formatPercent(last.pct, { signed: true })}.`;
 }
 
+/** Text alternative of the chart while something is excluded: what it covers and which lines are left. */
+export function chartSelectionSummary(data: AssetHistoryResponse, mode: ChartMode, shown: readonly string[]): string {
+  const first = data.points[0];
+  const last = data.points.at(-1);
+  if (!first || !last) return chartSummary(data, mode);
+  const subject = mode === 'price' ? 'Closing price' : 'Price change';
+  return `${subject} of ${data.symbol} from ${formatDate(first.date)} to ${formatDate(last.date)}, current selection: ${shown.join(', ')}.`;
+}
+
 type Bench = { symbol: string; index: number };
 
 const percent = (value: number | null | undefined): string => (value === null || value === undefined ? '—' : formatChartValue('performance', '')(value));
@@ -103,4 +113,18 @@ export function chartTableRows(data: AssetHistoryResponse, mode: ChartMode, max:
     max,
   );
   return { columns: tableColumns(data, mode, bench), rows: indexes.map((i) => tableRow(data, mode, bench, i)) };
+}
+
+/** The series of the chart, as the legend, the table columns and the selection name them: the security's own line (`price`), then one per benchmark. */
+export const PRICE_KEY = 'price';
+
+/** The data table as a selection table: series columns (the security, one per benchmark) and plain date rows (dates are never excluded). */
+export function selectableChartTable(data: AssetHistoryResponse, mode: ChartMode, max: number): { columns: SelectableColumn[]; rows: SelectableRow[] } {
+  const table = chartTableRows(data, mode, max);
+  const bench = mode === 'performance' ? availableBenchmarks(data) : [];
+  const [, ...labels] = table.columns;
+  const keys = mode === 'price' ? [PRICE_KEY, 'change'] : [PRICE_KEY, ...bench.map((b) => b.symbol)];
+  const columns = labels.map((label, i) => ({ key: keys[i]!, label, selectable: keys[i] !== 'change' }));
+  const rows = table.rows.map(([date, ...cells]) => ({ id: date!, header: date!, cells, selectable: false }));
+  return { columns, rows };
 }

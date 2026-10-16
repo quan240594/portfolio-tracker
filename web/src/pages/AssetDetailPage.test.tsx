@@ -366,7 +366,7 @@ describe('Dividends tab', () => {
 
     await user.click(screen.getByRole('button', { name: 'Data table' }));
     const byYear = screen.getByRole('table', { name: 'Dividend per share of AAPL per year' });
-    expect(within(byYear).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Year', 'Per share', 'Payments', 'Coverage']);
+    expect(within(byYear).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Year', 'Full year', 'Partial year', 'Payments']);
     expect(within(byYear).getAllByText('Partial year').length).toBeGreaterThan(0);
   });
 
