@@ -28,7 +28,7 @@ function SwitchDialog({ open, onClose }: Readonly<{ open: boolean; onClose: () =
             <a href={INFRA_README_URL} target="_blank" rel="noopener noreferrer" className={LINK_CLASS}>
               deployment guide
             </a>
-            .
+            <span>.</span>
           </li>
           <li>
             Set the repository variable <code className="rounded bg-slate-100 px-1 dark:bg-slate-800">REAL_APP_URL</code> to your
