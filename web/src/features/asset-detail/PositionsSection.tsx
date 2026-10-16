@@ -42,7 +42,7 @@ function PositionCard({ position, data }: Readonly<{ position: AssetPosition; da
         <h3 className="min-w-0 font-semibold break-words">{position.portfolioName}</h3>
         <StatusBadge status={position.status} />
       </div>
-      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
+      <dl className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-x-4 gap-y-3 sm:grid-cols-3">
         {open && <Item label="Shares">{formatQuantity(position.quantity)}</Item>}
         {open && (
           <Item label="Cost per share">
@@ -71,7 +71,7 @@ function Totals({ data }: Readonly<{ data: AssetPositionsResponse }>) {
   return (
     <section aria-label="Total across portfolios" className="card border-brand-500/40 p-4">
       <h3 className="font-semibold">Total across portfolios</h3>
-      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+      <dl className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-x-4 gap-y-3 sm:grid-cols-4">
         <Item label="Shares">{formatQuantity(t.quantity)}</Item>
         <Item label="Value">{formatMoney(t.marketValue, data.baseCurrency)}</Item>
         <Item label="Profit">
