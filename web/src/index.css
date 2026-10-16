@@ -20,6 +20,10 @@
   :root {
     color-scheme: light;
   }
+  html {
+    /* Height of the sticky banner + header, published by useStickyOffset. */
+    scroll-padding-top: calc(var(--sticky-offset, 0px) + 0.5rem);
+  }
   :root.dark {
     color-scheme: dark;
   }

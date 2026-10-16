@@ -103,6 +103,9 @@ The public demo is deployed by [.github/workflows/pages.yml](.github/workflows/p
   browser, in-memory sample data that resets on reload) with base path `/portfolio-tracker/`. It never calls a real API.
   The build also writes `404.html` (copy of `index.html`, so deep links like `/portfolio-tracker/holdings` survive a
   refresh) and `.nojekyll`. Then `upload-pages-artifact` (`web/dist`) → `deploy-pages` (environment `github-pages`).
+- **Switch to real data:** the demo banner has a "Switch to real data" button. Optionally set the repository *variable*
+  (not a secret) `REAL_APP_URL` (*Settings → Secrets and variables → Actions → Variables*) to the `web_url` of your own
+  deployment (https only) and re-run the workflow: the button then links there. Unset, it opens a dialog explaining the steps.
 - **One-time setting:** *Settings → Pages → Source: GitHub Actions* (already done).
 - **Preview locally:**
 

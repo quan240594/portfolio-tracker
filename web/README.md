@@ -57,6 +57,7 @@ Build-time (Vite `VITE_*`), see `.env.example`:
 | `VITE_AUTH_MODE` | `none` | `cognito` puts every route behind the Cognito sign-in (TOTP MFA). Ignored in mock mode. Set by the deploy workflow from the Terraform outputs. |
 | `VITE_COGNITO_USER_POOL_ID`, `VITE_COGNITO_CLIENT_ID` | – | Required when `VITE_AUTH_MODE=cognito` (otherwise the app shows a configuration error instead of starting). |
 | `VITE_COGNITO_REGION` | from pool id | Optional; derived from the pool id (`eu-west-1_xxx`). |
+| `VITE_REAL_APP_URL` | – | Demo mode only. https URL of your own deployed app: the banner's "Switch to real data" becomes a link to it (anything not https is ignored); unset opens a how-to dialog. The Pages workflow sets it from the repo variable `REAL_APP_URL`. |
 | `VITE_BASE_PATH` | `/` | Public base path (Vite `base`, slashes normalised). The router `basename` is derived from it, and the MSW worker is loaded from `<base>mockServiceWorker.js`. `build:pages` sets `/portfolio-tracker/`. |
 
 ## GitHub Pages demo
