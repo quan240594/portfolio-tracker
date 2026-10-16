@@ -11,7 +11,7 @@ export function PortfolioSwitcher() {
   return (
     <div className="flex items-center gap-2">
       <label htmlFor="portfolio-switcher" className="muted text-sm whitespace-nowrap">
-        Portfolio
+        Scope
       </label>
       <select
         id="portfolio-switcher"

@@ -143,6 +143,33 @@ describe('main navigation', () => {
     expect(trigger()).not.toHaveAttribute('data-active');
   });
 
+  it('announces the active section through a description, leaving the trigger name untouched', async () => {
+    const user = userEvent.setup();
+    const { router } = renderApp('/');
+    const hint = () => within(mainNav()).queryByText('Current section');
+    expect(hint()).not.toBeInTheDocument();
+    expect(trigger()).not.toHaveAttribute('aria-describedby');
+    expect(trigger()).toHaveAccessibleName('Portfolio');
+
+    await act(() => router.navigate('/holdings'));
+    await waitFor(() => expect(trigger()).toHaveAccessibleDescription('Current section'));
+    expect(trigger()).toHaveAccessibleName('Portfolio');
+    expect(hint()).toHaveClass('sr-only');
+    expect(within(mainNav()).getByRole('button', { name: 'Portfolio' })).toBe(trigger());
+
+    await act(() => router.navigate('/assets/AAPL'));
+    expect(trigger()).toHaveAccessibleDescription('Current section');
+    await openPortfolioMenu(user);
+    expect(trigger()).toHaveAccessibleName('Portfolio');
+
+    await act(() => router.navigate('/analytics'));
+    expect(hint()).not.toBeInTheDocument();
+    expect(trigger()).not.toHaveAttribute('aria-describedby');
+    expect(trigger()).toHaveAccessibleDescription('');
+    await act(() => router.navigate('/'));
+    expect(hint()).not.toBeInTheDocument();
+  });
+
   it('keeps the portfolio scope on menu links', async () => {
     const user = userEvent.setup();
     renderApp('/?portfolio=trading-212');

@@ -48,6 +48,7 @@ function PortfolioMenu({ withScope }: Readonly<{ withScope: WithScope }>) {
   const rootRef = useRef<HTMLLIElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listId = useId();
+  const hintId = useId();
   const active = PORTFOLIO_ITEMS.some((item) => isWithin(pathname, item.to));
 
   useEffect(() => {
@@ -84,6 +85,7 @@ function PortfolioMenu({ withScope }: Readonly<{ withScope: WithScope }>) {
         type="button"
         aria-expanded={open}
         aria-controls={listId}
+        aria-describedby={active ? hintId : undefined}
         data-active={active || undefined}
         onClick={() => setOpen((v) => !v)}
         className={`${ITEM_BASE} w-full gap-1 ${triggerClass}`}
@@ -102,6 +104,11 @@ function PortfolioMenu({ withScope }: Readonly<{ withScope: WithScope }>) {
           <path d="M5 8l5 5 5-5" />
         </svg>
       </button>
+      {active && (
+        <span id={hintId} className="sr-only">
+          Current section
+        </span>
+      )}
       <ul
         id={listId}
         hidden={!open}

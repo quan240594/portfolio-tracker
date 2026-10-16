@@ -79,9 +79,11 @@ test.describe('Header navigation (mock mode)', () => {
   test('marks the Portfolio trigger and the child active, also on nested routes', async ({ page }) => {
     await page.goto('/');
     await expect(portfolioTrigger(page)).not.toHaveAttribute('data-active', 'true');
+    await expect(portfolioTrigger(page)).toHaveAccessibleDescription('');
     await gotoViaNav(page, 'Transactions');
     await expect(page.getByRole('heading', { level: 1, name: 'Transactions' })).toBeVisible();
     await expect(portfolioTrigger(page)).toHaveAttribute('data-active', 'true');
+    await expect(portfolioTrigger(page)).toHaveAccessibleDescription('Current section');
     await openPortfolioMenu(page);
     await expect(mainNav(page).getByRole('link', { name: 'Transactions' })).toHaveAttribute('aria-current', 'page');
 
@@ -91,6 +93,7 @@ test.describe('Header navigation (mock mode)', () => {
     await gotoViaNav(page, 'Analytics');
     await expect(page).toHaveURL(/\/analytics$/);
     await expect(portfolioTrigger(page)).not.toHaveAttribute('data-active', 'true');
+    await expect(portfolioTrigger(page)).toHaveAccessibleDescription('');
   });
 
   for (const width of [390, 320]) {
