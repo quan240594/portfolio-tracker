@@ -126,11 +126,11 @@ describe('Consistency selection', () => {
     expect(screen.getByTestId('consistency-donut-centre')).toHaveTextContent(`${total}holdings`);
 
     await user.click(entry(legend, 'Reliable (3)'));
-    expect(screen.getByTestId('consistency-donut')).toHaveAccessibleName(/^Holdings by payment consistency: 1 OK, 1 Irregular, 1 New\.$/);
+    expect(screen.getByTestId('consistency-donut')).toHaveAccessibleName(/^Holdings by dividend safety: 1 OK, 1 Irregular, 1 New\.$/);
     expect(screen.getByTestId('consistency-donut-centre')).toHaveTextContent('3holdings');
 
-    const region = card('Payment consistency');
-    const table = await openTable(user, region, 'Consistency badge counts');
+    const region = card('Dividend safety');
+    const table = await openTable(user, region, 'Dividend safety badge counts');
     expect(pressed(within(table).getByRole('button', { name: 'Reliable' }))).toBe('false');
     await user.click(within(table).getByRole('button', { name: 'OK' }));
     await user.click(within(table).getByRole('button', { name: 'Irregular' }));

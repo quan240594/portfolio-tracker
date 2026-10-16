@@ -1142,7 +1142,7 @@ over the visible slices) and `visibleSliceTotal`. Chart-specific adapters live n
 |---|---|---|
 | Yield / payout (`YieldPayoutCard.tsx`) | `yield` (bars) + `onCost` (dots) for Yield; `amount` (bars) for Amount; only the drawn ones are toggles | holdings or categories (bar key) |
 | Passive income diversification (`DiversificationCard.tsx`) | none: slices are the entries | slices = holdings (top 8 + Other); legend, ranked list, donut and table follow; shares and the centre total are recomputed over the visible slices |
-| Payment consistency (`ConsistencyCard.tsx`) | none: slices are the entries | slices = badges; centre = holdings left; the per-holding table next to it is not chart data and does not change |
+| Dividend safety (`ConsistencyCard.tsx`) | none: slices are the entries | slices = badges; centre = holdings left; the per-holding table next to it is not chart data and does not change |
 | Average annual growth (`GrowthAndFuture.tsx`) | `growth` | holdings with a growth figure |
 | Future payments (`GrowthAndFuture.tsx`) | `declared`, `estimated`; the monthly average is a plain legend item, recomputed over the visible months and series | months |
 | Dividends received (`ReceivedTimeline.tsx`) | `paid` (Received), `declared`, `estimated` (future on), `avg` (line, toggle); the Total column is not a series | periods (`<granularity>:<period number>`); the average, the axis and the value labels are recomputed over the visible periods and statuses |

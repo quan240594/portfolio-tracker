@@ -93,7 +93,7 @@ test.describe('Donuts', () => {
 
   test('the consistency donut leaves a badge out and recounts the holdings', async ({ page }) => {
     await page.goto('/dividends');
-    const region = card(page, 'Payment consistency');
+    const region = card(page, 'Dividend safety');
     const donut = region.getByTestId('consistency-donut');
     const legend = region.getByTestId('consistency-legend');
     await expect(slices(donut).first()).toBeVisible();
@@ -278,7 +278,7 @@ test.describe('Layout with excluded entries', () => {
       ] as const) {
         await toggle(card(page, name).locator('[data-testid$="legend"]').first(), entry).click();
       }
-      for (const name of ['Passive income diversification', 'Payment consistency']) {
+      for (const name of ['Passive income diversification', 'Dividend safety']) {
         await card(page, name).locator('[data-testid$="legend"]').first().getByRole('button').first().click();
       }
       for (const summary of await page.getByText('Show data table').all()) await summary.click();
