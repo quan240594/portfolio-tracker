@@ -14,7 +14,7 @@ const REGIONS = [
   'Dividends',
   'Yield / payout',
   'Passive income diversification',
-  'Payment consistency',
+  'Dividend safety',
   'Average annual growth',
   'Future payments',
   'Dividends received',

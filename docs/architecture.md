@@ -523,7 +523,7 @@ same sanity check (rate must agree with the row's amounts, otherwise it is dropp
 ## Dividends page
 
 `/dividends` is a dashboard (top to bottom): Yield and Dividends KPIs next to a Yield / payout chart; passive income
-diversification; payment consistency; average annual growth next to future payments; dividends received over time next to
+diversification; dividend safety (payment consistency); average annual growth next to future payments; dividends received over time next to
 received by holding; calendar-month comparison of the last three years (`GET /analytics/dividend-growth`); and the payment
 history (received and upcoming, collapsible). Every card has an info tip with the metric, source and assumptions, loading /
 error (retry) / empty states, a chart text alternative and a "Show data table" disclosure. Everything follows the portfolio
@@ -547,7 +547,7 @@ Forward income is declared plus estimated, net of the withholding tax seen in th
 EODHD dividend events cover about two years of history, which is why the per-holding history merges the received payments with
 the stored *past* events (an event within 20 days of a received payment is the same payment).
 
-### Payment consistency score
+### Dividend safety score (payment consistency)
 
 Replaces a proprietary dividend rating (which needs company fundamentals we do not have). It is computed only from the
 user's own data and is **not a forecast or advice**. Per holding, from its payment history (received payments plus past events,

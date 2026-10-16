@@ -206,15 +206,15 @@ describe('ConsistencyCard', () => {
   it('counts the badges and lists every holding with its score', async () => {
     const { holdings } = overview();
     renderWithProviders(<ConsistencyCard />);
-    expect(screen.getByText('Loading payment consistency')).toBeInTheDocument();
+    expect(screen.getByText('Loading dividend safety')).toBeInTheDocument();
     const donut = await screen.findByTestId('consistency-donut');
-    expect(donut).toHaveAccessibleName(/^Holdings by payment consistency: 3 Reliable, 1 OK, 1 Irregular, 1 New\.$/);
+    expect(donut).toHaveAccessibleName(/^Holdings by dividend safety: 3 Reliable, 1 OK, 1 Irregular, 1 New\.$/);
     expect(screen.getByText('Based on your payment history, not a forecast or advice.')).toBeInTheDocument();
 
     const counts = within(screen.getByRole('list', { name: 'Holdings per badge' })).getAllByRole('listitem');
     expect(counts.map((li) => li.textContent)).toEqual(['Reliable3', 'OK1', 'Irregular1', 'New1']);
 
-    const table = screen.getByRole('table', { name: 'Payment consistency per holding' });
+    const table = screen.getByRole('table', { name: 'Dividend safety per holding' });
     const rows = within(table).getAllByRole('row').slice(1);
     expect(rows).toHaveLength(holdings.length);
     const top = holdings[0]!;
@@ -245,7 +245,7 @@ describe('ConsistencyCard', () => {
     renderWithProviders(<ConsistencyCard />);
     await screen.findByTestId('consistency-donut');
     await user.click(screen.getByText('Show data table'));
-    expect(screen.getByRole('table', { name: 'Consistency badge counts' })).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'Dividend safety badge counts' })).toBeInTheDocument();
   });
 
   it('shows an empty note and an error with retry', async () => {
@@ -259,7 +259,7 @@ describe('ConsistencyCard', () => {
     failOnce();
     renderWithProviders(<ConsistencyCard />);
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('Could not load payment consistency');
+    expect(alert).toHaveTextContent('Could not load dividend safety');
     await user.click(within(alert).getByRole('button', { name: 'Try again' }));
     expect(await screen.findByTestId('consistency-donut')).toBeInTheDocument();
   });

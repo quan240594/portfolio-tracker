@@ -91,13 +91,13 @@ function ConsistencyTable({ holdings, currency }: Readonly<{ holdings: readonly 
   return (
     <div className="max-h-80 overflow-auto">
       <table className="w-full text-sm">
-        <caption className="sr-only">Payment consistency per holding</caption>
+        <caption className="sr-only">Dividend safety per holding</caption>
         <thead>
           <tr className="muted sticky top-0 border-b border-slate-200 bg-white text-left text-xs dark:border-slate-800 dark:bg-slate-900">
             <th scope="col" className="py-2 pr-3 font-medium">Holding</th>
             <th scope="col" className="py-2 pr-3 text-right font-medium">Income per year</th>
             <th scope="col" className="py-2 pr-3 text-right font-medium">Yield</th>
-            <th scope="col" className="py-2 font-medium">Consistency</th>
+            <th scope="col" className="py-2 font-medium">Safety</th>
           </tr>
         </thead>
         <tbody>
@@ -125,7 +125,7 @@ function Consistency({ data }: Readonly<{ data: DividendsOverviewResponse }>) {
   const counts = BADGE_ORDER.map((badge) => ({ badge, count: holdings.filter((h) => h.consistency.badge === badge).length })).filter((c) => c.count > 0);
   const slices = counts.map((c) => ({ key: c.badge, label: BADGES[c.badge].label, value: c.count, color: BADGES[c.badge].color }));
   const summary = counts.map((c) => `${c.count} ${BADGES[c.badge].label}`).join(', ');
-  const label = `Holdings by payment consistency: ${summary}.`;
+  const label = `Holdings by dividend safety: ${summary}.`;
   return (
     <div className="space-y-4">
       <p className="muted text-xs">Based on your payment history, not a forecast or advice.</p>
@@ -145,7 +145,7 @@ function Consistency({ data }: Readonly<{ data: DividendsOverviewResponse }>) {
         <ConsistencyTable holdings={holdings} currency={data.baseCurrency} />
       </div>
       <ScoreHelp />
-      <ChartDataTable caption="Consistency badge counts" columns={['Badge', 'Holdings']} rows={counts.map((c) => [BADGES[c.badge].label, c.count])} />
+      <ChartDataTable caption="Dividend safety badge counts" columns={['Badge', 'Holdings']} rows={counts.map((c) => [BADGES[c.badge].label, c.count])} />
     </div>
   );
 }
@@ -155,15 +155,15 @@ export function ConsistencyCard() {
   return (
     <QueryCard
       id="div-consistency"
-      title="Payment consistency"
+      title="Dividend safety"
       query={query}
-      loadingLabel="Loading payment consistency"
-      errorTitle="Could not load payment consistency"
+      loadingLabel="Loading dividend safety"
+      errorTitle="Could not load dividend safety"
       skeletonClassName="h-64 w-full"
       info={
         <>
           <p>A transparent 0-100 score of how steadily each holding has paid: years with payments, regularity of the payment schedule, dividend cuts and a growth streak.</p>
-          <p>It uses only your payment history and stored dividend events (the provider covers about two years), not company fundamentals. It is not a forecast or advice.</p>
+          <p>It uses only your payment history and stored dividend events (the provider covers about two years), not company fundamentals. It describes how steadily dividends were paid, not whether they are guaranteed: it is not a forecast or advice.</p>
         </>
       }
     >
