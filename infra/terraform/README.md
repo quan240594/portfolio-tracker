@@ -113,6 +113,10 @@ builds and uploads the web app and invalidates CloudFront, authenticating with G
    The workflow builds the web app with `VITE_AUTH_MODE` / `VITE_COGNITO_*` taken from the Terraform outputs
    `cognito_user_pool_id`, `cognito_user_pool_client_id`, `cognito_region`.
 
+Optional: to make the GitHub Pages demo link to this deployment, set the repository variable `REAL_APP_URL` to
+`terraform output -raw web_url` and re-run the Pages workflow; the demo banner's "Switch to real data" button then opens it
+(unset, the button opens a dialog with these steps). It is a variable, not a secret.
+
 The deploy role trusts `repo:<repo>:environment:<env>` and `repo:<repo>:ref:refs/heads/main`, and its
 permissions are scoped to `portfolio-tracker-*` resources where the AWS APIs allow it.
 

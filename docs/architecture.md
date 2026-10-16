@@ -1248,3 +1248,27 @@ Dividends (stage 1): which data keys stay for each legend entry (every other ele
 | Income diversification, Dividend safety (donuts) | a holding / a badge | that slice (and, in the income card, its ranked row); the centre figure and the legend stay |
 | Dividends received by holding, Average annual growth | the one entry | nothing fades: a single series, so there is nothing to compare |
 
+## Demo banner and the switch to real data
+
+In mock/demo mode (`USE_MOCKS`, e.g. the GitHub Pages demo) `Layout` renders `DemoBanner` (`web/src/components/DemoBanner.tsx`); the
+deployed (non-mock) app has no banner. It is not dismissable.
+
+- **What is pinned:** from `sm` (640px) up the banner and the header are one `sticky top-0 z-30` container, so the banner is always
+  at the top with the header directly below it. Below `sm` that wrapper is `display: contents` and only the banner is pinned (it is
+  `sticky top-0 z-30` itself), so the header scrolls away and the pinned bar stays small on phones: the banner is compact, with the
+  text (`text-xs`) and a `shrink-0` 44px-tall control on one row, wrapping rather than clipping (about 60px at 390px, about 77px at 320px).
+  The Portfolio menu and the scope selector live in the header (their `z-40` is relative to it); on phones they scroll with the header
+  and stay below the banner. The dialog is portalled to `body` (`z-50`). The banner is opaque so content never shows through it.
+- **Focus not obscured:** `useStickyOffset` measures what is actually pinned (the wrapper from `sm` up, its sticky children below)
+  with a `ResizeObserver` plus a `resize` listener (the banner wraps differently per width and the breakpoint changes what is pinned)
+  and publishes `--sticky-offset` on `<html>`; `index.css` uses it for `scroll-padding-top`, so focused controls and in-page anchors
+  (`#main`) are never hidden under the pinned bar.
+- **"Switch to real data":** the browser cannot call Trading 212 directly (no CORS), so real data only exists in the user's own
+  deployment (Cognito sign-in, Brokers page, `POST /brokers/trading212/sync`). The control depends on the build-time variable
+  `VITE_REAL_APP_URL`:
+  - set to an `https:` URL (`parseRealAppUrl` in `web/src/config.ts` ignores anything else, also credentials in the URL): a plain
+    `<a href rel="noopener">` in the same tab; nothing from the demo is sent along;
+  - unset: a `<button>` that opens the repo's `Dialog` with the honest explanation and the steps (deploy, set `REAL_APP_URL`,
+    sign in and connect Trading 212 under Brokers; the first sync takes about 8 minutes). The key never goes through the demo.
+- **Configuration:** `.github/workflows/pages.yml` passes the repository *variable* (not a secret) `REAL_APP_URL` as
+  `VITE_REAL_APP_URL` to the Pages build; set it to the `web_url` Terraform output and re-run the Pages workflow.

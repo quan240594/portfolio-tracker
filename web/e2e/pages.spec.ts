@@ -34,6 +34,26 @@ async function expectDemoBanner(page: Page) {
 }
 
 test.describe('GitHub Pages build (demo mode under /portfolio-tracker/)', () => {
+  test('the demo banner stays pinned to the top while scrolling and offers "Switch to real data"', async ({ page }) => {
+    await page.goto(`${BASE}dividends`);
+    await expect(page.getByRole('heading', { level: 1, name: 'Dividends' })).toBeVisible();
+    const banner = page.getByRole('complementary', { name: 'Demo mode' });
+    await expect(banner.getByText('Switch to real data')).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(300);
+    await expect(banner).toBeInViewport();
+    await expect(page.getByRole('banner')).toBeInViewport();
+    const box = await banner.boundingBox();
+    expect(box!.y).toBeGreaterThanOrEqual(-1);
+    expect(box!.y).toBeLessThanOrEqual(4);
+    // Without VITE_REAL_APP_URL the control opens the how-to dialog.
+    const control = banner.getByRole('button', { name: 'Switch to real data' });
+    await control.click();
+    await expect(page.getByRole('dialog', { name: 'Switch to real data' })).toContainText('Your Trading 212 key never goes through this demo site.');
+    await page.keyboard.press('Escape');
+    await expect(control).toBeFocused();
+  });
+
   test('dashboard renders from mocks, nav works, and a reload on a deep link boots the app via 404.html', async ({ page }) => {
     const errors = trackErrors(page);
     const apiRequests: string[] = [];

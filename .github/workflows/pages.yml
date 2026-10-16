@@ -39,6 +39,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @portfolio/web build:pages # VITE_USE_MOCKS=true, base /portfolio-tracker/
+        env:
+          # Optional repository VARIABLE (not a secret): https URL of your own deployed app. When set, the demo banner's
+          # "Switch to real data" links there; empty (unset) opens a how-to dialog instead. Non-https values are ignored.
+          VITE_REAL_APP_URL: ${{ vars.REAL_APP_URL }}
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:

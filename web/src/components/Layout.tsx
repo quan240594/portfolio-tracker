@@ -1,6 +1,9 @@
+import { useRef } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useTheme } from '../theme/ThemeProvider';
 import { MainNav } from './MainNav';
+import { DemoBanner } from './DemoBanner';
+import { useStickyOffset } from './useStickyOffset';
 import { USE_MOCKS } from '../config';
 import { AccountMenu } from '../features/auth/AccountMenu';
 import { PortfolioSwitcher } from '../features/portfolios/PortfolioSwitcher';
@@ -41,20 +44,6 @@ function ThemeToggle() {
   );
 }
 
-/** Always shown in mock mode (e.g. the GitHub Pages demo); intentionally not dismissable. */
-export function DemoBanner() {
-  return (
-    <aside
-      aria-label="Demo mode"
-      className="border-b border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/60 dark:text-amber-100"
-    >
-      <p className="mx-auto max-w-7xl px-4 py-2 text-center text-sm sm:px-6">
-        <strong className="font-semibold">Demo mode</strong> — sample data, nothing is saved. Changes reset when you reload.
-      </p>
-    </aside>
-  );
-}
-
 export function Footer() {
   return (
     <footer className="border-t border-slate-200 py-6 text-xs dark:border-slate-800">
@@ -73,26 +62,32 @@ export function Footer() {
 export function Layout() {
   usePortfolioScopeSync();
   const { withScope } = usePortfolioScope();
+  const stickyRef = useRef<HTMLDivElement>(null);
+  useStickyOffset(stickyRef);
   return (
     <div className="flex min-h-screen flex-col">
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:shadow dark:focus:bg-slate-900">
         Skip to content
       </a>
-      {USE_MOCKS && <DemoBanner />}
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/85 backdrop-blur dark:border-slate-800 dark:bg-slate-950/85">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
-          <NavLink to={withScope('/')} className="flex items-center gap-2 font-semibold tracking-tight">
-            <Logo />
-            <span>Portfolio Tracker</span>
-          </NavLink>
-          <div className="ml-auto flex items-center gap-2 sm:order-last">
-            <PortfolioSwitcher />
-            <ThemeToggle />
-            <AccountMenu />
+      {/* From sm up the banner and the header are one sticky unit; below sm the wrapper vanishes (`contents`) and only the
+          banner is pinned (it is sticky itself), so the header scrolls away. useStickyOffset feeds scroll-padding-top. */}
+      <div ref={stickyRef} className="contents sm:sticky sm:top-0 sm:z-30 sm:block">
+        {USE_MOCKS && <DemoBanner />}
+        <header className="border-b border-slate-200 bg-white/85 backdrop-blur dark:border-slate-800 dark:bg-slate-950/85">
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
+            <NavLink to={withScope('/')} className="flex items-center gap-2 font-semibold tracking-tight">
+              <Logo />
+              <span>Portfolio Tracker</span>
+            </NavLink>
+            <div className="ml-auto flex items-center gap-2 sm:order-last">
+              <PortfolioSwitcher />
+              <ThemeToggle />
+              <AccountMenu />
+            </div>
+            <MainNav withScope={withScope} />
           </div>
-          <MainNav withScope={withScope} />
-        </div>
-      </header>
+        </header>
+      </div>
       <main id="main" tabIndex={-1} className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 focus:outline-none sm:px-6">
         <Outlet />
       </main>
