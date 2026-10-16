@@ -1170,13 +1170,13 @@ time" headline. The by-year and timeline charts keep their own legend keys, so s
 | `features/growth/DynamicsChart.tsx` (`DynamicsCard.tsx`) | Return per period | `portfolio` + one per benchmark symbol | months (`YYYY-MM`) of the chosen period; the "View details" table is the selection table | stage 2 | stage 2 |
 | `features/growth/HoldingsChart.tsx` (`HoldingsCard.tsx`) | Return per holding (horizontal bars) | `returnPct` (the Return column; Name, Return (€) and Measured from are plain columns) | holdings (symbol) | stage 2 (the legend and the table stay in both views; the table is the Table view) | stage 2 (one series that covers every bar: nothing fades) |
 | `features/growth/ChartOrTable.tsx`, `GrowthTable.tsx`, `GrowthChart.tsx` (`ChartLegend`), `RangeButtons.tsx` | Chart / table switch and legend of the Growth tab | same series as the three charts above | same | stage 2 (`ChartLegend` and `GrowthTable` are gone: `SelectableLegend` + `SelectableTable`; `SelectableChartOrTable` in `ChartOrTable.tsx` = legend + chart/table switch + empty state; helpers in `growthSelection.tsx`) | stage 2 |
-| `components/charts/BenchmarkChart.tsx` (Analytics, Benchmark tab) | Portfolio vs benchmark | portfolio, benchmark (when there is one), invested; the chart owns the state and the legend, no table (dates) | none (dates) | stage 2 | todo |
-| `components/charts/ReturnsBarChart.tsx` + `features/analytics/ReturnsTab.tsx` (Analytics, Returns tab) | TWR per period | twrPct (the Return (TWR) column; IRR, Gain, End value are plain columns) | periods (`year` / `quarter` / `month` key of the period); the best / worst period in the text alternative follow the periods that are left | stage 2 | todo |
-| `components/charts/DividendGrowthChart.tsx` + `features/analytics/GrowthChartBlock.tsx` (Analytics, Dividend growth tab) | Dividends compared per year / month | per year: current (Received); per month: previous (a year earlier, only when there is one), current (This period) | years / months (the bar's label) | stage 2 | todo |
-| `components/charts/GoalChart.tsx` + `features/analytics/GoalTab.tsx` (Analytics, Goal tab) | Scenario lines | none: scenarios are the entries (`useSliceSelection`; the legend and the scenario table rows toggle the same scenario) | scenarios (cautious, base, optimistic); the target line stays | stage 2 | todo |
-| `features/goals/GoalChart.tsx`, `GoalTable.tsx`, `GoalResults.tsx` (Goals page) | Plan vs goal lines + year-by-year table | goal, safe, alternative, plan (the Contributions column is not a series); `GoalResults` owns the state; the verdict, summary, insights and the CSV export (all years and scenarios) never change | years (`String(year)`; the table's rows) | stage 2 | todo |
-| `components/charts/ValueChart.tsx` (Dashboard, Value vs invested) | Value and invested lines | value, invested; the chart owns the state and the legend, no table (dates) | none (dates) | stage 2 | todo |
-| `components/charts/AllocationDonut.tsx` (Dashboard, Allocation) | Allocation donut | none: slices are the entries (`useSliceSelection`; reset when the dimension tab changes) | slices (top 8 + Other); shares and the centre total are recomputed over the visible slices | stage 2 | todo |
+| `components/charts/BenchmarkChart.tsx` (Analytics, Benchmark tab) | Portfolio vs benchmark | portfolio, benchmark (when there is one), invested; the chart owns the state and the legend, no table (dates) | none (dates) | stage 2 | stage 2 |
+| `components/charts/ReturnsBarChart.tsx` + `features/analytics/ReturnsTab.tsx` (Analytics, Returns tab) | TWR per period | twrPct (the Return (TWR) column; IRR, Gain, End value are plain columns) | periods (`year` / `quarter` / `month` key of the period); the best / worst period in the text alternative follow the periods that are left | stage 2 | stage 2 (one series: previewing it fades nothing) |
+| `components/charts/DividendGrowthChart.tsx` + `features/analytics/GrowthChartBlock.tsx` (Analytics, Dividend growth tab) | Dividends compared per year / month | per year: current (Received); per month: previous (a year earlier, only when there is one), current (This period) | years / months (the bar's label) | stage 2 | stage 2 |
+| `components/charts/GoalChart.tsx` + `features/analytics/GoalTab.tsx` (Analytics, Goal tab) | Scenario lines | none: scenarios are the entries (`useSliceSelection`; the legend and the scenario table rows toggle the same scenario) | scenarios (cautious, base, optimistic); the target line stays | stage 2 | stage 2 |
+| `features/goals/GoalChart.tsx`, `GoalTable.tsx`, `GoalResults.tsx` (Goals page) | Plan vs goal lines + year-by-year table | goal, safe, alternative, plan (the Contributions column is not a series); `GoalResults` owns the state; the verdict, summary, insights and the CSV export (all years and scenarios) never change | years (`String(year)`; the table's rows) | stage 2 | stage 2 |
+| `components/charts/ValueChart.tsx` (Dashboard, Value vs invested) | Value and invested lines | value, invested; the chart owns the state and the legend, no table (dates) | none (dates) | stage 2 | stage 2 |
+| `components/charts/AllocationDonut.tsx` (Dashboard, Allocation) | Allocation donut | none: slices are the entries (`useSliceSelection`; reset when the dimension tab changes) | slices (top 8 + Other); shares and the centre total are recomputed over the visible slices | stage 2 | stage 2 |
 | `features/calendar/CalendarOverview.tsx` (`IncomeChart`, `incomeChartModel.ts`, `IncomeTooltip.tsx`, sr-only data table) | Calendar income per month | paid, declared, estimated | months | stage 2 | todo |
 | `features/asset-detail/PriceChart.tsx` (`PriceHistoryCard.tsx`) | Price + benchmarks | `price` (the security; in the Price view also the plain Change column), one per benchmark symbol (Performance view only) | none (dates are plain table rows) | stage 2 (series only; hiding `price` also removes the high/low labels and the trade markers, which sit on that line) | stage 2 |
 | `features/asset-detail/DividendYearChart.tsx` (`DividendsTab.tsx`) | Dividends per year (asset detail) | `complete` (Full year), `partial` (Partial year): only the kinds that have data; Payments is a plain column | years | stage 2 (a year leaves the chart when its row or its kind is excluded) | stage 2 |
@@ -1223,7 +1223,7 @@ isFocused(focusKey, keys): boolean                                              
   whole stack only fade to 50 %. Text next to a slice (the ranked list) fades to 45 % so it stays readable. The preview element that stays is not restyled.
 - Motion: the chart frames carry `chart-focus` (`ChartFrame`, `Donut`); `index.css` gives the SVG shapes `transition` on
   `fill-opacity` / `stroke-opacity` / `opacity` of 120 ms, turned off under `prefers-reduced-motion: reduce`. A chart outside these
-  components adds the `chart-focus` class to its wrapper.
+  components adds the `chart-focus` class to its wrapper. The "goal reached" `ReferenceDot`s of the Goals chart have their own rule in `index.css` (`.recharts-reference-dot-dot`).
 - Test it: pure helpers and mappings directly; legend handlers (mouse, pen, touch ignored, keyboard focus / blur, excluded entry, entry that
   leaves); the card with a fixed-size `ResponsiveContainer` mock (see `features/dividends/legendFocus.test.tsx`) counting `fill-opacity` 1 versus
   0.25; Playwright (`e2e/chart-focus.spec.ts`) counts bars (`.recharts-bar-rectangle path`; the "Upcoming" band is a rectangle too) or
@@ -1247,6 +1247,20 @@ Dividends (stage 1): which data keys stay for each legend entry (every other ele
 | | Yield on cost | the dots; the bars fade |
 | Income diversification, Dividend safety (donuts) | a holding / a badge | that slice (and, in the income card, its ranked row); the centre figure and the legend stay |
 | Dividends received by holding, Average annual growth | the one entry | nothing fades: a single series, so there is nothing to compare |
+
+Analytics, Goals and Dashboard (stage 2, part B): which data keys stay for each legend entry. Tooltips, tables, headline numbers, the verdict
+and the insights never change; the Goals chart re-renders only its own card on a hover (the summary, insights and parameter cards are memoised).
+
+| Chart | Legend entry | Stays at full strength |
+|---|---|---|
+| Analytics Benchmark | Portfolio / the benchmark / Invested | that line |
+| Analytics Returns | Return (TWR) | every bar: the one series, nothing fades |
+| Analytics Dividend growth, per month | A year earlier / This period | that bar series (per year: the one series, nothing fades) |
+| Analytics Income goal | a scenario | that scenario's line; the Target line is not a series and stays |
+| Goals | Goal / Safe / Alternative / Your plan | that line and, for a scenario, its "goal reached" dot (the goal line has no dot, so every dot fades); the target-year rule stays |
+| Dashboard Value vs invested | Value | the area (fill and edge); the invested line fades |
+| | Invested | the invested line; the area fades |
+| Dashboard Allocation | a slice | that slice; the centre total, the table and the legend stay |
 
 ## Demo banner and the switch to real data
 

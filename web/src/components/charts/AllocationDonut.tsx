@@ -1,10 +1,11 @@
+import { useMemo } from 'react';
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import type { AllocationSlice } from '@portfolio/shared';
 import { useTheme } from '../../theme/ThemeProvider';
 import { formatMoney, formatWeight } from '../../lib/format';
 import { SERIES_COLORS, chartTheme } from './palette';
 import { moneyTooltip } from './chartFormatters';
-import { LegendSwatch, NothingSelected, SelectableLegend, SelectableTable, useSliceSelection, visibleSliceTotal, visibleSlices } from './selection';
+import { LegendSwatch, NothingSelected, SelectableLegend, SelectableTable, focusOpacity, useSliceSelection, visibleSliceTotal, visibleSlices } from './selection';
 
 const MAX_SLICES = 8;
 
@@ -43,9 +44,11 @@ export function AllocationDonut({ slices, currency, dimension = 'Category' }: Re
   const { theme } = useTheme();
   const c = chartTheme(theme);
   // colours follow the position among ALL slices, so a slice keeps its colour while others are excluded
-  const data = topSlices(slices).map((s, i) => ({ ...s, label: prettyLabel(s.label), color: SERIES_COLORS[i % SERIES_COLORS.length]! }));
+  const data = useMemo(() => topSlices(slices).map((s, i) => ({ ...s, label: prettyLabel(s.label), color: SERIES_COLORS[i % SERIES_COLORS.length]! })), [slices]);
   const selection = useSliceSelection(data.map((s) => s.key));
-  const shown = visibleSlices(data, selection);
+  const { isSeriesVisible } = selection;
+  // a hover preview must not rebuild the slices: they change with the include/exclude state only
+  const shown = useMemo(() => visibleSlices(data, { isSeriesVisible }), [data, isSeriesVisible]);
   const shownTotal = visibleSliceTotal(data, selection);
   const shareOf = new Map(shown.map((s) => [s.key, selection.hasHidden ? s.share : s.weight]));
   const parts = shown.map((s) => `${s.label} ${formatWeight(shareOf.get(s.key)!)}`);
@@ -58,7 +61,7 @@ export function AllocationDonut({ slices, currency, dimension = 'Category' }: Re
           <NothingSelected onShowAll={selection.reset} />
         </div>
       ) : (
-        <div role="img" aria-label={label} data-testid="allocation-donut" className="relative h-48 w-48 shrink-0">
+        <div role="img" aria-label={label} data-testid="allocation-donut" className="chart-focus relative h-48 w-48 shrink-0">
           <div aria-hidden="true" data-testid="allocation-donut-centre" className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-12 text-center text-xs leading-tight">
             <span className="font-semibold tabular-nums">{formatMoney(shownTotal, currency, { compact: true })}</span>
             <span className="muted">{selection.hasHidden ? 'selected' : 'total'}</span>
@@ -67,7 +70,7 @@ export function AllocationDonut({ slices, currency, dimension = 'Category' }: Re
             <PieChart>
               <Pie data={shown} dataKey="value" nameKey="label" innerRadius="62%" outerRadius="100%" paddingAngle={1.5} stroke="none" isAnimationActive={false}>
                 {shown.map((d) => (
-                  <Cell key={d.key} fill={d.color} />
+                  <Cell key={d.key} fill={d.color} fillOpacity={focusOpacity(selection.focusKey, d.key)} />
                 ))}
               </Pie>
               <Tooltip

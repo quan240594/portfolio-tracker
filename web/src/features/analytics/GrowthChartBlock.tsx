@@ -43,6 +43,7 @@ export function GrowthChartBlock({ bars, selection, currency, title, testId, cur
           showCurrent={selection.isSeriesVisible('current')}
           showPrevious={selection.isSeriesVisible('previous')}
           filtered={selection.hasHidden}
+          focusKey={selection.focusKey}
         />
       )}
       {children}

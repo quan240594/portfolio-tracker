@@ -4,7 +4,7 @@ import { useTheme } from '../../theme/ThemeProvider';
 import { formatDate, formatMoney } from '../../lib/format';
 import { compactMoneyTick, dateLabel, dateTickFormatter, moneyTooltip } from './chartFormatters';
 import { analyticsTheme, tooltipStyle } from './analyticsTheme';
-import { LegendSwatch, NothingSelected, SelectableLegend, useSeriesSelection } from './selection';
+import { LegendSwatch, NothingSelected, SelectableLegend, focusOpacity, useSeriesSelection } from './selection';
 
 interface Props {
   points: readonly BenchmarkPoint[];
@@ -54,6 +54,7 @@ export function BenchmarkChart({ points, currency, benchmark }: Readonly<Props>)
   const shown = { portfolio: selection.isSeriesVisible('portfolio'), benchmark: selection.isSeriesVisible('benchmark'), invested: selection.isSeriesVisible('invested') };
   const summary = benchmarkSummary(points, currency, benchmark, shown);
   const nameOf = benchmarkSeriesName(benchmark);
+  const fade = (key: string) => focusOpacity(selection.focusKey, key);
   const entries = [
     { key: 'portfolio', label: nameOf('portfolio'), swatch: <LegendSwatch shape="line" color={c.value} /> },
     ...(hasBenchmark ? [{ key: 'benchmark', label: nameOf('benchmark'), swatch: <LegendSwatch shape="line" color={c.benchmark} /> }] : []),
@@ -66,16 +67,16 @@ export function BenchmarkChart({ points, currency, benchmark }: Readonly<Props>)
       {selection.nothingSelected ? (
         <NothingSelected onShowAll={selection.reset} />
       ) : (
-        <div role="img" aria-label={selection.hasHidden ? `${summary} Chart shows the current selection.` : summary} className="h-72 w-full" data-testid="benchmark-chart">
+        <div role="img" aria-label={selection.hasHidden ? `${summary} Chart shows the current selection.` : summary} className="chart-focus h-72 w-full" data-testid="benchmark-chart">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={points as BenchmarkPoint[]} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
               <CartesianGrid stroke={c.grid} vertical={false} />
               <XAxis dataKey="date" tickFormatter={dateTickFormatter(points)} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} minTickGap={40} />
               <YAxis tickFormatter={compactMoneyTick(currency)} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={64} domain={['auto', 'auto']} />
               <Tooltip contentStyle={tooltipStyle(c)} labelFormatter={dateLabel} formatter={moneyTooltip(currency, nameOf)} />
-              {shown.portfolio && <Line type="monotone" dataKey="portfolio" stroke={c.value} strokeWidth={2} dot={false} isAnimationActive={false} />}
-              {hasBenchmark && shown.benchmark && <Line type="monotone" dataKey="benchmark" stroke={c.benchmark} strokeWidth={2} dot={false} isAnimationActive={false} />}
-              {shown.invested && <Line type="stepAfter" dataKey="invested" stroke={c.invested} strokeWidth={1.5} strokeDasharray="5 4" dot={false} isAnimationActive={false} />}
+              {shown.portfolio && <Line type="monotone" dataKey="portfolio" stroke={c.value} strokeWidth={2} strokeOpacity={fade('portfolio')} dot={false} isAnimationActive={false} />}
+              {hasBenchmark && shown.benchmark && <Line type="monotone" dataKey="benchmark" stroke={c.benchmark} strokeWidth={2} strokeOpacity={fade('benchmark')} dot={false} isAnimationActive={false} />}
+              {shown.invested && <Line type="stepAfter" dataKey="invested" stroke={c.invested} strokeWidth={1.5} strokeOpacity={fade('invested')} strokeDasharray="5 4" dot={false} isAnimationActive={false} />}
             </ComposedChart>
           </ResponsiveContainer>
         </div>
