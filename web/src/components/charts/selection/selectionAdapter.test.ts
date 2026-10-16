@@ -1,4 +1,4 @@
-import { maskSeries, selectRows, stableColours, visibleKeys, visibleSliceTotal, visibleSlices, visibleTotal } from './selectionAdapter';
+import { FOCUS_DIM, focusOpacity, isFocused, maskSeries, selectRows, stableColours, visibleKeys, visibleSliceTotal, visibleSlices, visibleTotal } from './selectionAdapter';
 
 const hide = (...hidden: string[]) => ({ isSeriesVisible: (k: string) => !hidden.includes(k), isRowVisible: (k: string) => !hidden.includes(k) });
 const rows = [
@@ -47,5 +47,30 @@ describe('selection adapter', () => {
     expect(visibleSlices(slices, hide('a', 'b', 'c'))).toEqual([]);
     expect(visibleSlices([{ key: 'z', value: 0 }], hide())[0]!.share).toBe(0);
     expect(visibleSliceTotal(slices, hide('a'))).toBe(50);
+  });
+});
+
+describe('legend focus helpers', () => {
+  it('treats everything as focused while nothing is previewed', () => {
+    expect(isFocused(null, 'a')).toBe(true);
+    expect(isFocused(undefined, ['a', 'b'])).toBe(true);
+    expect(focusOpacity(null, 'a')).toBe(1);
+    expect(focusOpacity(undefined, ['x'])).toBe(1);
+  });
+
+  it('matches an element by its one key or by any of the legend entries it belongs to', () => {
+    expect(isFocused('a', 'a')).toBe(true);
+    expect(isFocused('a', 'b')).toBe(false);
+    expect(isFocused('declared', ['2026', 'declared', '2026-forecast'])).toBe(true);
+    expect(isFocused('2027', ['2026', 'declared', '2026-forecast'])).toBe(false);
+    expect(isFocused('a', [])).toBe(false);
+  });
+
+  it('dims what does not belong to the previewed entry, by default or by the given amount', () => {
+    expect(focusOpacity('a', 'a')).toBe(1);
+    expect(focusOpacity('a', 'b')).toBe(FOCUS_DIM);
+    expect(focusOpacity('a', ['b', 'c'], 0.5)).toBe(0.5);
+    expect(FOCUS_DIM).toBeGreaterThan(0);
+    expect(FOCUS_DIM).toBeLessThan(1);
   });
 });

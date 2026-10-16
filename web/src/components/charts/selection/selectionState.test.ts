@@ -1,4 +1,4 @@
-import { allHidden, pruneKeys, toggleKey } from './selectionState';
+import { activeFocus, allHidden, pruneKeys, toggleKey } from './selectionState';
 
 describe('selectionState', () => {
   it('toggles a key without mutating the old set', () => {
@@ -19,5 +19,14 @@ describe('selectionState', () => {
     expect(allHidden(['a', 'b'], new Set(['a', 'b']))).toBe(true);
     expect(allHidden(['a', 'b'], new Set(['a']))).toBe(false);
     expect(allHidden([], new Set(['a']))).toBe(false);
+  });
+});
+
+describe('activeFocus', () => {
+  it('keeps a previewed key that is included and drops it when nothing is previewed or the key is excluded', () => {
+    expect(activeFocus('a', new Set())).toBe('a');
+    expect(activeFocus('a', new Set(['b']))).toBe('a');
+    expect(activeFocus(null, new Set(['a']))).toBeNull();
+    expect(activeFocus('a', new Set(['a']))).toBeNull();
   });
 });

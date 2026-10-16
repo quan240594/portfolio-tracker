@@ -1,3 +1,4 @@
+import { useMemo, type ReactElement } from 'react';
 import { Bar, CartesianGrid, ComposedChart, LabelList, Line, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { compactMoneyTick } from '../../components/charts/chartFormatters';
 import { formatMoney } from '../../lib/format';
@@ -9,6 +10,7 @@ import {
   NothingSelected,
   SelectableDataTable,
   SelectableLegend,
+  focusOpacity,
   useSeriesSelection,
   type LegendEntry,
   type SelectableColumn,
@@ -162,6 +164,37 @@ function legendEntriesOf(colours: IncomeColours, lineColour: string, withFuture:
   return entries;
 }
 
+/** The value labels above the stacks describe the whole stack, not one status: they only fade (less than the bars) while a legend entry is previewed. */
+const LABEL_FADE = 0.5;
+
+/** Stroke width and dash of a status bar: estimated has a dashed edge, so it is not told apart by colour alone. */
+const STATUS_EDGE: Readonly<Record<(typeof STATUS_SERIES)[number], { width: number; dash?: string }>> = {
+  paid: { width: 1 },
+  declared: { width: 1 },
+  estimated: { width: 1.5, dash: '4 2' },
+};
+
+/** The stacked bars that are drawn, in stacking order; the ones that do not belong to the previewed legend entry fade. */
+export function statusBars(colours: IncomeColours, withFuture: boolean, isDrawn: (key: string) => boolean, focusKey: string | null): ReactElement[] {
+  return STATUS_SERIES.filter((key) => (key === 'paid' || withFuture) && isDrawn(key)).map((key) => {
+    const opacity = focusOpacity(focusKey, key);
+    return (
+      <Bar
+        key={key}
+        dataKey={key}
+        stackId="income"
+        fill={colours[key].fill}
+        fillOpacity={opacity}
+        stroke={colours[key].stroke}
+        strokeOpacity={opacity}
+        strokeWidth={STATUS_EDGE[key].width}
+        strokeDasharray={STATUS_EDGE[key].dash}
+        isAnimationActive={false}
+      />
+    );
+  });
+}
+
 /** The series the selection controls: the status bars on the axis and the average line (when there is one). */
 const seriesKeysOf = (withFuture: boolean, withAverage: boolean): string[] => [...(withFuture ? STATUS_SERIES : (['paid'] as const)), ...(withAverage ? ['avg'] : [])];
 
@@ -177,12 +210,15 @@ export function ReceivedTimeline(props: Readonly<TimelineProps>) {
     seriesKeysOf(withFuture, fullAverage !== null),
     periods.map((p) => periodRowId(granularity, p)),
   );
-  const shown = selectPeriods(periods, (p) => periodRowId(granularity, p), selection);
+  const { isRowVisible, isSeriesVisible } = selection;
+  // the hover preview re-renders this card on every move: the periods and the rows are only rebuilt when the selection or the data change
+  const shown = useMemo(() => selectPeriods(periods, (p) => periodRowId(granularity, p), { isRowVisible, isSeriesVisible }), [periods, granularity, isRowVisible, isSeriesVisible]);
   const average = selection.hasHidden ? averageReceived(shown) : fullAverage;
   const showAverage = average !== null && selection.isSeriesVisible('avg');
   const band = withFuture ? upcomingBand(shown) : null;
-  const rows = chartRows(shown, currency, SLOT_PX);
+  const rows = useMemo(() => chartRows(shown, currency, SLOT_PX), [shown, currency]);
   const scale = niceAxis(Math.max(showAverage ? average : 0, ...shown.map((p) => p.total)));
+  const avgOpacity = focusOpacity(selection.focusKey, 'avg');
   const tooltip = <ReceivedFutureTooltip currency={currency} colours={colours} background={c.tooltipBg} border={c.tooltipBorder} text={c.text} withFuture={withFuture} />;
   return (
     <>
@@ -205,13 +241,11 @@ export function ReceivedTimeline(props: Readonly<TimelineProps>) {
               <YAxis hide domain={[0, scale.max]} ticks={scale.ticks} />
               <Tooltip cursor={{ fill: c.grid, opacity: 0.5 }} content={tooltip} />
               {band && <ReferenceArea x1={band.from} x2={band.to} fill={c.grid} fillOpacity={0.45} stroke={c.axis} strokeOpacity={0.5} strokeDasharray="3 3" label={<UpcomingLabel fill={c.text} />} />}
-              {selection.isSeriesVisible('paid') && <Bar dataKey="paid" stackId="income" fill={colours.paid.fill} stroke={colours.paid.stroke} strokeWidth={1} isAnimationActive={false} />}
-              {withFuture && selection.isSeriesVisible('declared') && <Bar dataKey="declared" stackId="income" fill={colours.declared.fill} stroke={colours.declared.stroke} strokeWidth={1} isAnimationActive={false} />}
-              {withFuture && selection.isSeriesVisible('estimated') && <Bar dataKey="estimated" stackId="income" fill={colours.estimated.fill} stroke={colours.estimated.stroke} strokeWidth={1.5} strokeDasharray="4 2" isAnimationActive={false} />}
+              {statusBars(colours, withFuture, selection.isSeriesVisible, selection.focusKey)}
               <Line dataKey="total" stroke="none" dot={false} activeDot={false} legendType="none" tooltipType="none" isAnimationActive={false}>
-                <LabelList dataKey="barLabel" position="top" fill={c.text} fontSize={10} stroke={c.tooltipBg} strokeWidth={3} style={LABEL_HALO} />
+                <LabelList dataKey="barLabel" position="top" fill={c.text} opacity={selection.focusKey === null ? 1 : LABEL_FADE} fontSize={10} stroke={c.tooltipBg} strokeWidth={3} style={LABEL_HALO} />
               </Line>
-              {showAverage && <ReferenceLine y={average} stroke={c.text} strokeDasharray="5 4" label={{ value: 'avg', position: 'right', fill: c.text, fontSize: 11 }} />}
+              {showAverage && <ReferenceLine y={average} stroke={c.text} strokeOpacity={avgOpacity} strokeDasharray="5 4" label={{ value: 'avg', position: 'right', fill: c.text, fontSize: 11, opacity: avgOpacity }} />}
             </ComposedChart>
           </ResponsiveContainer>
         </ChartFrame>

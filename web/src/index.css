@@ -62,3 +62,16 @@
 @utility muted {
   @apply text-slate-500 dark:text-slate-400;
 }
+
+/* Legend hover/focus preview: the series a legend entry stands for stays, the rest of the chart fades (opacity is set by the chart). */
+.chart-focus :is(.recharts-rectangle, .recharts-sector, .recharts-line-curve, .recharts-dot, .recharts-area-area, .recharts-area-curve, .recharts-reference-line-line, .recharts-label-list text, .recharts-reference-line text) {
+  transition:
+    fill-opacity 120ms,
+    stroke-opacity 120ms,
+    opacity 120ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chart-focus :is(.recharts-rectangle, .recharts-sector, .recharts-line-curve, .recharts-dot, .recharts-area-area, .recharts-area-curve, .recharts-reference-line-line, .recharts-label-list text, .recharts-reference-line text) {
+    transition: none;
+  }
+}

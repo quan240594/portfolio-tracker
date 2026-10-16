@@ -5,6 +5,7 @@ import {
   NothingSelected,
   SelectableDataTable,
   SelectableLegend,
+  focusOpacity,
   selectRows,
   useSeriesSelection,
   visibleTotal,
@@ -199,6 +200,7 @@ function FuturePayments({ data }: Readonly<{ data: DividendsOverviewResponse }>)
   const average = selection.hasHidden ? selectedAverage(shown, selection) : summary.monthlyAverage;
   const showDeclared = selection.isSeriesVisible('declared');
   const showEstimated = selection.isSeriesVisible('estimated');
+  const fade = (key: string) => focusOpacity(selection.focusKey, key);
   return (
     <>
       <FutureHeader data={data} />
@@ -227,9 +229,9 @@ function FuturePayments({ data }: Readonly<{ data: DividendsOverviewResponse }>)
                 labelFormatter={(m) => formatMonth(String(m))}
                 formatter={futureTooltipRow(ccy, c)}
               />
-              <ReferenceLine y={average} stroke={c.invested} strokeDasharray="5 4" ifOverflow="extendDomain" />
-              {showDeclared && <Bar dataKey="declared" stackId="f" fill={c.declared} stroke={c.declaredEdge} radius={showEstimated ? undefined : [4, 4, 0, 0]} isAnimationActive={false} />}
-              {showEstimated && <Bar dataKey="estimated" stackId="f" fill={c.estimated} stroke={c.estimatedEdge} strokeDasharray="4 3" radius={[4, 4, 0, 0]} isAnimationActive={false} />}
+              <ReferenceLine y={average} stroke={c.invested} strokeOpacity={fade('avg')} strokeDasharray="5 4" ifOverflow="extendDomain" />
+              {showDeclared && <Bar dataKey="declared" stackId="f" fill={c.declared} fillOpacity={fade('declared')} stroke={c.declaredEdge} strokeOpacity={fade('declared')} radius={showEstimated ? undefined : [4, 4, 0, 0]} isAnimationActive={false} />}
+              {showEstimated && <Bar dataKey="estimated" stackId="f" fill={c.estimated} fillOpacity={fade('estimated')} stroke={c.estimatedEdge} strokeOpacity={fade('estimated')} strokeDasharray="4 3" radius={[4, 4, 0, 0]} isAnimationActive={false} />}
             </BarChart>
           </ResponsiveContainer>
         </ChartFrame>

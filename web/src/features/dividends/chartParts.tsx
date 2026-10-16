@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { useTheme } from '../../theme/ThemeProvider';
 import { analyticsTheme, tooltipStyle } from '../../components/charts/analyticsTheme';
+import { focusOpacity } from '../../components/charts/selection';
 import { formatMoney } from '../../lib/format';
 import { incomeColours } from '../calendar/calendarColours';
 
@@ -50,7 +51,7 @@ export function ChartFrame({ label, testId, bars = 0, height = 'h-72', scrollToE
   }, [scrollToEnd, focusBar, bars]);
   const scrolling = (
     <div ref={scroller} className="min-w-0 flex-1 overflow-x-auto">
-      <div role="img" aria-label={label} data-testid={testId} className={`${height} w-full`} style={{ minWidth: bars * SLOT_PX }}>
+      <div role="img" aria-label={label} data-testid={testId} className={`chart-focus ${height} w-full`} style={{ minWidth: bars * SLOT_PX }}>
         {children}
       </div>
     </div>
@@ -117,12 +118,14 @@ interface DonutProps {
   format?: (value: number) => string;
   /** Text in the hole of the ring, e.g. the total of the slices shown; decorative (the label already says it). */
   centre?: ReactNode;
+  /** Slice key previewed through its legend entry: the other slices fade (the centre text and the legend stay). */
+  focusKey?: string | null;
 }
 
-export function Donut({ slices, label, testId, format = (v) => formatMoney(v, 'EUR'), centre }: Readonly<DonutProps>) {
+export function Donut({ slices, label, testId, format = (v) => formatMoney(v, 'EUR'), centre, focusKey = null }: Readonly<DonutProps>) {
   const c = useDividendTheme();
   return (
-    <div role="img" aria-label={label} data-testid={testId} className="relative mx-auto h-44 w-44 shrink-0 sm:h-52 sm:w-52">
+    <div role="img" aria-label={label} data-testid={testId} className="chart-focus relative mx-auto h-44 w-44 shrink-0 sm:h-52 sm:w-52">
       {centre && (
         <div aria-hidden="true" data-testid={`${testId}-centre`} className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-10 text-center text-xs leading-tight">
           {centre}
@@ -132,7 +135,7 @@ export function Donut({ slices, label, testId, format = (v) => formatMoney(v, 'E
         <PieChart>
           <Pie data={slices as DonutSlice[]} dataKey="value" nameKey="label" innerRadius="60%" outerRadius="100%" paddingAngle={1.5} stroke="none" isAnimationActive={false}>
             {slices.map((s) => (
-              <Cell key={s.key} fill={s.color} />
+              <Cell key={s.key} fill={s.color} fillOpacity={focusOpacity(focusKey, s.key)} />
             ))}
           </Pie>
           <Tooltip contentStyle={c.tooltip} itemStyle={{ color: c.text }} formatter={(v: unknown, name: unknown) => [format(Number(v)), String(name)]} />

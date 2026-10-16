@@ -1,5 +1,7 @@
-import { render, screen, within } from '@testing-library/react';
+import type { FocusEvent, PointerEvent } from 'react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { focusHandlers, hoverHandlers } from './SelectableLegend';
 import { LegendSwatch, NothingSelected, SelectableDataTable, SelectableLegend, SelectableTable, SelectionNote, useSeriesSelection, type SelectableColumn, type SelectableRow } from '.';
 
 const COLUMNS: SelectableColumn[] = [
@@ -221,5 +223,155 @@ describe('SelectableTable styling options', () => {
     expect(feb).not.toHaveAttribute('aria-current');
     expect(within(jan!).getByText('Target')).toBeInTheDocument();
     expect(within(jan!).getByRole('button', { name: 'Jan' })).toBeInTheDocument();
+  });
+});
+
+
+describe('SelectableLegend hover and keyboard focus preview', () => {
+  function Preview({ entries = ['declared', 'estimated'] }: Readonly<{ entries?: readonly string[] }>) {
+    const selection = useSeriesSelection(['declared', 'estimated']);
+    return (
+      <div>
+        <SelectableLegend
+          selection={selection}
+          entries={[
+            ...entries.map((key) => ({ key, label: key, swatch: <LegendSwatch color="#00f" /> })),
+            { key: 'avg', label: 'Average', swatch: <LegendSwatch shape="line" color="#000" />, toggleable: false },
+          ]}
+        />
+        <output data-testid="focus">{selection.focusKey ?? 'none'}</output>
+        <output data-testid="hidden">{[...selection.hiddenSeries].join(',')}</output>
+      </div>
+    );
+  }
+  const focus = () => screen.getByTestId('focus');
+
+  it('previews an entry while the mouse is on it and ends when it leaves, without toggling it', async () => {
+    const user = userEvent.setup();
+    render(<Preview />);
+    await user.hover(screen.getByRole('button', { name: 'declared' }));
+    expect(focus()).toHaveTextContent('declared');
+    await user.hover(screen.getByRole('button', { name: 'estimated' }));
+    expect(focus()).toHaveTextContent('estimated');
+    await user.unhover(screen.getByRole('button', { name: 'estimated' }));
+    expect(focus()).toHaveTextContent('none');
+    expect(screen.getByRole('button', { name: 'declared' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('hidden')).toBeEmptyDOMElement();
+  });
+
+  it('previews the plain, non-toggleable item too', async () => {
+    const user = userEvent.setup();
+    render(<Preview />);
+    await user.hover(screen.getByText('Average'));
+    expect(focus()).toHaveTextContent('avg');
+    await user.unhover(screen.getByText('Average'));
+    expect(focus()).toHaveTextContent('none');
+  });
+
+  it('previews an entry while it has keyboard focus and ends when focus leaves', async () => {
+    const user = userEvent.setup();
+    render(<Preview />);
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'declared' })).toHaveFocus();
+    expect(focus()).toHaveTextContent('declared');
+    await user.tab();
+    expect(focus()).toHaveTextContent('estimated');
+    await user.tab();
+    expect(focus()).toHaveTextContent('none');
+  });
+
+  it('has no preview for an excluded entry, and toggling by keyboard keeps working', async () => {
+    const user = userEvent.setup();
+    render(<Preview />);
+    await user.tab();
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('button', { name: 'declared' })).toHaveAttribute('aria-pressed', 'false');
+    expect(focus()).toHaveTextContent('none');
+    await user.hover(screen.getByRole('button', { name: 'declared' }));
+    expect(focus()).toHaveTextContent('none');
+    await user.keyboard(' ');
+    expect(screen.getByRole('button', { name: 'declared' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('does not start a preview from a click that merely focuses the button', async () => {
+    const user = userEvent.setup();
+    const original = Element.prototype.matches;
+    const matches = vi.spyOn(Element.prototype, 'matches').mockImplementation(function (this: Element, selector: string) {
+      return selector === ':focus-visible' ? false : original.call(this, selector);
+    });
+    try {
+      render(<Preview />);
+      const button = screen.getByRole('button', { name: 'estimated' });
+      await user.click(button);
+      expect(button).toHaveFocus();
+      expect(button).toHaveAttribute('aria-pressed', 'false');
+      expect(focus()).toHaveTextContent('none');
+    } finally {
+      matches.mockRestore();
+    }
+  });
+
+  it('ends the preview of an entry that leaves the legend', () => {
+    const { rerender } = render(<Preview />);
+    act(() => {
+      screen.getByRole('button', { name: 'estimated' }).focus();
+    });
+    rerender(<Preview entries={['declared']} />);
+    expect(focus()).toHaveTextContent('none');
+  });
+
+  it('works without a preview (a selection that is not aware of it)', async () => {
+    const user = userEvent.setup();
+    const selection = { isSeriesVisible: () => true, isRowVisible: () => true, toggleSeries: vi.fn(), toggleRow: vi.fn(), hasHidden: false, reset: vi.fn() };
+    render(<SelectableLegend selection={selection} entries={[{ key: 'a', label: 'A', swatch: <LegendSwatch color="#000" /> }]} />);
+    await user.hover(screen.getByRole('button', { name: 'A' }));
+    await user.tab();
+    await user.click(screen.getByRole('button', { name: 'A' }));
+    expect(selection.toggleSeries).toHaveBeenCalledWith('a');
+  });
+});
+
+describe('legend focus handlers', () => {
+  const pointer = (pointerType: string) => ({ pointerType }) as PointerEvent<HTMLElement>;
+
+  it('react to a mouse and a pen, not to a finger', () => {
+    const setFocus = vi.fn();
+    const { onPointerEnter, onPointerLeave } = hoverHandlers('a', setFocus) as { onPointerEnter: (e: PointerEvent<HTMLElement>) => void; onPointerLeave: (e: PointerEvent<HTMLElement>) => void };
+    onPointerEnter(pointer('mouse'));
+    expect(setFocus).toHaveBeenLastCalledWith('a');
+    onPointerLeave(pointer('mouse'));
+    expect(setFocus).toHaveBeenLastCalledWith(null);
+    setFocus.mockClear();
+    onPointerEnter(pointer('pen'));
+    onPointerLeave(pointer('pen'));
+    expect(setFocus).toHaveBeenCalledTimes(2);
+    setFocus.mockClear();
+    onPointerEnter(pointer('touch'));
+    onPointerLeave(pointer('touch'));
+    expect(setFocus).not.toHaveBeenCalled();
+  });
+
+  it('are empty without a setter', () => {
+    expect(hoverHandlers('a', undefined)).toEqual({});
+    expect(focusHandlers('a', undefined)).toEqual({});
+  });
+
+  it('count keyboard focus only, and take engines without :focus-visible as keyboard', () => {
+    const setFocus = vi.fn();
+    const { onFocus, onBlur } = focusHandlers('a', setFocus) as { onFocus: (e: FocusEvent<HTMLElement>) => void; onBlur: () => void };
+    const focusEvent = (matches: () => boolean) => ({ currentTarget: { matches } }) as unknown as FocusEvent<HTMLElement>;
+    onFocus(focusEvent(() => true));
+    expect(setFocus).toHaveBeenLastCalledWith('a');
+    setFocus.mockClear();
+    onFocus(focusEvent(() => false));
+    expect(setFocus).not.toHaveBeenCalled();
+    onFocus(
+      focusEvent(() => {
+        throw new SyntaxError('unsupported selector');
+      }),
+    );
+    expect(setFocus).toHaveBeenLastCalledWith('a');
+    onBlur();
+    expect(setFocus).toHaveBeenLastCalledWith(null);
   });
 });
