@@ -194,7 +194,7 @@ function TopHoldingsCard() {
               <div className="flex items-center gap-2 font-semibold">
                 {h.symbol} {h.priceStale && <StaleBadge />}
               </div>
-              <div className="muted truncate text-xs">{h.name}</div>
+              <div className="muted text-xs break-words">{h.name}</div>
             </div>
             <div className="text-right">
               <div className="font-medium tabular-nums">{formatMoney(h.marketValue, data.baseCurrency)}</div>

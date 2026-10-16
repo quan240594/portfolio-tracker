@@ -21,7 +21,7 @@ function MoverList({ title, movers, empty, currency }: Readonly<{ title: string;
             <li key={m.symbol} className="flex items-center gap-3 py-2 text-sm">
               <div className="min-w-0 flex-1">
                 <div className="font-semibold">{m.symbol}</div>
-                <div className="muted truncate text-xs">{m.name}</div>
+                <div className="muted text-xs break-words">{m.name}</div>
               </div>
               <div className="text-right">
                 <Change pct={m.dayChangePct} />

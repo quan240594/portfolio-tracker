@@ -45,6 +45,7 @@ export const INSTRUMENTS: InstrumentSeed[] = [
   // Watchlist-only instruments (no transactions).
   { symbol: 'NVDA', name: 'NVIDIA Corporation', assetClass: 'STOCK', sector: 'Technology', country: 'United States', exchange: 'NASDAQ', currency: 'USD', peRatio: 45.2, price: 131.4, annualDrift: 0.35, dailyVol: 0.024 },
   { symbol: 'SAP.DE', name: 'SAP SE', assetClass: 'STOCK', sector: 'Technology', country: 'Germany', exchange: 'XETRA', currency: 'EUR', peRatio: 38.7, price: 231.9, annualDrift: 0.12, dailyVol: 0.014 },
+  { symbol: 'EMIM.AS', name: 'iShares Core MSCI Emerging Markets IMI UCITS ETF (Acc)', assetClass: 'ETF', sector: 'Diversified', country: 'Global', exchange: 'Euronext Amsterdam', currency: 'EUR', price: 33.12, annualDrift: 0.1, dailyVol: 0.009 },
   { symbol: 'ETH-EUR', name: 'Ethereum', assetClass: 'CRYPTO', sector: 'Digital Assets', country: 'Global', currency: 'EUR', price: 2_410, annualDrift: 0.3, dailyVol: 0.035, tradesWeekends: true },
 ];
 
@@ -330,7 +331,7 @@ export const PRIVATE_ASSET_ID = 'asset-private';
 
 /**
  * Main portfolio: cash tracking on (15% dividend withholding), five categories whose targets add up to 100% with the
- * demo holdings drifting away from them, and three custom assets. The watchlist holds three symbols that are not owned.
+ * demo holdings drifting away from them, and three custom assets. The watchlist holds four symbols that are not owned.
  */
 export function createManagementSeed(today: string, now: Date): ManagementSeed {
   const ts = now.toISOString();
@@ -400,6 +401,7 @@ export function createManagementSeed(today: string, now: Date): ManagementSeed {
       { userId: MOCK_USER_ID, symbol: 'NVDA', addedAt: `${addDays(today, -30)}T10:00:00.000Z` },
       { userId: MOCK_USER_ID, symbol: 'SAP.DE', addedAt: `${addDays(today, -20)}T10:00:00.000Z` },
       { userId: MOCK_USER_ID, symbol: 'ETH-EUR', addedAt: `${addDays(today, -10)}T10:00:00.000Z` },
+      { userId: MOCK_USER_ID, symbol: 'EMIM.AS', addedAt: `${addDays(today, -5)}T10:00:00.000Z` },
     ],
   };
 }

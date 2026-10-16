@@ -54,7 +54,7 @@ describe('mock management API (mirrors services/api)', () => {
   it('validates watchlist input and limits', async () => {
     expect((await call('POST', '/watchlist', { symbol: '' })).status).toBe(400);
     expect((await call('POST', '/watchlist', { symbol: 'NVDA' })).status).toBe(409);
-    for (let i = 0; i < 97; i++) expect((await call('POST', '/watchlist', { symbol: `T${i}` })).status).toBe(201);
+    for (let i = 0; i < 96; i++) expect((await call('POST', '/watchlist', { symbol: `T${i}` })).status).toBe(201);
     expect((await call('POST', '/watchlist', { symbol: 'LAST' })).status).toBe(422);
     expect((await call('DELETE', '/watchlist/t1')).status).toBe(204);
   });

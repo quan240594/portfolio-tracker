@@ -25,10 +25,10 @@ export function EventRow({ event, baseCurrency, onSelect }: Readonly<RowProps>) 
       >
         <EventMarker type={event.type} className="h-5 w-5" />
         <span className="min-w-0 flex-1">
-          <span className="block truncate">
+          <span className="block break-words">
             <span className="font-semibold">{event.symbol}</span> <span className="opacity-75">{event.name === event.symbol ? '' : event.name}</span>
           </span>
-          <span className="block truncate text-xs opacity-80">{eventDetailLine(event)}</span>
+          <span className="block text-xs break-words opacity-80">{eventDetailLine(event)}</span>
         </span>
         <span className="flex shrink-0 flex-col items-end gap-1">
           {amount && (

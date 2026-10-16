@@ -12,7 +12,7 @@ interface Props {
 /** Latest price and day change per watched symbol (prices arrive once the prices service has enriched a new one). */
 export function WatchlistTable({ items, onRemove, disabled }: Readonly<Props>) {
   return (
-    <div className="card overflow-x-auto">
+    <div className="card relative overflow-x-auto">
       <table className="w-full text-sm">
         <caption className="sr-only">Watchlist</caption>
         <thead>
@@ -26,9 +26,9 @@ export function WatchlistTable({ items, onRemove, disabled }: Readonly<Props>) {
         <tbody>
           {items.map((w) => (
             <tr key={w.symbol} className="border-b border-slate-100 last:border-0 dark:border-slate-800/60">
-              <th scope="row" className="px-3 py-2.5 text-left font-normal">
+              <th scope="row" className="min-w-[9rem] px-3 py-2.5 text-left font-normal">
                 <span className="block font-semibold">{w.symbol}</span>
-                {w.name && <span className="muted block max-w-xs truncate text-xs">{w.name}</span>}
+                {w.name && <span className="muted block max-w-xs text-xs break-words">{w.name}</span>}
               </th>
               <td className="px-3 py-2.5 text-right tabular-nums">
                 {w.price === undefined ? <span className="muted">Waiting for price…</span> : formatMoney(w.price, w.currency, { maxDigits: w.price < 1 ? 6 : 2 })}
