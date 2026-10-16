@@ -19,6 +19,15 @@ const fillOpacity = (value: number) => `[fill-opacity="${value}"]`;
 const dimmed = (shapes: Locator) => shapes.and(shapes.page().locator(fillOpacity(0.25)));
 const strong = (shapes: Locator) => shapes.and(shapes.page().locator(fillOpacity(1)));
 
+/** Highlighted-shape count after a hover: waits until the preview has been applied (every shape is either strong or dimmed and something is dimmed). */
+async function settledKept(shapes: Locator): Promise<number> {
+  const total = await shapes.count();
+  await expect
+    .poll(async () => (await strong(shapes).count()) + (await dimmed(shapes).count()) === total && (await dimmed(shapes).count()) > 0)
+    .toBe(true);
+  return strong(shapes).count();
+}
+
 async function expectNothingFaded(shapes: Locator) {
   await expect(dimmed(shapes)).toHaveCount(0);
   await expect(strong(shapes)).toHaveCount(await shapes.count());
@@ -42,7 +51,7 @@ test.describe('Dividend growth, By year', () => {
 
     // the year with a received bar and a forecast stack: both stay, every other year and the lines fade
     await toggle(legend, '2026').hover();
-    const kept = await strong(bars(chart)).count();
+    const kept = await settledKept(bars(chart));
     expect(kept).toBeGreaterThan(1);
     expect(kept).toBeLessThan(all);
     await expect(dimmed(bars(chart))).toHaveCount(all - kept);
@@ -50,14 +59,14 @@ test.describe('Dividend growth, By year', () => {
 
     // a forecast-only year: its declared + estimated bars
     await toggle(legend, '2027 (forecast)').hover();
-    const forecastKept = await strong(bars(chart)).count();
+    const forecastKept = await settledKept(bars(chart));
     expect(forecastKept).toBeGreaterThan(0);
     expect(forecastKept).toBeLessThan(all);
     await expect(dimmed(bars(chart))).toHaveCount(all - forecastKept);
 
     // the status entries: that status in every year
     await toggle(legend, 'Declared (forecast)').hover();
-    const declared = await strong(bars(chart)).count();
+    const declared = await settledKept(bars(chart));
     expect(declared).toBeGreaterThan(0);
     expect(declared).toBeLessThan(all);
     await expect(dimmed(bars(chart))).toHaveCount(all - declared);
@@ -147,7 +156,7 @@ test.describe('Other Dividends charts', () => {
     const all = await bars(chart).count();
 
     await toggle(legend, 'Declared').hover();
-    const kept = await strong(bars(chart)).count();
+    const kept = await settledKept(bars(chart));
     expect(kept).toBeGreaterThan(0);
     expect(kept).toBeLessThan(all);
     await expect(dimmed(bars(chart))).toHaveCount(all - kept);
