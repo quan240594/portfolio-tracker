@@ -54,3 +54,20 @@ export function visibleSlices<T extends SliceLike>(slices: readonly T[], selecti
 export function visibleSliceTotal(slices: readonly SliceLike[], selection: SeriesVisibility): number {
   return slices.filter((s) => selection.isSeriesVisible(s.key)).reduce((sum, s) => sum + s.value, 0);
 }
+
+/** Opacity of everything that is not the previewed legend entry. */
+export const FOCUS_DIM = 0.25;
+
+/**
+ * True when nothing is previewed, or an element that stands for the legend entries `keys` (one key, or every entry it belongs to:
+ * a forecast bar belongs to its year, to "declared" and to "<year>-forecast") belongs to the previewed one.
+ */
+export function isFocused(focusKey: string | null | undefined, keys: string | readonly string[]): boolean {
+  if (focusKey === null || focusKey === undefined) return true;
+  return typeof keys === 'string' ? keys === focusKey : keys.includes(focusKey);
+}
+
+/** 1 for the previewed legend entry's elements (and for everything while nothing is previewed), `dim` for the rest: the value of `fillOpacity` / `strokeOpacity` / `opacity`. */
+export function focusOpacity(focusKey: string | null | undefined, keys: string | readonly string[], dim: number = FOCUS_DIM): number {
+  return isFocused(focusKey, keys) ? 1 : dim;
+}

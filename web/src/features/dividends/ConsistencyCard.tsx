@@ -148,7 +148,7 @@ function ConsistencyBody({ data, counts }: Readonly<{ data: DividendsOverviewRes
           {selection.nothingSelected ? (
             <NothingSelected onShowAll={selection.reset} />
           ) : (
-            <Donut slices={shown} label={label} testId="consistency-donut" format={(v) => `${v} holding${v === 1 ? '' : 's'}`} centre={centre} />
+            <Donut slices={shown} label={label} testId="consistency-donut" focusKey={selection.focusKey} format={(v) => `${v} holding${v === 1 ? '' : 's'}`} centre={centre} />
           )}
         </div>
         <ConsistencyTable holdings={data.holdings} currency={data.baseCurrency} />

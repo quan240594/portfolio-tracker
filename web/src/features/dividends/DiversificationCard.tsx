@@ -1,5 +1,5 @@
 import type { DividendsOverviewResponse } from '@portfolio/shared';
-import { LegendSwatch, NothingSelected, SelectableDataTable, SelectableLegend, useSliceSelection, visibleSliceTotal, visibleSlices } from '../../components/charts/selection';
+import { LegendSwatch, NothingSelected, focusOpacity, SelectableDataTable, SelectableLegend, useSliceSelection, visibleSliceTotal, visibleSlices } from '../../components/charts/selection';
 import { SERIES_COLORS } from '../../components/charts/palette';
 import { formatMoney, formatWeight } from '../../lib/format';
 import { Donut } from './chartParts';
@@ -9,6 +9,9 @@ import { useScopedDividendsOverview } from './useDividendsOverview';
 
 const OTHER_COLOR = '#94a3b8';
 const OTHER_KEY = '__other';
+
+/** The ranked list is text: it fades less than the donut so it stays readable. */
+const LIST_DIM = 0.45;
 
 type IncomeSlice = Slice & { color: string };
 
@@ -50,10 +53,10 @@ function IncomeBody({ slices, currency }: Readonly<{ slices: readonly IncomeSlic
         <NothingSelected onShowAll={selection.reset} />
       ) : (
         <div className="grid grid-cols-1 items-center gap-6 md:grid-cols-[14rem_minmax(0,1fr)]">
-          <Donut slices={shown} label={label} testId="income-donut" centre={centre} />
+          <Donut slices={shown} label={label} testId="income-donut" centre={centre} focusKey={selection.focusKey} />
           <ol className="min-w-0 space-y-3" aria-label="Holdings ranked by expected annual income">
             {shown.map((s) => (
-              <li key={s.key} className="text-sm">
+              <li key={s.key} className="text-sm transition-opacity duration-100 motion-reduce:transition-none" style={{ opacity: focusOpacity(selection.focusKey, s.key, LIST_DIM) }}>
                 <div className="flex items-baseline gap-2">
                   <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 self-center rounded-sm" style={{ background: s.color }} />
                   <span className="truncate font-medium">{s.label}</span>

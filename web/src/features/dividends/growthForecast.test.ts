@@ -15,6 +15,7 @@ import {
   tooltipLinesOfTimeline,
   selectYearRows,
   visiblePoints,
+  yearBarEntries,
   yearBarVisible,
   yearForecastModel,
   yearLegendItems,
@@ -290,5 +291,23 @@ describe('selection of the grouped chart', () => {
     const none = yearForecastModel(growth.byMonth, timeline, false, 3, full.years);
     expect(none.hasAverage).toBe(false);
     expect(first).toBeDefined();
+  });
+});
+
+describe('yearBarEntries (which legend entries a data key of the grouped chart belongs to)', () => {
+  it('maps a received bar to its year, a forecast bar to its year, its kind and the forecast-year entry, and the line to the average', () => {
+    expect(yearBarEntries('2026')).toEqual(['2026']);
+    expect(yearBarEntries('2026-declared')).toEqual(['2026', 'declared', '2026-forecast']);
+    expect(yearBarEntries('2027-estimated')).toEqual(['2027', 'estimated', '2027-forecast']);
+    expect(yearBarEntries('average')).toEqual(['average']);
+  });
+
+  it('is what decides whether a bar is drawn: every entry must be included', () => {
+    const drawn = (hidden: string[]) => yearBarVisible((key) => !hidden.includes(key));
+    for (const key of ['2026', '2026-declared', '2027-estimated', 'average']) {
+      for (const entry of ['2026', '2027', 'declared', 'estimated', '2026-forecast', '2027-forecast', 'average']) {
+        expect(drawn([entry])(key), `${key} without ${entry}`).toBe(!yearBarEntries(key).includes(entry));
+      }
+    }
   });
 });

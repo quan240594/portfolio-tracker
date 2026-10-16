@@ -1,4 +1,4 @@
-import type { ReactElement, ReactNode } from 'react';
+import { useMemo, type ReactElement, type ReactNode } from 'react';
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { AnalyticsDividendGrowthResponse, ForecastTotals, GrowthTimeline } from '@portfolio/shared';
 import { compactMoneyTick } from '../../components/charts/chartFormatters';
@@ -7,6 +7,7 @@ import {
   NothingSelected,
   SelectableDataTable,
   SelectableLegend,
+  focusOpacity,
   maskSeries,
   selectRows,
   useSeriesSelection,
@@ -25,6 +26,7 @@ import {
   timelineRows,
   selectYearRows,
   visiblePoints,
+  yearBarEntries,
   yearBarVisible,
   yearForecastModel,
   yearLegendItems,
@@ -41,8 +43,11 @@ export function yearColour(c: Theme, years: readonly string[], year: string): st
 
 const cell = (value: number | string | undefined, currency: string): string => (typeof value === 'number' ? formatMoney(value, currency) : '—');
 
-/** Bars of the grouped chart: per year its received bar with the declared and estimated forecast stacked on top. Bars that are excluded are left out, the top one of each stack gets the rounded corners. */
-export function yearBars(model: YearForecastModel, c: Theme, isDrawn: (dataKey: string) => boolean = () => true): ReactElement[] {
+/**
+ * Bars of the grouped chart: per year its received bar with the declared and estimated forecast stacked on top. Bars that are excluded are left out, the top one of each stack gets the rounded corners.
+ * `focusKey` = the legend entry being previewed: the bars that do not belong to it fade.
+ */
+export function yearBars(model: YearForecastModel, c: Theme, isDrawn: (dataKey: string) => boolean = () => true, focusKey: string | null = null): ReactElement[] {
   return model.bars.flatMap((year) => {
     const stacked = model.forecastYears.includes(year);
     const specs: { key: string; fill: string; stroke?: string; dash?: string }[] = [];
@@ -51,18 +56,23 @@ export function yearBars(model: YearForecastModel, c: Theme, isDrawn: (dataKey: 
       specs.push({ key: declaredKey(year), fill: c.declared, stroke: c.declaredEdge }, { key: estimatedKey(year), fill: c.estimated, stroke: c.estimatedEdge, dash: '4 3' });
     }
     const drawn = specs.filter((spec) => isDrawn(spec.key));
-    return drawn.map((spec, i) => (
-      <Bar
-        key={spec.key}
-        dataKey={spec.key}
-        stackId={year}
-        fill={spec.fill}
-        stroke={spec.stroke}
-        strokeDasharray={spec.dash}
-        radius={i === drawn.length - 1 ? [3, 3, 0, 0] : undefined}
-        isAnimationActive={false}
-      />
-    ));
+    return drawn.map((spec, i) => {
+      const opacity = focusOpacity(focusKey, yearBarEntries(spec.key));
+      return (
+        <Bar
+          key={spec.key}
+          dataKey={spec.key}
+          stackId={year}
+          fill={spec.fill}
+          fillOpacity={opacity}
+          stroke={spec.stroke}
+          strokeOpacity={opacity}
+          strokeDasharray={spec.dash}
+          radius={i === drawn.length - 1 ? [3, 3, 0, 0] : undefined}
+          isAnimationActive={false}
+        />
+      );
+    });
   });
 }
 
@@ -89,23 +99,29 @@ export function YearChart({ data, timeline, showForecast, forecast, children }: 
   const c = useDividendTheme();
   const ccy = data.baseCurrency;
   const include = showForecast && forecast !== null;
-  const full = yearForecastModel(data.byMonth, timeline, include);
+  const full = useMemo(() => yearForecastModel(data.byMonth, timeline, include), [data.byMonth, timeline, include]);
   const colorOf = (year: string) => yearColour(c, full.years, year);
   const items = yearLegendItems(full, colorOf);
   const selection = useSeriesSelection(
     items.map((i) => i.key),
     full.rows.map((r) => r.month),
   );
-  const isDrawn = yearBarVisible(selection.isSeriesVisible);
-  const model = yearForecastModel(
-    data.byMonth,
-    timeline,
-    include,
-    3,
-    full.years.filter((y) => !selection.isSeriesVisible(y)),
+  const { isSeriesVisible, isRowVisible, hiddenSeries } = selection;
+  const isDrawn = useMemo(() => yearBarVisible(isSeriesVisible), [isSeriesVisible]);
+  // the hover preview re-renders this card on every move: the model and the rows are only rebuilt when the selection or the data change
+  const model = useMemo(
+    () =>
+      yearForecastModel(
+        data.byMonth,
+        timeline,
+        include,
+        3,
+        full.years.filter((y) => hiddenSeries.has(y)),
+      ),
+    [data.byMonth, timeline, include, full.years, hiddenSeries],
   );
-  const rows = selectYearRows(model.rows, selection.isRowVisible, isDrawn);
-  const shownYears = model.years.filter((y) => selection.isSeriesVisible(y));
+  const rows = useMemo(() => selectYearRows(model.rows, isRowVisible, isDrawn), [model.rows, isRowVisible, isDrawn]);
+  const shownYears = model.years.filter((y) => isSeriesVisible(y));
   const totals = shownYears.map((y) => `${y}: ${formatMoney(data.byYear.find((b) => b.year === y)?.total ?? 0, ccy)}`).join(', ');
   const totalsShown = include ? forecast : null;
   const summary = selection.hasHidden ? 'Current selection.' : forecastLabel(timeline, ccy, totalsShown);
@@ -113,6 +129,7 @@ export function YearChart({ data, timeline, showForecast, forecast, children }: 
   const forecastNote = model.forecastYears.length > 0 ? ` Forecast bars (declared and estimated) are stacked on the received amounts for ${model.forecastYears.join(' and ')}.` : '';
   const label = `Dividends received per calendar month, compared for ${shownYears.join(', ')}. Totals per year: ${totals}.${forecastNote}${average} ${summary}`.trim();
   const ahead = timeline.points.filter((p) => p.phase !== 'PAST');
+  const averageOpacity = focusOpacity(selection.focusKey, 'average');
   return (
     <>
       <ForecastBlock timeline={timeline} ccy={ccy} forecast={forecast} />
@@ -127,8 +144,8 @@ export function YearChart({ data, timeline, showForecast, forecast, children }: 
               <XAxis dataKey="month" stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval={0} />
               <YAxis tickFormatter={compactMoneyTick(ccy)} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={56} />
               <Tooltip cursor={{ fill: c.grid, opacity: 0.5 }} content={<YearTooltip model={model} ccy={ccy} c={c} colorOf={colorOf} />} />
-              {yearBars(model, c, isDrawn)}
-              {model.hasAverage && isDrawn('average') && <Line dataKey="average" stroke={c.invested} strokeWidth={2} strokeDasharray="5 4" dot={{ r: 2 }} isAnimationActive={false} />}
+              {yearBars(model, c, isDrawn, selection.focusKey)}
+              {model.hasAverage && isDrawn('average') && <Line dataKey="average" stroke={c.invested} strokeWidth={2} strokeOpacity={averageOpacity} strokeDasharray="5 4" dot={{ r: 2, fillOpacity: averageOpacity, strokeOpacity: averageOpacity }} isAnimationActive={false} />}
             </ComposedChart>
           </ResponsiveContainer>
         </ChartFrame>
@@ -160,6 +177,23 @@ const TIMELINE_COLUMNS: SelectableColumn[] = [
   { key: 'trend', label: 'Trend' },
 ];
 
+/** Bars and lines of the timeline, in drawing order; the ones that do not belong to the previewed legend entry fade. */
+export function timelineSeries(c: Theme, isDrawn: (key: string) => boolean, focusKey: string | null): ReactElement[] {
+  const fade = (key: string) => focusOpacity(focusKey, key);
+  const series: ReactElement[] = [];
+  if (isDrawn('received')) series.push(<Bar key="received" dataKey="received" stackId="t" fill={c.received} fillOpacity={fade('received')} isAnimationActive={false} />);
+  if (isDrawn('declared')) series.push(<Bar key="declared" dataKey="declared" stackId="t" fill={c.declared} fillOpacity={fade('declared')} stroke={c.declaredEdge} strokeOpacity={fade('declared')} isAnimationActive={false} />);
+  if (isDrawn('estimated')) {
+    series.push(
+      <Bar key="estimated" dataKey="estimated" stackId="t" fill={c.estimated} fillOpacity={fade('estimated')} stroke={c.estimatedEdge} strokeOpacity={fade('estimated')} strokeDasharray="4 3" radius={[3, 3, 0, 0]} isAnimationActive={false} />,
+    );
+  }
+  if (isDrawn('average')) series.push(<Line key="average" dataKey="average" type="monotone" stroke={c.invested} strokeWidth={2} strokeOpacity={fade('average')} dot={false} isAnimationActive={false} />);
+  if (isDrawn('trend')) series.push(<Line key="trend" dataKey="trend" stroke={c.value} strokeWidth={2} strokeOpacity={fade('trend')} dot={false} isAnimationActive={false} />);
+  if (isDrawn('projection')) series.push(<Line key="projection" dataKey="projection" stroke={c.value} strokeWidth={2} strokeOpacity={fade('projection')} strokeDasharray="6 4" dot={false} isAnimationActive={false} />);
+  return series;
+}
+
 /**
  * One chronological series: received bars, forecast bars to the right, the 12-month average and the trend.
  * Series = received / declared / estimated bars and the average, trend and projected-trend lines; rows = the months.
@@ -169,14 +203,19 @@ export function TimelineChart({ data, timeline, showForecast, forecast, children
   const c = useDividendTheme();
   const ccy = data.baseCurrency;
   const include = showForecast && forecast !== null;
-  const all = timelineRows(timeline, include);
-  const items = timelineLegendItems(all, c.received);
-  const keys = items.map((i) => i.key);
+  const all = useMemo(() => timelineRows(timeline, include), [timeline, include]);
+  const items = useMemo(() => timelineLegendItems(all, c.received), [all, c.received]);
+  const keys = useMemo(() => items.map((i) => i.key), [items]);
   const selection = useSeriesSelection(
     keys,
     all.map((r) => r.month),
   );
-  const rows = selectRows(all, (r) => r.month, selection).map((r) => maskSeries(r, keys, selection));
+  const { isSeriesVisible, isRowVisible } = selection;
+  // the hover preview re-renders this card on every move: the rows are only rebuilt when the selection or the data change
+  const rows = useMemo(() => {
+    const view = { isSeriesVisible, isRowVisible };
+    return selectRows(all, (r) => r.month, view).map((r) => maskSeries(r, keys, view));
+  }, [all, keys, isSeriesVisible, isRowVisible]);
   const last = rows.at(-1);
   const totalsShown = include ? forecast : null;
   const scope = selection.hasHidden ? 'current selection' : forecastLabel(timeline, ccy, totalsShown);
@@ -197,12 +236,7 @@ export function TimelineChart({ data, timeline, showForecast, forecast, children
               <XAxis dataKey="label" stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={8} />
               <YAxis tickFormatter={compactMoneyTick(ccy)} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={56} />
               <Tooltip cursor={{ fill: c.grid, opacity: 0.5 }} content={<TimelineTooltip ccy={ccy} c={c} />} />
-              {selection.isSeriesVisible('received') && <Bar dataKey="received" stackId="t" fill={c.received} isAnimationActive={false} />}
-              {selection.isSeriesVisible('declared') && <Bar dataKey="declared" stackId="t" fill={c.declared} stroke={c.declaredEdge} isAnimationActive={false} />}
-              {selection.isSeriesVisible('estimated') && <Bar dataKey="estimated" stackId="t" fill={c.estimated} stroke={c.estimatedEdge} strokeDasharray="4 3" radius={[3, 3, 0, 0]} isAnimationActive={false} />}
-              {selection.isSeriesVisible('average') && <Line dataKey="average" type="monotone" stroke={c.invested} strokeWidth={2} dot={false} isAnimationActive={false} />}
-              {selection.isSeriesVisible('trend') && <Line dataKey="trend" stroke={c.value} strokeWidth={2} dot={false} isAnimationActive={false} />}
-              {selection.isSeriesVisible('projection') && <Line dataKey="projection" stroke={c.value} strokeWidth={2} strokeDasharray="6 4" dot={false} isAnimationActive={false} />}
+              {timelineSeries(c, selection.isSeriesVisible, selection.focusKey)}
             </ComposedChart>
           </ResponsiveContainer>
         </ChartFrame>

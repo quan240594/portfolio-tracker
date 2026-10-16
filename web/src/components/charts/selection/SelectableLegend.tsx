@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from 'react';
+import { useEffect, type CSSProperties, type FocusEvent, type PointerEvent, type ReactNode } from 'react';
 import type { SelectionView } from './useSeriesSelection';
 import { SelectionNote } from './SelectionNotes';
 
@@ -48,9 +48,61 @@ interface LegendProps {
 
 const ITEM = 'inline-flex min-h-6 items-center gap-1.5 rounded px-1.5 py-0.5';
 
-function ToggleEntry({ entry, visible, onToggle }: Readonly<{ entry: LegendEntry; visible: boolean; onToggle: () => void }>) {
+type SetFocus = ((key: string | null) => void) | undefined;
+
+/** A mouse or a pen hovers; a finger does not (a tap only toggles, it must not leave the chart dimmed). */
+const hovers = (event: PointerEvent): boolean => event.pointerType === 'mouse' || event.pointerType === 'pen';
+
+/** True for keyboard focus; a click also focuses a button but must not start the preview. Engines without `:focus-visible` count as keyboard. */
+function isKeyboardFocus(element: Element): boolean {
+  try {
+    return element.matches(':focus-visible');
+  } catch {
+    return true;
+  }
+}
+
+/** Pointer handlers of a legend entry: hovering it previews it in the chart. No-ops without `setFocus`. */
+export function hoverHandlers(key: string, setFocus: SetFocus) {
+  if (!setFocus) return {};
+  return {
+    onPointerEnter: (event: PointerEvent) => {
+      if (hovers(event)) setFocus(key);
+    },
+    onPointerLeave: (event: PointerEvent) => {
+      if (hovers(event)) setFocus(null);
+    },
+  };
+}
+
+/** Keyboard handlers of a legend button: Tab onto it previews it in the chart, Tab away ends the preview. */
+export function focusHandlers(key: string, setFocus: SetFocus) {
+  if (!setFocus) return {};
+  return {
+    onFocus: (event: FocusEvent<HTMLElement>) => {
+      if (isKeyboardFocus(event.currentTarget)) setFocus(key);
+    },
+    onBlur: () => setFocus(null),
+  };
+}
+
+interface ToggleProps {
+  entry: LegendEntry;
+  visible: boolean;
+  onToggle: () => void;
+  setFocus: SetFocus;
+}
+
+function ToggleEntry({ entry, visible, onToggle, setFocus }: Readonly<ToggleProps>) {
   return (
-    <button type="button" aria-pressed={visible} onClick={onToggle} className={`${ITEM} cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800`}>
+    <button
+      type="button"
+      aria-pressed={visible}
+      onClick={onToggle}
+      className={`${ITEM} cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800`}
+      {...hoverHandlers(entry.key, setFocus)}
+      {...focusHandlers(entry.key, setFocus)}
+    >
       <span className={visible ? '' : 'opacity-40'}>{entry.swatch}</span>
       <span className={visible ? '' : 'line-through'}>{entry.label}</span>
       {entry.detail && <span className={`muted tabular-nums ${visible ? '' : 'opacity-40'}`}>{entry.detail}</span>}
@@ -63,19 +115,25 @@ function ToggleEntry({ entry, visible, onToggle }: Readonly<{ entry: LegendEntry
  * swatch, announced through `aria-pressed="false"`. Drawn above the chart, outside its horizontal scroll area, so it wraps on a phone.
  */
 export function SelectableLegend({ entries, selection, label = 'Legend', testId = 'chart-legend', className = '' }: Readonly<LegendProps>) {
+  const { focusKey, setFocus } = selection;
+  // an entry that leaves the legend (another scope, a toggled option) while previewed would leave the chart dimmed
+  const focusPresent = focusKey === null || focusKey === undefined || entries.some((entry) => entry.key === focusKey);
+  useEffect(() => {
+    if (!focusPresent) setFocus?.(null);
+  }, [focusPresent, setFocus]);
   return (
     <div className={`mb-2 ${className}`} data-testid={testId}>
       <ul aria-label={label} className="m-0 flex list-none flex-wrap items-center justify-center gap-x-2 gap-y-1 p-0 text-xs">
         {entries.map((entry) => (
           <li key={entry.key}>
             {entry.toggleable === false ? (
-              <span className={ITEM}>
+              <span className={ITEM} {...hoverHandlers(entry.key, setFocus)}>
                 {entry.swatch}
                 <span>{entry.label}</span>
                 {entry.detail && <span className="muted tabular-nums">{entry.detail}</span>}
               </span>
             ) : (
-              <ToggleEntry entry={entry} visible={selection.isSeriesVisible(entry.key)} onToggle={() => selection.toggleSeries(entry.key)} />
+              <ToggleEntry entry={entry} visible={selection.isSeriesVisible(entry.key)} onToggle={() => selection.toggleSeries(entry.key)} setFocus={setFocus} />
             )}
           </li>
         ))}

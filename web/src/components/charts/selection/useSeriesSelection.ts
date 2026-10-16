@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { allHidden, pruneKeys, toggleKey } from './selectionState';
+import { activeFocus, allHidden, pruneKeys, toggleKey } from './selectionState';
 
 /** What the legend, the table and the chart share: which series (columns, legend entries) and which rows (categories) are hidden. */
 export interface SeriesSelection {
@@ -17,10 +17,20 @@ export interface SeriesSelection {
   nothingSelected: boolean;
   /** "Show all". */
   reset: () => void;
+  /**
+   * The legend entry the pointer or the keyboard is on (hover / focus preview), or null. Transient: never persisted, never changes what is
+   * included, and null while that entry is excluded. The chart dims everything that does not belong to it (`focusOpacity`).
+   */
+  focusKey: string | null;
+  /** Sets or clears (null) the previewed legend entry; the `SelectableLegend` calls it. */
+  setFocus: (key: string | null) => void;
 }
 
 /** The part of the selection the legend and the table need (so tests and other callers can pass a small object). */
-export type SelectionView = Pick<SeriesSelection, 'isSeriesVisible' | 'isRowVisible' | 'toggleSeries' | 'toggleRow' | 'hasHidden' | 'reset'>;
+export type SelectionView = Pick<SeriesSelection, 'isSeriesVisible' | 'isRowVisible' | 'toggleSeries' | 'toggleRow' | 'hasHidden' | 'reset'> & Partial<Pick<SeriesSelection, 'focusKey' | 'setFocus'>>;
+
+/** The include/exclude half of the selection: stable while only the hover / focus preview changes. */
+type SelectionBase = Omit<SeriesSelection, 'focusKey' | 'setFocus'>;
 
 const NONE: ReadonlySet<string> = new Set();
 
@@ -42,6 +52,12 @@ function useHiddenKeys(valid: readonly string[]) {
   return { hidden: effective, keys, toggle, clear };
 }
 
+/** The transient hover / keyboard focus of a legend entry; it follows `hidden` so an excluded entry has no focus. */
+function useLegendFocus(hidden: ReadonlySet<string>) {
+  const [focus, setFocus] = useState<string | null>(null);
+  return { focusKey: activeFocus(focus, hidden), setFocus };
+}
+
 /**
  * Include/exclude state of one chart card, in memory only.
  * `seriesKeys` = the series the chart can draw (legend entries, value columns of the table); `rowIds` = its categories (table rows).
@@ -50,13 +66,14 @@ function useHiddenKeys(valid: readonly string[]) {
 export function useSeriesSelection(seriesKeys: readonly string[], rowIds: readonly string[] = []): SeriesSelection {
   const series = useHiddenKeys(seriesKeys);
   const rows = useHiddenKeys(rowIds);
+  const { focusKey, setFocus } = useLegendFocus(series.hidden);
   const { clear: clearSeries } = series;
   const { clear: clearRows } = rows;
   const reset = useCallback(() => {
     clearSeries();
     clearRows();
   }, [clearSeries, clearRows]);
-  return useMemo(
+  const base = useMemo<SelectionBase>(
     () => ({
       hiddenSeries: series.hidden,
       hiddenRows: rows.hidden,
@@ -70,6 +87,8 @@ export function useSeriesSelection(seriesKeys: readonly string[], rowIds: readon
     }),
     [series.hidden, series.keys, series.toggle, rows.hidden, rows.keys, rows.toggle, reset],
   );
+  // the preview changes on every hover: the include/exclude functions above keep their identity, so memoised chart data stays valid
+  return useMemo(() => ({ ...base, focusKey, setFocus }), [base, focusKey, setFocus]);
 }
 
 /**
@@ -78,7 +97,8 @@ export function useSeriesSelection(seriesKeys: readonly string[], rowIds: readon
  */
 export function useSliceSelection(sliceKeys: readonly string[]): SeriesSelection {
   const slices = useHiddenKeys(sliceKeys);
-  return useMemo(
+  const { focusKey, setFocus } = useLegendFocus(slices.hidden);
+  const base = useMemo<SelectionBase>(
     () => ({
       hiddenSeries: slices.hidden,
       hiddenRows: slices.hidden,
@@ -92,4 +112,5 @@ export function useSliceSelection(sliceKeys: readonly string[]): SeriesSelection
     }),
     [slices.hidden, slices.keys, slices.toggle, slices.clear],
   );
+  return useMemo(() => ({ ...base, focusKey, setFocus }), [base, focusKey, setFocus]);
 }

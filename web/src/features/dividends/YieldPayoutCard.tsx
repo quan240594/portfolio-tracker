@@ -11,6 +11,7 @@ import {
   NothingSelected,
   SelectableDataTable,
   SelectableLegend,
+  focusOpacity,
   selectRows,
   useSeriesSelection,
   type LegendEntry,
@@ -53,6 +54,8 @@ function YieldPayoutChart({ bars, metric, currency, selection }: Readonly<ChartP
   const barKey = isYield ? 'yield' : 'amount';
   const showBar = selection.isSeriesVisible(barKey);
   const showDots = isYield && selection.isSeriesVisible('onCost');
+  const barOpacity = focusOpacity(selection.focusKey, barKey);
+  const dotOpacity = focusOpacity(selection.focusKey, 'onCost');
   const shown = selectRows(bars, (b) => b.key, selection);
   const fmt = (v: number) => (isYield ? formatPercent(v) : formatMoney(v, currency));
   const summary = shown.map((b) => `${b.label} ${fmt(isYield ? b.yieldPct : b.amount)}`).join(', ');
@@ -89,8 +92,8 @@ function YieldPayoutChart({ bars, metric, currency, selection }: Readonly<ChartP
                 labelFormatter={(_l, payload) => payload[0]?.payload.name ?? ''}
                 formatter={(v: unknown, name: unknown) => [fmt(Number(v)), seriesName(name, isYield)]}
               />
-              {showBar && <Bar dataKey={isYield ? 'yieldPct' : 'amount'} fill={c.value} radius={[4, 4, 0, 0]} isAnimationActive={false} />}
-              {showDots && <Line dataKey="onCostPct" stroke="none" dot={{ r: 4.5, fill: c.benchmark, stroke: c.tooltipBg, strokeWidth: 1.5 }} activeDot={{ r: 5 }} isAnimationActive={false} />}
+              {showBar && <Bar dataKey={isYield ? 'yieldPct' : 'amount'} fill={c.value} fillOpacity={barOpacity} radius={[4, 4, 0, 0]} isAnimationActive={false} />}
+              {showDots && <Line dataKey="onCostPct" stroke="none" dot={{ r: 4.5, fill: c.benchmark, stroke: c.tooltipBg, strokeWidth: 1.5, fillOpacity: dotOpacity, strokeOpacity: dotOpacity }} activeDot={{ r: 5 }} isAnimationActive={false} />}
             </ComposedChart>
           </ResponsiveContainer>
         </ChartFrame>

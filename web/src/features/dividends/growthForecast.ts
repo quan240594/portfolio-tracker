@@ -69,18 +69,23 @@ export function yearForecastModel(
 }
 
 /**
- * Whether a data key of the grouped chart (`2026`, `2026-declared`, `2026-estimated`, `average`) is drawn under a selection.
- * Legend keys: a year hides its received bar and its forecast stack, `declared` / `estimated` hide that status in every year,
- * `<year>-forecast` hides the forecast of a year that only has forecast bars, `average` hides the line.
+ * The legend entries a data key of the grouped chart (`2026`, `2026-declared`, `2026-estimated`, `average`) belongs to: a received bar
+ * to its year; a forecast bar to its year, to its kind (`declared` / `estimated`, in every year) and to `<year>-forecast` (the entry of a
+ * year that only has forecast bars); the average line to `average`. Drawn = every one of them is included; previewed = any is the focus.
+ */
+export function yearBarEntries(dataKey: string): string[] {
+  if (dataKey === 'average') return ['average'];
+  const year = dataKey.slice(0, 4);
+  if (dataKey === year) return [year];
+  return [year, dataKey.slice(5), `${year}-forecast`];
+}
+
+/**
+ * Whether a data key of the grouped chart is drawn under a selection (see `yearBarEntries`).
  * `isVisible` answers true for keys the selection does not know.
  */
 export function yearBarVisible(isVisible: (key: string) => boolean): (dataKey: string) => boolean {
-  return (dataKey) => {
-    if (dataKey === 'average') return isVisible('average');
-    const year = dataKey.slice(0, 4);
-    if (dataKey === year) return isVisible(year);
-    return isVisible(year) && isVisible(dataKey.slice(5)) && isVisible(`${year}-forecast`);
-  };
+  return (dataKey) => yearBarEntries(dataKey).every(isVisible);
 }
 
 /** The months that are not excluded, with the hidden bars and lines cleared, so a tooltip only names what is drawn. */

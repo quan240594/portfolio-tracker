@@ -1155,35 +1155,96 @@ time" headline. The by-year and timeline charts keep their own legend keys, so s
 
 ### All charts (follow-up work: pick up the `todo` rows)
 
-| File | Chart | Series (= columns) | Categories (= rows) | Status |
-|---|---|---|---|---|
-| `features/dividends/YieldPayoutCard.tsx` | Yield / payout bars + cost dots | yield, onCost / amount | holdings, categories | stage 1 |
-| `features/dividends/DiversificationCard.tsx` | Income donut | - (slices) | holdings (top 8 + Other) | stage 1 |
-| `features/dividends/ConsistencyCard.tsx` | Dividend safety / consistency donut | - (slices) | badges | stage 1 |
-| `features/dividends/GrowthAndFuture.tsx` | Average annual growth | growth | holdings | stage 1 |
-| `features/dividends/GrowthAndFuture.tsx` | Future payments | declared, estimated | months | stage 1 |
-| `features/dividends/ReceivedTimeline.tsx` | Dividends received (+ future) | paid, declared, estimated, avg | periods | stage 1 |
-| `features/dividends/ReceivedCards.tsx` | Dividends received by holding | amount | holdings | stage 1 |
-| `features/dividends/GrowthCharts.tsx` | Dividend growth, By year | years, declared, estimated, forecast year, average | calendar months | stage 1 |
-| `features/dividends/GrowthCharts.tsx` | Dividend growth, Timeline | received, declared, estimated, average, trend, projection | months | stage 1 |
-| `features/growth/GrowthChart.tsx` (Growth tab: Value and Performance cards) | Portfolio value / return lines | `portfolio`, `invested` (Value card only), one per benchmark symbol (Performance: only while Compare is on); legend entries carry their start → end figure as `detail` | none (dates are plain table rows) | stage 2 (series only; the benchmark picker is unchanged: a hidden benchmark stays selected there and in the request, only the line goes; the benchmark headline never changes) |
-| `features/growth/DynamicsChart.tsx` (`DynamicsCard.tsx`) | Return per period | `portfolio` + one per benchmark symbol | months (`YYYY-MM`) of the chosen period; the "View details" table is the selection table | stage 2 |
-| `features/growth/HoldingsChart.tsx` (`HoldingsCard.tsx`) | Return per holding (horizontal bars) | `returnPct` (the Return column; Name, Return (€) and Measured from are plain columns) | holdings (symbol) | stage 2 (the legend and the table stay in both views; the table is the Table view) |
-| `features/growth/ChartOrTable.tsx`, `GrowthTable.tsx`, `GrowthChart.tsx` (`ChartLegend`), `RangeButtons.tsx` | Chart / table switch and legend of the Growth tab | same series as the three charts above | same | stage 2 (`ChartLegend` and `GrowthTable` are gone: `SelectableLegend` + `SelectableTable`; `SelectableChartOrTable` in `ChartOrTable.tsx` = legend + chart/table switch + empty state; helpers in `growthSelection.tsx`) |
-| `components/charts/BenchmarkChart.tsx` (Analytics, Benchmark tab) | Portfolio vs benchmark | portfolio, benchmark (when there is one), invested; the chart owns the state and the legend, no table (dates) | none (dates) | stage 2 |
-| `components/charts/ReturnsBarChart.tsx` + `features/analytics/ReturnsTab.tsx` (Analytics, Returns tab) | TWR per period | twrPct (the Return (TWR) column; IRR, Gain, End value are plain columns) | periods (`year` / `quarter` / `month` key of the period); the best / worst period in the text alternative follow the periods that are left | stage 2 |
-| `components/charts/DividendGrowthChart.tsx` + `features/analytics/GrowthChartBlock.tsx` (Analytics, Dividend growth tab) | Dividends compared per year / month | per year: current (Received); per month: previous (a year earlier, only when there is one), current (This period) | years / months (the bar's label) | stage 2 |
-| `components/charts/GoalChart.tsx` + `features/analytics/GoalTab.tsx` (Analytics, Goal tab) | Scenario lines | none: scenarios are the entries (`useSliceSelection`; the legend and the scenario table rows toggle the same scenario) | scenarios (cautious, base, optimistic); the target line stays | stage 2 |
-| `features/goals/GoalChart.tsx`, `GoalTable.tsx`, `GoalResults.tsx` (Goals page) | Plan vs goal lines + year-by-year table | goal, safe, alternative, plan (the Contributions column is not a series); `GoalResults` owns the state; the verdict, summary, insights and the CSV export (all years and scenarios) never change | years (`String(year)`; the table's rows) | stage 2 |
-| `components/charts/ValueChart.tsx` (Dashboard, Value vs invested) | Value and invested lines | value, invested; the chart owns the state and the legend, no table (dates) | none (dates) | stage 2 |
-| `components/charts/AllocationDonut.tsx` (Dashboard, Allocation) | Allocation donut | none: slices are the entries (`useSliceSelection`; reset when the dimension tab changes) | slices (top 8 + Other); shares and the centre total are recomputed over the visible slices | stage 2 |
-| `features/calendar/CalendarOverview.tsx` (`IncomeChart`, `incomeChartModel.ts`, `IncomeTooltip.tsx`, sr-only data table) | Calendar income per month | paid, declared, estimated | months | stage 2 |
-| `features/asset-detail/PriceChart.tsx` (`PriceHistoryCard.tsx`) | Price + benchmarks | `price` (the security; in the Price view also the plain Change column), one per benchmark symbol (Performance view only) | none (dates are plain table rows) | stage 2 (series only; hiding `price` also removes the high/low labels and the trade markers, which sit on that line) |
-| `features/asset-detail/DividendYearChart.tsx` (`DividendsTab.tsx`) | Dividends per year (asset detail) | `complete` (Full year), `partial` (Partial year): only the kinds that have data; Payments is a plain column | years | stage 2 (a year leaves the chart when its row or its kind is excluded) |
-| `components/charts/DividendBarChart.tsx` | Received / upcoming per month | received, upcoming | months | n/a: not used by any page (only tests) |
-| `features/rebalance/DriftTable.tsx` | Drift table | - | holdings / categories | n/a: a table, not a chart |
-| `features/auth/TotpQr.tsx` | TOTP QR code | - | - | n/a: not a data chart |
+| File | Chart | Series (= columns) | Categories (= rows) | Status | Focus (hover) |
+|---|---|---|---|---|---|
+| `features/dividends/YieldPayoutCard.tsx` | Yield / payout bars + cost dots | yield, onCost / amount | holdings, categories | stage 1 | stage 1 |
+| `features/dividends/DiversificationCard.tsx` | Income donut | - (slices) | holdings (top 8 + Other) | stage 1 | stage 1 |
+| `features/dividends/ConsistencyCard.tsx` | Dividend safety / consistency donut | - (slices) | badges | stage 1 | stage 1 |
+| `features/dividends/GrowthAndFuture.tsx` | Average annual growth | growth | holdings | stage 1 | stage 1 |
+| `features/dividends/GrowthAndFuture.tsx` | Future payments | declared, estimated | months | stage 1 | stage 1 |
+| `features/dividends/ReceivedTimeline.tsx` | Dividends received (+ future) | paid, declared, estimated, avg | periods | stage 1 | stage 1 |
+| `features/dividends/ReceivedCards.tsx` | Dividends received by holding | amount | holdings | stage 1 | stage 1 |
+| `features/dividends/GrowthCharts.tsx` | Dividend growth, By year | years, declared, estimated, forecast year, average | calendar months | stage 1 | stage 1 |
+| `features/dividends/GrowthCharts.tsx` | Dividend growth, Timeline | received, declared, estimated, average, trend, projection | months | stage 1 | stage 1 |
+| `features/growth/GrowthChart.tsx` (Growth tab: Value and Performance cards) | Portfolio value / return lines | `portfolio`, `invested` (Value card only), one per benchmark symbol (Performance: only while Compare is on); legend entries carry their start → end figure as `detail` | none (dates are plain table rows) | stage 2 (series only; the benchmark picker is unchanged: a hidden benchmark stays selected there and in the request, only the line goes; the benchmark headline never changes) | todo |
+| `features/growth/DynamicsChart.tsx` (`DynamicsCard.tsx`) | Return per period | `portfolio` + one per benchmark symbol | months (`YYYY-MM`) of the chosen period; the "View details" table is the selection table | stage 2 | todo |
+| `features/growth/HoldingsChart.tsx` (`HoldingsCard.tsx`) | Return per holding (horizontal bars) | `returnPct` (the Return column; Name, Return (€) and Measured from are plain columns) | holdings (symbol) | stage 2 (the legend and the table stay in both views; the table is the Table view) | todo |
+| `features/growth/ChartOrTable.tsx`, `GrowthTable.tsx`, `GrowthChart.tsx` (`ChartLegend`), `RangeButtons.tsx` | Chart / table switch and legend of the Growth tab | same series as the three charts above | same | stage 2 (`ChartLegend` and `GrowthTable` are gone: `SelectableLegend` + `SelectableTable`; `SelectableChartOrTable` in `ChartOrTable.tsx` = legend + chart/table switch + empty state; helpers in `growthSelection.tsx`) | todo |
+| `components/charts/BenchmarkChart.tsx` (Analytics, Benchmark tab) | Portfolio vs benchmark | portfolio, benchmark (when there is one), invested; the chart owns the state and the legend, no table (dates) | none (dates) | stage 2 | todo |
+| `components/charts/ReturnsBarChart.tsx` + `features/analytics/ReturnsTab.tsx` (Analytics, Returns tab) | TWR per period | twrPct (the Return (TWR) column; IRR, Gain, End value are plain columns) | periods (`year` / `quarter` / `month` key of the period); the best / worst period in the text alternative follow the periods that are left | stage 2 | todo |
+| `components/charts/DividendGrowthChart.tsx` + `features/analytics/GrowthChartBlock.tsx` (Analytics, Dividend growth tab) | Dividends compared per year / month | per year: current (Received); per month: previous (a year earlier, only when there is one), current (This period) | years / months (the bar's label) | stage 2 | todo |
+| `components/charts/GoalChart.tsx` + `features/analytics/GoalTab.tsx` (Analytics, Goal tab) | Scenario lines | none: scenarios are the entries (`useSliceSelection`; the legend and the scenario table rows toggle the same scenario) | scenarios (cautious, base, optimistic); the target line stays | stage 2 | todo |
+| `features/goals/GoalChart.tsx`, `GoalTable.tsx`, `GoalResults.tsx` (Goals page) | Plan vs goal lines + year-by-year table | goal, safe, alternative, plan (the Contributions column is not a series); `GoalResults` owns the state; the verdict, summary, insights and the CSV export (all years and scenarios) never change | years (`String(year)`; the table's rows) | stage 2 | todo |
+| `components/charts/ValueChart.tsx` (Dashboard, Value vs invested) | Value and invested lines | value, invested; the chart owns the state and the legend, no table (dates) | none (dates) | stage 2 | todo |
+| `components/charts/AllocationDonut.tsx` (Dashboard, Allocation) | Allocation donut | none: slices are the entries (`useSliceSelection`; reset when the dimension tab changes) | slices (top 8 + Other); shares and the centre total are recomputed over the visible slices | stage 2 | todo |
+| `features/calendar/CalendarOverview.tsx` (`IncomeChart`, `incomeChartModel.ts`, `IncomeTooltip.tsx`, sr-only data table) | Calendar income per month | paid, declared, estimated | months | stage 2 | todo |
+| `features/asset-detail/PriceChart.tsx` (`PriceHistoryCard.tsx`) | Price + benchmarks | `price` (the security; in the Price view also the plain Change column), one per benchmark symbol (Performance view only) | none (dates are plain table rows) | stage 2 (series only; hiding `price` also removes the high/low labels and the trade markers, which sit on that line) | todo |
+| `features/asset-detail/DividendYearChart.tsx` (`DividendsTab.tsx`) | Dividends per year (asset detail) | `complete` (Full year), `partial` (Partial year): only the kinds that have data; Payments is a plain column | years | stage 2 (a year leaves the chart when its row or its kind is excluded) | todo |
+| `components/charts/DividendBarChart.tsx` | Received / upcoming per month | received, upcoming | months | n/a: not used by any page (only tests) | n/a |
+| `features/rebalance/DriftTable.tsx` | Drift table | - | holdings / categories | n/a: a table, not a chart | n/a |
+| `features/auth/TotpQr.tsx` | TOTP QR code | - | - | n/a: not a data chart | n/a |
 
 Charts where include/exclude barely makes sense: the single-line charts (portfolio value, price, benchmark) have one series that
 should always stay, so the legend only matters when benchmarks / invested are present; hiding "Portfolio" there is allowed (empty state)
 but low value. Goal-planning lines are scenarios of one calculation: excluding a line only declutters, the verdict text never changes.
+
+### Legend hover focus
+
+Hovering a legend entry, or Tab-focusing its button, previews it in the chart: the series, bars or slice the entry stands for stay at
+full strength, everything else fades to 25 %. A preview only: it never changes what is included, never changes a headline number, and does
+nothing for an entry that is excluded (it is not drawn). Progressive enhancement: touch (a tap only toggles), screen readers and
+keyboard-less non-hover users lose nothing. The "Focus (hover)" column of the "All charts" table says which charts have it (`stage 1` = done, `todo` = not yet).
+
+API (additive and optional; `SelectableLegend` wires it, a chart only reads it):
+
+```ts
+interface SeriesSelection {            // returned by useSeriesSelection AND useSliceSelection
+  focusKey: string | null;             // the previewed legend entry; null while nothing is previewed or the entry is excluded
+  setFocus(key: string | null): void;  // called by SelectableLegend; transient, not persisted, not part of reset()
+}
+focusOpacity(focusKey, keys: string | readonly string[], dim = FOCUS_DIM /* 0.25 */): number  // 1 or dim
+isFocused(focusKey, keys): boolean                                                              // true when nothing is previewed
+```
+
+- State lives in the same hook instance as the selection, so only the card re-renders on a hover. The include/exclude half of the
+  selection keeps its identity while only the preview changes: memoise heavy chart data (`useMemo`) on `isSeriesVisible`, `isRowVisible`,
+  `hiddenSeries`, not on `selection` itself. Recharts runs with `isAnimationActive={false}`, so a hover repaints without re-animating.
+- Legend wiring: `onPointerEnter` / `onPointerLeave` on every entry (mouse and pen only, `pointerType` `touch` is ignored), `onFocus` / `onBlur`
+  on every toggle button (keyboard focus only: `:focus-visible`, so the focus that a click leaves on the button does not start a preview).
+  A plain, non-toggleable entry (e.g. the "Monthly average" line) previews on hover too; it carries a key like any entry. An entry that
+  leaves the legend while previewed ends the preview. No key handlers on non-interactive elements.
+- Mapping rule: the legend key is not always the data key. Each chart says which legend entries a drawn element belongs to and passes them
+  as `keys` to `focusOpacity(selection.focusKey, keys)`; reuse the logic that already decides visibility, do not write a second copy. Example:
+  `yearBarEntries(dataKey)` in `growthForecast.ts` (`2026-declared` belongs to `2026`, `declared` and `2026-forecast`); `yearBarVisible` is
+  `entries.every(isVisible)`, the preview is `entries.includes(focusKey)`. For a donut the slice key is the legend key (`<Donut focusKey>` in
+  `features/dividends/chartParts.tsx` fades the other `<Cell>`s through `fillOpacity`; the centre text and the legend stay).
+- Applying it: bars `fillOpacity` + `strokeOpacity`, lines `strokeOpacity` (dots too: `dot={{ fillOpacity, strokeOpacity }}`), areas and
+  reference lines `strokeOpacity`, SVG text `opacity`. Text values (value labels, tooltips, axis) are never removed; labels that describe a
+  whole stack only fade to 50 %. Text next to a slice (the ranked list) fades to 45 % so it stays readable. The preview element that stays is not restyled.
+- Motion: the chart frames carry `chart-focus` (`ChartFrame`, `Donut`); `index.css` gives the SVG shapes `transition` on
+  `fill-opacity` / `stroke-opacity` / `opacity` of 120 ms, turned off under `prefers-reduced-motion: reduce`. A chart outside these
+  components adds the `chart-focus` class to its wrapper.
+- Test it: pure helpers and mappings directly; legend handlers (mouse, pen, touch ignored, keyboard focus / blur, excluded entry, entry that
+  leaves); the card with a fixed-size `ResponsiveContainer` mock (see `features/dividends/legendFocus.test.tsx`) counting `fill-opacity` 1 versus
+  0.25; Playwright (`e2e/chart-focus.spec.ts`) counts bars (`.recharts-bar-rectangle path`; the "Upcoming" band is a rectangle too) or
+  slices by `fill-opacity` / `stroke-opacity`, never pixels, and checks no sideways page scroll at 1440 / 390 / 320.
+
+Dividends (stage 1): which data keys stay for each legend entry (every other element fades).
+
+| Chart | Legend entry | Stays at full strength |
+|---|---|---|
+| Dividend growth, By year | a year (`2026`) | its received bar and its declared / estimated forecast stack |
+| | `<year> (forecast)` (a year with forecast bars only) | that year's declared and estimated bars |
+| | Declared / Estimated (forecast) | that status in every year |
+| | Average of years | the dashed line (and its dots) |
+| Dividend growth, Timeline | Received, Declared, Estimated | that bar series |
+| | 12-month average, Trend, Trend (projected) | that line (the projection is its own entry) |
+| Dividends received | Received, Declared, Estimated | that status segment of every stack; the value labels fade to 50 % while anything is previewed |
+| | avg | the dashed average line and its label |
+| Future payments | Declared, Estimated | that status; the dashed average fades |
+| | Monthly average (plain item) | the dashed line; the bars fade |
+| Yield / payout | Yield on value / Amount per year | the bars; the dots fade |
+| | Yield on cost | the dots; the bars fade |
+| Income diversification, Dividend safety (donuts) | a holding / a badge | that slice (and, in the income card, its ranked row); the centre figure and the legend stay |
+| Dividends received by holding, Average annual growth | the one entry | nothing fades: a single series, so there is nothing to compare |
+

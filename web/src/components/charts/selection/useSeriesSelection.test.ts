@@ -86,3 +86,62 @@ describe('useSliceSelection', () => {
     expect(result.current.hasHidden).toBe(false);
   });
 });
+
+describe('legend focus (hover / keyboard preview)', () => {
+  it('starts without focus, sets and clears it, and never changes what is included', () => {
+    const { result } = renderHook(() => useSeriesSelection(['a', 'b'], ['r1']));
+    expect(result.current.focusKey).toBeNull();
+    act(() => result.current.setFocus('a'));
+    expect(result.current.focusKey).toBe('a');
+    expect(result.current.hasHidden).toBe(false);
+    expect(result.current.isSeriesVisible('a')).toBe(true);
+    act(() => result.current.setFocus('b'));
+    expect(result.current.focusKey).toBe('b');
+    act(() => result.current.setFocus(null));
+    expect(result.current.focusKey).toBeNull();
+  });
+
+  it('has no focus while the entry is excluded, and the preview resumes when it is included again', () => {
+    const { result } = renderHook(() => useSeriesSelection(['a', 'b']));
+    act(() => result.current.setFocus('a'));
+    act(() => result.current.toggleSeries('a'));
+    expect(result.current.focusKey).toBeNull();
+    act(() => result.current.toggleSeries('a'));
+    expect(result.current.focusKey).toBe('a');
+    act(() => result.current.toggleSeries('b'));
+    expect(result.current.focusKey).toBe('a');
+  });
+
+  it('keeps the include/exclude functions stable while only the preview changes (so memoised chart data stays valid)', () => {
+    const { result } = renderHook(() => useSeriesSelection(['a', 'b'], ['r1']));
+    const before = result.current;
+    act(() => result.current.setFocus('a'));
+    expect(result.current).not.toBe(before);
+    expect(result.current.isSeriesVisible).toBe(before.isSeriesVisible);
+    expect(result.current.isRowVisible).toBe(before.isRowVisible);
+    expect(result.current.hiddenSeries).toBe(before.hiddenSeries);
+    expect(result.current.setFocus).toBe(before.setFocus);
+  });
+
+  it('is not part of "Show all" and survives a re-render with the same keys', () => {
+    const { result, rerender } = renderHook(({ keys }) => useSeriesSelection(keys), { initialProps: { keys: ['a', 'b'] } });
+    act(() => result.current.setFocus('b'));
+    rerender({ keys: ['a', 'b'] });
+    expect(result.current.focusKey).toBe('b');
+    act(() => result.current.reset());
+    expect(result.current.focusKey).toBe('b');
+  });
+
+  it('works for a donut: the slice of the legend entry, nothing while it is excluded', () => {
+    const { result } = renderHook(() => useSliceSelection(['a', 'b']));
+    expect(result.current.focusKey).toBeNull();
+    act(() => result.current.setFocus('a'));
+    expect(result.current.focusKey).toBe('a');
+    act(() => result.current.toggleRow('a'));
+    expect(result.current.focusKey).toBeNull();
+    act(() => result.current.reset());
+    expect(result.current.focusKey).toBe('a');
+    act(() => result.current.setFocus(null));
+    expect(result.current.focusKey).toBeNull();
+  });
+});
