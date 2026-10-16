@@ -1,8 +1,10 @@
+import { useMemo } from 'react';
 import { Area, CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useTheme } from '../../theme/ThemeProvider';
 import { formatMoney, formatPercent } from '../../lib/format';
 import { compactMoneyTick, dateLabel, dateTickFormatter } from '../../components/charts/chartFormatters';
 import { analyticsTheme, tooltipStyle } from '../../components/charts/analyticsTheme';
+import { focusOpacity } from '../../components/charts/selection';
 import { benchmarkColors, monthTicks, niceAxis, percentTickWith, returnKey, valueKey, type GrowthRow } from './growthFormat';
 
 interface Props {
@@ -18,6 +20,8 @@ interface Props {
   currency: string;
   summary: string;
   testId: string;
+  /** The legend entry that is hovered or focused: its line stays, every other line fades. `portfolio`, `invested` or a benchmark symbol. */
+  focusKey?: string | null;
 }
 
 const tickProps = { fontSize: 11 } as const;
@@ -27,19 +31,26 @@ export const growthTooltip =
   (v: unknown, name: unknown): [string, string] => [isValue ? formatMoney(Number(v), currency) : formatPercent(Number(v), { signed: true }), String(name)];
 
 /** Portfolio value (area + invested) or cumulative return (lines) with one line per benchmark. */
-export function GrowthChart({ rows, benchmarks, showPortfolio, showInvested = true, kind, currency, summary, testId }: Readonly<Props>) {
+export function GrowthChart({ rows, benchmarks, showPortfolio, showInvested = true, kind, currency, summary, testId, focusKey = null }: Readonly<Props>) {
   const { theme } = useTheme();
   const c = analyticsTheme(theme);
   const colors = benchmarkColors(theme);
   const isValue = kind === 'value';
   const portfolioKey = isValue ? 'value' : 'returnPct';
-  const dates = rows.map((r) => String(r.date));
-  const longSpan = dates.length > 1 && Date.parse(dates.at(-1)!) - Date.parse(dates[0]!) > 200 * 86_400_000;
-  const returns = rows.flatMap((r) => [...(showPortfolio ? [Number(r.returnPct)] : []), ...benchmarks.map((b) => Number(r[returnKey(b.index)] ?? 0))]);
-  const percentAxis = niceAxis(returns);
+  const { dates, longSpan, percentAxis } = useMemo(() => {
+    const days = rows.map((r) => String(r.date));
+    const returns = rows.flatMap((r) => [...(showPortfolio ? [Number(r.returnPct)] : []), ...benchmarks.map((b) => Number(r[returnKey(b.index)] ?? 0))]);
+    return {
+      dates: days,
+      longSpan: days.length > 1 && Date.parse(days.at(-1)!) - Date.parse(days[0]!) > 200 * 86_400_000,
+      percentAxis: niceAxis(returns),
+    };
+  }, [rows, benchmarks, showPortfolio]);
+  const portfolioOpacity = focusOpacity(focusKey, 'portfolio');
+  const investedOpacity = focusOpacity(focusKey, 'invested');
 
   return (
-    <div role="img" aria-label={summary} className="h-72 w-full" data-testid={testId}>
+    <div role="img" aria-label={summary} className="chart-focus h-72 w-full" data-testid={testId}>
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={rows as GrowthRow[]} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
           <defs>
@@ -62,9 +73,9 @@ export function GrowthChart({ rows, benchmarks, showPortfolio, showInvested = tr
           />
           <Tooltip contentStyle={tooltipStyle(c)} labelFormatter={dateLabel} formatter={growthTooltip(isValue, currency)} />
           {!isValue && <ReferenceLine y={0} stroke={c.axis} strokeDasharray="3 3" />}
-          {isValue && showPortfolio && <Area type="monotone" dataKey="value" name="Portfolio" stroke={c.value} strokeWidth={2.5} fill={`url(#growth-fill-${kind})`} baseValue="dataMin" dot={false} isAnimationActive={false} />}
-          {!isValue && showPortfolio && <Line type="monotone" dataKey={portfolioKey} name="Portfolio" stroke={c.value} strokeWidth={2.5} dot={false} isAnimationActive={false} />}
-          {isValue && showInvested && <Line type="stepAfter" dataKey="invested" name="Invested" stroke={c.invested} strokeWidth={1.5} strokeDasharray="5 4" dot={false} isAnimationActive={false} />}
+          {isValue && showPortfolio && <Area type="monotone" dataKey="value" name="Portfolio" stroke={c.value} strokeWidth={2.5} strokeOpacity={portfolioOpacity} fill={`url(#growth-fill-${kind})`} fillOpacity={portfolioOpacity} baseValue="dataMin" dot={false} isAnimationActive={false} />}
+          {!isValue && showPortfolio && <Line type="monotone" dataKey={portfolioKey} name="Portfolio" stroke={c.value} strokeWidth={2.5} strokeOpacity={portfolioOpacity} dot={false} isAnimationActive={false} />}
+          {isValue && showInvested && <Line type="stepAfter" dataKey="invested" name="Invested" stroke={c.invested} strokeWidth={1.5} strokeOpacity={investedOpacity} strokeDasharray="5 4" dot={false} isAnimationActive={false} />}
           {benchmarks.map((b) => (
             <Line
               key={b.symbol}
@@ -73,6 +84,7 @@ export function GrowthChart({ rows, benchmarks, showPortfolio, showInvested = tr
               name={b.symbol}
               stroke={colors[b.index % colors.length]}
               strokeWidth={2}
+              strokeOpacity={focusOpacity(focusKey, b.symbol)}
               dot={false}
               connectNulls={false}
               isAnimationActive={false}

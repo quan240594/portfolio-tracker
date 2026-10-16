@@ -1,6 +1,7 @@
+import { useMemo } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { AssetDividendYear } from '@portfolio/shared';
-import type { SeriesSelection } from '../../components/charts/selection';
+import { focusOpacity, type SeriesSelection } from '../../components/charts/selection';
 import { analyticsTheme, tooltipStyle } from '../../components/charts/analyticsTheme';
 import { formatMoney } from '../../lib/format';
 import { useTheme } from '../../theme/ThemeProvider';
@@ -47,26 +48,28 @@ interface Props {
   showComplete: boolean;
   showPartial: boolean;
   label: string;
+  /** The legend entry that is hovered or focused (`complete` or `partial`): that kind of year stays, the other fades. */
+  focusKey?: string | null;
 }
 
 /** Dividend per share per calendar year. */
-export function DividendYearChart({ byYear, currency, showComplete, showPartial, label }: Readonly<Props>) {
+export function DividendYearChart({ byYear, currency, showComplete, showPartial, label, focusKey = null }: Readonly<Props>) {
   const { theme } = useTheme();
   const c = analyticsTheme(theme);
-  const rows = yearRows(byYear);
+  const rows = useMemo(() => yearRows(byYear), [byYear]);
   const format = (v: unknown, name: unknown): [string, string] => [formatMoney(Number(v), currency, { maxDigits: 4 }), yearSeriesName(name)];
   // a year is one kind or the other, so whichever bar is drawn is the top of its stack
   const top: [number, number, number, number] = [4, 4, 0, 0];
   return (
-    <div role="img" aria-label={label} className="h-64 w-full" data-testid="asset-dividend-chart">
+    <div role="img" aria-label={label} className="chart-focus h-64 w-full" data-testid="asset-dividend-chart">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={rows} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
           <CartesianGrid stroke={c.grid} vertical={false} />
           <XAxis dataKey="year" stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
           <YAxis tickFormatter={perShareTick(currency)} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={64} />
           <Tooltip cursor={{ fill: c.grid, opacity: 0.5 }} contentStyle={tooltipStyle(c)} formatter={format} />
-          {showComplete && <Bar dataKey="complete" stackId="y" fill={c.received} radius={top} isAnimationActive={false} />}
-          {showPartial && <Bar dataKey="partial" stackId="y" fill={c.upcoming} radius={top} isAnimationActive={false} />}
+          {showComplete && <Bar dataKey="complete" stackId="y" fill={c.received} fillOpacity={focusOpacity(focusKey, 'complete')} strokeOpacity={focusOpacity(focusKey, 'complete')} radius={top} isAnimationActive={false} />}
+          {showPartial && <Bar dataKey="partial" stackId="y" fill={c.upcoming} fillOpacity={focusOpacity(focusKey, 'partial')} strokeOpacity={focusOpacity(focusKey, 'partial')} radius={top} isAnimationActive={false} />}
         </BarChart>
       </ResponsiveContainer>
     </div>

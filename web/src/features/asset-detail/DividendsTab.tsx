@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { AssetDetailResponse, AssetDividendYear, AssetPositionsResponse } from '@portfolio/shared';
 import { QueryBoundary } from '../../components/QueryBoundary';
@@ -45,7 +45,9 @@ function YearChartBlock({ byYear, currency, symbol }: Readonly<{ byYear: readonl
   const c = analyticsTheme(theme);
   const kinds = yearSeriesKeys(byYear);
   const selection = useSeriesSelection(kinds, byYear.map(yearId));
-  const shown = selectYears(byYear, selection);
+  const { isRowVisible, isSeriesVisible } = selection;
+  // memoised on the include/exclude state only, so a hover preview does not rebuild the chart data
+  const shown = useMemo(() => selectYears(byYear, { isRowVisible, isSeriesVisible }), [byYear, isRowVisible, isSeriesVisible]);
   const swatches: Record<YearKind, string> = { complete: c.received, partial: c.upcoming };
   const entries = kinds.map((kind) => ({ key: kind, label: YEAR_LABELS[kind], swatch: <LegendSwatch color={swatches[kind]} /> }));
   const columns = [...kinds.map((kind) => ({ key: kind, label: YEAR_LABELS[kind] })), { key: 'payments', label: 'Payments', selectable: false }];
@@ -68,6 +70,7 @@ function YearChartBlock({ byYear, currency, symbol }: Readonly<{ byYear: readonl
               showComplete={selection.isSeriesVisible('complete')}
               showPartial={selection.isSeriesVisible('partial')}
               label={dividendYearLabel(shown, currency, symbol, selection.hasHidden)}
+              focusKey={selection.focusKey}
             />
           )
         }
