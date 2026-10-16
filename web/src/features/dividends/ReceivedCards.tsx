@@ -7,7 +7,8 @@ import { SegmentedControl } from '../../components/SegmentedControl';
 import { compactMoneyTick } from '../../components/charts/chartFormatters';
 import { formatMoney } from '../../lib/format';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
-import { ChartDataTable, ChartFrame, useDividendTheme } from './chartParts';
+import { LegendSwatch, NothingSelected, SelectableDataTable, SelectableLegend, selectRows, useSeriesSelection, type SelectableColumn } from '../../components/charts/selection';
+import { ChartFrame, useDividendTheme } from './chartParts';
 import { EmptyNote, QueryCard } from './DividendCard';
 import { receivedFutureTimeline } from './receivedFuture';
 import { ReceivedTimeline } from './ReceivedTimeline';
@@ -32,24 +33,43 @@ interface BarsProps {
   column: string;
 }
 
+const AMOUNT_SERIES = ['amount'];
+const amountColumns = (column: string): SelectableColumn[] => [{ key: 'amount', label: column }];
+
 function AmountBars({ data, currency, title, testId, caption, column }: Readonly<BarsProps>) {
   const c = useDividendTheme();
-  const total = data.reduce((s, d) => s + d.amount, 0);
-  const label = `${title}: ${data.length} bars, ${formatMoney(total, currency)} in total.`;
+  const selection = useSeriesSelection(
+    AMOUNT_SERIES,
+    data.map((d) => d.label),
+  );
+  const shown = selectRows(data, (d) => d.label, selection);
+  const total = shown.reduce((s, d) => s + d.amount, 0);
+  const label = `${title}: ${shown.length} bars, ${formatMoney(total, currency)} in total.`;
   return (
     <>
-      <ChartFrame label={label} testId={testId} bars={data.length} height="h-64">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data as { label: string; amount: number }[]} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-            <CartesianGrid stroke={c.grid} vertical={false} />
-            <XAxis dataKey="label" stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={8} />
-            <YAxis tickFormatter={compactMoneyTick(currency)} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={56} />
-            <Tooltip cursor={{ fill: c.grid, opacity: 0.5 }} contentStyle={c.tooltip} formatter={(v: unknown) => [formatMoney(Number(v), currency), 'Received']} />
-            <Bar dataKey="amount" fill={c.received} radius={[4, 4, 0, 0]} isAnimationActive={false} />
-          </BarChart>
-        </ResponsiveContainer>
-      </ChartFrame>
-      <ChartDataTable caption={caption} columns={[column, 'Received']} rows={data.map((d) => [d.label, formatMoney(d.amount, currency)])} />
+      <SelectableLegend entries={[{ key: 'amount', label: 'Received', swatch: <LegendSwatch color={c.received} /> }]} selection={selection} testId={`${testId}-legend`} />
+      {selection.nothingSelected ? (
+        <NothingSelected onShowAll={selection.reset} />
+      ) : (
+        <ChartFrame label={label} testId={testId} bars={shown.length} height="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={shown as { label: string; amount: number }[]} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+              <CartesianGrid stroke={c.grid} vertical={false} />
+              <XAxis dataKey="label" stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={8} />
+              <YAxis tickFormatter={compactMoneyTick(currency)} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={56} />
+              <Tooltip cursor={{ fill: c.grid, opacity: 0.5 }} contentStyle={c.tooltip} formatter={(v: unknown) => [formatMoney(Number(v), currency), 'Received']} />
+              <Bar dataKey="amount" fill={c.received} radius={[4, 4, 0, 0]} isAnimationActive={false} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartFrame>
+      )}
+      <SelectableDataTable
+        caption={caption}
+        rowHeader={column}
+        columns={amountColumns('Received')}
+        selection={selection}
+        rows={data.map((d) => ({ id: d.label, header: d.label, cells: [formatMoney(d.amount, currency)] }))}
+      />
     </>
   );
 }

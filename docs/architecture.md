@@ -1050,3 +1050,140 @@ periods of the chart that lie before the current one; the current and upcoming p
 complete. It is drawn dashed, labelled `avg` and listed in the legend; there is no line when no period is complete or nothing
 was received in them. The value is spelled out under the chart and in the card's info tip. It is a history of what was
 received, not a forecast.
+
+## Chart selection (legend and data table)
+
+Every chart can let the user include or exclude data: click a legend entry, a column header or a row header of the chart's data
+table. Excluded series and categories disappear from the chart, which rescales to what is left. State is per card, in memory only
+(no persistence, no URL). Code: `web/src/components/charts/selection/` (import from the `index.ts`); the Dividends page is the
+reference implementation (stage 1). Other areas reuse the same primitives, they do not invent their own.
+
+### Vocabulary
+
+- **Series** = what a legend entry and a value column of the table stand for: a bar series, a line, a year (when years are the
+  colours), a status (declared / estimated). Key = a stable string, the same in legend, table column and chart (usually the
+  recharts `dataKey`).
+- **Row** = a category on the axis and a row of the table: a month, a period, a holding, a badge. Id = a stable string.
+- **Slice** (donut = parts of a whole): the legend entry and the table row are the same thing; one state, `useSliceSelection`.
+- Time-series charts (dates on the x axis: value, price, benchmark lines) have **series only**: hiding single days is meaningless.
+  Give their table rows `selectable: false` (or leave the table out).
+
+### API
+
+```ts
+useSeriesSelection(seriesKeys: readonly string[], rowIds: readonly string[] = []): SeriesSelection
+useSliceSelection(sliceKeys: readonly string[]): SeriesSelection   // rows === series; legend and table toggle the same slices
+
+interface SeriesSelection {
+  hiddenSeries, hiddenRows: ReadonlySet<string>;        // only keys that still exist in the data
+  isSeriesVisible(key), isRowVisible(id): boolean;
+  toggleSeries(key), toggleRow(id): void;
+  hasHidden: boolean;                                    // something is excluded
+  nothingSelected: boolean;                              // every series, or every row, is excluded
+  reset(): void;                                         // "Show all"
+}
+```
+
+- Pass the keys the chart CAN draw (from the unfiltered data), not the visible ones. Lists may be rebuilt on every render.
+- Hidden keys that disappear from the data (another portfolio, metric, period) are dropped; keys that are still there stay hidden.
+- Hiding the last visible series (or row) is allowed; the card then shows `<NothingSelected onShowAll={selection.reset} />`
+  ("Nothing selected: show all") instead of the chart, and keeps the legend and table so the user can undo it.
+
+Components (all `Readonly<Props>`, native HTML, no ARIA roles):
+
+| Component | Use |
+|---|---|
+| `<SelectableLegend entries selection label? testId? />` | HTML legend above the chart (outside its scroll area, wraps on a phone). `entries: { key, label, swatch: ReactNode, toggleable? }[]`; `toggleable: false` shows a plain, non-interactive item (a derived line). Shows "Show all" and the note "Chart shows the current selection" only while something is excluded. `data-testid` default `chart-legend`. |
+| `<LegendSwatch shape? color edge? dashed? />` | Colour key: `shape` `square` (bars, slices, default), `line`, `dot`; `edge` = darker outline of a pastel bar; `dashed` = estimated / forecast / dashed line. Any ReactNode works as `swatch` (the growth cards reuse their own `Swatch`). |
+| `<SelectableTable caption rowHeader columns rows selection />` | Real `<table>`: series column headers and row headers are toggle buttons. `columns: { key, label, selectable? }[]` (key = series key; `selectable: false` for totals, derived or descriptive columns); `rows: { id, header: string, cells, selectable? }[]` (id = row id; `selectable: false` for totals rows); one cell per column. Visible hint "Click a column or row header to include or exclude it from the chart" (the table's accessible description) and a "Show all" button while something is excluded. |
+| `<SelectableDataTable ...same props, extra? />` | The same inside the usual "Show data table" disclosure; `extra` adds plain content (more tables) below. Replaces `ChartDataTable`. |
+| `<SelectionNote />`, `<NothingSelected onShowAll />` | The note and the empty state (the legend already renders the note itself). |
+
+Adapter (`selectionAdapter.ts`, pure): `selectRows(rows, idOf, selection)` (drop excluded categories), `visibleKeys(keys, selection)`,
+`maskSeries(row, keys, selection)` (hidden series fields -> undefined, so tooltips and totals ignore them), `visibleTotal(row, keys,
+selection)`, `stableColours(allKeys, palette)` (colour by position among ALL keys), `visibleSlices(slices, selection)` (adds `share`
+over the visible slices) and `visibleSliceTotal`. Chart-specific adapters live next to the chart's model (e.g. `selectPeriods` in
+`receivedFuture.ts`, `yearBarVisible` / `selectYearRows` in `growthForecast.ts`).
+
+### Mapping rules (how to apply it to a chart)
+
+1. Decide series keys and row ids and write them in the table below. Keys come from the unfiltered data; colours must not depend on
+   what is visible (`stableColours`, or colours fixed per series / per year).
+2. Call `useSeriesSelection(seriesKeys, rowIds)` (or `useSliceSelection` for a donut) in the component that owns the card state. Put
+   it BELOW the early returns of empty states by splitting the component (hooks cannot follow a `return`).
+3. Draw only what is visible: `selectRows` for the categories, and do not render the `<Bar>`/`<Line>` of an excluded series (do not use
+   recharts `hide`; omitting the element rescales the axis for sure). Give the top segment of a stack the rounded corners again.
+   Mask excluded series in the rows the tooltip reads (`maskSeries`) so the tooltip never names an excluded series.
+4. Recompute everything that is part of the chart from the visible data: totals above stacked bars, a fixed value axis (`niceAxis`),
+   a dashed average line ("average of what is shown"), donut shares and the centre text, the chart's accessible `aria-label`
+   (say "current selection"). Lines that are statistical fits of the whole history (trend, 12-month average) are NOT refitted:
+   excluded months only remove their points.
+5. Headline numbers, KPI tiles and stat tiles are NOT recomputed (they describe the portfolio); the legend's note
+   "Chart shows the current selection" tells the reader the chart is filtered. Summary lines that belong to the chart say what they cover.
+6. Render `<SelectableLegend>` above the chart, `<NothingSelected>` instead of the chart when `selection.nothingSelected`, and
+   `<SelectableDataTable>` (or `SelectableTable`) as the table alternative. Table cells of the data stay complete (excluded rows /
+   columns are dimmed and struck through, not removed).
+7. Test the card DIRECTLY (legend, table header and row toggles, "Show all", the empty state, the recomputed label) and add Playwright
+   coverage: count `path.recharts-rectangle` / `path.recharts-sector` before and after, assert `aria-pressed`, never exact pixels.
+
+### Accessibility
+
+- Legend entries and headers are native `<button type="button" aria-pressed>`: pressed = included, `aria-pressed="false"` = excluded
+  (announced as "not pressed"); Tab, Enter and Space work, focus ring from the global `:focus-visible` rule, targets at least 24 px tall.
+- Excluded is shown by text, not colour alone: struck-through label, dimmed swatch, dimmed and struck-through cells.
+- Legend text uses the normal text colour (never the pale bar colour); the swatch is `aria-hidden`.
+- The table keeps `<table>` / `<th scope="col|row">` semantics; no `role="grid"`, no key handlers on non-interactive elements. Wrap any
+  visually hidden (sr-only) table in a `div`: a bare sr-only table can widen the page.
+- The hint line is the table's accessible description (`aria-describedby`); the chart keeps `role="img"` with a label that follows the selection.
+
+### Stage 1: the Dividends page (done)
+
+| Chart | Series (legend, table columns) | Rows (table rows) |
+|---|---|---|
+| Yield / payout (`YieldPayoutCard.tsx`) | `yield` (bars) + `onCost` (dots) for Yield; `amount` (bars) for Amount; only the drawn ones are toggles | holdings or categories (bar key) |
+| Passive income diversification (`DiversificationCard.tsx`) | none: slices are the entries | slices = holdings (top 8 + Other); legend, ranked list, donut and table follow; shares and the centre total are recomputed over the visible slices |
+| Dividend safety (`ConsistencyCard.tsx`) | none: slices are the entries | slices = badges; centre = holdings left; the per-holding table next to it is not chart data and does not change |
+| Average annual growth (`GrowthAndFuture.tsx`) | `growth` | holdings with a growth figure |
+| Future payments (`GrowthAndFuture.tsx`) | `declared`, `estimated`; the monthly average is a plain legend item, recomputed over the visible months and series | months |
+| Dividends received (`ReceivedTimeline.tsx`) | `paid` (Received), `declared`, `estimated` (future on), `avg` (line, toggle); the Total column is not a series | periods (`<granularity>:<period number>`); the average, the axis and the value labels are recomputed over the visible periods and statuses |
+| Dividends received by holding (`ReceivedCards.tsx`) | `amount` | holdings |
+| Dividend growth, By year (`GrowthCharts.tsx` `YearChart`) | one per year (hides its received bar AND its forecast stack), `declared` / `estimated` (that status in every year), `<year>-forecast` (a forecast-only year), `average` (the "Average of years" line, recomputed over the years that are left) | the 12 calendar months |
+| Dividend growth, Timeline (`GrowthCharts.tsx` `TimelineChart`) | `received`, `declared`, `estimated`, `average` (12-month average), `trend`, `projection`; the table's Trend column toggles `trend` only | months (`YYYY-MM`) |
+
+Not recomputed by design: the KPI tiles, the "Forecast next 12 months" summary line, the growth stat tiles and the "received all
+time" headline. The by-year and timeline charts keep their own legend keys, so switching view or toggling the forecast simply drops the keys that vanish.
+
+### All charts (follow-up work: pick up the `todo` rows)
+
+| File | Chart | Series (= columns) | Categories (= rows) | Status |
+|---|---|---|---|---|
+| `features/dividends/YieldPayoutCard.tsx` | Yield / payout bars + cost dots | yield, onCost / amount | holdings, categories | stage 1 |
+| `features/dividends/DiversificationCard.tsx` | Income donut | - (slices) | holdings (top 8 + Other) | stage 1 |
+| `features/dividends/ConsistencyCard.tsx` | Dividend safety / consistency donut | - (slices) | badges | stage 1 |
+| `features/dividends/GrowthAndFuture.tsx` | Average annual growth | growth | holdings | stage 1 |
+| `features/dividends/GrowthAndFuture.tsx` | Future payments | declared, estimated | months | stage 1 |
+| `features/dividends/ReceivedTimeline.tsx` | Dividends received (+ future) | paid, declared, estimated, avg | periods | stage 1 |
+| `features/dividends/ReceivedCards.tsx` | Dividends received by holding | amount | holdings | stage 1 |
+| `features/dividends/GrowthCharts.tsx` | Dividend growth, By year | years, declared, estimated, forecast year, average | calendar months | stage 1 |
+| `features/dividends/GrowthCharts.tsx` | Dividend growth, Timeline | received, declared, estimated, average, trend, projection | months | stage 1 |
+| `features/growth/GrowthChart.tsx` (Growth tab: Value and Performance cards) | Portfolio value / return lines | Portfolio, Invested, one per benchmark | none (dates) | todo (series only; keep the benchmark picker, which already adds/removes benchmarks, as is) |
+| `features/growth/DynamicsChart.tsx` | Return per period | Portfolio + one per benchmark | periods | todo |
+| `features/growth/HoldingsChart.tsx` | Return per holding (horizontal bars) | returnPct | holdings | todo |
+| `features/growth/ChartOrTable.tsx`, `GrowthTable.tsx`, `GrowthChart.tsx` (`ChartLegend`), `RangeButtons.tsx` | Chart / table switch and legend of the Growth tab | same series as the three charts above | same | todo (replace `ChartLegend` by `SelectableLegend`; the table view becomes a `SelectableTable`) |
+| `components/charts/BenchmarkChart.tsx` (Analytics, Benchmark tab) | Portfolio vs benchmark | portfolio, benchmark, invested | none (dates) | todo (series only) |
+| `components/charts/ReturnsBarChart.tsx` (Analytics, Returns tab) | TWR per period | twrPct | periods | todo |
+| `components/charts/DividendGrowthChart.tsx` (Analytics, Dividend growth tab) | Dividends compared per year / month | previous, current | years / months | todo |
+| `components/charts/GoalChart.tsx` (Analytics, Goal tab) | Scenario lines | one per scenario id | none (years) | todo (series only) |
+| `features/goals/GoalChart.tsx` (Goals page) | Plan vs goal lines | goal, safe, alternative, plan | none (years) | todo (series only; hiding the goal line must not change the verdict text) |
+| `features/calendar/CalendarOverview.tsx` (`IncomeChart`, `incomeChartModel.ts`, `IncomeTooltip.tsx`, sr-only data table) | Calendar income per month | paid, declared, estimated | months | todo (reuse `selectPeriods`-style masking; wrap the sr-only table in a `div`) |
+| `features/asset-detail/PriceChart.tsx` | Price + benchmarks | price (symbol), one per benchmark | none (dates) | todo (series only) |
+| `features/asset-detail/DividendYearChart.tsx` | Dividends per year (asset detail) | complete, partial | years | todo |
+| `components/charts/ValueChart.tsx` (Dashboard) | Portfolio value area | value, invested | none (dates) | todo (series only) |
+| `components/charts/AllocationDonut.tsx` (Dashboard) | Allocation donut | - (slices) | slices | todo (`useSliceSelection`, centre text via `Donut`'s `centre` prop pattern) |
+| `components/charts/DividendBarChart.tsx` | Received / upcoming per month | received, upcoming | months | n/a: not used by any page (only tests) |
+| `features/rebalance/DriftTable.tsx` | Drift table | - | holdings / categories | n/a: a table, not a chart |
+| `features/auth/TotpQr.tsx` | TOTP QR code | - | - | n/a: not a data chart |
+
+Charts where include/exclude barely makes sense: the single-line charts (portfolio value, price, benchmark) have one series that
+should always stay, so the legend only matters when benchmarks / invested are present; hiding "Portfolio" there is allowed (empty state)
+but low value. Goal-planning lines are scenarios of one calculation: excluding a line only declutters, the verdict text never changes.

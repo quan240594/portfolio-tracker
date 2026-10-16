@@ -1,8 +1,19 @@
-import { Bar, BarChart, CartesianGrid, Cell, Legend, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import type { DividendsOverviewResponse } from '@portfolio/shared';
+import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import type { DividendsOverviewResponse, FutureMonth } from '@portfolio/shared';
+import {
+  LegendSwatch,
+  NothingSelected,
+  SelectableDataTable,
+  SelectableLegend,
+  selectRows,
+  useSeriesSelection,
+  visibleTotal,
+  type SelectableColumn,
+  type SeriesSelection,
+} from '../../components/charts/selection';
 import { compactMoneyTick } from '../../components/charts/chartFormatters';
 import { formatMoney, formatMonth, formatPercent } from '../../lib/format';
-import { ChartDataTable, ChartFrame, useDividendTheme } from './chartParts';
+import { ChartFrame, useDividendTheme } from './chartParts';
 import { EmptyNote, QueryCard } from './DividendCard';
 import { useScopedDividendsOverview } from './useDividendsOverview';
 
@@ -20,44 +31,66 @@ export function growthBars(data: DividendsOverviewResponse): GrowthBar[] {
     .sort((a, b) => b.growthPct - a.growthPct || a.symbol.localeCompare(b.symbol));
 }
 
-function AverageGrowth({ data }: Readonly<{ data: DividendsOverviewResponse }>) {
+/** The one series of the chart: the growth bars. */
+const GROWTH_SERIES = ['growth'];
+const GROWTH_COLUMNS: SelectableColumn[] = [
+  { key: 'growth', label: 'Growth per year' },
+  { key: 'years', label: 'Years measured', selectable: false },
+];
+
+function GrowthBars({ bars, skipped }: Readonly<{ bars: readonly GrowthBar[]; skipped: number }>) {
   const c = useDividendTheme();
-  const bars = growthBars(data);
-  if (bars.length === 0) return <EmptyNote>Not enough payment history yet: growth needs two full years of payments.</EmptyNote>;
-  const skipped = data.holdings.length - bars.length;
-  const summary = bars.map((b) => `${b.symbol} ${formatPercent(b.growthPct, { signed: true, digits: 1 })}`).join(', ');
-  const label = `Average annual dividend growth per share, ${bars.length} holdings: ${summary}.`;
+  const selection = useSeriesSelection(
+    GROWTH_SERIES,
+    bars.map((b) => b.symbol),
+  );
+  const shown = selectRows(bars, (b) => b.symbol, selection);
+  const summary = shown.map((b) => `${b.symbol} ${formatPercent(b.growthPct, { signed: true, digits: 1 })}`).join(', ');
+  const label = `Average annual dividend growth per share, ${shown.length} holdings: ${summary}.`;
   return (
     <>
-      <ChartFrame label={label} testId="growth-cagr-chart" bars={bars.length}>
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={bars} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-            <CartesianGrid stroke={c.grid} vertical={false} />
-            <XAxis dataKey="symbol" stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval={0} />
-            <YAxis tickFormatter={(v: number) => formatPercent(v, { digits: 0 })} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={48} />
-            <ReferenceLine y={0} stroke={c.axis} />
-            <Tooltip
-              cursor={{ fill: c.grid, opacity: 0.5 }}
-              contentStyle={c.tooltip}
-              labelFormatter={(_l, payload) => payload[0]?.payload.name ?? ''}
-              formatter={(v: unknown) => [formatPercent(Number(v), { signed: true }), 'Average annual growth']}
-            />
-            <Bar dataKey="growthPct" radius={[4, 4, 0, 0]} isAnimationActive={false}>
-              {bars.map((b) => (
-                <Cell key={b.symbol} fill={b.growthPct >= 0 ? c.gain : c.loss} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </ChartFrame>
+      <SelectableLegend entries={[{ key: 'growth', label: 'Average annual growth', swatch: <LegendSwatch color={c.gain} /> }]} selection={selection} testId="growth-cagr-legend" />
+      {selection.nothingSelected ? (
+        <NothingSelected onShowAll={selection.reset} />
+      ) : (
+        <ChartFrame label={label} testId="growth-cagr-chart" bars={shown.length}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={shown as GrowthBar[]} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+              <CartesianGrid stroke={c.grid} vertical={false} />
+              <XAxis dataKey="symbol" stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval={0} />
+              <YAxis tickFormatter={(v: number) => formatPercent(v, { digits: 0 })} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={48} />
+              <ReferenceLine y={0} stroke={c.axis} />
+              <Tooltip
+                cursor={{ fill: c.grid, opacity: 0.5 }}
+                contentStyle={c.tooltip}
+                labelFormatter={(_l, payload) => payload[0]?.payload.name ?? ''}
+                formatter={(v: unknown) => [formatPercent(Number(v), { signed: true }), 'Average annual growth']}
+              />
+              <Bar dataKey="growthPct" radius={[4, 4, 0, 0]} isAnimationActive={false}>
+                {shown.map((b) => (
+                  <Cell key={b.symbol} fill={b.growthPct >= 0 ? c.gain : c.loss} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartFrame>
+      )}
       {skipped > 0 && <p className="muted mt-1 text-xs">{skipped} holding{skipped === 1 ? '' : 's'} without two full years of payments not shown.</p>}
-      <ChartDataTable
+      <SelectableDataTable
         caption="Average annual dividend growth per share"
-        columns={['Holding', 'Growth per year', 'Years measured']}
-        rows={bars.map((b) => [b.name, formatPercent(b.growthPct, { signed: true }), b.years])}
+        rowHeader="Holding"
+        columns={GROWTH_COLUMNS}
+        selection={selection}
+        rows={bars.map((b) => ({ id: b.symbol, header: b.name, cells: [formatPercent(b.growthPct, { signed: true }), b.years] }))}
       />
     </>
   );
+}
+
+function AverageGrowth({ data }: Readonly<{ data: DividendsOverviewResponse }>) {
+  const bars = growthBars(data);
+  if (bars.length === 0) return <EmptyNote>Not enough payment history yet: growth needs two full years of payments.</EmptyNote>;
+  return <GrowthBars bars={bars} skipped={data.holdings.length - bars.length} />;
 }
 
 export function AverageGrowthCard() {
@@ -130,63 +163,87 @@ export function FutureKey({ name, c }: Readonly<{ name: unknown; c: ReturnType<t
   );
 }
 
-interface LegendEntry {
-  value?: unknown;
-  /** `none` marks helper series (e.g. the invisible total line behind value labels) that have no legend entry. */
-  type?: string;
-}
-
 /** Tooltip row for one status: the amount and its swatch + name. */
 export function futureTooltipRow(ccy: string, c: ReturnType<typeof useDividendTheme>) {
   return (value: unknown, name: unknown): [string, React.JSX.Element] => [formatMoney(Number(value), ccy), <FutureKey key={String(name)} name={name} c={c} />];
 }
 
-/** Own legend: recharts paints its default legend text in the (pastel) bar colour, which is unreadable on white. */
-export function FutureLegend({ payload, c }: Readonly<{ payload?: readonly LegendEntry[]; c: ReturnType<typeof useDividendTheme> }>) {
-  return (
-    <ul className="m-0 flex list-none flex-wrap justify-center gap-x-4 gap-y-1 p-0 text-xs" style={{ color: c.text }}>
-      {(payload ?? []).filter((entry) => entry.type !== 'none').map((entry) => (
-        <li key={String(entry.value)}>
-          <FutureKey name={entry.value} c={c} />
-        </li>
-      ))}
-    </ul>
-  );
+/** The series of the chart: the stacked bars. The monthly average line is derived, not a series of its own. */
+const FUTURE_SERIES = ['declared', 'estimated'];
+
+/** Mean of the visible bars per shown month: the dashed line follows the selection (the headline keeps the portfolio's own average). */
+function selectedAverage(months: readonly FutureMonth[], selection: SeriesSelection): number {
+  if (months.length === 0) return 0;
+  return months.reduce((sum, m) => sum + visibleTotal(m, FUTURE_SERIES, selection), 0) / months.length;
+}
+
+function futureLabel(data: DividendsOverviewResponse, shown: readonly FutureMonth[], selection: SeriesSelection): string {
+  const ccy = data.baseCurrency;
+  const { summary } = data;
+  if (!selection.hasHidden) {
+    return `Expected dividends per month over the next 12 months, ${formatMoney(summary.forward12m, ccy)} in total: ${formatMoney(summary.declared, ccy)} declared and ${formatMoney(summary.estimated, ccy)} estimated.`;
+  }
+  const total = shown.reduce((sum, m) => sum + visibleTotal(m, FUTURE_SERIES, selection), 0);
+  return `Expected dividends for the ${shown.length} selected months, ${formatMoney(total, ccy)} in total (current selection).`;
 }
 
 function FuturePayments({ data }: Readonly<{ data: DividendsOverviewResponse }>) {
   const c = useDividendTheme();
   const ccy = data.baseCurrency;
   const { futureMonths: months, summary } = data;
-  const label = `Expected dividends per month over the next 12 months, ${formatMoney(summary.forward12m, ccy)} in total: ${formatMoney(summary.declared, ccy)} declared and ${formatMoney(summary.estimated, ccy)} estimated.`;
+  const selection = useSeriesSelection(
+    FUTURE_SERIES,
+    months.map((m) => m.month),
+  );
+  const shown = selectRows(months, (m) => m.month, selection);
+  const average = selection.hasHidden ? selectedAverage(shown, selection) : summary.monthlyAverage;
+  const showDeclared = selection.isSeriesVisible('declared');
+  const showEstimated = selection.isSeriesVisible('estimated');
   return (
     <>
       <FutureHeader data={data} />
-      <ChartFrame label={label} testId="future-chart" bars={months.length} height="h-64">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={months} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-            <CartesianGrid stroke={c.grid} vertical={false} />
-            <XAxis dataKey="month" tickFormatter={formatMonth} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval={0} />
-            <YAxis tickFormatter={compactMoneyTick(ccy)} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={56} />
-            <Tooltip
-              cursor={{ fill: c.grid, opacity: 0.5 }}
-              contentStyle={c.tooltip}
-              itemStyle={{ color: c.text }}
-              labelFormatter={(m) => formatMonth(String(m))}
-              formatter={futureTooltipRow(ccy, c)}
-            />
-            <Legend content={<FutureLegend c={c} />} />
-            <ReferenceLine y={summary.monthlyAverage} stroke={c.invested} strokeDasharray="5 4" ifOverflow="extendDomain" />
-            <Bar dataKey="declared" stackId="f" fill={c.declared} stroke={c.declaredEdge} isAnimationActive={false} />
-            <Bar dataKey="estimated" stackId="f" fill={c.estimated} stroke={c.estimatedEdge} strokeDasharray="4 3" radius={[4, 4, 0, 0]} isAnimationActive={false} />
-          </BarChart>
-        </ResponsiveContainer>
-      </ChartFrame>
-      <p className="muted mt-1 text-xs">The dashed line is the monthly average.</p>
-      <ChartDataTable
+      <SelectableLegend
+        testId="future-legend"
+        selection={selection}
+        entries={[
+          { key: 'declared', label: 'Declared', swatch: <LegendSwatch color={c.declared} edge={c.declaredEdge} /> },
+          { key: 'estimated', label: 'Estimated', swatch: <LegendSwatch color={c.estimated} edge={c.estimatedEdge} dashed /> },
+          { key: 'avg', label: 'Monthly average', swatch: <LegendSwatch shape="line" color={c.invested} dashed />, toggleable: false },
+        ]}
+      />
+      {selection.nothingSelected ? (
+        <NothingSelected onShowAll={selection.reset} />
+      ) : (
+        <ChartFrame label={futureLabel(data, shown, selection)} testId="future-chart" bars={shown.length} height="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={shown as FutureMonth[]} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+              <CartesianGrid stroke={c.grid} vertical={false} />
+              <XAxis dataKey="month" tickFormatter={formatMonth} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval={0} />
+              <YAxis tickFormatter={compactMoneyTick(ccy)} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={56} />
+              <Tooltip
+                cursor={{ fill: c.grid, opacity: 0.5 }}
+                contentStyle={c.tooltip}
+                itemStyle={{ color: c.text }}
+                labelFormatter={(m) => formatMonth(String(m))}
+                formatter={futureTooltipRow(ccy, c)}
+              />
+              <ReferenceLine y={average} stroke={c.invested} strokeDasharray="5 4" ifOverflow="extendDomain" />
+              {showDeclared && <Bar dataKey="declared" stackId="f" fill={c.declared} stroke={c.declaredEdge} radius={showEstimated ? undefined : [4, 4, 0, 0]} isAnimationActive={false} />}
+              {showEstimated && <Bar dataKey="estimated" stackId="f" fill={c.estimated} stroke={c.estimatedEdge} strokeDasharray="4 3" radius={[4, 4, 0, 0]} isAnimationActive={false} />}
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartFrame>
+      )}
+      <p className="muted mt-1 text-xs">{selection.hasHidden ? 'The dashed line is the monthly average of the current selection.' : 'The dashed line is the monthly average.'}</p>
+      <SelectableDataTable
         caption="Expected dividends per month"
-        columns={['Month', 'Declared', 'Estimated']}
-        rows={months.map((m) => [formatMonth(m.month), formatMoney(m.declared, ccy), formatMoney(m.estimated, ccy)])}
+        rowHeader="Month"
+        columns={[
+          { key: 'declared', label: 'Declared' },
+          { key: 'estimated', label: 'Estimated' },
+        ]}
+        selection={selection}
+        rows={months.map((m) => ({ id: m.month, header: formatMonth(m.month), cells: [formatMoney(m.declared, ccy), formatMoney(m.estimated, ccy)] }))}
       />
     </>
   );

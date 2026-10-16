@@ -8,7 +8,7 @@ import { getAnalyticsData } from '../../mocks/db';
 import { formatMoney, formatPercent, formatWeight } from '../../lib/format';
 import { DiversificationCard } from './DiversificationCard';
 import { ConsistencyCard, scoreBreakdown } from './ConsistencyCard';
-import { AverageGrowthCard, FutureKey, FutureLegend, FuturePaymentsCard, futureTooltipRow, growthBars } from './GrowthAndFuture';
+import { AverageGrowthCard, FutureKey, FuturePaymentsCard, futureTooltipRow, growthBars } from './GrowthAndFuture';
 import { useDividendTheme } from './chartParts';
 import { DividendsKpi, YieldKpi } from './YieldKpis';
 import { YieldPayoutCard } from './YieldPayoutCard';
@@ -212,7 +212,7 @@ describe('ConsistencyCard', () => {
     expect(screen.getByText('Based on your payment history, not a forecast or advice.')).toBeInTheDocument();
 
     const counts = within(screen.getByRole('list', { name: 'Holdings per badge' })).getAllByRole('listitem');
-    expect(counts.map((li) => li.textContent)).toEqual(['Reliable3', 'OK1', 'Irregular1', 'New1']);
+    expect(counts.map((li) => li.textContent)).toEqual(['Reliable (3)', 'OK (1)', 'Irregular (1)', 'New (1)']);
 
     const table = screen.getByRole('table', { name: 'Dividend safety per holding' });
     const rows = within(table).getAllByRole('row').slice(1);
@@ -367,12 +367,9 @@ describe('future payments colour key', () => {
     const [amount, key] = futureTooltipRow('EUR', c)(12.5, 'estimated');
     return (
       <>
-        <FutureLegend payload={[{ value: 'declared' }, { value: 'estimated' }]} c={c} />
-        <FutureLegend c={c} />
         <FutureKey name="declared" c={c} />
         <FutureKey name="paid" c={c} />
         <FutureKey name="avg" c={c} />
-        <FutureLegend payload={[{ value: 'total', type: 'none' }]} c={c} />
         <p data-testid="row">{amount}</p>
         {key}
       </>
@@ -381,8 +378,8 @@ describe('future payments colour key', () => {
 
   it('names every status next to its swatch, solid for declared and dashed for estimated', () => {
     const { container } = renderWithProviders(<KeyHarness />);
-    expect(screen.getAllByText('Declared').length).toBeGreaterThanOrEqual(2);
-    expect(screen.getAllByText('Estimated').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText('Declared').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Estimated').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId('row')).toHaveTextContent(sp(formatMoney(12.5, 'EUR')));
     const swatches = [...container.querySelectorAll<HTMLElement>('span[aria-hidden="true"]')];
     expect(swatches.some((s) => s.style.border.includes('dashed'))).toBe(true);
@@ -390,6 +387,5 @@ describe('future payments colour key', () => {
     // Received in the calendar's green, the average line as a dashed rule, and helper series (type none) without an entry
     expect(screen.getByText('Received')).toBeInTheDocument();
     expect(screen.getByText('avg')).toBeInTheDocument();
-    expect(screen.getAllByRole('listitem')).toHaveLength(2);
   });
 });

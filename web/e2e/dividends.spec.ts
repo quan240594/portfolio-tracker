@@ -48,7 +48,7 @@ test.describe('Dividends page (mock mode)', () => {
     await expect(received.getByText('received this year to date')).toBeVisible();
     await received.getByRole('radio', { name: 'Yearly' }).click();
     await received.getByText('Show data table').click();
-    await expect(received.getByRole('table', { name: 'Dividends received and upcoming per period' }).getByRole('cell').first()).toHaveText(/^\d{4}( · Current)?$/);
+    await expect(received.getByRole('table', { name: 'Dividends received and upcoming per period' }).getByRole('rowheader').first()).toHaveText(/^\d{4}( · Current)?$/);
     expect(allTime).toMatch(/€/);
 
     const growth = page.getByRole('region', { name: 'Dividend safety' });
@@ -202,7 +202,7 @@ test.describe('Dividends received with future payments (mock mode)', () => {
     await expect(chart(page).getByText('Upcoming', { exact: true })).toBeVisible();
     await expect(chart(page).getByText('avg', { exact: true })).toHaveCount(1);
     expect(await chart(page).locator('.recharts-label-list text').count()).toBeGreaterThan(5);
-    const legend = card(page).getByRole('list');
+    const legend = card(page).getByTestId('received-legend');
     for (const name of ['Received', 'Declared', 'Estimated', 'avg']) await expect(legend.getByText(name, { exact: true })).toBeVisible();
     // future bars have their own colours
     await expect(chart(page).locator('path.recharts-rectangle[stroke="#3b6fd4"]').first()).toBeVisible();
@@ -227,13 +227,13 @@ test.describe('Dividends received with future payments (mock mode)', () => {
       await card(page).getByText('Show data table').click();
       const table = card(page).getByRole('table', { name: 'Dividends received and upcoming per period' });
       await expect(table.getByRole('columnheader')).toHaveText(['Period', 'Received', 'Declared', 'Estimated', 'Total']);
-      const periods = await table.locator('td:first-child').allTextContents();
+      const periods = await table.locator('th[scope=row]').allTextContents();
       for (const period of periods) expect(period).toMatch(label);
       expect(periods.filter((p) => p.endsWith('· Current'))).toHaveLength(1);
       expect(periods.filter((p) => p.endsWith('· Upcoming')).length).toBeGreaterThanOrEqual(1);
       // each row adds up: received + declared + estimated = total
       for (const row of await table.locator('tbody tr').all()) {
-        const [received, declared, estimated, total] = (await row.locator('td').allTextContents()).slice(1).map((c) => euros(c));
+        const [received, declared, estimated, total] = (await row.locator('td').allTextContents()).map((c) => euros(c));
         expect(received! + declared! + estimated!).toBeCloseTo(total!, 1);
       }
       await expect(chart(page).getByText('Upcoming', { exact: true })).toBeVisible();

@@ -4,9 +4,18 @@ import { formatMoney } from '../../lib/format';
 import { useTheme } from '../../theme/ThemeProvider';
 import { incomeColours, type IncomeColours } from '../calendar/calendarColours';
 import { StatusAmounts, TooltipShell } from '../calendar/IncomeTooltip';
-import { ChartDataTable, ChartFrame, SLOT_PX, useDividendTheme } from './chartParts';
-import { FutureLegend } from './GrowthAndFuture';
-import { averageReceived, chartRows, niceAxis, periodText, timelineTotals, upcomingBand, type ChartRow, type TimelinePeriod } from './receivedFuture';
+import {
+  LegendSwatch,
+  NothingSelected,
+  SelectableDataTable,
+  SelectableLegend,
+  useSeriesSelection,
+  type LegendEntry,
+  type SelectableColumn,
+  type SeriesSelection,
+} from '../../components/charts/selection';
+import { ChartFrame, SLOT_PX, useDividendTheme } from './chartParts';
+import { STATUS_SERIES, averageReceived, chartRows, niceAxis, periodRowId, periodText, selectPeriods, timelineTotals, upcomingBand, type ChartRow, type TimelinePeriod } from './receivedFuture';
 import type { Granularity } from './receivedSeries';
 
 const UNIT_NAMES: Readonly<Record<Granularity, string>> = { month: 'month', quarter: 'quarter', year: 'year' };
@@ -72,10 +81,6 @@ export function UpcomingLabel({ viewBox, fill }: Readonly<UpcomingLabelProps>) {
   );
 }
 
-/** The legend sits under the scrolling chart, not in it, so it stays centred in the card. */
-const STATUS_ENTRIES = [{ value: 'paid' }, { value: 'declared' }, { value: 'estimated' }];
-const legendEntries = (withAverage: boolean) => (withAverage ? [...STATUS_ENTRIES, { value: 'avg' }] : STATUS_ENTRIES);
-
 const CHART_MARGIN_TOP = 36;
 
 /** Paints the label's outline behind its fill: a halo in the card colour keeps it readable where the avg line crosses it. */
@@ -104,16 +109,20 @@ interface AverageNoteProps {
   average: number | null;
   currency: string;
   granularity: Granularity;
+  /** The chart shows a selection: say so, the average then covers the periods that are included. */
+  filtered?: boolean;
 }
 
 /** Spells out what the dashed "avg" line is (or why there is none). */
-export function AverageNote({ average, currency, granularity }: Readonly<AverageNoteProps>) {
+export function AverageNote({ average, currency, granularity, filtered = false }: Readonly<AverageNoteProps>) {
   const unit = UNIT_NAMES[granularity];
+  const view = filtered ? 'the current selection' : 'this view';
+  const none = filtered ? 'in the current selection' : 'yet';
   return (
     <p className="muted mt-1 text-xs" data-testid="received-average-note">
       {average === null
-        ? `No completed ${unit} yet, so there is no average line.`
-        : `The dashed line (avg) is the average received per completed ${unit} in this view: ${formatMoney(average, currency)}. The ${unit} in progress and the upcoming ones are not counted.`}
+        ? `No completed ${unit} ${none}, so there is no average line.`
+        : `The dashed line (avg) is the average received per completed ${unit} in ${view}: ${formatMoney(average, currency)}. The ${unit} in progress and the upcoming ones are not counted.`}
     </p>
   );
 }
@@ -133,62 +142,116 @@ export interface TimelineProps {
   upcoming?: UpcomingSummary;
 }
 
-function timelineLabel({ periods, currency, granularity, upcoming: next }: TimelineProps, average: number | null): string {
+function timelineLabel({ periods, currency, granularity, upcoming: next }: TimelineProps, average: number | null, filtered: boolean): string {
   const received = `${formatMoney(timelineTotals(periods).paid, currency)} received`;
-  const upcoming = next ? `, ${formatMoney(next.total, currency)} upcoming (${formatMoney(next.declared, currency)} declared, ${formatMoney(next.estimated, currency)} estimated)` : '';
+  const upcoming = next && !filtered ? `, ${formatMoney(next.total, currency)} upcoming (${formatMoney(next.declared, currency)} declared, ${formatMoney(next.estimated, currency)} estimated)` : '';
   const avg = average === null ? '' : `, average ${formatMoney(average, currency)} received per completed ${UNIT_NAMES[granularity]}`;
-  return `Dividends received over time: ${periods.length} bars, ${received}${upcoming}${avg}.`;
+  return `Dividends received over time${filtered ? ', current selection' : ''}: ${periods.length} bars, ${received}${upcoming}${avg}.`;
 }
 
-/** Stacked bars per month / quarter / year: received so far, declared and estimated income, with value labels, an "avg" line and a table alternative. */
+/** Legend entries of the stacked bars and the average line; the swatches repeat the colours of the chart. */
+function legendEntriesOf(colours: IncomeColours, lineColour: string, withFuture: boolean, withAverage: boolean): LegendEntry[] {
+  const entries: LegendEntry[] = [{ key: 'paid', label: 'Received', swatch: <LegendSwatch color={colours.paid.fill} edge={colours.paid.stroke} /> }];
+  if (withFuture) {
+    entries.push(
+      { key: 'declared', label: 'Declared', swatch: <LegendSwatch color={colours.declared.fill} edge={colours.declared.stroke} /> },
+      { key: 'estimated', label: 'Estimated', swatch: <LegendSwatch color={colours.estimated.fill} edge={colours.estimated.stroke} dashed /> },
+    );
+  }
+  if (withAverage) entries.push({ key: 'avg', label: 'avg', swatch: <LegendSwatch shape="line" color={lineColour} dashed /> });
+  return entries;
+}
+
+/** The series the selection controls: the status bars on the axis and the average line (when there is one). */
+const seriesKeysOf = (withFuture: boolean, withAverage: boolean): string[] => [...(withFuture ? STATUS_SERIES : (['paid'] as const)), ...(withAverage ? ['avg'] : [])];
+
+/** Stacked bars per month / quarter / year: received so far, declared and estimated income, with value labels, an "avg" line and a table alternative. Columns = the statuses and the avg line, rows = the periods. */
 export function ReceivedTimeline(props: Readonly<TimelineProps>) {
   const { periods, currency, granularity } = props;
   const withFuture = props.upcoming !== undefined;
   const { theme } = useTheme();
   const c = useDividendTheme();
   const colours = incomeColours(theme);
-  const average = averageReceived(periods);
-  const band = withFuture ? upcomingBand(periods) : null;
-  const rows = chartRows(periods, currency, SLOT_PX);
-  const scale = niceAxis(Math.max(average ?? 0, ...periods.map((p) => p.total)));
+  const fullAverage = averageReceived(periods);
+  const selection = useSeriesSelection(
+    seriesKeysOf(withFuture, fullAverage !== null),
+    periods.map((p) => periodRowId(granularity, p)),
+  );
+  const shown = selectPeriods(periods, (p) => periodRowId(granularity, p), selection);
+  const average = selection.hasHidden ? averageReceived(shown) : fullAverage;
+  const showAverage = average !== null && selection.isSeriesVisible('avg');
+  const band = withFuture ? upcomingBand(shown) : null;
+  const rows = chartRows(shown, currency, SLOT_PX);
+  const scale = niceAxis(Math.max(showAverage ? average : 0, ...shown.map((p) => p.total)));
   const tooltip = <ReceivedFutureTooltip currency={currency} colours={colours} background={c.tooltipBg} border={c.tooltipBorder} text={c.text} withFuture={withFuture} />;
   return (
     <>
-      <ChartFrame label={timelineLabel(props, average)} testId="received-time-chart" bars={periods.length} height="h-72" focusBar={periods.findIndex((p) => p.phase === 'current')} axis={<FixedAxis rows={rows} scale={scale} currency={currency} />}>
-        <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={rows} margin={{ top: CHART_MARGIN_TOP, right: 34, bottom: 0, left: 0 }}>
-            <CartesianGrid stroke={c.grid} vertical={false} />
-            <XAxis dataKey="label" stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={2} />
-            <YAxis hide domain={[0, scale.max]} ticks={scale.ticks} />
-            <Tooltip cursor={{ fill: c.grid, opacity: 0.5 }} content={tooltip} />
-            {band && <ReferenceArea x1={band.from} x2={band.to} fill={c.grid} fillOpacity={0.45} stroke={c.axis} strokeOpacity={0.5} strokeDasharray="3 3" label={<UpcomingLabel fill={c.text} />} />}
-            <Bar dataKey="paid" stackId="income" fill={colours.paid.fill} stroke={colours.paid.stroke} strokeWidth={1} isAnimationActive={false} />
-            {withFuture && <Bar dataKey="declared" stackId="income" fill={colours.declared.fill} stroke={colours.declared.stroke} strokeWidth={1} isAnimationActive={false} />}
-            {withFuture && <Bar dataKey="estimated" stackId="income" fill={colours.estimated.fill} stroke={colours.estimated.stroke} strokeWidth={1.5} strokeDasharray="4 2" isAnimationActive={false} />}
-            <Line dataKey="total" stroke="none" dot={false} activeDot={false} legendType="none" tooltipType="none" isAnimationActive={false}>
-              <LabelList dataKey="barLabel" position="top" fill={c.text} fontSize={10} stroke={c.tooltipBg} strokeWidth={3} style={LABEL_HALO} />
-            </Line>
-            {average !== null && <ReferenceLine y={average} stroke={c.text} strokeDasharray="5 4" label={{ value: 'avg', position: 'right', fill: c.text, fontSize: 11 }} />}
-          </ComposedChart>
-        </ResponsiveContainer>
-      </ChartFrame>
-      {withFuture && <FutureLegend c={c} payload={legendEntries(average !== null)} />}
-      <AverageNote average={average} currency={currency} granularity={granularity} />
-      <TimelineTable periods={periods} currency={currency} withFuture={withFuture} />
+      <SelectableLegend entries={legendEntriesOf(colours, c.text, withFuture, fullAverage !== null)} selection={selection} testId="received-legend" />
+      {selection.nothingSelected ? (
+        <NothingSelected onShowAll={selection.reset} />
+      ) : (
+        <ChartFrame
+          label={timelineLabel({ ...props, periods: shown }, showAverage ? average : null, selection.hasHidden)}
+          testId="received-time-chart"
+          bars={shown.length}
+          height="h-72"
+          focusBar={shown.findIndex((p) => p.phase === 'current')}
+          axis={<FixedAxis rows={rows} scale={scale} currency={currency} />}
+        >
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={rows} margin={{ top: CHART_MARGIN_TOP, right: 34, bottom: 0, left: 0 }}>
+              <CartesianGrid stroke={c.grid} vertical={false} />
+              <XAxis dataKey="label" stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={2} />
+              <YAxis hide domain={[0, scale.max]} ticks={scale.ticks} />
+              <Tooltip cursor={{ fill: c.grid, opacity: 0.5 }} content={tooltip} />
+              {band && <ReferenceArea x1={band.from} x2={band.to} fill={c.grid} fillOpacity={0.45} stroke={c.axis} strokeOpacity={0.5} strokeDasharray="3 3" label={<UpcomingLabel fill={c.text} />} />}
+              {selection.isSeriesVisible('paid') && <Bar dataKey="paid" stackId="income" fill={colours.paid.fill} stroke={colours.paid.stroke} strokeWidth={1} isAnimationActive={false} />}
+              {withFuture && selection.isSeriesVisible('declared') && <Bar dataKey="declared" stackId="income" fill={colours.declared.fill} stroke={colours.declared.stroke} strokeWidth={1} isAnimationActive={false} />}
+              {withFuture && selection.isSeriesVisible('estimated') && <Bar dataKey="estimated" stackId="income" fill={colours.estimated.fill} stroke={colours.estimated.stroke} strokeWidth={1.5} strokeDasharray="4 2" isAnimationActive={false} />}
+              <Line dataKey="total" stroke="none" dot={false} activeDot={false} legendType="none" tooltipType="none" isAnimationActive={false}>
+                <LabelList dataKey="barLabel" position="top" fill={c.text} fontSize={10} stroke={c.tooltipBg} strokeWidth={3} style={LABEL_HALO} />
+              </Line>
+              {showAverage && <ReferenceLine y={average} stroke={c.text} strokeDasharray="5 4" label={{ value: 'avg', position: 'right', fill: c.text, fontSize: 11 }} />}
+            </ComposedChart>
+          </ResponsiveContainer>
+        </ChartFrame>
+      )}
+      <AverageNote average={showAverage ? average : null} currency={currency} granularity={granularity} filtered={selection.hasHidden} />
+      <TimelineTable periods={periods} currency={currency} withFuture={withFuture} granularity={granularity} selection={selection} />
     </>
   );
 }
 
-/** The chart's numbers as a table: future rows are named in words ("Upcoming", "Current"), not only coloured. */
-export function TimelineTable({ periods, currency, withFuture }: Readonly<{ periods: readonly TimelinePeriod[]; currency: string; withFuture: boolean }>) {
+interface TableProps {
+  periods: readonly TimelinePeriod[];
+  currency: string;
+  withFuture: boolean;
+  granularity: Granularity;
+  selection: SeriesSelection;
+}
+
+const STATUS_COLUMNS: SelectableColumn[] = [
+  { key: 'paid', label: 'Received' },
+  { key: 'declared', label: 'Declared' },
+  { key: 'estimated', label: 'Estimated' },
+  { key: 'total', label: 'Total', selectable: false },
+];
+const RECEIVED_COLUMNS: SelectableColumn[] = [{ key: 'paid', label: 'Received' }];
+
+/** The chart's numbers as a table: future rows are named in words ("Upcoming", "Current"), not only coloured. The Total column is the whole period, not a series. */
+export function TimelineTable({ periods, currency, withFuture, granularity, selection }: Readonly<TableProps>) {
   const money = (v: number) => formatMoney(v, currency);
-  return withFuture ? (
-    <ChartDataTable
-      caption="Dividends received and upcoming per period"
-      columns={['Period', 'Received', 'Declared', 'Estimated', 'Total']}
-      rows={periods.map((p) => [periodText(p, true), money(p.paid), money(p.declared), money(p.estimated), money(p.total)])}
+  return (
+    <SelectableDataTable
+      caption={withFuture ? 'Dividends received and upcoming per period' : 'Dividends received per period'}
+      rowHeader="Period"
+      columns={withFuture ? STATUS_COLUMNS : RECEIVED_COLUMNS}
+      selection={selection}
+      rows={periods.map((p) => ({
+        id: periodRowId(granularity, p),
+        header: periodText(p, withFuture),
+        cells: withFuture ? [money(p.paid), money(p.declared), money(p.estimated), money(p.total)] : [money(p.paid)],
+      }))}
     />
-  ) : (
-    <ChartDataTable caption="Dividends received per period" columns={['Period', 'Received']} rows={periods.map((p) => [p.label, money(p.paid)])} />
   );
 }

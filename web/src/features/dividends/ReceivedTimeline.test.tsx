@@ -4,7 +4,8 @@ import { renderWithProviders, sp } from '../../test/utils';
 import { formatMoney } from '../../lib/format';
 import { incomeColours } from '../calendar/calendarColours';
 import { AverageNote, FixedAxis, ReceivedFutureTooltip, ReceivedTimeline, TimelineTable, UpcomingLabel } from './ReceivedTimeline';
-import { chartRows, niceAxis, type TimelinePeriod } from './receivedFuture';
+import { useSeriesSelection } from '../../components/charts/selection';
+import { chartRows, niceAxis, periodRowId, type TimelinePeriod } from './receivedFuture';
 import { ChartFrame } from './chartParts';
 
 const period = (over: Partial<TimelinePeriod>): TimelinePeriod => ({
@@ -99,22 +100,28 @@ describe('chart text parts', () => {
   });
 });
 
+function TableHarness({ periods: rows, withFuture }: Readonly<{ periods: TimelinePeriod[]; withFuture: boolean }>) {
+  const selection = useSeriesSelection(['paid'], rows.map((p) => periodRowId('quarter', p)));
+  return <TimelineTable periods={rows} currency="EUR" withFuture={withFuture} granularity="quarter" selection={selection} />;
+}
+
 describe('TimelineTable', () => {
   it('has Period, Received, Declared, Estimated and Total columns and names the phase of the future rows', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<TimelineTable periods={periods} currency="EUR" withFuture />);
+    renderWithProviders(<TableHarness periods={periods} withFuture />);
     await user.click(screen.getByText('Show data table'));
     const table = screen.getByRole('table', { name: 'Dividends received and upcoming per period' });
     expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Period', 'Received', 'Declared', 'Estimated', 'Total']);
     const rows = within(table).getAllByRole('row').slice(1);
-    expect(rows.map((r) => within(r).getAllByRole('cell')[0]!.textContent)).toEqual(['Q2 26', 'Q3 26', 'Q4 26 · Current', 'Q1 27 · Upcoming']);
+    expect(rows.map((r) => within(r).getByRole('rowheader').textContent)).toEqual(['Q2 26', 'Q3 26', 'Q4 26 · Current', 'Q1 27 · Upcoming']);
     expect(rows[3]).toHaveTextContent(money(8));
-    expect(within(rows[2]!).getAllByRole('cell').map((c) => sp(c.textContent!))).toEqual(['Q4 26 · Current', money(10), money(20), money(5), money(35)]);
+    expect(sp(within(rows[2]!).getByRole('rowheader').textContent!)).toBe('Q4 26 · Current');
+    expect(within(rows[2]!).getAllByRole('cell').map((c) => sp(c.textContent!))).toEqual([money(10), money(20), money(5), money(35)]);
   });
 
   it('is Period and Received only without the future', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<TimelineTable periods={periods.slice(0, 2)} currency="EUR" withFuture={false} />);
+    renderWithProviders(<TableHarness periods={periods.slice(0, 2)} withFuture={false} />);
     await user.click(screen.getByText('Show data table'));
     const table = screen.getByRole('table', { name: 'Dividends received per period' });
     expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Period', 'Received']);
@@ -133,10 +140,10 @@ describe('ReceivedTimeline', () => {
     expect(screen.getByTestId('received-average-note')).toHaveTextContent('average received per completed quarter');
   });
 
-  it('is the received history only, without legend and future columns', () => {
+  it('is the received history only, without the future legend entries and columns', () => {
     renderWithProviders(<ReceivedTimeline periods={periods.slice(0, 2)} currency="EUR" granularity="month" />);
     expect(screen.getByTestId('received-time-chart').getAttribute('aria-label')).not.toContain('upcoming');
-    expect(screen.queryByRole('listitem')).not.toBeInTheDocument();
+    expect(within(screen.getByTestId('received-legend')).getAllByRole('button').map((b) => b.textContent)).toEqual(['Received', 'avg']);
   });
 
   it('has no average clause without a completed period', () => {

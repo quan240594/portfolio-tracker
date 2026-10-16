@@ -4,8 +4,11 @@ import {
   chartRows,
   labelStep,
   niceAxis,
+  periodRowId,
   periodText,
   receivedFutureTimeline,
+  selectPeriods,
+  STATUS_SERIES,
   timelineTotals,
   upcomingBand,
   type FutureIncome,
@@ -188,5 +191,47 @@ describe('niceAxis', () => {
   it('falls back to 0-1 without a positive maximum', () => {
     expect(niceAxis(0)).toEqual({ max: 1, ticks: [0, 1] });
     expect(niceAxis(Number.NaN)).toEqual({ max: 1, ticks: [0, 1] });
+  });
+});
+
+describe('selectPeriods', () => {
+  const period = (key: number, over: Partial<TimelinePeriod> = {}): TimelinePeriod => ({
+    key,
+    label: `P${key}`,
+    phase: 'past',
+    paid: 10,
+    declared: 4,
+    estimated: 1,
+    total: 15,
+    holdings: [{ symbol: 'AAA', amount: 15 }],
+    ...over,
+  });
+  const list = [period(1), period(2), period(3)];
+  const all = { isRowVisible: () => true, isSeriesVisible: () => true };
+
+  it('names a period by granularity and number, and the statuses in stacking order', () => {
+    expect(periodRowId('month', { key: 5 })).toBe('month:5');
+    expect(periodRowId('year', { key: 5 })).not.toBe(periodRowId('month', { key: 5 }));
+    expect(STATUS_SERIES).toEqual(['paid', 'declared', 'estimated']);
+  });
+
+  it('keeps every period untouched when nothing is excluded', () => {
+    const result = selectPeriods(list, (p) => periodRowId('month', p), all);
+    expect(result).toEqual(list);
+    expect(result[0]).toBe(list[0]);
+  });
+
+  it('drops excluded periods', () => {
+    const result = selectPeriods(list, (p) => periodRowId('month', p), { ...all, isRowVisible: (id) => id !== 'month:2' });
+    expect(result.map((p) => p.key)).toEqual([1, 3]);
+  });
+
+  it('clears excluded statuses, recomputes the total and drops the holdings that no longer add up', () => {
+    const result = selectPeriods(list, (p) => periodRowId('month', p), { ...all, isSeriesVisible: (key) => key !== 'declared' });
+    expect(result[0]).toMatchObject({ paid: 10, declared: 0, estimated: 1, total: 11, holdings: [] });
+    expect(list[0]!.total).toBe(15);
+    expect(averageReceived(result)).toBe(10);
+    const noPaid = selectPeriods(list, (p) => periodRowId('month', p), { ...all, isSeriesVisible: (key) => key !== 'paid' });
+    expect(averageReceived(noPaid)).toBeNull();
   });
 });

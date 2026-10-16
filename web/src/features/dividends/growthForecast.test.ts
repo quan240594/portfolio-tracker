@@ -13,7 +13,9 @@ import {
   timelineLegendItems,
   timelineRows,
   tooltipLinesOfTimeline,
+  selectYearRows,
   visiblePoints,
+  yearBarVisible,
   yearForecastModel,
   yearLegendItems,
   yearTooltipLines,
@@ -240,5 +242,53 @@ describe('legend items', () => {
     expect(all.map((i) => i.label)).toEqual(['Received', 'Declared (forecast)', 'Estimated (forecast)', '12-month average', 'Trend', 'Trend (projected)']);
     const hidden = timelineLegendItems(timelineRows(TIMELINE, false), '#0d9488');
     expect(hidden.map((i) => i.label)).toEqual(['Received', '12-month average', 'Trend']);
+  });
+});
+
+describe('selection of the grouped chart', () => {
+  const data = getAnalyticsData();
+  const overview = computeDividendsOverview(data);
+  const growth = computeDividendGrowth(data);
+  const hide = (...hidden: string[]) => yearBarVisible((key) => !hidden.includes(key));
+
+  it('lets a year hide its received bar and its forecast stack, and a kind hide that status in every year', () => {
+    expect(hide()('2026')).toBe(true);
+    expect(hide('2026')('2026')).toBe(false);
+    expect(hide('2026')('2026-declared')).toBe(false);
+    expect(hide('2026')('2027-declared')).toBe(true);
+    expect(hide('declared')('2027-declared')).toBe(false);
+    expect(hide('declared')('2027-estimated')).toBe(true);
+    expect(hide('declared')('2026')).toBe(true);
+  });
+
+  it('lets a forecast-only year and the average line be hidden on their own', () => {
+    expect(hide('2027-forecast')('2027-declared')).toBe(false);
+    expect(hide('2027-forecast')('2027-estimated')).toBe(false);
+    expect(hide('2027-forecast')('2026-declared')).toBe(true);
+    expect(hide('average')('average')).toBe(false);
+    expect(hide()('average')).toBe(true);
+  });
+
+  it('drops excluded months and clears hidden bars and lines in the rows it keeps', () => {
+    const rows = [
+      { month: 'Jan', '2025': 1, '2026': 2, '2026-declared': 3, average: 1.5 },
+      { month: 'Feb', '2025': 4, '2026': 5, average: 4.5 },
+    ];
+    const result = selectYearRows(rows, (month) => month !== 'Feb', hide('2026', 'average'));
+    expect(result).toEqual([{ month: 'Jan', '2025': 1, '2026': undefined, '2026-declared': undefined, average: undefined }]);
+    expect(rows[0]!['2026']).toBe(2);
+  });
+
+  it('leaves the excluded years out of the average of the years only', () => {
+    const timeline = buildGrowthTimeline(growth.byMonth, [], overview.asOf);
+    const full = yearForecastModel(growth.byMonth, timeline, false);
+    const [first, ...rest] = full.years;
+    const without = yearForecastModel(growth.byMonth, timeline, false, 3, rest);
+    expect(without.years).toEqual(full.years);
+    expect(without.bars).toEqual(full.bars);
+    expect(without.rows.map((r) => r.average)).not.toEqual(full.rows.map((r) => r.average));
+    const none = yearForecastModel(growth.byMonth, timeline, false, 3, full.years);
+    expect(none.hasAverage).toBe(false);
+    expect(first).toBeDefined();
   });
 });

@@ -2,6 +2,7 @@ import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { buildGrowthTimeline, computeDividendGrowth, computeDividendsOverview, type AnalyticsDividendGrowthResponse } from '@portfolio/shared';
+import { SelectableLegend, useSeriesSelection, type LegendEntry } from '../../components/charts/selection';
 import { renderWithProviders, sp } from '../../test/utils';
 import { server } from '../../mocks/server';
 import { getAnalyticsData } from '../../mocks/db';
@@ -9,7 +10,7 @@ import { formatMoney } from '../../lib/format';
 import { DividendGrowthCard } from './DividendGrowthCard';
 import { FuturePaymentsCard } from './GrowthAndFuture';
 import { useDividendTheme } from './chartParts';
-import { GrowthLegend, GrowthControls, ForecastSummary, Swatch, TimelineTooltip, TooltipBox, TrendMethod, TrendNote, YearTooltip } from './GrowthForecastParts';
+import { growthLegendEntries, GrowthControls, ForecastSummary, Swatch, TimelineTooltip, TooltipBox, TrendMethod, TrendNote, YearTooltip } from './GrowthForecastParts';
 import { yearBars, yearColour } from './GrowthCharts';
 import { timelineRows, yearForecastModel, type SwatchKind } from './growthForecast';
 import type { ReactNode } from 'react';
@@ -25,6 +26,11 @@ const growthWith = (byMonth: AnalyticsDividendGrowthResponse['byMonth']) => serv
 /** Runs `render` with the dividends chart theme (needs the theme provider). */
 function Themed({ children }: Readonly<{ children: (c: ReturnType<typeof useDividendTheme>) => ReactNode }>) {
   return <>{children(useDividendTheme())}</>;
+}
+
+function LegendHarness({ entries }: Readonly<{ entries: LegendEntry[] }>) {
+  const selection = useSeriesSelection(entries.map((e) => e.key));
+  return <SelectableLegend entries={entries} selection={selection} />;
 }
 
 describe('parts', () => {
@@ -45,21 +51,24 @@ describe('parts', () => {
     expect(style(8).borderTopStyle).toBe('dashed');
   });
 
-  it('lists the legend items as text', () => {
+  it('turns legend items into entries with a swatch and the text', () => {
     renderWithProviders(
       <Themed>
         {(c) => (
-          <GrowthLegend
-            c={c}
-            items={[
-              { key: 'a', label: '2027 (forecast)', swatch: 'forecastYear' },
-              { key: 'b', label: 'Estimated (forecast)', swatch: 'estimated' },
-            ]}
+          <LegendHarness
+            entries={growthLegendEntries(
+              [
+                { key: 'a', label: '2027 (forecast)', swatch: 'forecastYear' },
+                { key: 'b', label: 'Estimated (forecast)', swatch: 'estimated' },
+              ],
+              c,
+            )}
           />
         )}
       </Themed>,
     );
     expect(screen.getAllByRole('listitem').map((li) => li.textContent)).toEqual(['2027 (forecast)', 'Estimated (forecast)']);
+    expect(screen.getByRole('button', { name: '2027 (forecast)' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('shows a tooltip box with a labelled row per series', () => {
