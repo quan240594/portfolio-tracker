@@ -69,13 +69,13 @@ test.describe('Dividends page (mock mode)', () => {
     const income = page.getByTestId('kpi-income');
     await expect(income).toBeVisible();
     const combined = await income.textContent();
-    await page.getByLabel('Portfolio', { exact: true }).selectOption({ label: 'Trading 212' });
+    await page.getByLabel('Scope', { exact: true }).selectOption({ label: 'Trading 212' });
     await expect(page).toHaveURL(/\/dividends\?portfolio=trading-212$/);
     await expect(page.getByText(/^Trading 212 · amounts in EUR/)).toBeVisible();
     await expect(income).not.toHaveText(combined!);
     // categories exist for the main portfolio only
     await expect(page.getByRole('radiogroup', { name: 'Group by' })).toHaveCount(0);
-    await page.getByLabel('Portfolio', { exact: true }).selectOption({ label: 'Main portfolio' });
+    await page.getByLabel('Scope', { exact: true }).selectOption({ label: 'Main portfolio' });
     await expect(page.getByRole('radio', { name: 'Categories' })).toBeVisible();
   });
 

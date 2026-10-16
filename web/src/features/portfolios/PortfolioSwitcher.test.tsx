@@ -7,7 +7,7 @@ import { getPortfolio } from '../../mocks/db';
 import { PORTFOLIO_STORAGE_KEY, defaultTargetPortfolio, readStoredScope, usePortfolioScope } from './usePortfolioScope';
 import type { Portfolio } from '@portfolio/shared';
 
-const switcher = () => screen.getByRole('combobox', { name: 'Portfolio' });
+const switcher = () => screen.getByRole('combobox', { name: 'Scope' });
 // Menu links are hidden while the Portfolio menu is closed; only their hrefs are inspected here.
 const navLink = (name: string) => within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name, hidden: true });
 const optionsOf = (select: HTMLElement) => within(select).getAllByRole('option').map((o) => o.textContent);

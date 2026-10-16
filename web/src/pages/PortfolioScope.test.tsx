@@ -87,7 +87,7 @@ describe('portfolio-scoped pages', () => {
     expect(first).toHaveTextContent(all[0]!.portfolioId === 'default' ? 'Main portfolio' : 'Trading 212');
     expect(screen.getByText(/^All portfolios · buys, sells and dividends/)).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Portfolio' }), 'Trading 212');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Scope' }), 'Trading 212');
     await waitFor(() => expect(bodyRows(screen.getByRole('table'))).toHaveLength(listTransactions('trading-212').length));
     table = screen.getByRole('table');
     expect(within(table).queryByRole('columnheader', { name: 'Portfolio' })).not.toBeInTheDocument();

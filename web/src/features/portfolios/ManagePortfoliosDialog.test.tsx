@@ -61,7 +61,7 @@ describe('ManagePortfoliosDialog', () => {
     expect(input).toHaveValue('');
     expect(await within(dialog).findByText('Long term')).toBeInTheDocument();
     expect(within(rowOf(dialog, 'Long term')).getByText('0 transactions')).toBeInTheDocument();
-    expect(within(screen.getByRole('combobox', { name: 'Portfolio' })).getByRole('option', { name: 'Long term' })).toBeInTheDocument();
+    expect(within(screen.getByRole('combobox', { name: 'Scope' })).getByRole('option', { name: 'Long term' })).toBeInTheDocument();
     expect(listPortfolios().map((p) => p.name)).toContain('Long term');
   });
 
@@ -158,7 +158,7 @@ describe('ManagePortfoliosDialog', () => {
     expect(listTransactions().every((t) => t.portfolioId === 'default')).toBe(true);
     // The deleted portfolio was selected → the app falls back to all portfolios.
     await waitFor(() => expect(router.state.location.search).toBe(''));
-    expect(screen.getByRole('combobox', { name: 'Portfolio' })).toHaveValue('all');
+    expect(screen.getByRole('combobox', { name: 'Scope' })).toHaveValue('all');
   });
 
   it('cancels a force delete and keeps the portfolio', async () => {

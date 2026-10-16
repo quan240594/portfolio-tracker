@@ -32,7 +32,7 @@ test.describe('Analytics → Metrics (mock mode)', () => {
     await expect(page.getByTestId('metric-twr')).toContainText('VWRL.AS:');
     await expect(page.getByTestId('metric-sharpe')).toContainText('Market = VWRL.AS');
 
-    await page.getByRole('combobox', { name: 'Portfolio' }).selectOption({ label: 'Trading 212' });
+    await page.getByRole('combobox', { name: 'Scope' }).selectOption({ label: 'Trading 212' });
     await expect(page.getByTestId('pe-coverage')).toContainText('Based on 3 of 4 stocks');
     await expect(page.getByRole('heading', { level: 1, name: 'Analytics' })).toBeVisible();
   });

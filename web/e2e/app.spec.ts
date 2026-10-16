@@ -118,7 +118,7 @@ test.describe('Portfolio Tracker (mock mode)', () => {
   test('multiple portfolios: create one, add a transaction to it, switch scope and see it', async ({ page }) => {
     await page.goto('/transactions');
     await expect(page.getByRole('table')).toBeVisible();
-    const switcher = page.getByRole('combobox', { name: 'Portfolio' });
+    const switcher = page.getByRole('combobox', { name: 'Scope' });
     await expect(switcher).toHaveValue('all');
     await expect(switcher.getByRole('option')).toHaveText(['All portfolios', 'Main portfolio', 'Trading 212']);
 

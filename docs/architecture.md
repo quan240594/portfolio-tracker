@@ -128,6 +128,11 @@ combined view is `begins_with(TXN#)` — no GSI needed.
 - A symbol must have the same currency in every portfolio of a user, so the combined view never mixes currencies.
 - Deleting a non-empty portfolio needs `?force=true` (cascades); the last portfolio cannot be deleted.
 - All portfolios share the global base currency (EUR).
+- The web header has a native `<select>` labelled **Scope** ("All portfolios", then one option per portfolio) plus a
+  "Manage portfolios" button; it is deliberately not called "Portfolio" because the **Portfolio** navigation menu
+  (Holdings, Transactions, …) sits next to it. While a page inside that menu is shown, the menu button stays named
+  "Portfolio" and is described to screen readers by a visually hidden "(current section)" (`aria-describedby`),
+  besides the visual active style.
 - `TransactionsChanged` events carry `portfolioId`; the prices service ignores it (prices are per ticker).
 
 ## Currency conversion (base currency EUR)

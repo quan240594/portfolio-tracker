@@ -17,7 +17,7 @@ test.describe('Assets → securities list and asset detail (mock mode)', () => {
     await expect(page.getByRole('heading', { name: 'Custom assets' })).toBeVisible();
 
     // Follows the portfolio scope.
-    await page.getByLabel('Portfolio', { exact: true }).selectOption({ label: 'Trading 212' });
+    await page.getByLabel('Scope', { exact: true }).selectOption({ label: 'Trading 212' });
     await expect(table.getByRole('rowheader')).toHaveCount(4);
     await expect(table.getByRole('link', { name: 'ASML.AS', exact: true })).toHaveCount(0);
 
@@ -108,10 +108,10 @@ test.describe('Assets → securities list and asset detail (mock mode)', () => {
     await page.goto('/assets/AAPL?portfolio=default');
     const positions = page.getByRole('region', { name: 'My positions' });
     await expect(positions).toContainText('You have no position in AAPL in Main portfolio');
-    await page.getByLabel('Portfolio', { exact: true }).selectOption({ label: 'Trading 212' });
+    await page.getByLabel('Scope', { exact: true }).selectOption({ label: 'Trading 212' });
     await expect(positions.getByRole('listitem', { name: 'Trading 212 position' })).toBeVisible();
     await expect(page).toHaveURL(/portfolio=trading-212/);
-    await page.getByLabel('Portfolio', { exact: true }).selectOption({ label: 'All portfolios' });
+    await page.getByLabel('Scope', { exact: true }).selectOption({ label: 'All portfolios' });
     await expect(positions.getByRole('listitem', { name: 'Trading 212 position' })).toBeVisible();
   });
 

@@ -43,9 +43,9 @@ test.describe('Goals (mock mode)', () => {
     await expect(page.getByRole('table', { name: 'Parameters used per scenario' })).toBeVisible();
 
     // The goal is per scope: another portfolio starts from the defaults.
-    await page.getByLabel('Portfolio', { exact: true }).selectOption({ label: 'Trading 212' });
+    await page.getByLabel('Scope', { exact: true }).selectOption({ label: 'Trading 212' });
     await expect(form.getByLabel('Target annual passive income (€)')).toHaveValue('24000');
-    await page.getByLabel('Portfolio', { exact: true }).selectOption({ label: 'All portfolios' });
+    await page.getByLabel('Scope', { exact: true }).selectOption({ label: 'All portfolios' });
     await expect(form.getByLabel('Target portfolio value (€)')).toHaveValue('500000');
 
     await form.getByRole('button', { name: 'Reset' }).click();
