@@ -83,19 +83,19 @@ function GrowthBody({ data }: Readonly<{ data: AnalyticsDividendGrowthResponse }
   const monthSelection = useSeriesSelection(growthSeriesKeys(monthBars), monthBars.map((b) => b.label));
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <div className="min-w-0">
           <h3 className="mb-2 text-sm font-medium">Per year</h3>
           <GrowthChartBlock bars={yearBars} selection={yearSelection} currency={data.baseCurrency} title="Dividends received per year" testId="dividend-year-chart" currentName="Received" />
         </div>
-        <div>
+        <div className="min-w-0">
           <h3 className="mb-2 text-sm font-medium">Last {MONTHS_SHOWN} months vs a year earlier</h3>
           <GrowthChartBlock bars={monthBars} selection={monthSelection} currency={data.baseCurrency} title="Monthly dividends compared with a year earlier" testId="dividend-month-chart" currentName="This period">
             <MonthTable bars={monthBars} currency={data.baseCurrency} currentName="This period" selection={monthSelection} />
           </GrowthChartBlock>
         </div>
       </div>
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <YearTable data={data} selection={yearSelection} />
         <PerShareTable series={data.perShare} />
       </div>
