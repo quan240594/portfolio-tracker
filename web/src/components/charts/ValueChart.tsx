@@ -18,8 +18,10 @@ interface Shown {
   invested: boolean;
 }
 
+const ALL_SHOWN: Shown = { value: true, invested: true };
+
 /** Text alternative of the chart; it only mentions the series that are drawn. */
-export function valueSummary(points: readonly ValuePoint[], currency: string, shown: Shown = { value: true, invested: true }): string {
+export function valueSummary(points: readonly ValuePoint[], currency: string, shown: Shown = ALL_SHOWN): string {
   const first = points[0];
   const last = points.at(-1);
   if (!first || !last) return 'No history available.';
