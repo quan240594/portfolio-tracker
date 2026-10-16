@@ -70,12 +70,12 @@ function SecurityTableRow({ row, to }: Readonly<{ row: SecurityRow; to: string }
   const dash = row.sold ? '—' : null;
   return (
     <tr className="border-b border-slate-100 last:border-0 hover:bg-slate-50 dark:border-slate-800/60 dark:hover:bg-slate-800/40">
-      <th scope="row" className="px-3 py-2.5 text-left font-normal">
+      <th scope="row" className="min-w-[12rem] px-3 py-2.5 text-left font-normal">
         <div className="flex items-center gap-2">
           <SecurityLink row={row} to={to} />
           {row.sold && <SoldBadge />}
         </div>
-        <div className="muted max-w-[14rem] truncate text-xs">{row.name}</div>
+        <div className="muted max-w-[20rem] text-xs break-words">{row.name}</div>
       </th>
       <td className="px-3 py-2.5">{row.sector}</td>
       <td className="px-3 py-2.5">{row.country}</td>
@@ -125,7 +125,7 @@ function SecurityCards({ rows, linkTo }: Readonly<{ rows: readonly SecurityRow[]
                 <SecurityLink row={r} to={linkTo(r.symbol)} />
                 {r.sold && <SoldBadge />}
               </div>
-              <div className="muted truncate text-xs">{r.name}</div>
+              <div className="muted text-xs break-words">{r.name}</div>
             </div>
             <div className="text-right">
               <div className="font-semibold tabular-nums">{r.sold ? '—' : formatMoney(r.marketValue)}</div>

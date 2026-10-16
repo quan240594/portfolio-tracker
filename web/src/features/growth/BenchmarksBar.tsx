@@ -15,10 +15,6 @@ interface Props {
 
 const FALLBACK_OPTIONS: GrowthBenchmarkOption[] = BENCHMARK_SUGGESTIONS.map((s) => ({ symbol: s.symbol, name: s.name, hasData: true }));
 
-function optionLabel(o: GrowthBenchmarkOption): string {
-  return o.name ? `${o.symbol} · ${o.name}` : o.symbol;
-}
-
 function Chip({ symbol, color, name, noData, onRemove }: Readonly<{ symbol: string; color: string; name?: string; noData: boolean; onRemove: () => void }>) {
   return (
     <li className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white py-1 pr-1 pl-3 text-sm dark:border-slate-700 dark:bg-slate-950" title={name}>
@@ -40,14 +36,18 @@ function Chip({ symbol, color, name, noData, onRemove }: Readonly<{ symbol: stri
 function OptionCheckbox({ option, selected, disabled, onToggle }: Readonly<{ option: GrowthBenchmarkOption; selected: boolean; disabled: boolean; onToggle: () => void }>) {
   return (
     <label
-      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-slate-100 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-500 dark:hover:bg-slate-800 ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+      className={`flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-slate-100 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-500 dark:hover:bg-slate-800 ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
     >
       <input type="checkbox" className="sr-only" checked={selected} disabled={disabled} onChange={onToggle} />
-      <span aria-hidden="true" className="w-4 text-brand-600 dark:text-brand-400">
+      <span aria-hidden="true" className="w-4 shrink-0 text-brand-600 dark:text-brand-400">
         {selected ? '✓' : ''}
       </span>
-      <span className="min-w-0 flex-1 truncate">{optionLabel(option)}</span>
-      {!option.hasData && <span className="muted text-xs">no price data yet</span>}
+      <span className="w-[5.5rem] shrink-0 font-medium break-words">{option.symbol}</span>
+      <span className="min-w-0 flex-1 break-words">
+        {option.name && <span className="sr-only"> · </span>}
+        {option.name}{' '}
+        {!option.hasData && <span className="muted block text-xs">no price data yet</span>}
+      </span>
     </label>
   );
 }
@@ -70,7 +70,7 @@ function Picker({ id, options, selected, onToggle }: Readonly<{ id: string; opti
   const tracked = options.filter((o) => o.hasData);
   const other = options.filter((o) => !o.hasData);
   return (
-    <div id={id} className="card absolute left-0 z-20 sm:right-0 sm:left-auto mt-2 w-80 max-w-[calc(100vw-2rem)] p-2 shadow-lg">
+    <div id={id} className="card absolute inset-x-4 z-20 mt-2 p-2 shadow-lg sm:inset-x-auto sm:right-4 sm:w-[32rem] sm:max-w-[calc(100%-2rem)]">
       <fieldset className="max-h-72 min-w-0 overflow-y-auto">
         <legend className="sr-only">Benchmarks</legend>
         <OptionGroup label="With price data" options={tracked} selected={selected} full={full} onToggle={onToggle} />
@@ -126,7 +126,7 @@ export function BenchmarksBar({ selected, options, benchmarks, onChange }: Reado
   const toggle = (symbol: string) => onChange(selected.includes(symbol) ? selected.filter((s) => s !== symbol) : [...selected, symbol]);
 
   return (
-    <section aria-labelledby="growth-benchmarks-title" className="card p-4">
+    <section aria-labelledby="growth-benchmarks-title" className="card relative p-4">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <h2 id="growth-benchmarks-title" className="font-semibold">
           Benchmarks
@@ -137,7 +137,7 @@ export function BenchmarksBar({ selected, options, benchmarks, onChange }: Reado
           ))}
           {selected.length === 0 && <li className="muted text-sm">None selected. Select a benchmark to compare your portfolio with.</li>}
         </ul>
-        <div ref={wrapper} className="relative">
+        <div ref={wrapper}>
           <button ref={button} type="button" className="btn-secondary" aria-controls={open ? pickerId : undefined} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
             Select
           </button>

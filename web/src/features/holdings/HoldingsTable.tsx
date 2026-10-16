@@ -98,7 +98,7 @@ export function StaleBadge() {
 function WeightBar({ weight }: Readonly<{ weight: number }>) {
   return (
     <div className="flex items-center justify-end gap-2">
-      <div className="hidden h-1.5 w-16 overflow-hidden rounded-full bg-slate-200 lg:block dark:bg-slate-800" aria-hidden="true">
+      <div className="hidden h-1.5 w-16 overflow-hidden rounded-full bg-slate-200 2xl:block dark:bg-slate-800" aria-hidden="true">
         <div className="h-full rounded-full bg-brand-500" style={{ width: `${Math.min(100, weight * 100)}%` }} />
       </div>
       <span className="w-12 tabular-nums">{formatWeight(weight)}</span>
@@ -157,12 +157,12 @@ export function HoldingsTable({ holdings, currency }: Readonly<Props>) {
           <tbody>
             {sorted.map((h) => (
               <tr key={h.symbol} className="border-b border-slate-100 last:border-0 hover:bg-slate-50 dark:border-slate-800/60 dark:hover:bg-slate-800/40">
-                <th scope="row" className="px-3 py-2.5 text-left font-normal">
+                <th scope="row" className="min-w-[9rem] px-3 py-2.5 text-left font-normal">
                   <div className="flex items-center gap-2">
                     <HoldingSymbol holding={h} to={withScope(assetPath(h.symbol))} />
                     {h.priceStale && <StaleBadge />}
                   </div>
-                  <div className="muted max-w-[16rem] truncate text-xs">{h.name}</div>
+                  <div className="muted max-w-[20rem] text-xs break-words">{h.name}</div>
                 </th>
                 <td className="px-3 py-2.5 text-right tabular-nums">{formatQuantity(h.quantity)}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums">
@@ -228,7 +228,7 @@ export function HoldingsTable({ holdings, currency }: Readonly<Props>) {
                     <HoldingSymbol holding={h} to={withScope(assetPath(h.symbol))} />
                     {h.priceStale && <StaleBadge />}
                   </div>
-                  <div className="muted truncate text-xs">{h.name}</div>
+                  <div className="muted text-xs break-words">{h.name}</div>
                 </div>
                 <div className="text-right">
                   <div className="font-semibold tabular-nums">{formatMoney(h.marketValue, currency)}</div>

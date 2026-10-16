@@ -36,7 +36,7 @@ function Bar({ label, value, max, testId }: Readonly<{ label: string; value: num
   const color = value < 0 ? 'bg-red-400 dark:bg-red-500/70' : 'bg-brand-500 dark:bg-brand-400';
   return (
     <div className="grid grid-cols-[5.5rem_1fr_4.5rem] items-center gap-2 text-xs">
-      <span className="muted truncate">{label}</span>
+      <span className="muted break-words">{label}</span>
       <span className="h-2.5 rounded-full bg-slate-100 dark:bg-slate-800">
         <span className={`block h-full rounded-full ${color}`} style={{ width: `${((Math.abs(value) / max) * 100).toFixed(1)}%` }} data-testid={testId} />
       </span>

@@ -166,7 +166,7 @@ describe('TransactionsPage management actions', () => {
     expect(backup.portfolios).toHaveLength(2);
     expect(backup.categories).toHaveLength(5);
     expect(backup.customAssets).toHaveLength(3);
-    expect(backup.watchlist).toHaveLength(3);
+    expect(backup.watchlist).toHaveLength(4);
     expect(JSON.stringify(backup)).not.toMatch(/secret|token|password/i);
 
     server.use(http.get('/api/export/backup', () => HttpResponse.json({ error: { code: 'X', message: 'Backup failed' } }, { status: 500 })));

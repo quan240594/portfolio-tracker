@@ -90,8 +90,8 @@ export function CategoryDialog({ portfolioId, category, categories, assignments,
                 <li key={h.symbol}>
                   <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-slate-100 dark:hover:bg-slate-800">
                     <input type="checkbox" checked={symbols.has(h.symbol)} onChange={() => toggle(h.symbol)} />
-                    <span className="truncate">{holdingLabel(h)}</span>
-                    {elsewhere && <span className="muted ml-auto text-xs whitespace-nowrap">in {elsewhere}</span>}
+                    <span className="min-w-0 break-words">{holdingLabel(h)}</span>
+                    {elsewhere && <span className="muted ml-auto shrink-0 text-xs whitespace-nowrap">in {elsewhere}</span>}
                   </label>
                 </li>
               );

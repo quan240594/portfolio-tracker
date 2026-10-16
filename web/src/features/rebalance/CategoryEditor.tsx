@@ -54,7 +54,7 @@ export function CategoryEditor({ portfolioId }: Readonly<{ portfolioId: string }
                 <span aria-hidden="true" className="h-3 w-3 rounded-full" style={{ backgroundColor: c.color }} />
                 <span className="font-medium">{c.name}</span>
                 <span className="tabular-nums">{formatPercent(c.targetWeight, { digits: 1 })}</span>
-                <span className="muted min-w-0 flex-1 truncate text-xs">{symbols.length > 0 ? symbols.join(', ') : 'No holdings assigned'}</span>
+                <span className="muted min-w-0 flex-1 text-xs break-words">{symbols.length > 0 ? symbols.join(', ') : 'No holdings assigned'}</span>
                 <button type="button" className="rounded-md px-2 py-1 text-xs font-medium hover:bg-slate-100 dark:hover:bg-slate-800" aria-label={`Edit ${c.name}`} onClick={() => setEditing(c)}>
                   Edit
                 </button>

@@ -1272,3 +1272,28 @@ deployed (non-mock) app has no banner. It is not dismissable.
     sign in and connect Trading 212 under Brokers; the first sync takes about 8 minutes). The key never goes through the demo.
 - **Configuration:** `.github/workflows/pages.yml` passes the repository *variable* (not a secret) `REAL_APP_URL` as
   `VITE_REAL_APP_URL` to the Pages build; set it to the `web_url` Terraform output and re-run the Pages workflow.
+## Display conventions
+
+### Names are never truncated
+
+A security's name (or ticker + name) is always shown in full: it wraps onto a second line (`min-w-0` + `break-words`, a flex/grid child never
+pushes the layout) instead of ending in an ellipsis. Never put `truncate`, `text-ellipsis`, `line-clamp-*` or `overflow-hidden` on a name, and do
+not shrink the font to make it fit; widen the container or let it wrap. The ticker keeps its own column/line so scanning still works, and a
+status ("no price data yet") goes under the name, so it never squeezes it. Native `title` is an extra, not a substitute. Where a name is
+long, give the cell a sensible `min-w-*` (Holdings/Securities 12rem, Watchlist 9rem) so it wraps to two lines rather than five.
+
+- The benchmark picker (`features/growth/BenchmarksBar.tsx`) is `sm:w-[32rem]` and anchored to the card (`inset-x-4` below `sm`, `right-4`
+  from `sm` up), so it never leaves the viewport. The `<label>` text stays `SYMBOL · Name` for assistive technology.
+- Native `<option>` labels carry the full name; the browser handles overflow.
+- Hidden tables: wrap a `sr-only` table in a `div` (and give scroll containers `relative`), otherwise its absolutely positioned cells widen the page.
+- Tests: `web/src/fullNames.test.tsx` (class assertions per component) and `web/e2e/full-names.spec.ts` (computed style + `scrollWidth`, at
+  1440, 390 and 320 px, plus no horizontal page overflow). Never assert exact pixels (CI fonts are wider than macOS fonts).
+
+Exceptions, where a full name cannot physically fit, show the short symbol instead and carry the full name elsewhere (legend, tooltip, data
+table, `aria-label`, and `title` as an extra):
+
+- chart axes and bar/slice labels (recharts ticks, the donut centre, bar labels such as the received-per-holding chart),
+- the Calendar month-grid chips (symbol + amount; the full name is one click away in the event dialog and always shown in the list view),
+- the Benchmarks chips above the picker and the chart legends (symbol only; the name is in the picker, the chip's `title` and the data tables),
+- non-name text that is deliberately clamped: the transaction note column (`title` holds the whole note), account e-mail in the menu, and
+  portfolio names in the scope `<select>` (`max-w-[14rem]`, native select clipping).

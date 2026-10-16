@@ -59,7 +59,7 @@ function IncomeBody({ slices, currency }: Readonly<{ slices: readonly IncomeSlic
               <li key={s.key} className="text-sm transition-opacity duration-100 motion-reduce:transition-none" style={{ opacity: focusOpacity(selection.focusKey, s.key, LIST_DIM) }}>
                 <div className="flex items-baseline gap-2">
                   <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 self-center rounded-sm" style={{ background: s.color }} />
-                  <span className="truncate font-medium">{s.label}</span>
+                  <span className="min-w-0 font-medium break-words">{s.label}</span>
                   {s.detail && <span className="muted text-xs">{s.detail}</span>}
                   <span className="ml-auto w-14 text-right font-medium tabular-nums">{formatWeight(s.share)}</span>
                   <span className="muted w-24 text-right tabular-nums">{formatMoney(s.value, currency)}</span>
