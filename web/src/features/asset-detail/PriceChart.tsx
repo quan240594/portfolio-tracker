@@ -9,8 +9,10 @@ import { benchKey, chartExtremes, chartTooltip, labelPosition, formatChartValue,
 interface Props {
   rows: readonly ChartRow[];
   mode: ChartMode;
-  /** Benchmarks that have data, by their index in the response. */
+  /** Benchmarks to draw (the ones that are not excluded), by their index in the response: the index keeps the colour. */
   benchmarks: readonly { symbol: string; index: number }[];
+  /** false = the security's own line is excluded: its high/low labels and the trade markers (which sit on it) go with it. */
+  showPrice: boolean;
   markers: readonly PlottedMarker[];
   currency: string;
   summary: string;
@@ -35,7 +37,7 @@ export const markerColors = (theme: Theme): Record<AssetMarkerType, string> => {
 };
 
 /** The price (or percent change) line with benchmark lines, min/max labels and the user's trades. */
-export function PriceChart({ rows, mode, benchmarks, markers, currency, summary, symbol }: Readonly<Props>) {
+export function PriceChart({ rows, mode, benchmarks, showPrice, markers, currency, summary, symbol }: Readonly<Props>) {
   const { theme } = useTheme();
   const c = analyticsTheme(theme);
   const colors = benchmarkColors(theme);
@@ -43,7 +45,7 @@ export function PriceChart({ rows, mode, benchmarks, markers, currency, summary,
   const isPrice = mode === 'price';
   const dates = rows.map((r) => String(r.date));
   const longSpan = dates.length > 1 && Date.parse(dates.at(-1)!) - Date.parse(dates[0]!) > 200 * 86_400_000;
-  const values = rows.flatMap((r) => [Number(r.value), ...benchmarks.map((b) => Number(r[benchKey(b.index)] ?? 0))]);
+  const values = rows.flatMap((r) => [...(showPrice ? [Number(r.value)] : []), ...benchmarks.map((b) => Number(r[benchKey(b.index)] ?? 0))]);
   const percentAxis = niceAxis(values, 0.08);
   const { min, max } = chartExtremes(rows);
   const format = formatChartValue(mode, currency);
@@ -66,13 +68,13 @@ export function PriceChart({ rows, mode, benchmarks, markers, currency, summary,
           />
           <Tooltip contentStyle={tooltipStyle(c)} labelFormatter={dateLabel} formatter={chartTooltip(mode, currency)} />
           {!isPrice && <ReferenceLine y={0} stroke={c.axis} strokeDasharray="3 3" />}
-          <Line type="monotone" dataKey="value" name={symbol} stroke={c.value} strokeWidth={2.5} dot={false} isAnimationActive={false} />
+          {showPrice && <Line type="monotone" dataKey="value" name={symbol} stroke={c.value} strokeWidth={2.5} dot={false} isAnimationActive={false} />}
           {benchmarks.map((b) => (
             <Line key={b.symbol} type="monotone" dataKey={benchKey(b.index)} name={b.symbol} stroke={colors[b.index % colors.length]} strokeWidth={2} dot={false} connectNulls={false} isAnimationActive={false} />
           ))}
-          {max && <ReferenceDot x={max.date} y={max.value} r={4} fill={c.text} stroke={c.tooltipBg} ifOverflow="extendDomain" label={{ value: `High ${format(max.value)}`, position: labelPosition(rows, max.date, 'top'), fontSize: 11, fill: c.text }} />}
-          {min && min.date !== max?.date && <ReferenceDot x={min.date} y={min.value} r={4} fill={c.text} stroke={c.tooltipBg} ifOverflow="extendDomain" label={{ value: `Low ${format(min.value)}`, position: labelPosition(rows, min.date, 'bottom'), fontSize: 11, fill: c.text }} />}
-          {markers.map((m) => (
+          {showPrice && max && <ReferenceDot x={max.date} y={max.value} r={4} fill={c.text} stroke={c.tooltipBg} ifOverflow="extendDomain" label={{ value: `High ${format(max.value)}`, position: labelPosition(rows, max.date, 'top'), fontSize: 11, fill: c.text }} />}
+          {showPrice && min && min.date !== max?.date && <ReferenceDot x={min.date} y={min.value} r={4} fill={c.text} stroke={c.tooltipBg} ifOverflow="extendDomain" label={{ value: `Low ${format(min.value)}`, position: labelPosition(rows, min.date, 'bottom'), fontSize: 11, fill: c.text }} />}
+          {(showPrice ? markers : []).map((m) => (
             <ReferenceDot key={m.key} x={m.x} y={m.y} ifOverflow="extendDomain" shape={<MarkerShape type={m.type} colors={shapeColors} />} />
           ))}
         </ComposedChart>

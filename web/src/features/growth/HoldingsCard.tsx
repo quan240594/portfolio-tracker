@@ -1,12 +1,15 @@
 import { useState } from 'react';
-import { DEFAULT_GROWTH_RANGE, type AnalyticsHoldingsPerformanceResponse, type GrowthRange } from '@portfolio/shared';
+import { DEFAULT_GROWTH_RANGE, type AnalyticsHoldingsPerformanceResponse, type GrowthRange, type HoldingPerformanceRow } from '@portfolio/shared';
 import { useHoldingsPerformance } from '../../api/growthHooks';
 import { Change } from '../../components/Change';
 import { QueryBoundary } from '../../components/QueryBoundary';
 import { SegmentedControl } from '../../components/SegmentedControl';
+import { analyticsTheme } from '../../components/charts/analyticsTheme';
+import { LegendSwatch, NothingSelected, SelectableLegend, SelectableTable, selectRows, useSeriesSelection, type SelectableColumn } from '../../components/charts/selection';
+import { useTheme } from '../../theme/ThemeProvider';
 import { formatDate, formatPercent } from '../../lib/format';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
-import { PanelHeader, TableShell, numCell, rowClass } from '../analytics/TableShell';
+import { PanelHeader } from '../analytics/TableShell';
 import { HoldingsChart } from './HoldingsChart';
 import { InfoNote } from './InfoNote';
 import { RangeButtons } from './RangeButtons';
@@ -18,39 +21,64 @@ const VIEWS = [
   { value: 'table', label: 'Table' },
 ] as const;
 
-const HOLDINGS_COLUMNS = [{ label: 'Symbol' }, { label: 'Name' }, { label: 'Return', align: 'right' as const }, { label: 'Return (€)', align: 'right' as const }, { label: 'Measured from', align: 'right' as const }];
+const HOLDINGS_COLUMNS: SelectableColumn[] = [
+  { key: 'name', label: 'Name', selectable: false },
+  { key: 'returnPct', label: 'Return' },
+  { key: 'gain', label: 'Return (€)', selectable: false },
+  { key: 'from', label: 'Measured from', selectable: false },
+];
 
-function HoldingsTable({ data }: Readonly<{ data: AnalyticsHoldingsPerformanceResponse }>) {
+/** Text alternative of the bars: best and worst of the holdings that are drawn. */
+export function holdingsSummary(rows: readonly HoldingPerformanceRow[], hasHidden: boolean): string {
+  const best = rows[0];
+  const worst = rows.at(-1);
+  if (!best || !worst) return 'No holdings selected.';
+  const describe = (h: HoldingPerformanceRow) => `${h.symbol} ${arrowOf(h.returnPct)} ${formatPercent(h.returnPct, { signed: true })}`;
+  const selection = hasHidden ? ', current selection' : '';
+  return `Return per holding over the selected range, ${rows.length} holdings${selection}. Best ${describe(best)}, worst ${describe(worst)}.`;
+}
+
+function HoldingsBody({ data, view }: Readonly<{ data: AnalyticsHoldingsPerformanceResponse; view: View }>) {
+  const { theme } = useTheme();
+  const selection = useSeriesSelection(
+    ['returnPct'],
+    data.holdings.map((h) => h.symbol),
+  );
+  const shown = selectRows(data.holdings, (h) => h.symbol, selection);
+  const rows = data.holdings.map((h) => ({
+    id: h.symbol,
+    header: h.symbol,
+    cells: [
+      <span key="name" className="muted">
+        {h.name}
+      </span>,
+      <Change key="pct" pct={h.returnPct} />,
+      <Change key="gain" amount={h.gain} currency={data.baseCurrency} />,
+      <span key="from">
+        {formatDate(h.from)}
+        {h.sincePurchase && <span title="Bought inside this range"> *</span>}
+      </span>,
+    ],
+  }));
+  let content = <HoldingsChart rows={shown} summary={holdingsSummary(shown, selection.hasHidden)} />;
+  if (view === 'table') content = <SelectableTable caption="Return per holding, best first" rowHeader="Symbol" columns={HOLDINGS_COLUMNS} rows={rows} selection={selection} />;
+  else if (selection.nothingSelected) content = <NothingSelected onShowAll={selection.reset} />;
   return (
-    <TableShell caption="Return per holding, best first" columns={HOLDINGS_COLUMNS}>
-      {data.holdings.map((h) => (
-        <tr key={h.symbol} className={rowClass}>
-          <th scope="row" className="py-2 pr-3 text-left font-medium whitespace-nowrap">
-            {h.symbol}
-          </th>
-          <td className="muted max-w-48 truncate py-2 pr-3">{h.name}</td>
-          <td className={numCell}>
-            <Change pct={h.returnPct} />
-          </td>
-          <td className={numCell}>
-            <Change amount={h.gain} currency={data.baseCurrency} />
-          </td>
-          <td className={numCell}>
-            {formatDate(h.from)}
-            {h.sincePurchase && <span title="Bought inside this range"> *</span>}
-          </td>
-        </tr>
-      ))}
-    </TableShell>
+    <>
+      <SelectableLegend
+        entries={[{ key: 'returnPct', label: 'Return per holding', swatch: <LegendSwatch color={analyticsTheme(theme).gain} /> }]}
+        selection={selection}
+        label="Holdings performance series"
+        testId="growth-holdings-legend"
+      />
+      {content}
+    </>
   );
 }
 
 function HoldingsContent({ data, view }: Readonly<{ data: AnalyticsHoldingsPerformanceResponse; view: View }>) {
   if (data.holdings.length === 0) return <p className="muted py-8 text-center text-sm">No open positions with a return in this range yet.</p>;
-  const best = data.holdings[0]!;
-  const worst = data.holdings.at(-1)!;
-  const summary = `Return per holding over the selected range, ${data.holdings.length} holdings. Best ${best.symbol} ${arrowOf(best.returnPct)} ${formatPercent(best.returnPct, { signed: true })}, worst ${worst.symbol} ${arrowOf(worst.returnPct)} ${formatPercent(worst.returnPct, { signed: true })}.`;
-  return view === 'bars' ? <HoldingsChart rows={data.holdings} summary={summary} /> : <HoldingsTable data={data} />;
+  return <HoldingsBody data={data} view={view} />;
 }
 
 /** Card 5: return of each open holding over the chosen range, as bars or a table. */

@@ -30,26 +30,49 @@ export function PercentLabel({ x, y, width, height, value, gain, loss }: Readonl
 
 export const dynamicsTooltip = (v: unknown, name: unknown): [string, string] => [signedLabel(Number(v), 2), String(name)];
 
+interface SummaryView {
+  /** The portfolio bars are drawn. */
+  portfolio: boolean;
+  /** Names of the series that are drawn. */
+  names: readonly string[];
+  /** Something is excluded: say that the chart shows the current selection. */
+  hasHidden: boolean;
+}
+
+/** Text alternative of the chart, for the months and series that are drawn. */
+export function dynamicsSummary(months: readonly GrowthMonthRow[], view: SummaryView): string {
+  const first = months[0];
+  if (!first) return 'No months selected.';
+  const count = `${months.length} months`;
+  const selection = view.hasHidden ? ', current selection' : '';
+  if (!view.portfolio) return `Monthly returns of ${view.names.join(', ')} over ${count}${selection}.`;
+  const best = months.reduce((a, m) => (m.portfolioPct > a.portfolioPct ? m : a), first);
+  return `Monthly portfolio return over ${count}${selection}. Best month ${monthShortLabel(best.month)} ${signedLabel(best.portfolioPct)}.`;
+}
+
 interface Props {
   months: readonly GrowthMonthRow[];
-  /** Benchmarks to show next to the portfolio (empty when Compare is off). */
+  /** Benchmarks to show next to the portfolio (empty when Compare is off, or excluded); the index keeps the colour. */
   benchmarks: readonly { symbol: string; index: number }[];
+  /** false = the portfolio bars are excluded. */
+  showPortfolio: boolean;
   summary: string;
 }
 
 /** Monthly returns as columns: green/red portfolio bars with value labels, one neutral bar per benchmark. */
-export function DynamicsChart({ months, benchmarks, summary }: Readonly<Props>) {
+export function DynamicsChart({ months, benchmarks, showPortfolio, summary }: Readonly<Props>) {
   const { theme } = useTheme();
   const c = analyticsTheme(theme);
   const colors = benchmarkColors(theme);
   const data = months.map((m) => {
-    const row: Record<string, string | number | null> = { label: monthShortLabel(m.month), portfolio: m.portfolioPct };
+    const row: Record<string, string | number | null> = { label: monthShortLabel(m.month) };
+    if (showPortfolio) row.portfolio = m.portfolioPct;
     for (const b of benchmarks) row[returnKey(b.index)] = m.benchmarks[b.symbol] ?? null;
     return row;
   });
   const axis = niceAxis(data.flatMap((d) => Object.entries(d).filter(([k]) => k !== 'label').map(([, v]) => Number(v ?? 0))), 0.1);
   // Each month needs room for its bars and the value label above the portfolio bar.
-  const minWidth = Math.max(320, months.length * (benchmarks.length + 1) * 22 + 60);
+  const minWidth = Math.max(320, months.length * (benchmarks.length + Number(showPortfolio)) * 22 + 60);
 
   return (
     <div className="overflow-x-auto">
@@ -61,12 +84,14 @@ export function DynamicsChart({ months, benchmarks, summary }: Readonly<Props>) 
             <YAxis tickFormatter={percentTickWith(axis.digits)} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={48} domain={axis.domain} ticks={axis.ticks} />
             <Tooltip cursor={{ fill: c.grid, opacity: 0.5 }} contentStyle={tooltipStyle(c)} formatter={dynamicsTooltip} />
             <ReferenceLine y={0} stroke={c.axis} />
-            <Bar dataKey="portfolio" name="Portfolio" radius={[3, 3, 0, 0]} isAnimationActive={false}>
-              {data.map((d) => (
-                <Cell key={String(d.label)} fill={Number(d.portfolio) >= 0 ? c.gain : c.loss} />
-              ))}
-              <LabelList dataKey="portfolio" content={<PercentLabel gain={c.gain} loss={c.loss} />} />
-            </Bar>
+            {showPortfolio && (
+              <Bar dataKey="portfolio" name="Portfolio" radius={[3, 3, 0, 0]} isAnimationActive={false}>
+                {data.map((d) => (
+                  <Cell key={String(d.label)} fill={Number(d.portfolio) >= 0 ? c.gain : c.loss} />
+                ))}
+                <LabelList dataKey="portfolio" content={<PercentLabel gain={c.gain} loss={c.loss} />} />
+              </Bar>
+            )}
             {benchmarks.map((b) => (
               <Bar key={b.symbol} dataKey={returnKey(b.index)} name={b.symbol} fill={colors[b.index % colors.length]} radius={[3, 3, 0, 0]} isAnimationActive={false} />
             ))}

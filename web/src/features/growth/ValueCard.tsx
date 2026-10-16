@@ -6,14 +6,15 @@ import { QueryBoundary } from '../../components/QueryBoundary';
 import { useTheme, type Theme } from '../../theme/ThemeProvider';
 import { analyticsTheme } from '../../components/charts/analyticsTheme';
 import { formatDate, formatMoney } from '../../lib/format';
+import { SelectableTable, useSeriesSelection } from '../../components/charts/selection';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
 import { PanelHeader } from '../analytics/TableShell';
-import { ChartLegend, GrowthChart, type LegendItem } from './GrowthChart';
-import { ChartOrTable } from './ChartOrTable';
-import { GrowthTable } from './GrowthTable';
+import { GrowthChart } from './GrowthChart';
+import { SelectableChartOrTable } from './ChartOrTable';
 import { InfoNote } from './InfoNote';
 import { RangeButtons } from './RangeButtons';
-import { TABLE_ROWS, availableBenchmarks, benchmarkColors, firstBenchmarkValue, growthRows, headlineText, lastBenchmarkValue } from './growthFormat';
+import { TABLE_ROWS, availableBenchmarks, benchmarkColors, firstBenchmarkValue, growthRows, headlineText, lastBenchmarkValue, valueKey } from './growthFormat';
+import { legendEntries, selectionSummary, seriesKeys, shownLabels, visibleBenchmarks, type LineSeries } from './growthSelection';
 
 export const NO_TRANSACTIONS_TEXT = 'Add transactions to see how your portfolio grows.';
 
@@ -32,7 +33,8 @@ function PeriodLine({ period, currency }: Readonly<{ period: GrowthPeriod; curre
   );
 }
 
-function legendOf(data: AnalyticsGrowthResponse, period: GrowthPeriod, theme: Theme): LegendItem[] {
+/** Series of the value chart: portfolio, invested and one per benchmark (colour by the benchmark's index, so it never shifts). */
+export function valueSeries(data: AnalyticsGrowthResponse, period: GrowthPeriod, theme: Theme): LineSeries[] {
   const c = data.baseCurrency;
   const colors = benchmarkColors(theme);
   const t = analyticsTheme(theme);
@@ -47,27 +49,57 @@ function legendOf(data: AnalyticsGrowthResponse, period: GrowthPeriod, theme: Th
   ];
 }
 
-function ValueContent({ data }: Readonly<{ data: AnalyticsGrowthResponse }>) {
+function ValueChartBlock({ data, period }: Readonly<{ data: AnalyticsGrowthResponse; period: GrowthPeriod }>) {
   const { theme } = useTheme();
-  const { period } = data;
-  if (!period) return <p className="muted py-8 text-center text-sm">{NO_TRANSACTIONS_TEXT}</p>;
   const c = data.baseCurrency;
   const rows = growthRows(data);
   const bench = availableBenchmarks(data);
+  const series = valueSeries(data, period, theme);
+  const selection = useSeriesSelection(seriesKeys(series));
+  const shown = visibleBenchmarks(bench, selection);
+  const span = `from ${formatDate(period.from)} to ${formatDate(period.to)}`;
   const compared = bench.length > 0 ? `, compared with ${bench.map((b) => b.symbol).join(', ')} replayed with the same cash flows` : '';
-  const summary = `Portfolio value from ${formatDate(period.from)} to ${formatDate(period.to)}: ${formatMoney(period.startValue, c)} to ${formatMoney(period.endValue, c)}, invested ${formatMoney(period.invested, c)}${compared}.`;
-  const sampled = downsampleEvenly(rows, TABLE_ROWS);
-  const tableRows = sampled.map((r) => [formatDate(String(r.date)), formatMoney(Number(r.value), c), formatMoney(Number(r.invested), c), ...bench.map((b) => formatMoney(Number(r[`v${b.index}`]), c))]);
+  const whole = `Portfolio value ${span}: ${formatMoney(period.startValue, c)} to ${formatMoney(period.endValue, c)}, invested ${formatMoney(period.invested, c)}${compared}.`;
+  const summary = selection.hasHidden ? selectionSummary('Portfolio value', span, shownLabels(series, selection)) : whole;
+  const columns = series.map(({ key, label }) => ({ key, label }));
+  const tableRows = downsampleEvenly(rows, TABLE_ROWS).map((r) => ({
+    id: String(r.date),
+    header: formatDate(String(r.date)),
+    selectable: false,
+    cells: [formatMoney(Number(r.value), c), formatMoney(Number(r.invested), c), ...bench.map((b) => formatMoney(Number(r[valueKey(b.index)]), c))],
+  }));
+  return (
+    <SelectableChartOrTable
+      id="growth-value-body"
+      entries={legendEntries(series)}
+      selection={selection}
+      legendTestId="growth-value-legend"
+      legendLabel="Portfolio value series"
+      chart={
+        <GrowthChart
+          rows={rows}
+          benchmarks={shown}
+          showPortfolio={selection.isSeriesVisible('portfolio')}
+          showInvested={selection.isSeriesVisible('invested')}
+          kind="value"
+          currency={c}
+          summary={summary}
+          testId="growth-value-chart"
+        />
+      }
+      table={<SelectableTable caption="Portfolio value over time" rowHeader="Date" columns={columns} rows={tableRows} selection={selection} />}
+    />
+  );
+}
+
+function ValueContent({ data }: Readonly<{ data: AnalyticsGrowthResponse }>) {
+  const { period } = data;
+  if (!period) return <p className="muted py-8 text-center text-sm">{NO_TRANSACTIONS_TEXT}</p>;
   return (
     <div>
       <Headline data={data} />
-      <PeriodLine period={period} currency={c} />
-      <ChartLegend items={legendOf(data, period, theme)} />
-      <ChartOrTable
-        id="growth-value-body"
-        chart={<GrowthChart rows={rows} benchmarks={bench} kind="value" currency={c} summary={summary} testId="growth-value-chart" />}
-        table={<GrowthTable caption="Portfolio value over time" columns={['Date', 'Portfolio', 'Invested', ...bench.map((b) => b.symbol)]} rows={tableRows} />}
-      />
+      <PeriodLine period={period} currency={data.baseCurrency} />
+      <ValueChartBlock data={data} period={period} />
       <InfoNote>
         <p>
           Portfolio is the market value of your current and past holdings plus the dividends received since the start of the period. Invested is the value at the

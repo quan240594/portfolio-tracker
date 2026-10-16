@@ -1,10 +1,10 @@
 import { cloneElement, type ReactElement } from 'react';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import type { GrowthMonthRow, HoldingPerformanceRow } from '@portfolio/shared';
 import { renderWithProviders, sp } from '../../test/utils';
 import { THEME_STORAGE_KEY } from '../../theme/ThemeProvider';
-import { DynamicsChart, PercentLabel, dynamicsTooltip, signedLabel } from './DynamicsChart';
-import { ChartLegend, GrowthChart, growthTooltip } from './GrowthChart';
+import { DynamicsChart, PercentLabel, dynamicsSummary, dynamicsTooltip, signedLabel } from './DynamicsChart';
+import { GrowthChart, growthTooltip } from './GrowthChart';
 import { BarValueLabel, HoldingsChart, holdingsTooltip } from './HoldingsChart';
 import type { GrowthRow } from './growthFormat';
 
@@ -28,7 +28,7 @@ const rows: GrowthRow[] = Array.from({ length: 40 }, (_, i) => ({
 
 describe('GrowthChart', () => {
   it('draws the value area, the invested line and a benchmark with a text summary', () => {
-    const { container } = renderWithProviders(<GrowthChart rows={rows} benchmarks={[{ symbol: 'IWDA.AS', index: 0 }]} kind="value" currency="EUR" summary="Summary text" testId="chart" />);
+    const { container } = renderWithProviders(<GrowthChart rows={rows} benchmarks={[{ symbol: 'IWDA.AS', index: 0 }]} showPortfolio kind="value" currency="EUR" summary="Summary text" testId="chart" />);
     expect(screen.getByRole('img', { name: 'Summary text' })).toBe(screen.getByTestId('chart'));
     expect(container.querySelectorAll('path.recharts-line-curve')).toHaveLength(2);
     expect(container.querySelector('path.recharts-area-area')).not.toBeNull();
@@ -40,33 +40,41 @@ describe('GrowthChart', () => {
   it('draws the return lines with a zero line, in dark mode too', () => {
     localStorage.setItem(THEME_STORAGE_KEY, 'dark');
     const { container } = renderWithProviders(
-      <GrowthChart rows={rows.slice(0, 5)} benchmarks={[{ symbol: 'A', index: 0 }]} kind="return" currency="EUR" summary="s" testId="chart" />,
+      <GrowthChart rows={rows.slice(0, 5)} benchmarks={[{ symbol: 'A', index: 0 }]} showPortfolio kind="return" currency="EUR" summary="s" testId="chart" />,
     );
     expect(container.querySelectorAll('path.recharts-line-curve')).toHaveLength(2);
     expect(container.querySelector('.recharts-reference-line')).not.toBeNull();
     expect(container.querySelectorAll('.recharts-yAxis .recharts-cartesian-axis-tick-value')[0]?.textContent).toMatch(/%$/);
   });
 
+  it('draws only the series that are shown: no portfolio area, no invested line, no benchmark', () => {
+    const { container, rerender } = renderWithProviders(
+      <GrowthChart rows={rows} benchmarks={[{ symbol: 'IWDA.AS', index: 0 }]} showPortfolio={false} showInvested kind="value" currency="EUR" summary="s" testId="chart" />,
+    );
+    expect(container.querySelector('path.recharts-area-area')).toBeNull();
+    expect(container.querySelectorAll('path.recharts-line-curve')).toHaveLength(2);
+    rerender(<GrowthChart rows={rows} benchmarks={[]} showPortfolio showInvested={false} kind="value" currency="EUR" summary="s" testId="chart" />);
+    expect(container.querySelector('path.recharts-area-area')).not.toBeNull();
+    expect(container.querySelectorAll('path.recharts-line-curve')).toHaveLength(0);
+  });
+
+  it('rescales the return axis to the lines that are shown', () => {
+    const wide: GrowthRow[] = rows.map((r) => ({ ...r, returnPct: 80, r0: 2 }));
+    const top = (portfolio: boolean) => {
+      const { container, unmount } = renderWithProviders(
+        <GrowthChart rows={wide} benchmarks={[{ symbol: 'A', index: 0 }]} showPortfolio={portfolio} kind="return" currency="EUR" summary="s" testId="chart" />,
+      );
+      const ticks = [...container.querySelectorAll('.recharts-yAxis .recharts-cartesian-axis-tick-value')].map((t) => Number.parseFloat((t.textContent ?? '').replace(/[^\d,.−-]/g, '').replace(',', '.')));
+      unmount();
+      return Math.max(...ticks);
+    };
+    expect(top(true)).toBeGreaterThanOrEqual(80);
+    expect(top(false)).toBeLessThan(10);
+  });
+
   it('formats tooltips as money or percentage', () => {
     expect(sp(growthTooltip(true, 'EUR')(1234.5, 'Portfolio')[0])).toBe('€ 1.234,50');
     expect(growthTooltip(false, 'EUR')(2.5, 'IWDA.AS')).toEqual(['+2,50%', 'IWDA.AS']);
-  });
-});
-
-describe('ChartLegend', () => {
-  it('lists the series with details and a dashed marker', () => {
-    render(
-      <ChartLegend
-        items={[
-          { key: 'a', color: '#111', label: 'Portfolio', detail: '€ 1 → € 2' },
-          { key: 'b', color: '#222', label: 'Invested', dashed: true },
-        ]}
-      />,
-    );
-    const items = screen.getAllByRole('listitem');
-    expect(items).toHaveLength(2);
-    expect(within(items[0]!).getByText('€ 1 → € 2')).toBeInTheDocument();
-    expect(items[1]!.firstElementChild).toHaveStyle({ borderTopStyle: 'dashed' });
   });
 });
 
@@ -78,7 +86,7 @@ const months: GrowthMonthRow[] = [
 
 describe('DynamicsChart', () => {
   it('labels every month with sign and arrow and adds a benchmark bar', () => {
-    const { container } = renderWithProviders(<DynamicsChart months={months} benchmarks={[{ symbol: 'IWDA', index: 0 }]} summary="Monthly summary" />);
+    const { container } = renderWithProviders(<DynamicsChart months={months} benchmarks={[{ symbol: 'IWDA', index: 0 }]} showPortfolio summary="Monthly summary" />);
     expect(screen.getByRole('img', { name: 'Monthly summary' })).toBeInTheDocument();
     const labels = [...container.querySelectorAll('text')].map((t) => t.textContent);
     expect(labels).toEqual(expect.arrayContaining(['▲ +4,2%', '▼ −1,7%', '■ 0,0%']));
@@ -86,8 +94,21 @@ describe('DynamicsChart', () => {
   });
 
   it('works without benchmarks', () => {
-    const { container } = renderWithProviders(<DynamicsChart months={months} benchmarks={[]} summary="s" />);
+    const { container } = renderWithProviders(<DynamicsChart months={months} benchmarks={[]} showPortfolio summary="s" />);
     expect(container.querySelectorAll('.recharts-bar')).toHaveLength(1);
+  });
+
+  it('leaves the portfolio bars and the excluded benchmark out', () => {
+    const { container } = renderWithProviders(<DynamicsChart months={months} benchmarks={[{ symbol: 'IWDA', index: 0 }]} showPortfolio={false} summary="s" />);
+    expect(container.querySelectorAll('.recharts-bar')).toHaveLength(1);
+    expect([...container.querySelectorAll('text')].map((t) => t.textContent)).not.toContain('▲ +4,2%');
+  });
+
+  it('summarises the months and series that are drawn', () => {
+    expect(dynamicsSummary(months, { portfolio: true, names: ['Portfolio'], hasHidden: false })).toBe('Monthly portfolio return over 3 months. Best month jan 26 ▲ +4,2%.');
+    expect(dynamicsSummary(months.slice(1), { portfolio: true, names: ['Portfolio'], hasHidden: true })).toBe('Monthly portfolio return over 2 months, current selection. Best month mrt 26 ■ 0,0%.');
+    expect(dynamicsSummary(months, { portfolio: false, names: ['IWDA'], hasHidden: true })).toBe('Monthly returns of IWDA over 3 months, current selection.');
+    expect(dynamicsSummary([], { portfolio: true, names: [], hasHidden: true })).toBe('No months selected.');
   });
 
   it('formats labels and tooltips', () => {

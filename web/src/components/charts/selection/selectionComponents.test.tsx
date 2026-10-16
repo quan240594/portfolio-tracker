@@ -80,6 +80,29 @@ describe('SelectableLegend', () => {
     expect(screen.getByRole('list', { name: 'Holdings legend' })).toBeInTheDocument();
     expect(screen.getByTestId('my-legend')).toHaveClass('mt-2');
   });
+
+  it('shows an optional detail after the label, in the toggle name and not struck through', async () => {
+    const user = userEvent.setup();
+    function WithDetail() {
+      const selection = useSeriesSelection(['a']);
+      return (
+        <SelectableLegend
+          selection={selection}
+          entries={[
+            { key: 'a', label: 'Portfolio', detail: '€ 1 → € 2', swatch: <LegendSwatch color="#00f" /> },
+            { key: 'b', label: 'Plain', detail: '+1%', swatch: <LegendSwatch color="#0f0" />, toggleable: false },
+          ]}
+        />
+      );
+    }
+    render(<WithDetail />);
+    const toggle = screen.getByRole('button', { name: 'Portfolio € 1 → € 2' });
+    expect(screen.getByText('+1%')).toBeInTheDocument();
+    await user.click(toggle);
+    expect(screen.getByText('€ 1 → € 2')).toHaveClass('opacity-40');
+    expect(screen.getByText('€ 1 → € 2')).not.toHaveClass('line-through');
+    expect(screen.getByText('Portfolio')).toHaveClass('line-through');
+  });
 });
 
 describe('LegendSwatch', () => {
