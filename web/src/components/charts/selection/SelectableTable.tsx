@@ -66,7 +66,7 @@ function ScrollArea({ className, children }: Readonly<{ className?: string; chil
  * The numbers behind a chart. The header buttons of the series columns and of the rows include/exclude that series or row in the chart
  * (the same state as the legend); excluded ones are dimmed and struck through. A real table: `th scope`, no ARIA grid.
  */
-export function SelectableTable({ caption, rowHeader, columns, rows, selection, className = '', tableClassName = 'w-full text-xs', scrollClassName, headClassName = '' }: Readonly<TableProps>) {
+export function SelectableTable({ caption, rowHeader, columns, rows, selection, className = '', tableClassName = 'w-full text-xs', scrollClassName = 'overflow-x-auto', headClassName = '' }: Readonly<TableProps>) {
   const hintId = useId();
   const columnState = columns.map((c) => ({ ...c, selectable: c.selectable !== false, visible: selection.isSeriesVisible(c.key) }));
   return (
