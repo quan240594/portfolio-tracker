@@ -172,7 +172,7 @@ describe('ReceivedCards with future payments', () => {
     await screen.findByTestId('received-upcoming-total');
     await user.click(within(screen.getByRole('region', { name: 'Dividends received' })).getByText('Show data table'));
     const table = screen.getByRole('table', { name: 'Dividends received and upcoming per period' });
-    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Period', 'Received', 'Declared', 'Estimated', 'Total']);
+    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Period', 'Received', 'Declared (announced)', 'Estimated (from history)', 'Total']);
     const periods = within(table).getAllByRole('row').slice(1).map((r) => within(r).getByRole('rowheader').textContent);
     expect(periods.filter((p) => p!.endsWith('· Current'))).toHaveLength(1);
     expect(periods.filter((p) => p!.endsWith('· Upcoming')).length).toBeGreaterThanOrEqual(11);

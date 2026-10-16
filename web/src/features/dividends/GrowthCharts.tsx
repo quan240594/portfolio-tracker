@@ -15,6 +15,7 @@ import {
   type SelectableRow,
 } from '../../components/charts/selection';
 import { ChartFrame, DataGrid, useDividendTheme } from './chartParts';
+import { DECLARED_LABEL, ESTIMATED_LABEL } from './forecastLabels';
 import {
   TABLE_COLUMNS,
   declaredKey,
@@ -32,7 +33,7 @@ import {
   yearLegendItems,
   type YearForecastModel,
 } from './growthForecast';
-import { ForecastSummary, TimelineTooltip, TrendMethod, TrendNote, YearTooltip, growthLegendEntries } from './GrowthForecastParts';
+import { ForecastSummary, GrowthLegendNote, TimelineTooltip, TrendMethod, TrendNote, YearTooltip, growthLegendEntries } from './GrowthForecastParts';
 
 type Theme = ReturnType<typeof useDividendTheme>;
 
@@ -134,6 +135,7 @@ export function YearChart({ data, timeline, showForecast, forecast, children }: 
     <>
       <ForecastBlock timeline={timeline} ccy={ccy} forecast={forecast} />
       <SelectableLegend entries={growthLegendEntries(items, c)} selection={selection} testId="growth-legend" />
+      <GrowthLegendNote items={items} />
       {selection.nothingSelected ? (
         <NothingSelected onShowAll={selection.reset} />
       ) : (
@@ -172,8 +174,8 @@ export function YearChart({ data, timeline, showForecast, forecast, children }: 
 /** Series of the timeline, named like the fields of its rows. */
 const TIMELINE_COLUMNS: SelectableColumn[] = [
   { key: 'received', label: 'Received' },
-  { key: 'declared', label: 'Declared' },
-  { key: 'estimated', label: 'Estimated' },
+  { key: 'declared', label: DECLARED_LABEL },
+  { key: 'estimated', label: ESTIMATED_LABEL },
   { key: 'trend', label: 'Trend' },
 ];
 
@@ -226,6 +228,7 @@ export function TimelineChart({ data, timeline, showForecast, forecast, children
     <>
       <ForecastBlock timeline={timeline} ccy={ccy} forecast={forecast} />
       <SelectableLegend entries={growthLegendEntries(items, c)} selection={selection} testId="growth-legend" />
+      <GrowthLegendNote items={items} />
       {selection.nothingSelected ? (
         <NothingSelected onShowAll={selection.reset} />
       ) : (

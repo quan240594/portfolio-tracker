@@ -378,8 +378,8 @@ describe('future payments colour key', () => {
 
   it('names every status next to its swatch, solid for declared and dashed for estimated', () => {
     const { container } = renderWithProviders(<KeyHarness />);
-    expect(screen.getAllByText('Declared').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText('Estimated').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Declared (announced)').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Estimated (from history)').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId('row')).toHaveTextContent(sp(formatMoney(12.5, 'EUR')));
     const swatches = [...container.querySelectorAll<HTMLElement>('span[aria-hidden="true"]')];
     expect(swatches.some((s) => s.style.border.includes('dashed'))).toBe(true);

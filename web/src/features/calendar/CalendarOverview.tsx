@@ -1,3 +1,4 @@
+import { useMemo, type ReactElement } from 'react';
 import { Bar, CartesianGrid, ComposedChart, LabelList, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { CalendarMonth, CalendarSummary } from '@portfolio/shared';
 import { KpiCard } from '../../components/KpiCard';
@@ -7,6 +8,7 @@ import { LoadingRegion, Skeleton } from '../../components/Skeleton';
 import { formatMoney, formatMonth, formatPercent } from '../../lib/format';
 import { useTheme } from '../../theme/ThemeProvider';
 import {
+  focusOpacity,
   LegendSwatch,
   NothingSelected,
   SelectableDataTable,
@@ -36,31 +38,61 @@ interface BarsProps {
   currency: string;
   statuses: readonly IncomeSeries[];
   label: string;
+  /** The legend entry being previewed (hover / keyboard focus), or null. */
+  focusKey: string | null;
+}
+
+/** The value labels above the bars describe the whole stack, not one status: they only fade (less than the bars) while a legend entry is previewed. */
+const LABEL_FADE = 0.5;
+
+/** Stroke width and dash of a status bar: estimated has a dashed edge, so it is not told apart by colour alone. */
+const STATUS_EDGE: Readonly<Record<IncomeSeries, { width: number; dash?: string }>> = {
+  paid: { width: 1 },
+  declared: { width: 1 },
+  estimated: { width: 1.5, dash: '4 2' },
+};
+
+/** The stacked bars of the statuses that are included, in stacking order; the ones that do not belong to the previewed legend entry fade. */
+export function incomeBars(colours: IncomeColours, statuses: readonly IncomeSeries[], focusKey: string | null): ReactElement[] {
+  return INCOME_SERIES.filter((key) => statuses.includes(key)).map((key) => {
+    const opacity = focusOpacity(focusKey, key);
+    return (
+      <Bar
+        key={key}
+        dataKey={key}
+        stackId="income"
+        fill={colours[key].fill}
+        fillOpacity={opacity}
+        stroke={colours[key].stroke}
+        strokeOpacity={opacity}
+        strokeWidth={STATUS_EDGE[key].width}
+        strokeDasharray={STATUS_EDGE[key].dash}
+        isAnimationActive={false}
+      />
+    );
+  });
 }
 
 /** The stacked bars of the statuses that are included, their value labels and the dashed average line; the axis follows the data left. */
-function IncomeBars({ rows, average, currency, statuses, label }: Readonly<BarsProps>) {
+function IncomeBars({ rows, average, currency, statuses, label, focusKey }: Readonly<BarsProps>) {
   const { theme } = useTheme();
   const c = chartTheme(theme);
   const colours = incomeColours(theme);
+  const avgOpacity = focusOpacity(focusKey, 'avg');
   const tooltip = <IncomeTooltip currency={currency} colours={colours} background={c.tooltipBg} border={c.tooltipBorder} text={c.text} statuses={statuses} />;
   return (
-    <div role="img" aria-label={label} className="h-72 w-full" data-testid="calendar-income-chart">
+    <div role="img" aria-label={label} className="chart-focus h-72 w-full" data-testid="calendar-income-chart">
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={rows as IncomeRow[]} margin={{ top: 22, right: 30, bottom: 0, left: 0 }}>
           <CartesianGrid stroke={c.grid} vertical={false} />
           <XAxis dataKey="month" tickFormatter={formatMonth} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
           <YAxis tickFormatter={compactMoneyTick(currency)} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={52} />
           <Tooltip cursor={{ fill: c.grid, opacity: 0.5 }} content={tooltip} />
-          {statuses.includes('paid') && <Bar dataKey="paid" stackId="income" fill={colours.paid.fill} stroke={colours.paid.stroke} strokeWidth={1} isAnimationActive={false} />}
-          {statuses.includes('declared') && <Bar dataKey="declared" stackId="income" fill={colours.declared.fill} stroke={colours.declared.stroke} strokeWidth={1} isAnimationActive={false} />}
-          {statuses.includes('estimated') && (
-            <Bar dataKey="estimated" stackId="income" fill={colours.estimated.fill} stroke={colours.estimated.stroke} strokeWidth={1.5} strokeDasharray="4 2" isAnimationActive={false} />
-          )}
+          {incomeBars(colours, statuses, focusKey)}
           <Line dataKey="total" stroke="none" dot={false} activeDot={false} legendType="none" tooltipType="none" isAnimationActive={false}>
-            <LabelList dataKey="label" position="top" fill={c.text} fontSize={10} />
+            <LabelList dataKey="label" position="top" fill={c.text} opacity={focusKey === null ? 1 : LABEL_FADE} fontSize={10} />
           </Line>
-          <ReferenceLine y={average} stroke={c.text} strokeDasharray="5 4" label={{ value: 'avg', position: 'right', fill: c.text, fontSize: 11 }} />
+          <ReferenceLine y={average} stroke={c.text} strokeOpacity={avgOpacity} strokeDasharray="5 4" label={{ value: 'avg', position: 'right', fill: c.text, fontSize: 11, opacity: avgOpacity }} />
         </ComposedChart>
       </ResponsiveContainer>
     </div>
@@ -94,7 +126,10 @@ export function IncomeChart({ monthly, average, currency }: Readonly<{ monthly: 
     INCOME_SERIES,
     monthly.map((m) => m.month),
   );
-  const shown = selectMonths(monthly, selection);
+  const { isRowVisible, isSeriesVisible } = selection;
+  // the hover preview re-renders this card on every move: the months are only rebuilt when the selection or the data change
+  const shown = useMemo(() => selectMonths(monthly, { isRowVisible, isSeriesVisible }), [monthly, isRowVisible, isSeriesVisible]);
+  const rows = useMemo(() => incomeRows(shown, currency, narrow), [shown, currency, narrow]);
   const shownAverage = selectedAverage(shown, average, selection.hasHidden);
   const statuses = INCOME_SERIES.filter((key) => selection.isSeriesVisible(key));
   return (
@@ -103,7 +138,7 @@ export function IncomeChart({ monthly, average, currency }: Readonly<{ monthly: 
       {selection.nothingSelected ? (
         <NothingSelected onShowAll={selection.reset} />
       ) : (
-        <IncomeBars rows={incomeRows(shown, currency, narrow)} average={shownAverage} currency={currency} statuses={statuses} label={incomeLabel(shown, shownAverage, currency, selection.hasHidden)} />
+        <IncomeBars rows={rows} average={shownAverage} currency={currency} statuses={statuses} label={incomeLabel(shown, shownAverage, currency, selection.hasHidden)} focusKey={selection.focusKey} />
       )}
       <figcaption className="sr-only">Dividend income per month</figcaption>
       <SelectableDataTable

@@ -2,9 +2,11 @@ import { useId, type CSSProperties } from 'react';
 import { formatMoney } from '../../lib/format';
 import type { LegendEntry } from '../../components/charts/selection';
 import { ToggleGroup } from '../calendar/CalendarControls';
+import { ForecastNote } from './ForecastNote';
 import { useDividendTheme } from './chartParts';
 import {
   GROWTH_VIEWS,
+  legendNote,
   NEEDS_HISTORY_NOTE,
   tooltipLinesOfTimeline,
   yearTooltipLines,
@@ -26,9 +28,15 @@ const LINE_STYLE: Record<'average' | 'yearAverage' | 'trend' | 'projection', { s
   projection: { solid: false, colour: (c) => c.value },
 };
 
+/** A forecast-only year is neither of the statuses: a neutral square with a dashed edge and a diagonal hatch, so it is not read as "declared" (blue) or "estimated" (yellow). */
+function forecastYearStyle(c: Theme): CSSProperties {
+  return { backgroundColor: c.grid, backgroundImage: `repeating-linear-gradient(135deg, ${c.axis} 0 1px, transparent 1px 3px)`, border: `1px dashed ${c.axis}` };
+}
+
 function barStyle(kind: SwatchKind, c: Theme, color?: string): CSSProperties {
   if (kind === 'estimated') return { background: c.estimated, border: `1px dashed ${c.estimatedEdge}` };
-  if (kind === 'declared' || kind === 'forecastYear') return { background: c.declared, border: `1px solid ${c.declaredEdge}` };
+  if (kind === 'forecastYear') return forecastYearStyle(c);
+  if (kind === 'declared') return { background: c.declared, border: `1px solid ${c.declaredEdge}` };
   return { background: color };
 }
 
@@ -44,6 +52,12 @@ export function Swatch({ kind, color, c }: Readonly<{ kind: SwatchKind; color?: 
 /** Legend entries of the growth charts: swatch + readable text instead of recharts' legend text in the, often pastel, series colour. The keys are the series keys of the selection. */
 export function growthLegendEntries(items: readonly LegendItem[], c: Theme): LegendEntry[] {
   return items.map((item) => ({ key: item.key, label: item.label, swatch: <Swatch kind={item.swatch} color={item.color} c={c} /> }));
+}
+
+/** The line under the legend that says what Declared, Estimated and a "(forecast)" year mean; nothing while no forecast is shown. */
+export function GrowthLegendNote({ items }: Readonly<{ items: readonly LegendItem[] }>) {
+  const note = legendNote(items);
+  return note ? <ForecastNote text={note} testId="growth-legend-note" /> : null;
 }
 
 interface TooltipEntry {
