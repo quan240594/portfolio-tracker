@@ -73,14 +73,15 @@ describe('DashboardPage', () => {
     await user.click(within(tabs).getByRole('tab', { name: 'Currency' }));
     expect(within(tabs).getByRole('tab', { name: 'Currency' })).toHaveAttribute('aria-selected', 'true');
     const panel = screen.getByRole('tabpanel', { name: 'Currency' });
-    expect(await within(panel).findByText('USD')).toBeInTheDocument();
-    expect(within(panel).getByText('EUR')).toBeInTheDocument();
+    const legend = await within(panel).findByTestId('allocation-legend');
+    expect(await within(legend).findByRole('button', { name: 'USD' })).toBeInTheDocument();
+    expect(within(legend).getByRole('button', { name: 'EUR' })).toBeInTheDocument();
 
     await user.click(within(tabs).getByRole('tab', { name: 'Sector' }));
-    expect(await within(screen.getByRole('tabpanel', { name: 'Sector' })).findByText('Technology')).toBeInTheDocument();
+    expect(await within(await within(screen.getByRole('tabpanel', { name: 'Sector' })).findByTestId('allocation-legend')).findByRole('button', { name: 'Technology' })).toBeInTheDocument();
 
     await user.click(within(tabs).getByRole('tab', { name: 'Country' }));
-    expect(await within(screen.getByRole('tabpanel', { name: 'Country' })).findByText('United States')).toBeInTheDocument();
+    expect(await within(await within(screen.getByRole('tabpanel', { name: 'Country' })).findByTestId('allocation-legend')).findByRole('button', { name: 'United States' })).toBeInTheDocument();
   });
 
   it('shows per-card errors and recovers on retry', async () => {

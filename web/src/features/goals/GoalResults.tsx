@@ -1,6 +1,7 @@
 import { GOAL_SCENARIO_ADJUSTMENTS, MAX_GOAL_CONTRIBUTION, type GoalProjection } from '@portfolio/shared';
 import { formatMoney, formatPercent } from '../../lib/format';
-import { GoalChart } from './GoalChart';
+import { useSeriesSelection } from '../../components/charts/selection';
+import { GOAL_SERIES, GoalChart, goalRowIds } from './GoalChart';
 import { GoalTable } from './GoalTable';
 import { GOAL_MEASURE, adjustmentText, goalInsights, plural, verdictText, type GoalInsight } from './goalText';
 
@@ -133,16 +134,18 @@ function Parameters({ projection: p }: Readonly<{ projection: GoalProjection }>)
 
 export function GoalResults({ projection }: Readonly<{ projection: GoalProjection }>) {
   const empty = projection.start.value === 0;
+  // the chart and the year-by-year table share one selection; the verdict, the summary and the insights always describe the whole calculation
+  const selection = useSeriesSelection(GOAL_SERIES, goalRowIds(projection));
   return (
     <div className="space-y-4">
       <Summary projection={projection} />
       {empty && <p className="muted text-sm">There are no holdings in this scope yet, so the projection starts from zero.</p>}
       <Insights projection={projection} />
       <div className="card p-4">
-        <GoalChart projection={projection} />
+        <GoalChart projection={projection} selection={selection} />
       </div>
       <div className="card p-4">
-        <GoalTable projection={projection} />
+        <GoalTable projection={projection} selection={selection} />
       </div>
       <Parameters projection={projection} />
     </div>

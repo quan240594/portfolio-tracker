@@ -110,10 +110,6 @@ function PerformanceCard() {
     body = (
       <div className={isPlaceholderData ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
         <ValueChart points={data.points} currency={data.baseCurrency} />
-        <div className="muted mt-2 flex gap-4 text-xs" aria-hidden="true">
-          <span className="flex items-center gap-1.5"><span className="h-0.5 w-4 bg-brand-500" /> Value</span>
-          <span className="flex items-center gap-1.5"><span className="h-0 w-4 border-t-2 border-dashed border-slate-400" /> Invested</span>
-        </div>
       </div>
     );
   }
@@ -159,7 +155,7 @@ function AllocationCard() {
   } else if (data.slices.length === 0) {
     body = <p className="muted text-sm">Nothing to allocate yet.</p>;
   } else {
-    body = <AllocationDonut slices={data.slices} currency={data.baseCurrency} />;
+    body = <AllocationDonut key={by} slices={data.slices} currency={data.baseCurrency} dimension={tabs.find((t) => t.value === by)?.label} />;
   }
   return (
     <section className="card p-4" aria-labelledby="alloc-title">

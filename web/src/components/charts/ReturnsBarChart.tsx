@@ -6,18 +6,21 @@ import { periodLabel, percentTick } from '../../features/analytics/labels';
 import { analyticsTheme, tooltipStyle } from './analyticsTheme';
 
 interface Props {
+  /** The periods to draw: the ones that are not excluded (at least one). */
   rows: readonly ReturnPeriodRow[];
   period: ReturnPeriod;
+  /** Some periods are excluded: the text alternative says the chart shows a selection. */
+  filtered?: boolean;
 }
 
 export const returnsTooltip = (v: unknown): [string, string] => [formatPercent(Number(v), { signed: true }), 'Time-weighted return'];
 
-export function ReturnsBarChart({ rows, period }: Readonly<Props>) {
+export function ReturnsBarChart({ rows, period, filtered = false }: Readonly<Props>) {
   const { theme } = useTheme();
   const c = analyticsTheme(theme);
   const best = rows.reduce((a, r) => (r.twrPct > a.twrPct ? r : a), rows[0]!);
   const worst = rows.reduce((a, r) => (r.twrPct < a.twrPct ? r : a), rows[0]!);
-  const label = `Time-weighted return per ${period} over ${rows.length} periods. Best ${periodLabel(period, best.period)} ${formatPercent(best.twrPct, { signed: true })}, worst ${periodLabel(period, worst.period)} ${formatPercent(worst.twrPct, { signed: true })}.`;
+  const label = `Time-weighted return per ${period} over ${rows.length} periods. Best ${periodLabel(period, best.period)} ${formatPercent(best.twrPct, { signed: true })}, worst ${periodLabel(period, worst.period)} ${formatPercent(worst.twrPct, { signed: true })}.${filtered ? ' Chart shows the current selection.' : ''}`;
   const data = rows.map((r) => ({ label: periodLabel(period, r.period), twrPct: r.twrPct }));
 
   return (
