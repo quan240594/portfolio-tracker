@@ -1,5 +1,6 @@
 import { averageByCalendarMonth, completeHistory, type AnalyticsDividendGrowthResponse, type ForecastTotals, type GrowthTimeline, type TimelinePoint } from '@portfolio/shared';
 import { formatMoney, formatMonth } from '../../lib/format';
+import { DECLARED_LABEL, ESTIMATED_LABEL, FORECAST_YEAR_NOTE, GROWTH_FORECAST_NOTE } from './forecastLabels';
 import { yearComparison } from './receivedSeries';
 
 /** View models of the forecast and trend in the "Dividend growth" card (pure: the components only draw them). */
@@ -120,8 +121,8 @@ export function yearTooltipLines(row: YearRow, model: Pick<YearForecastModel, 'b
     const declared = row[declaredKey(year)];
     const estimated = row[estimatedKey(year)];
     if (isNumber(received)) lines.push({ key: year, label: year, value: received, kind: 'received', year });
-    if (isNumber(declared)) lines.push({ key: declaredKey(year), label: `${year} forecast · Declared`, value: declared, kind: 'declared', year });
-    if (isNumber(estimated)) lines.push({ key: estimatedKey(year), label: `${year} forecast · Estimated`, value: estimated, kind: 'estimated', year });
+    if (isNumber(declared)) lines.push({ key: declaredKey(year), label: `${year} forecast · ${DECLARED_LABEL}`, value: declared, kind: 'declared', year });
+    if (isNumber(estimated)) lines.push({ key: estimatedKey(year), label: `${year} forecast · ${ESTIMATED_LABEL}`, value: estimated, kind: 'estimated', year });
   }
   if (isNumber(row.average)) lines.push({ key: 'average', label: 'Average of years', value: row.average, kind: 'average' });
   return lines;
@@ -173,8 +174,8 @@ export function tooltipLinesOfTimeline(row: TimelineRow): TooltipLine[] {
     if (value !== undefined) lines.push({ key, label, value, kind });
   };
   add('received', row.phase === 'CURRENT' ? 'Received so far' : 'Received', row.received, 'received');
-  add('declared', 'Forecast · Declared', row.declared, 'declared');
-  add('estimated', 'Forecast · Estimated', row.estimated, 'estimated');
+  add('declared', `Forecast · ${DECLARED_LABEL}`, row.declared, 'declared');
+  add('estimated', `Forecast · ${ESTIMATED_LABEL}`, row.estimated, 'estimated');
   add('average', '12-month average', row.average, 'average');
   add('trend', row.trend === undefined ? 'Trend (projected)' : 'Trend', row.trend ?? row.projection, 'trend');
   return lines;
@@ -182,7 +183,7 @@ export function tooltipLinesOfTimeline(row: TimelineRow): TooltipLine[] {
 
 const PHASE_NOTE: Record<TimelinePoint['phase'], string> = { PAST: '', CURRENT: ' · Forecast (month in progress)', FUTURE: ' · Forecast' };
 
-export const TABLE_COLUMNS = ['Period', 'Received', 'Declared', 'Estimated', 'Trend'] as const;
+export const TABLE_COLUMNS = ['Period', 'Received', DECLARED_LABEL, ESTIMATED_LABEL, 'Trend'] as const;
 
 const amount = (value: number | null, ccy: string): string => (value === null ? DASH : formatMoney(value, ccy));
 
@@ -239,17 +240,23 @@ export function yearLegendItems(model: YearForecastModel, colorOf: (year: string
   const items: LegendItem[] = model.years.map((y) => ({ key: y, label: y, swatch: 'year', color: colorOf(y) }));
   for (const y of model.forecastYears) if (!model.years.includes(y)) items.push({ key: `${y}-forecast`, label: `${y} (forecast)`, swatch: 'forecastYear' });
   if (model.forecastYears.length > 0) {
-    items.push({ key: 'declared', label: 'Declared (forecast)', swatch: 'declared' }, { key: 'estimated', label: 'Estimated (forecast)', swatch: 'estimated' });
+    items.push({ key: 'declared', label: DECLARED_LABEL, swatch: 'declared' }, { key: 'estimated', label: ESTIMATED_LABEL, swatch: 'estimated' });
   }
   if (model.hasAverage) items.push({ key: 'average', label: 'Average of years', swatch: 'yearAverage' });
   return items;
 }
 
+/** The line under the legend that says what the forecast entries mean; null while no forecast entry is shown. A forecast-only year is explained when the legend has one. */
+export function legendNote(items: readonly LegendItem[]): string | null {
+  if (!items.some((i) => i.key === 'declared' || i.key === 'estimated')) return null;
+  return items.some((i) => i.swatch === 'forecastYear') ? `${GROWTH_FORECAST_NOTE} ${FORECAST_YEAR_NOTE}` : GROWTH_FORECAST_NOTE;
+}
+
 /** Legend of the timeline: the series that are drawn. */
 export function timelineLegendItems(rows: readonly TimelineRow[], received: string): LegendItem[] {
   const items: LegendItem[] = [{ key: 'received', label: 'Received', swatch: 'received', color: received }];
-  if (rows.some((r) => r.declared !== undefined)) items.push({ key: 'declared', label: 'Declared (forecast)', swatch: 'declared' });
-  if (rows.some((r) => r.estimated !== undefined)) items.push({ key: 'estimated', label: 'Estimated (forecast)', swatch: 'estimated' });
+  if (rows.some((r) => r.declared !== undefined)) items.push({ key: 'declared', label: DECLARED_LABEL, swatch: 'declared' });
+  if (rows.some((r) => r.estimated !== undefined)) items.push({ key: 'estimated', label: ESTIMATED_LABEL, swatch: 'estimated' });
   if (rows.some((r) => r.average !== undefined)) items.push({ key: 'average', label: '12-month average', swatch: 'average' });
   if (rows.some((r) => r.trend !== undefined)) items.push({ key: 'trend', label: 'Trend', swatch: 'trend' });
   if (rows.some((r) => r.projection !== undefined)) items.push({ key: 'projection', label: 'Trend (projected)', swatch: 'projection' });

@@ -203,7 +203,7 @@ test.describe('Dividends received with future payments (mock mode)', () => {
     await expect(chart(page).getByText('avg', { exact: true })).toHaveCount(1);
     expect(await chart(page).locator('.recharts-label-list text').count()).toBeGreaterThan(5);
     const legend = card(page).getByTestId('received-legend');
-    for (const name of ['Received', 'Declared', 'Estimated', 'avg']) await expect(legend.getByText(name, { exact: true })).toBeVisible();
+    for (const name of ['Received', 'Declared (announced)', 'Estimated (from history)', 'avg']) await expect(legend.getByText(name, { exact: true })).toBeVisible();
     // future bars have their own colours
     await expect(chart(page).locator('path.recharts-rectangle[stroke="#3b6fd4"]').first()).toBeVisible();
 
@@ -226,7 +226,7 @@ test.describe('Dividends received with future payments (mock mode)', () => {
       await card(page).getByRole('radio', { name: granularity }).click();
       await card(page).getByText('Show data table').click();
       const table = card(page).getByRole('table', { name: 'Dividends received and upcoming per period' });
-      await expect(table.getByRole('columnheader')).toHaveText(['Period', 'Received', 'Declared', 'Estimated', 'Total']);
+      await expect(table.getByRole('columnheader')).toHaveText(['Period', 'Received', 'Declared (announced)', 'Estimated (from history)', 'Total']);
       const periods = await table.locator('th[scope=row]').allTextContents();
       for (const period of periods) expect(period).toMatch(label);
       expect(periods.filter((p) => p.endsWith('· Current'))).toHaveLength(1);

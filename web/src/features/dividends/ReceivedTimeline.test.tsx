@@ -39,7 +39,7 @@ describe('ReceivedFutureTooltip', () => {
     renderWithProviders(<ReceivedFutureTooltip {...props} active payload={[{ payload: row }]} />);
     const tip = screen.getByTestId('received-future-tooltip');
     expect(tip).toHaveTextContent('Q4 26 · Current');
-    for (const [name, amount] of [['Received', 10], ['Declared', 20], ['Estimated', 5], ['Total', 35]] as const) {
+    for (const [name, amount] of [['Received', 10], ['Declared (announced)', 20], ['Estimated (from history)', 5], ['Total', 35]] as const) {
       expect(within(tip).getByText(name).parentElement).toHaveTextContent(money(amount));
     }
     const holdings = within(screen.getByTestId('received-future-tooltip-holdings')).getAllByRole('listitem');
@@ -111,7 +111,7 @@ describe('TimelineTable', () => {
     renderWithProviders(<TableHarness periods={periods} withFuture />);
     await user.click(screen.getByText('Show data table'));
     const table = screen.getByRole('table', { name: 'Dividends received and upcoming per period' });
-    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Period', 'Received', 'Declared', 'Estimated', 'Total']);
+    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Period', 'Received', 'Declared (announced)', 'Estimated (from history)', 'Total']);
     const rows = within(table).getAllByRole('row').slice(1);
     expect(rows.map((r) => within(r).getByRole('rowheader').textContent)).toEqual(['Q2 26', 'Q3 26', 'Q4 26 · Current', 'Q1 27 · Upcoming']);
     expect(rows[3]).toHaveTextContent(money(8));
@@ -136,7 +136,7 @@ describe('ReceivedTimeline', () => {
         `Dividends received over time: 4 bars, ${formatMoney(70, 'EUR')} received, ${formatMoney(33, 'EUR')} upcoming (${formatMoney(20, 'EUR')} declared, ${formatMoney(13, 'EUR')} estimated), average ${formatMoney(30, 'EUR')} received per completed quarter.`,
       ),
     );
-    expect(screen.getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Received', 'Declared', 'Estimated', 'avg']);
+    expect(screen.getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Received', 'Declared (announced)', 'Estimated (from history)', 'avg']);
     expect(screen.getByTestId('received-average-note')).toHaveTextContent('average received per completed quarter');
   });
 

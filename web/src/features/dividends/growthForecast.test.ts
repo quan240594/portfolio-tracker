@@ -122,10 +122,10 @@ describe('yearTooltipLines', () => {
   it('lists the received and forecast rows of a month and says "forecast" in words', () => {
     const model = yearForecastModel(RECEIVED, TIMELINE, true);
     const lines = yearTooltipLines(model.rows[9]!, model);
-    expect(lines.map((l) => l.label)).toEqual(['2024', '2025', '2026', '2026 forecast · Estimated', 'Average of years']);
+    expect(lines.map((l) => l.label)).toEqual(['2024', '2025', '2026', '2026 forecast · Estimated (from history)', 'Average of years']);
     expect(lines.find((l) => l.kind === 'estimated')).toMatchObject({ value: 3, year: '2026' });
-    expect(yearTooltipLines(model.rows[0]!, model).map((l) => l.label)).toContain('2027 forecast · Declared');
-    expect(yearTooltipLines(model.rows[1]!, model).map((l) => l.label)).toContain('2027 forecast · Estimated');
+    expect(yearTooltipLines(model.rows[0]!, model).map((l) => l.label)).toContain('2027 forecast · Declared (announced)');
+    expect(yearTooltipLines(model.rows[1]!, model).map((l) => l.label)).toContain('2027 forecast · Estimated (from history)');
   });
 
   it('is empty for a month without any data', () => {
@@ -174,19 +174,19 @@ describe('tooltipLinesOfTimeline', () => {
   it('names the rows: received so far, forecast and projected trend', () => {
     const rows = timelineRows(TIMELINE, true);
     const current = tooltipLinesOfTimeline(rows[TIMELINE_HISTORY_MONTHS]!);
-    expect(current.map((l) => l.label)).toEqual(['Received so far', 'Forecast · Estimated', 'Trend (projected)']);
+    expect(current.map((l) => l.label)).toEqual(['Received so far', 'Forecast · Estimated (from history)', 'Trend (projected)']);
     const past = tooltipLinesOfTimeline(rows[3]!);
     expect(past.map((l) => l.label)).toEqual(['Received', '12-month average', 'Trend']);
     const joint = tooltipLinesOfTimeline(rows[TIMELINE_HISTORY_MONTHS - 1]!);
     expect(joint.at(-1)!.label).toBe('Trend');
-    expect(tooltipLinesOfTimeline(rows.at(-1)!).map((l) => l.label)).toEqual(['Forecast · Estimated', 'Trend (projected)']);
+    expect(tooltipLinesOfTimeline(rows.at(-1)!).map((l) => l.label)).toEqual(['Forecast · Estimated (from history)', 'Trend (projected)']);
   });
 });
 
 describe('visiblePoints and tableRows', () => {
   it('labels forecast months "Forecast" in the period column', () => {
     const rows = tableRows(visiblePoints(TIMELINE, true), 'EUR').map((r) => r.map(sp));
-    expect(TABLE_COLUMNS).toEqual(['Period', 'Received', 'Declared', 'Estimated', 'Trend']);
+    expect(TABLE_COLUMNS).toEqual(['Period', 'Received', 'Declared (announced)', 'Estimated (from history)', 'Trend']);
     expect(rows[0]![0]).toMatch(/^okt\.? 24$/);
     expect(rows[0]!.slice(2, 4)).toEqual(['—', '—']); // history has no forecast
     const current = rows[TIMELINE_HISTORY_MONTHS]!;
@@ -233,14 +233,14 @@ describe('legend items', () => {
   it('lists the years, the forecast year, the forecast statuses and the average', () => {
     const model = yearForecastModel(RECEIVED, TIMELINE, true);
     const items = yearLegendItems(model, (y) => `#${y}`);
-    expect(items.map((i) => i.label)).toEqual(['2024', '2025', '2026', '2027 (forecast)', 'Declared (forecast)', 'Estimated (forecast)', 'Average of years']);
+    expect(items.map((i) => i.label)).toEqual(['2024', '2025', '2026', '2027 (forecast)', 'Declared (announced)', 'Estimated (from history)', 'Average of years']);
     expect(items[0]).toMatchObject({ swatch: 'year', color: '#2024' });
     expect(yearLegendItems(yearForecastModel(RECEIVED, TIMELINE, false), (y) => y).map((i) => i.label)).toEqual(['2024', '2025', '2026', 'Average of years']);
   });
 
   it('lists only the series of the timeline that are drawn', () => {
     const all = timelineLegendItems(timelineRows(TIMELINE, true), '#0d9488');
-    expect(all.map((i) => i.label)).toEqual(['Received', 'Declared (forecast)', 'Estimated (forecast)', '12-month average', 'Trend', 'Trend (projected)']);
+    expect(all.map((i) => i.label)).toEqual(['Received', 'Declared (announced)', 'Estimated (from history)', '12-month average', 'Trend', 'Trend (projected)']);
     const hidden = timelineLegendItems(timelineRows(TIMELINE, false), '#0d9488');
     expect(hidden.map((i) => i.label)).toEqual(['Received', '12-month average', 'Trend']);
   });

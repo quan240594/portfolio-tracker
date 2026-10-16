@@ -17,8 +17,13 @@ import {
   type SeriesSelection,
 } from '../../components/charts/selection';
 import { ChartFrame, SLOT_PX, useDividendTheme } from './chartParts';
+import { ForecastNote } from './ForecastNote';
+import { DECLARED_LABEL, ESTIMATED_LABEL, STATUS_NOTE } from './forecastLabels';
 import { STATUS_SERIES, averageReceived, chartRows, niceAxis, periodRowId, periodText, selectPeriods, timelineTotals, upcomingBand, type ChartRow, type TimelinePeriod } from './receivedFuture';
 import type { Granularity } from './receivedSeries';
+
+/** The forecast statuses are named by where they come from; the calendar keeps the short names. */
+const STATUS_NAMES = { declared: DECLARED_LABEL, estimated: ESTIMATED_LABEL } as const;
 
 const UNIT_NAMES: Readonly<Record<Granularity, string>> = { month: 'month', quarter: 'quarter', year: 'year' };
 
@@ -63,7 +68,7 @@ export function ReceivedFutureTooltip({ active, payload, currency, colours, back
   if (!active || !row) return null;
   return (
     <TooltipShell title={periodText(row, withFuture)} testId="received-future-tooltip" background={background} border={border} text={text}>
-      <StatusAmounts row={row} currency={currency} colours={colours} border={border} />
+      <StatusAmounts row={row} currency={currency} colours={colours} border={border} names={STATUS_NAMES} />
       <HoldingList row={row} currency={currency} border={border} />
     </TooltipShell>
   );
@@ -156,8 +161,8 @@ function legendEntriesOf(colours: IncomeColours, lineColour: string, withFuture:
   const entries: LegendEntry[] = [{ key: 'paid', label: 'Received', swatch: <LegendSwatch color={colours.paid.fill} edge={colours.paid.stroke} /> }];
   if (withFuture) {
     entries.push(
-      { key: 'declared', label: 'Declared', swatch: <LegendSwatch color={colours.declared.fill} edge={colours.declared.stroke} /> },
-      { key: 'estimated', label: 'Estimated', swatch: <LegendSwatch color={colours.estimated.fill} edge={colours.estimated.stroke} dashed /> },
+      { key: 'declared', label: DECLARED_LABEL, swatch: <LegendSwatch color={colours.declared.fill} edge={colours.declared.stroke} /> },
+      { key: 'estimated', label: ESTIMATED_LABEL, swatch: <LegendSwatch color={colours.estimated.fill} edge={colours.estimated.stroke} dashed /> },
     );
   }
   if (withAverage) entries.push({ key: 'avg', label: 'avg', swatch: <LegendSwatch shape="line" color={lineColour} dashed /> });
@@ -223,6 +228,7 @@ export function ReceivedTimeline(props: Readonly<TimelineProps>) {
   return (
     <>
       <SelectableLegend entries={legendEntriesOf(colours, c.text, withFuture, fullAverage !== null)} selection={selection} testId="received-legend" />
+      {withFuture && <ForecastNote text={STATUS_NOTE} testId="received-legend-note" />}
       {selection.nothingSelected ? (
         <NothingSelected onShowAll={selection.reset} />
       ) : (
@@ -266,8 +272,8 @@ interface TableProps {
 
 const STATUS_COLUMNS: SelectableColumn[] = [
   { key: 'paid', label: 'Received' },
-  { key: 'declared', label: 'Declared' },
-  { key: 'estimated', label: 'Estimated' },
+  { key: 'declared', label: DECLARED_LABEL },
+  { key: 'estimated', label: ESTIMATED_LABEL },
   { key: 'total', label: 'Total', selectable: false },
 ];
 const RECEIVED_COLUMNS: SelectableColumn[] = [{ key: 'paid', label: 'Received' }];

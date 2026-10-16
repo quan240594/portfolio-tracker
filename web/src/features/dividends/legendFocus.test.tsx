@@ -47,7 +47,7 @@ describe('Dividend growth, By year: legend preview', () => {
     expect(count(year, '1') + count(year, '0.25')).toBe(all);
     expect(count(year, '0.25')).toBeGreaterThan(0);
 
-    await user.hover(entry(legend, 'Declared (forecast)'));
+    await user.hover(entry(legend, 'Declared (announced)'));
     const declared = opacities(chart, BARS);
     expect(count(declared, '1')).toBeGreaterThan(0);
     expect(count(declared, '0.25')).toBe(all - count(declared, '1'));
@@ -116,7 +116,7 @@ describe('Dividends received: legend preview', () => {
     const line = () => opacities(chart, '.recharts-reference-line line', 'stroke-opacity');
     expect(line()).toEqual(['1']);
 
-    await user.hover(entry(legend, 'Declared'));
+    await user.hover(entry(legend, 'Declared (announced)'));
     const bars = opacities(chart, BARS);
     expect(count(bars, '1')).toBeGreaterThan(0);
     expect(count(bars, '0.25')).toBe(all - count(bars, '1'));
@@ -150,7 +150,7 @@ describe('Future payments: legend preview', () => {
     const legend = legendIn('future-legend');
     const line = () => opacities(chart, '.recharts-reference-line line', 'stroke-opacity');
 
-    await user.hover(entry(legend, 'Declared'));
+    await user.hover(entry(legend, 'Declared (announced)'));
     expect(count(opacities(chart, BARS), '1')).toBeGreaterThan(0);
     expect(line()).toEqual(['0.25']);
 

@@ -18,7 +18,7 @@ test.describe('Dividend growth: forecast and trend', () => {
     await expect(growth.getByRole('radio', { name: 'By year' })).toBeChecked();
 
     const legend = growth.getByTestId('growth-legend');
-    for (const text of ['2027 (forecast)', 'Declared (forecast)', 'Estimated (forecast)', 'Average of years']) await expect(legend).toContainText(text);
+    for (const text of ['2027 (forecast)', 'Declared (announced)', 'Estimated (from history)', 'Average of years']) await expect(legend).toContainText(text);
     // forecast bars use the calendar's status colours: pastel blue (declared) and pastel yellow (estimated)
     const chart = growth.getByTestId('year-compare-chart');
     await expect(chart.locator('path.recharts-rectangle[fill="#bfdbfe"]').first()).toBeVisible();
@@ -67,7 +67,7 @@ test.describe('Dividend growth: forecast and trend', () => {
     const growth = card(page);
     await growth.getByText('Show data table').click();
     const forecast = growth.getByRole('table', { name: 'Dividend forecast and trend per month' });
-    await expect(forecast.getByRole('columnheader')).toHaveText(['Period', 'Received', 'Declared', 'Estimated', 'Trend']);
+    await expect(forecast.getByRole('columnheader')).toHaveText(['Period', 'Received', 'Declared (announced)', 'Estimated (from history)', 'Trend']);
     const rows = forecast.getByRole('row');
     await expect(rows).toHaveCount(13);
     for (const row of (await rows.all()).slice(1)) await expect(row.getByRole('cell').first()).toContainText('Forecast');
@@ -109,6 +109,32 @@ test.describe('Dividend growth: forecast and trend', () => {
     await expect(growth.getByTestId('growth-legend')).not.toContainText('Trend');
   });
 
+  test('the legend names the statuses and the forecast year apart and explains them in a line of text', async ({ page }) => {
+    await page.goto('/dividends');
+    const growth = card(page);
+    await expect(growth.getByTestId('year-compare-chart')).toBeVisible();
+    const legend = growth.getByTestId('growth-legend');
+    const note = growth.getByTestId('growth-legend-note');
+
+    await expect(legend.getByRole('button', { name: '2027 (forecast)', exact: true })).toBeVisible();
+    await expect(legend.getByRole('button', { name: 'Declared (announced)', exact: true })).toBeVisible();
+    await expect(legend.getByRole('button', { name: 'Estimated (from history)', exact: true })).toBeVisible();
+    await expect(legend).not.toContainText('Declared (forecast)');
+    await expect(legend).not.toContainText('Estimated (forecast)');
+    await expect(note).toHaveText('Forecast bars: declared = announced by the company; estimated = implied by your payment history. A year marked (forecast) has only forecast bars.');
+
+    // the timeline uses the same two names and only the first sentence
+    await growth.getByText('Timeline', { exact: true }).click();
+    await expect(growth.getByTestId('growth-timeline-chart')).toBeVisible();
+    await expect(legend.getByRole('button', { name: 'Declared (announced)', exact: true })).toBeVisible();
+    await expect(legend.getByRole('button', { name: 'Estimated (from history)', exact: true })).toBeVisible();
+    await expect(note).toHaveText('Forecast bars: declared = announced by the company; estimated = implied by your payment history.');
+
+    // no forecast, no explanation
+    await growth.getByRole('checkbox', { name: 'Show forecast' }).uncheck();
+    await expect(note).toHaveCount(0);
+  });
+
   for (const [width, height] of [
     [1440, 900],
     [390, 844],
@@ -130,6 +156,11 @@ test.describe('Dividend growth: forecast and trend', () => {
       const legend = await growth.getByTestId('growth-legend').boundingBox();
       const frame = await growth.boundingBox();
       expect(legend!.x + legend!.width).toBeLessThanOrEqual(frame!.x + frame!.width + 1);
+      await growth.getByRole('checkbox', { name: 'Show forecast' }).check();
+      await growth.getByText('By year', { exact: true }).click();
+      const note = await growth.getByTestId('growth-legend-note').boundingBox();
+      expect(note!.x + note!.width).toBeLessThanOrEqual(frame!.x + frame!.width + 1);
+      expect(await overflow(page)).toBeLessThanOrEqual(0);
     });
   }
 });

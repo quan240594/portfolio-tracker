@@ -42,7 +42,8 @@ describe('parts', () => {
     const style = (i: number) => (swatches[i] as HTMLElement).style;
     expect(style(0).background).toContain('rgb(18, 52, 86)');
     expect(style(2).background).toContain('rgb(18, 52, 86)');
-    expect(style(1).border).toContain('solid');
+    expect(style(1).border).toContain('dashed'); // a forecast-only year: dashed neutral square, not the declared edge
+    expect(style(1).border).not.toBe(style(3).border);
     expect(style(3).border).toContain('solid');
     expect(style(4).border).toContain('dashed'); // estimated: dashed edge, not colour only
     expect(style(5).borderTopStyle).toBe('solid');
@@ -59,7 +60,7 @@ describe('parts', () => {
             entries={growthLegendEntries(
               [
                 { key: 'a', label: '2027 (forecast)', swatch: 'forecastYear' },
-                { key: 'b', label: 'Estimated (forecast)', swatch: 'estimated' },
+                { key: 'b', label: 'Estimated (from history)', swatch: 'estimated' },
               ],
               c,
             )}
@@ -67,7 +68,7 @@ describe('parts', () => {
         )}
       </Themed>,
     );
-    expect(screen.getAllByRole('listitem').map((li) => li.textContent)).toEqual(['2027 (forecast)', 'Estimated (forecast)']);
+    expect(screen.getAllByRole('listitem').map((li) => li.textContent)).toEqual(['2027 (forecast)', 'Estimated (from history)']);
     expect(screen.getByRole('button', { name: '2027 (forecast)' })).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -191,13 +192,13 @@ describe('DividendGrowthCard forecast and trend', () => {
     expect(sp((await screen.findByTestId('future-total')).textContent!)).toBe(sp(formatMoney(forward12m, 'EUR')));
 
     const legend = within(card()).getByTestId('growth-legend');
-    for (const text of ['2027 (forecast)', 'Declared (forecast)', 'Estimated (forecast)', 'Average of years']) expect(legend).toHaveTextContent(text);
+    for (const text of ['2027 (forecast)', 'Declared (announced)', 'Estimated (from history)', 'Average of years']) expect(legend).toHaveTextContent(text);
     expect(chart.getAttribute('aria-label')).toMatch(/Forecast bars \(declared and estimated\) are stacked .* 2026 and 2027\./);
     expect(chart.getAttribute('aria-label')).toContain('Forecast next 12 months');
 
     await user.click(within(card()).getByText('Show data table'));
     const forecast = screen.getByRole('table', { name: 'Dividend forecast and trend per month' });
-    expect(within(forecast).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Period', 'Received', 'Declared', 'Estimated', 'Trend']);
+    expect(within(forecast).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Period', 'Received', 'Declared (announced)', 'Estimated (from history)', 'Trend']);
     const rows = within(forecast).getAllByRole('row').slice(1);
     expect(rows).toHaveLength(12);
     for (const row of rows) expect(within(row).getAllByRole('cell')[0]).toHaveTextContent(/Forecast/);

@@ -42,8 +42,15 @@ export interface StatusValues {
   total: number;
 }
 
-/** Amount per (visible) status (zero rows are kept so the statuses always read the same: swatch + name, not colour only) and the total of those. */
-export function StatusAmounts({ row, currency, colours, border, statuses = INCOME_SERIES }: Readonly<{ row: StatusValues; currency: string; colours: IncomeColours; border: string; statuses?: readonly IncomeSeries[] }>) {
+/** Amount per (visible) status, named by `names` where given (the Dividends page says where a forecast figure comes from) (zero rows are kept so the statuses always read the same: swatch + name, not colour only) and the total of those. */
+export function StatusAmounts({
+  row,
+  currency,
+  colours,
+  border,
+  statuses = INCOME_SERIES,
+  names,
+}: Readonly<{ row: StatusValues; currency: string; colours: IncomeColours; border: string; statuses?: readonly IncomeSeries[]; names?: Readonly<Partial<Record<IncomeSeries, string>>> }>) {
   return (
     <>
       <ul className="m-0 list-none p-0">
@@ -55,7 +62,7 @@ export function StatusAmounts({ row, currency, colours, border, statuses = INCOM
                 className="inline-block h-2.5 w-2.5 rounded-sm border"
                 style={{ background: colours[key].fill, borderColor: colours[key].stroke, borderStyle: key === 'estimated' ? 'dashed' : 'solid' }}
               />
-              {seriesName(key)}
+              {names?.[key] ?? seriesName(key)}
             </span>
             <span className="tabular-nums">{formatMoney(row[key], currency)}</span>
           </li>

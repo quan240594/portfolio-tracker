@@ -65,7 +65,7 @@ test.describe('Dividend growth, By year', () => {
     await expect(dimmed(bars(chart))).toHaveCount(all - forecastKept);
 
     // the status entries: that status in every year
-    await toggle(legend, 'Declared (forecast)').hover();
+    await toggle(legend, 'Declared (announced)').hover();
     const declared = await settledKept(bars(chart));
     expect(declared).toBeGreaterThan(0);
     expect(declared).toBeLessThan(all);
@@ -155,7 +155,7 @@ test.describe('Other Dividends charts', () => {
     await expectNothingFaded(bars(chart));
     const all = await bars(chart).count();
 
-    await toggle(legend, 'Declared').hover();
+    await toggle(legend, 'Declared (announced)').hover();
     const kept = await settledKept(bars(chart));
     expect(kept).toBeGreaterThan(0);
     expect(kept).toBeLessThan(all);
@@ -179,7 +179,7 @@ test.describe('Other Dividends charts', () => {
     await expect(bars(chart).first()).toBeVisible();
     const line = chart.locator('.recharts-reference-line line');
 
-    await toggle(legend, 'Declared').hover();
+    await toggle(legend, 'Declared (announced)').hover();
     await expect(dimmed(bars(chart)).first()).toBeVisible();
     await expect(strong(bars(chart)).first()).toBeVisible();
     await expect(line).toHaveAttribute('stroke-opacity', '0.25');

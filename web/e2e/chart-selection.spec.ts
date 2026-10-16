@@ -121,20 +121,20 @@ test.describe('Bar charts', () => {
     await expect(line).toHaveCount(1);
     const y = await line.getAttribute('y1');
 
-    await toggle(legend, 'Estimated').click();
+    await toggle(legend, 'Estimated (from history)').click();
     await expect.poll(() => bars(chart).count()).toBeLessThan(all);
     await expect(line).toHaveCount(1);
     expect(await line.getAttribute('y1')).not.toBe(y);
     await expect(region.getByText('The dashed line is the monthly average of the current selection.')).toBeVisible();
 
     const table = await openTable(region, 'Expected dividends per month');
-    await expect(toggle(table, 'Estimated')).toHaveAttribute('aria-pressed', 'false');
+    await expect(toggle(table, 'Estimated (from history)')).toHaveAttribute('aria-pressed', 'false');
     await table.getByRole('rowheader').first().getByRole('button').click();
     await expect(chart).toHaveAttribute('aria-label', /the 11 selected months/);
 
     await region.getByRole('button', { name: 'Show all' }).first().click();
     await expect(bars(chart)).toHaveCount(all);
-    await expect(toggle(legend, 'Estimated')).toHaveAttribute('aria-pressed', 'true');
+    await expect(toggle(legend, 'Estimated (from history)')).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('Dividends received: the future series and the average line are toggles; the headline stays', async ({ page }) => {
@@ -147,8 +147,8 @@ test.describe('Bar charts', () => {
     const all = await bars(chart).count();
     await expect(chart.getByText('avg', { exact: true })).toHaveCount(1);
 
-    await toggle(legend, 'Declared').click();
-    await toggle(legend, 'Estimated').click();
+    await toggle(legend, 'Declared (announced)').click();
+    await toggle(legend, 'Estimated (from history)').click();
     await expect.poll(() => bars(chart).count()).toBeLessThan(all);
     await expect(chart.getByText('Upcoming', { exact: true })).toBeVisible();
     await toggle(legend, 'avg').click();
@@ -157,7 +157,7 @@ test.describe('Bar charts', () => {
     await expect(region.getByTestId('selection-note')).toBeVisible();
 
     const table = await openTable(region, 'Dividends received and upcoming per period');
-    await expect(toggle(table, 'Declared')).toHaveAttribute('aria-pressed', 'false');
+    await expect(toggle(table, 'Declared (announced)')).toHaveAttribute('aria-pressed', 'false');
     // the totals column is not a toggle
     await expect(toggle(table, 'Total')).toHaveCount(0);
     await toggle(table, 'Received').click();
@@ -226,12 +226,12 @@ test.describe('Keyboard and screen readers', () => {
   test('a legend entry is a pressed-state button operated with Enter and Space', async ({ page }) => {
     await page.goto('/dividends');
     const legend = card(page, 'Future payments').getByTestId('future-legend');
-    const declared = toggle(legend, 'Declared');
+    const declared = toggle(legend, 'Declared (announced)');
     await expect(declared).toHaveAttribute('aria-pressed', 'true');
     await declared.focus();
     await page.keyboard.press('Enter');
     await expect(declared).toHaveAttribute('aria-pressed', 'false');
-    await expect(declared.getByText('Declared')).toHaveCSS('text-decoration-line', 'line-through');
+    await expect(declared.getByText('Declared (announced)')).toHaveCSS('text-decoration-line', 'line-through');
     await page.keyboard.press('Space');
     await expect(declared).toHaveAttribute('aria-pressed', 'true');
     // a comfortable target, and the average line is plain text, not a control
@@ -272,8 +272,8 @@ test.describe('Layout with excluded entries', () => {
       // exclude something in every card, then open every data table
       for (const [name, entry] of [
         ['Yield / payout', 'Yield on cost'],
-        ['Future payments', 'Declared'],
-        ['Dividends received', 'Estimated'],
+        ['Future payments', 'Declared (announced)'],
+        ['Dividends received', 'Estimated (from history)'],
         ['Dividend growth', 'Average of years'],
       ] as const) {
         await toggle(card(page, name).locator('[data-testid$="legend"]').first(), entry).click();

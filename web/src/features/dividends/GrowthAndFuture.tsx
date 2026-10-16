@@ -16,6 +16,8 @@ import { compactMoneyTick } from '../../components/charts/chartFormatters';
 import { formatMoney, formatMonth, formatPercent } from '../../lib/format';
 import { ChartFrame, useDividendTheme } from './chartParts';
 import { EmptyNote, QueryCard } from './DividendCard';
+import { ForecastNote } from './ForecastNote';
+import { DECLARED_LABEL, ESTIMATED_LABEL, STATUS_NOTE } from './forecastLabels';
 import { useScopedDividendsOverview } from './useDividendsOverview';
 
 interface GrowthBar {
@@ -136,7 +138,7 @@ function FutureHeader({ data }: Readonly<{ data: DividendsOverviewResponse }>) {
   );
 }
 
-const STATUS_NAMES: Readonly<Record<string, string>> = { paid: 'Received', declared: 'Declared', estimated: 'Estimated' };
+const STATUS_NAMES: Readonly<Record<string, string>> = { paid: 'Received', declared: DECLARED_LABEL, estimated: ESTIMATED_LABEL };
 
 function swatchOf(status: string, c: ReturnType<typeof useDividendTheme>) {
   if (status === 'paid') return { fill: c.paid, edge: c.paidEdge };
@@ -208,11 +210,12 @@ function FuturePayments({ data }: Readonly<{ data: DividendsOverviewResponse }>)
         testId="future-legend"
         selection={selection}
         entries={[
-          { key: 'declared', label: 'Declared', swatch: <LegendSwatch color={c.declared} edge={c.declaredEdge} /> },
-          { key: 'estimated', label: 'Estimated', swatch: <LegendSwatch color={c.estimated} edge={c.estimatedEdge} dashed /> },
+          { key: 'declared', label: DECLARED_LABEL, swatch: <LegendSwatch color={c.declared} edge={c.declaredEdge} /> },
+          { key: 'estimated', label: ESTIMATED_LABEL, swatch: <LegendSwatch color={c.estimated} edge={c.estimatedEdge} dashed /> },
           { key: 'avg', label: 'Monthly average', swatch: <LegendSwatch shape="line" color={c.invested} dashed />, toggleable: false },
         ]}
       />
+      <ForecastNote text={STATUS_NOTE} testId="future-legend-note" />
       {selection.nothingSelected ? (
         <NothingSelected onShowAll={selection.reset} />
       ) : (
@@ -241,8 +244,8 @@ function FuturePayments({ data }: Readonly<{ data: DividendsOverviewResponse }>)
         caption="Expected dividends per month"
         rowHeader="Month"
         columns={[
-          { key: 'declared', label: 'Declared' },
-          { key: 'estimated', label: 'Estimated' },
+          { key: 'declared', label: DECLARED_LABEL },
+          { key: 'estimated', label: ESTIMATED_LABEL },
         ]}
         selection={selection}
         rows={months.map((m) => ({ id: m.month, header: formatMonth(m.month), cells: [formatMoney(m.declared, ccy), formatMoney(m.estimated, ccy)] }))}

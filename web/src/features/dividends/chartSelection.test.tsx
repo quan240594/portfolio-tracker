@@ -171,10 +171,10 @@ describe('Future payments selection', () => {
     const legend = legendIn('future-legend');
     // the average line is shown but is not a control
     expect(within(legend).getByText('Monthly average')).toBeInTheDocument();
-    expect(entryNames(legend)).toEqual(['Declared', 'Estimated']);
+    expect(entryNames(legend)).toEqual(['Declared (announced)', 'Estimated (from history)']);
     expect(screen.getByText('The dashed line is the monthly average.')).toBeInTheDocument();
 
-    await user.click(entry(legend, 'Declared'));
+    await user.click(entry(legend, 'Declared (announced)'));
     expect(labelOf('future-chart')).toMatch(/^Expected dividends for the 12 selected months, .* \(current selection\)\.$/);
     expect(screen.getByText('The dashed line is the monthly average of the current selection.')).toBeInTheDocument();
     // the headline keeps describing the whole portfolio
@@ -183,7 +183,7 @@ describe('Future payments selection', () => {
     const table = await openTable(user, card('Future payments'), 'Expected dividends per month');
     await user.click(firstRowToggle(table));
     expect(labelOf('future-chart')).toContain('the 11 selected months');
-    await user.click(within(table).getByRole('button', { name: 'Estimated' }));
+    await user.click(within(table).getByRole('button', { name: 'Estimated (from history)' }));
     expect(screen.getByTestId('nothing-selected')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'show all' }));
     expect(labelOf('future-chart')).toMatch(/^Expected dividends per month/);
@@ -198,10 +198,10 @@ describe('Dividends received selection', () => {
     const headline = total.textContent;
     const region = card('Dividends received');
     const legend = legendIn('received-legend');
-    expect(entryNames(legend)).toEqual(['Received', 'Declared', 'Estimated', 'avg']);
+    expect(entryNames(legend)).toEqual(['Received', 'Declared (announced)', 'Estimated (from history)', 'avg']);
     expect(labelOf('received-time-chart')).toContain('upcoming');
 
-    await user.click(entry(legend, 'Estimated'));
+    await user.click(entry(legend, 'Estimated (from history)'));
     const selected = labelOf('received-time-chart');
     expect(selected).toMatch(/^Dividends received over time, current selection: \d+ bars/);
     expect(selected).not.toContain('upcoming');
@@ -223,7 +223,7 @@ describe('Dividends received selection', () => {
     expect(labelOf('received-time-chart')).not.toContain('average');
 
     await user.click(within(table).getByRole('button', { name: 'Received' }));
-    await user.click(within(table).getByRole('button', { name: 'Declared' }));
+    await user.click(within(table).getByRole('button', { name: 'Declared (announced)' }));
     // Estimated and avg were excluded before: every series is now
     expect(screen.getAllByTestId('nothing-selected')[0]).toBeInTheDocument();
     await user.click(screen.getAllByRole('button', { name: 'show all' })[0]!);
@@ -235,7 +235,7 @@ describe('Dividends received selection', () => {
     renderWithProviders(<ReceivedCards />);
     await screen.findByTestId('received-total');
     const legend = legendIn('received-legend');
-    await user.click(entry(legend, 'Declared'));
+    await user.click(entry(legend, 'Declared (announced)'));
     await user.click(screen.getByRole('checkbox', { name: 'Include future payments' }));
     expect(entryNames(legendIn('received-legend'))).toEqual(['Received', 'avg']);
     expect(screen.queryByTestId('selection-note')).toBeNull();
@@ -267,7 +267,7 @@ describe('Dividend growth selection', () => {
     const region = card('Dividend growth');
     const legend = legendIn('growth-legend');
     const names = entryNames(legend);
-    expect(names).toEqual(expect.arrayContaining([...years, 'Declared (forecast)', 'Estimated (forecast)', 'Average of years']));
+    expect(names).toEqual(expect.arrayContaining([...years, 'Declared (announced)', 'Estimated (from history)', 'Average of years']));
     expect(labelOf('year-compare-chart')).toContain(`compared for ${years.join(', ')}`);
 
     const newest = years.at(-1)!;
@@ -283,8 +283,8 @@ describe('Dividend growth selection', () => {
     await user.click(firstRowToggle(table));
     await user.click(entry(legend, 'Average of years'));
     expect(labelOf('year-compare-chart')).not.toContain('average of the years');
-    await user.click(entry(legend, 'Declared (forecast)'));
-    await user.click(entry(legend, 'Estimated (forecast)'));
+    await user.click(entry(legend, 'Declared (announced)'));
+    await user.click(entry(legend, 'Estimated (from history)'));
     for (const year of years.slice(0, -1)) await user.click(entry(legend, year));
     // only the forecast-only year entry can be left
     const forecastEntry = names.find((n) => n.endsWith('(forecast)') && /^\d{4}/.test(n));
@@ -311,7 +311,7 @@ describe('Dividend growth selection', () => {
     await user.click(screen.getByRole('radio', { name: 'Timeline' }));
     await screen.findByTestId('growth-timeline-chart');
     const legend = legendIn('growth-legend');
-    expect(entryNames(legend)).toEqual(['Received', 'Declared (forecast)', 'Estimated (forecast)', '12-month average', 'Trend', 'Trend (projected)']);
+    expect(entryNames(legend)).toEqual(['Received', 'Declared (announced)', 'Estimated (from history)', '12-month average', 'Trend', 'Trend (projected)']);
 
     await user.click(entry(legend, 'Trend'));
     await user.click(entry(legend, 'Trend (projected)'));
@@ -321,15 +321,15 @@ describe('Dividend growth selection', () => {
 
     const region = card('Dividend growth');
     const table = await openTable(user, region, 'Dividends received, forecast and trend per month');
-    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Period', 'Received', 'Declared', 'Estimated', 'Trend']);
+    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['Period', 'Received', 'Declared (announced)', 'Estimated (from history)', 'Trend']);
     expect(pressed(within(table).getByRole('button', { name: 'Trend' }))).toBe('false');
     const firstMonth = within(table).getAllByRole('rowheader')[0]!.textContent!;
     await user.click(firstRowToggle(table));
     expect(labelOf('growth-timeline-chart')).not.toContain(`from ${firstMonth}`);
 
     await user.click(entry(legend, 'Received'));
-    await user.click(entry(legend, 'Declared (forecast)'));
-    await user.click(entry(legend, 'Estimated (forecast)'));
+    await user.click(entry(legend, 'Declared (announced)'));
+    await user.click(entry(legend, 'Estimated (from history)'));
     expect(screen.getByTestId('nothing-selected')).toBeInTheDocument();
     await user.click(screen.getAllByRole('button', { name: 'show all' })[0]!);
     expect(screen.getByTestId('growth-timeline-chart')).toBeInTheDocument();

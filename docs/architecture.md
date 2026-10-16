@@ -1009,10 +1009,21 @@ teal, forecast bars as above, 12-month average (solid grey), trend (solid indigo
 `summary.forward12m`, `declared` and `estimated` of the overview, i.e. exactly the Future payments card. The bars are the cent-rounded months, so they can differ
 from the headline by a few cents (demo: bars € 479,21 against € 479,16); a unit test pins this (< € 0,10). The trend part is left out without 6 months of history.
 
+**Legend wording.** Two different things are in the By-year legend, and they look different: a *year group* and a *status*. `2027 (forecast)` is a year
+group (a year without received dividends, every bar of it is forecast); its swatch is a neutral grey square with a dashed edge and a diagonal hatch (`forecastYear`
+in `GrowthForecastParts.tsx`), deliberately neither the blue of declared nor the yellow of estimated. `Declared (announced)` (solid blue edge) and
+`Estimated (from history)` (yellow, dashed edge) are statuses that apply to the forecast bars of every year that has one (the rest of the current year on top of its
+received bar, and next year's bars). The names live in `forecastLabels.ts` (`DECLARED_LABEL`, `ESTIMATED_LABEL`) and are used in the legends, the tooltips
+("2027 forecast · Declared (announced)"), the table column headers and the aria names of the Dividends page cards that show forecast statuses (Dividend growth, Dividends
+received, Future payments). The Calendar keeps the short "Declared" / "Estimated" (a different page: its filters, month grid and event dialog use the same words). While
+the forecast is on, one muted line under the legend says it in words (`<ForecastNote>`, `data-testid` `growth-legend-note`, `received-legend-note`,
+`future-legend-note`): "Forecast bars: declared = announced by the company; estimated = implied by your payment history. A year marked (forecast) has only forecast bars."
+(the second sentence only when a forecast-only year is in the legend; the other two cards say "Declared = announced by the company; estimated = implied by your payment history.").
+
 **Accessibility.** The chart's `aria-label` summarises received years, forecast and trend. The legend is plain HTML (swatch + text, "(forecast)", dashed
 edge for estimated, dashed vs solid lines), drawn above the chart outside its horizontal scroll area so it wraps on a phone; tooltips repeat the swatch with a text label
-("2027 forecast · Declared"). "Show data table" holds the existing year table and, with the forecast on, a second table (Period, Received, Declared, Estimated,
-Trend) whose forecast rows say "Forecast" in the period; the Timeline's single table has the same columns. The calculation, formulas and limits are in the card's
+("2027 forecast · Declared (announced)"). "Show data table" holds the existing year table and, with the forecast on, a second table (Period, Received, Declared
+(announced), Estimated (from history), Trend) whose forecast rows say "Forecast" in the period; the Timeline's single table has the same columns. The calculation, formulas and limits are in the card's
 "How is this calculated?" disclosure. The page never scrolls sideways (e2e at 1440, 390 and 320 px).
 
 **Limitations.** An extrapolation of the past, not a promise: dividends can be cut, skipped or raised, estimated payments repeat last year's schedule at the latest
@@ -1161,11 +1172,11 @@ time" headline. The by-year and timeline charts keep their own legend keys, so s
 | `features/dividends/DiversificationCard.tsx` | Income donut | - (slices) | holdings (top 8 + Other) | stage 1 | stage 1 |
 | `features/dividends/ConsistencyCard.tsx` | Dividend safety / consistency donut | - (slices) | badges | stage 1 | stage 1 |
 | `features/dividends/GrowthAndFuture.tsx` | Average annual growth | growth | holdings | stage 1 | stage 1 |
-| `features/dividends/GrowthAndFuture.tsx` | Future payments | declared, estimated | months | stage 1 | stage 1 |
-| `features/dividends/ReceivedTimeline.tsx` | Dividends received (+ future) | paid, declared, estimated, avg | periods | stage 1 | stage 1 |
+| `features/dividends/GrowthAndFuture.tsx` | Future payments | declared ("Declared (announced)"), estimated ("Estimated (from history)") | months | stage 1 | stage 1 |
+| `features/dividends/ReceivedTimeline.tsx` | Dividends received (+ future) | paid ("Received"), declared ("Declared (announced)"), estimated ("Estimated (from history)"), avg | periods | stage 1 | stage 1 |
 | `features/dividends/ReceivedCards.tsx` | Dividends received by holding | amount | holdings | stage 1 | stage 1 |
-| `features/dividends/GrowthCharts.tsx` | Dividend growth, By year | years, declared, estimated, forecast year, average | calendar months | stage 1 | stage 1 |
-| `features/dividends/GrowthCharts.tsx` | Dividend growth, Timeline | received, declared, estimated, average, trend, projection | months | stage 1 | stage 1 |
+| `features/dividends/GrowthCharts.tsx` | Dividend growth, By year | years, declared ("Declared (announced)"), estimated ("Estimated (from history)"), forecast year (`2027 (forecast)`: a year group, neutral hatched swatch), average | calendar months | stage 1 | stage 1 |
+| `features/dividends/GrowthCharts.tsx` | Dividend growth, Timeline | received, declared ("Declared (announced)"), estimated ("Estimated (from history)"), average, trend, projection | months | stage 1 | stage 1 |
 | `features/growth/GrowthChart.tsx` (Growth tab: Value and Performance cards) | Portfolio value / return lines | `portfolio`, `invested` (Value card only), one per benchmark symbol (Performance: only while Compare is on); legend entries carry their start → end figure as `detail` | none (dates are plain table rows) | stage 2 (series only; the benchmark picker is unchanged: a hidden benchmark stays selected there and in the request, only the line goes; the benchmark headline never changes) | stage 2 |
 | `features/growth/DynamicsChart.tsx` (`DynamicsCard.tsx`) | Return per period | `portfolio` + one per benchmark symbol | months (`YYYY-MM`) of the chosen period; the "View details" table is the selection table | stage 2 | stage 2 |
 | `features/growth/HoldingsChart.tsx` (`HoldingsCard.tsx`) | Return per holding (horizontal bars) | `returnPct` (the Return column; Name, Return (€) and Measured from are plain columns) | holdings (symbol) | stage 2 (the legend and the table stay in both views; the table is the Table view) | stage 2 (one series that covers every bar: nothing fades) |
@@ -1177,7 +1188,7 @@ time" headline. The by-year and timeline charts keep their own legend keys, so s
 | `features/goals/GoalChart.tsx`, `GoalTable.tsx`, `GoalResults.tsx` (Goals page) | Plan vs goal lines + year-by-year table | goal, safe, alternative, plan (the Contributions column is not a series); `GoalResults` owns the state; the verdict, summary, insights and the CSV export (all years and scenarios) never change | years (`String(year)`; the table's rows) | stage 2 | stage 2 |
 | `components/charts/ValueChart.tsx` (Dashboard, Value vs invested) | Value and invested lines | value, invested; the chart owns the state and the legend, no table (dates) | none (dates) | stage 2 | stage 2 |
 | `components/charts/AllocationDonut.tsx` (Dashboard, Allocation) | Allocation donut | none: slices are the entries (`useSliceSelection`; reset when the dimension tab changes) | slices (top 8 + Other); shares and the centre total are recomputed over the visible slices | stage 2 | stage 2 |
-| `features/calendar/CalendarOverview.tsx` (`IncomeChart`, `incomeChartModel.ts`, `IncomeTooltip.tsx`, sr-only data table) | Calendar income per month | paid, declared, estimated | months | stage 2 | todo |
+| `features/calendar/CalendarOverview.tsx` (`IncomeChart`, `incomeChartModel.ts`, `IncomeTooltip.tsx`, sr-only data table) | Calendar income per month | paid, declared, estimated | months | stage 2 | stage 2 |
 | `features/asset-detail/PriceChart.tsx` (`PriceHistoryCard.tsx`) | Price + benchmarks | `price` (the security; in the Price view also the plain Change column), one per benchmark symbol (Performance view only) | none (dates are plain table rows) | stage 2 (series only; hiding `price` also removes the high/low labels and the trade markers, which sit on that line) | stage 2 |
 | `features/asset-detail/DividendYearChart.tsx` (`DividendsTab.tsx`) | Dividends per year (asset detail) | `complete` (Full year), `partial` (Partial year): only the kinds that have data; Payments is a plain column | years | stage 2 (a year leaves the chart when its row or its kind is excluded) | stage 2 |
 | `components/charts/DividendBarChart.tsx` | Received / upcoming per month | received, upcoming | months | n/a: not used by any page (only tests) | n/a |
@@ -1235,13 +1246,13 @@ Dividends (stage 1): which data keys stay for each legend entry (every other ele
 |---|---|---|
 | Dividend growth, By year | a year (`2026`) | its received bar and its declared / estimated forecast stack |
 | | `<year> (forecast)` (a year with forecast bars only) | that year's declared and estimated bars |
-| | Declared / Estimated (forecast) | that status in every year |
+| | Declared (announced) / Estimated (from history) | that status in every year |
 | | Average of years | the dashed line (and its dots) |
-| Dividend growth, Timeline | Received, Declared, Estimated | that bar series |
+| Dividend growth, Timeline | Received, Declared (announced), Estimated (from history) | that bar series |
 | | 12-month average, Trend, Trend (projected) | that line (the projection is its own entry) |
-| Dividends received | Received, Declared, Estimated | that status segment of every stack; the value labels fade to 50 % while anything is previewed |
+| Dividends received | Received, Declared (announced), Estimated (from history) | that status segment of every stack; the value labels fade to 50 % while anything is previewed |
 | | avg | the dashed average line and its label |
-| Future payments | Declared, Estimated | that status; the dashed average fades |
+| Future payments | Declared (announced), Estimated (from history) | that status; the dashed average fades |
 | | Monthly average (plain item) | the dashed line; the bars fade |
 | Yield / payout | Yield on value / Amount per year | the bars; the dots fade |
 | | Yield on cost | the dots; the bars fade |
@@ -1261,6 +1272,15 @@ and the insights never change; the Goals chart re-renders only its own card on a
 | Dashboard Value vs invested | Value | the area (fill and edge); the invested line fades |
 | | Invested | the invested line; the area fades |
 | Dashboard Allocation | a slice | that slice; the centre total, the table and the legend stay |
+
+Calendar (stage 2), `IncomeBars` in `CalendarOverview.tsx` (`incomeBars` draws the stack):
+
+| Chart | Legend entry | Stays at full strength |
+|---|---|---|
+| Calendar income per month | Received, Declared, Estimated (`paid`, `declared`, `estimated`) | that status segment of every month's stack; the value labels above the bars (they describe the whole stack) fade to 50 % while anything is previewed |
+| | avg (plain item) | the dashed average line and its label; the bars fade |
+
+The KPI tiles, the month grid / list and the tooltip content never change on a hover; an excluded status previews nothing.
 
 ## Demo banner and the switch to real data
 
