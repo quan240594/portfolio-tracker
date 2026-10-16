@@ -115,6 +115,14 @@ for (const target of TARGETS) {
 
       const button = entryOf(legend, target.entry);
       await button.hover();
+      if (target.kept !== null) {
+        // a late re-render can replace the legend button under the pointer: hover again until the preview has started
+        await expect(async () => {
+          await page.mouse.move(2, 2);
+          await button.hover();
+          await expect(dimmed(shapes, target.attribute).first()).toBeVisible({ timeout: 1500 });
+        }).toPass({ timeout: 10_000 });
+      }
       if (target.kept === null) {
         // a single series: previewing it keeps every shape
         await expect(button).toHaveAttribute('aria-pressed', 'true');
