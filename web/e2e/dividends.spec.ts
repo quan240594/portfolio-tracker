@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 const CARDS = [
   'Yield / payout',
   'Passive income diversification',
-  'Payment consistency',
+  'Dividend safety',
   'Average annual growth',
   'Future payments',
   'Dividends received',
@@ -28,7 +28,7 @@ test.describe('Dividends page (mock mode)', () => {
     }
     await expect(page.getByRole('alert')).toHaveCount(0);
 
-    const consistency = page.getByRole('region', { name: 'Payment consistency' });
+    const consistency = page.getByRole('region', { name: 'Dividend safety' });
     for (const badge of ['Reliable', 'OK', 'Irregular', 'New']) await expect(consistency.getByRole('table').getByText(badge, { exact: true }).first()).toBeVisible();
     expect(errors).toEqual([]);
   });
@@ -51,7 +51,7 @@ test.describe('Dividends page (mock mode)', () => {
     await expect(received.getByRole('table', { name: 'Dividends received and upcoming per period' }).getByRole('cell').first()).toHaveText(/^\d{4}( · Current)?$/);
     expect(allTime).toMatch(/€/);
 
-    const growth = page.getByRole('region', { name: 'Payment consistency' });
+    const growth = page.getByRole('region', { name: 'Dividend safety' });
     await growth.getByText('How is the score calculated?').click();
     await expect(growth.getByText(/Based on your payment history, not a forecast or advice. It says nothing/)).toBeVisible();
 
