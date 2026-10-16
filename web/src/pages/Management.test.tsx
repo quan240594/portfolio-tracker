@@ -191,8 +191,9 @@ describe('DashboardPage management widgets', () => {
     const user = userEvent.setup();
     renderApp('/?portfolio=default');
     await user.click(await screen.findByRole('tab', { name: 'Category' }));
-    expect(await screen.findByText('Core ETFs')).toBeInTheDocument();
-    expect(screen.getByText('Uncategorized')).toBeInTheDocument();
+    const legend = await screen.findByTestId('allocation-legend');
+    expect(await within(legend).findByRole('button', { name: 'Core ETFs' })).toBeInTheDocument();
+    expect(within(legend).getByRole('button', { name: 'Uncategorized' })).toBeInTheDocument();
   });
 
   it('hides the category tab in the combined view and falls back to another dimension', async () => {

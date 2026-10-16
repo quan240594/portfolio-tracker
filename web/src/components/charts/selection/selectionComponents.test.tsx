@@ -176,3 +176,27 @@ describe('selection notes', () => {
     expect(onShowAll).toHaveBeenCalledOnce();
   });
 });
+
+describe('SelectableTable styling options', () => {
+  function Styled() {
+    const selection = useSeriesSelection(['declared'], ['jan', 'feb']);
+    const rows: SelectableRow[] = [
+      { id: 'jan', header: 'Jan', cells: ['1'], current: true, note: <span>Target</span> },
+      { id: 'feb', header: 'Feb', cells: ['2'] },
+    ];
+    return <SelectableTable caption="Styled" rowHeader="Month" columns={[{ key: 'declared', label: 'Declared' }]} rows={rows} selection={selection} tableClassName="w-full min-w-[30rem] text-sm" headClassName="sticky top-0" />;
+  }
+
+  it('marks the current row, shows a note outside the toggle and applies the table and head classes', () => {
+    render(<Styled />);
+    const table = screen.getByRole('table', { name: 'Styled' });
+    expect(table).toHaveClass('min-w-[30rem]');
+    expect(table).not.toHaveClass('text-xs');
+    expect(table.querySelector('thead')).toHaveClass('sticky');
+    const [jan, feb] = within(table).getAllByRole('row').slice(1);
+    expect(jan).toHaveAttribute('aria-current', 'true');
+    expect(feb).not.toHaveAttribute('aria-current');
+    expect(within(jan!).getByText('Target')).toBeInTheDocument();
+    expect(within(jan!).getByRole('button', { name: 'Jan' })).toBeInTheDocument();
+  });
+});

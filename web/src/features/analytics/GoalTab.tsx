@@ -2,11 +2,14 @@ import { useState, type FormEvent } from 'react';
 import type { AnalyticsGoalParams, AnalyticsGoalResponse, GoalScenario } from '@portfolio/shared';
 import { useAnalyticsGoal } from '../../api/analyticsHooks';
 import { QueryBoundary } from '../../components/QueryBoundary';
-import { GoalChart } from '../../components/charts/GoalChart';
+import { GoalChart, scenarioColours, scenarioName } from '../../components/charts/GoalChart';
+import { analyticsTheme } from '../../components/charts/analyticsTheme';
+import { LegendSwatch, NothingSelected, SelectableLegend, SelectableTable, useSliceSelection } from '../../components/charts/selection';
+import { useTheme } from '../../theme/ThemeProvider';
 import { LOCALE, formatMoney, formatPercent } from '../../lib/format';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
 import { DEFAULT_GOAL_FORM, parseGoalForm, type GoalField, type GoalFormValues } from './goalForm';
-import { PanelHeader, TableShell, numCell, rowClass } from './TableShell';
+import { PanelHeader } from './TableShell';
 
 const FIELDS: { name: GoalField; label: string; hint?: string }[] = [
   { name: 'targetIncome', label: 'Target annual income (€)' },
@@ -100,31 +103,59 @@ function yearsToGoalText(s: GoalScenario, horizon: number): string {
   return s.yearsToGoal === 0 ? 'Already reached' : `${yearsFormatter.format(s.yearsToGoal)} years`;
 }
 
+/** The table's scenario columns only describe a scenario, so a scenario is a row: legend and row headers toggle the same state. */
+const scenarioColumns = (years: number) => [
+  { key: 'dividendGrowth', label: 'Dividend growth', selectable: false },
+  { key: 'yieldNew', label: 'Yield new money', selectable: false },
+  { key: 'timeToGoal', label: 'Time to goal', selectable: false },
+  { key: 'income', label: `Income after ${years} y`, selectable: false },
+];
+
 function GoalResults({ data }: Readonly<{ data: AnalyticsGoalResponse }>) {
   const { inputs } = data;
+  const { theme } = useTheme();
+  const colours = scenarioColours(analyticsTheme(theme));
+  const selection = useSliceSelection(data.scenarios.map((s) => s.id));
+  const shown = data.scenarios.filter((s) => selection.isSeriesVisible(s.id));
   return (
     <div className="space-y-4">
       <p className="text-sm">
         Starting from <strong>{formatMoney(inputs.currentIncome, data.baseCurrency)}</strong> a year ({formatPercent(inputs.currentYieldPct)} yield on{' '}
         {formatMoney(inputs.currentValue, data.baseCurrency)}), aiming for <strong>{formatMoney(inputs.targetIncome, data.baseCurrency)}</strong> a year.
       </p>
-      <GoalChart scenarios={data.scenarios} targetIncome={inputs.targetIncome} currency={data.baseCurrency} />
-      <TableShell
+      <div>
+        <SelectableLegend
+          label="Scenarios"
+          testId="goal-legend"
+          selection={selection}
+          entries={data.scenarios.map((s) => ({ key: s.id, label: scenarioName(s.id), swatch: <LegendSwatch shape="line" color={colours[s.id]!} /> }))}
+        />
+        {selection.nothingSelected ? (
+          <NothingSelected onShowAll={selection.reset} />
+        ) : (
+          <GoalChart scenarios={shown} targetIncome={inputs.targetIncome} currency={data.baseCurrency} filtered={selection.hasHidden} />
+        )}
+      </div>
+      <SelectableTable
         caption="Projection per scenario"
-        columns={[{ label: 'Scenario' }, { label: 'Dividend growth', align: 'right' }, { label: 'Yield new money', align: 'right' }, { label: 'Time to goal', align: 'right' }, { label: `Income after ${inputs.years} y`, align: 'right' }]}
-      >
-        {data.scenarios.map((s) => (
-          <tr key={s.id} className={rowClass}>
-            <th scope="row" className="py-2 pr-3 text-left font-medium">
-              {s.label}
-            </th>
-            <td className={numCell}>{formatPercent(s.dividendGrowthPct, { digits: 1 })}</td>
-            <td className={numCell}>{formatPercent(s.yieldOnNewMoneyPct, { digits: 1 })}</td>
-            <td className={`${numCell} font-medium`}>{yearsToGoalText(s, inputs.years)}</td>
-            <td className={numCell}>{formatMoney(s.points.at(-1)?.income ?? 0, data.baseCurrency)}</td>
-          </tr>
-        ))}
-      </TableShell>
+        rowHeader="Scenario"
+        columns={scenarioColumns(inputs.years)}
+        selection={selection}
+        tableClassName="w-full text-sm"
+        scrollClassName="overflow-x-auto"
+        rows={data.scenarios.map((s) => ({
+          id: s.id,
+          header: s.label,
+          cells: [
+            formatPercent(s.dividendGrowthPct, { digits: 1 }),
+            formatPercent(s.yieldOnNewMoneyPct, { digits: 1 }),
+            <span key="goal" className="font-medium">
+              {yearsToGoalText(s, inputs.years)}
+            </span>,
+            formatMoney(s.points.at(-1)?.income ?? 0, data.baseCurrency),
+          ],
+        }))}
+      />
       <p className="muted text-xs">
         A simple monthly model: existing dividends grow at the chosen rate and every month your contribution
         {inputs.reinvestDividends ? ' and the dividends received' : ''} buys extra income at the yield on new money. The cautious and optimistic
@@ -141,7 +172,7 @@ export function GoalTab() {
   return (
     <section aria-labelledby="goal-title">
       <PanelHeader id="goal-title" title="Passive income goal" description="How long until your dividends reach the income you are aiming for?" />
-      <div className="grid gap-6 lg:grid-cols-[18rem_1fr]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
         <GoalForm onSubmit={setParams} />
         <QueryBoundary query={query} loadingLabel="Loading projection" errorTitle="Could not load the projection">
           {(data) => <GoalResults data={data} />}

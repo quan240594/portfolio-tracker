@@ -1,4 +1,4 @@
-import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useTheme } from '../../theme/ThemeProvider';
 import { formatMoney } from '../../lib/format';
 import { compactMoneyTick, moneyTooltip } from './chartFormatters';
@@ -18,26 +18,36 @@ interface Props {
   testId: string;
   currentName?: string;
   previousName?: string;
+  /** Draw the current series (default true); false when it is excluded in the legend. */
+  showCurrent?: boolean;
+  /** Draw the previous-year series when the bars have one (default true). */
+  showPrevious?: boolean;
+  /** Some periods or series are excluded: the text alternative says the chart shows a selection. */
+  filtered?: boolean;
 }
 
-export function DividendGrowthChart({ bars, currency, title, testId, currentName = 'Received', previousName = 'A year earlier' }: Readonly<Props>) {
+/** True when any bar carries a previous-year value: the chart then has a second series. */
+export const hasPreviousSeries = (bars: readonly GrowthBar[]): boolean => bars.some((b) => b.previous !== undefined);
+
+export function DividendGrowthChart({ bars, currency, title, testId, currentName = 'Received', previousName = 'A year earlier', showCurrent = true, showPrevious = true, filtered = false }: Readonly<Props>) {
   const { theme } = useTheme();
   const c = analyticsTheme(theme);
-  const total = bars.reduce((s, b) => s + b.current, 0);
-  const withPrevious = bars.some((b) => b.previous !== undefined);
+  const drawPrevious = showPrevious && hasPreviousSeries(bars);
+  const total = showCurrent ? bars.reduce((s, b) => s + b.current, 0) : bars.reduce((s, b) => s + (b.previous ?? 0), 0);
+  const what = showCurrent ? 'in total' : previousName.toLowerCase();
   const nameOf = (name: unknown) => (name === 'previous' ? previousName : currentName);
+  const label = `${title}: ${bars.length} periods, ${formatMoney(total, currency)} ${what}.${filtered ? ' Chart shows the current selection.' : ''}`;
 
   return (
-    <div role="img" aria-label={`${title}: ${bars.length} periods, ${formatMoney(total, currency)} in total.`} className="h-64 w-full" data-testid={testId}>
+    <div role="img" aria-label={label} className="h-64 w-full" data-testid={testId}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={bars as GrowthBar[]} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid stroke={c.grid} vertical={false} />
           <XAxis dataKey="label" stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
           <YAxis tickFormatter={compactMoneyTick(currency)} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={56} />
           <Tooltip cursor={{ fill: c.grid, opacity: 0.5 }} contentStyle={tooltipStyle(c)} formatter={moneyTooltip(currency, nameOf)} />
-          {withPrevious && <Legend formatter={nameOf} wrapperStyle={{ fontSize: 12 }} />}
-          {withPrevious && <Bar dataKey="previous" fill={c.previous} radius={[4, 4, 0, 0]} isAnimationActive={false} />}
-          <Bar dataKey="current" fill={c.received} radius={[4, 4, 0, 0]} isAnimationActive={false} />
+          {drawPrevious && <Bar dataKey="previous" fill={c.previous} radius={[4, 4, 0, 0]} isAnimationActive={false} />}
+          {showCurrent && <Bar dataKey="current" fill={c.received} radius={[4, 4, 0, 0]} isAnimationActive={false} />}
         </BarChart>
       </ResponsiveContainer>
     </div>

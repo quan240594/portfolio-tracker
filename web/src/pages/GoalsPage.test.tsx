@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { delay, http, HttpResponse } from 'msw';
+import { http, HttpResponse } from 'msw';
 import type { GoalResponse } from '@portfolio/shared';
 import { API_BASE_URL } from '../config';
 import { server } from '../mocks/server';
@@ -253,9 +253,14 @@ describe('GoalsPage', () => {
   });
 
   it('shows progress while saving and resetting, and whether there are unsaved changes', async () => {
+    // the request stays in flight until the test opens the gate, so the progress state cannot be missed on a slow machine
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     server.use(
       http.put(goalsUrl(), async () => {
-        await delay(150);
+        await gate;
         return HttpResponse.json({ error: { code: 'INTERNAL', message: 'Slow failure' } }, { status: 500 });
       }),
     );
@@ -265,6 +270,7 @@ describe('GoalsPage', () => {
     expect(await screen.findByText('Not saved yet')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Save and calculate' }));
     expect(await screen.findByRole('button', { name: 'Saving…' })).toBeDisabled();
+    release();
     expect(await screen.findByText('Slow failure')).toBeInTheDocument();
   });
 
@@ -274,14 +280,19 @@ describe('GoalsPage', () => {
     expect(await screen.findByText('Saved')).toBeInTheDocument();
     await user.type(screen.getByLabelText('Monthly contribution (€)'), '5');
     expect(await screen.findByText('Unsaved changes')).toBeInTheDocument();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     server.use(
       http.delete(goalsUrl(), async () => {
-        await delay(150);
+        await gate;
         return new HttpResponse(null, { status: 204 });
       }),
     );
     await user.click(screen.getByRole('button', { name: 'Reset' }));
     expect(await screen.findByRole('button', { name: 'Resetting…' })).toBeDisabled();
+    release();
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Resetting…' })).not.toBeInTheDocument());
   });
 

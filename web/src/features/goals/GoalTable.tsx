@@ -1,9 +1,8 @@
 import { GOAL_PLAN_IDS, GOAL_PLAN_LABELS, goalRowsToCsv, type GoalPlanId, type GoalProjection, type GoalRow } from '@portfolio/shared';
+import { SelectableTable, type SeriesSelection } from '../../components/charts/selection';
 import { downloadFile } from '../management/form';
 import { formatMoney } from '../../lib/format';
 import { GOAL_MEASURE } from './goalText';
-
-const cell = 'px-3 py-1.5 text-right tabular-nums';
 
 function ReachedBadge() {
   return (
@@ -13,20 +12,45 @@ function ReachedBadge() {
   );
 }
 
-function PlanCell({ id, row, reachedYear, currency }: Readonly<{ id: GoalPlanId; row: GoalRow; reachedYear: number | null; currency: string }>) {
+function PlanValue({ id, row, reachedYear, currency }: Readonly<{ id: GoalPlanId; row: GoalRow; reachedYear: number | null; currency: string }>) {
   return (
-    <td className={cell}>
+    <>
       {formatMoney(row[id], currency, { maxDigits: 0 })}
       {reachedYear === row.year && <ReachedBadge />}
-    </td>
+    </>
   );
 }
 
-export function GoalTable({ projection }: Readonly<{ projection: GoalProjection }>) {
+interface Props {
+  projection: GoalProjection;
+  /** Shared with the chart: the Goal and scenario columns are its series, the years its rows. */
+  selection: SeriesSelection;
+}
+
+export function GoalTable({ projection, selection }: Readonly<Props>) {
   const { rows, scenarios, baseCurrency: currency, targetYear, monthlyContribution } = projection;
   const reached = Object.fromEntries(scenarios.map((s) => [s.id, s.reachedYear])) as Record<GoalPlanId, number | null>;
   const column = GOAL_MEASURE[projection.goalType].column;
   const perMonth = formatMoney(monthlyContribution, currency, { maxDigits: 0 });
+  const columns = [
+    { key: 'goal', label: 'Goal' },
+    { key: 'contributed', label: `Contributions (${perMonth}/month)`, selectable: false },
+    ...GOAL_PLAN_IDS.map((id) => ({ key: id, label: GOAL_PLAN_LABELS[id] })),
+  ];
+  const tableRows = rows.map((row) => {
+    const isTarget = row.year === targetYear;
+    return {
+      id: String(row.year),
+      header: row.yearOffset === 0 ? 'Today' : String(row.year),
+      current: isTarget,
+      note: isTarget && <span className="ml-1.5 text-xs font-semibold text-brand-700 dark:text-brand-100">Target year</span>,
+      cells: [
+        formatMoney(row.goal, currency, { maxDigits: 0 }),
+        formatMoney(row.contributed, currency, { maxDigits: 0 }),
+        ...GOAL_PLAN_IDS.map((id) => <PlanValue key={id} id={id} row={row} reachedYear={reached[id]} currency={currency} />),
+      ],
+    };
+  });
 
   return (
     <section aria-labelledby="goal-table-title">
@@ -38,53 +62,17 @@ export function GoalTable({ projection }: Readonly<{ projection: GoalProjection 
           Download CSV
         </button>
       </div>
-      <div className="max-h-[28rem] overflow-auto rounded-lg border border-slate-200 dark:border-slate-800">
-        <table className="w-full min-w-[40rem] text-sm">
-          <caption className="sr-only">
-            {column} per year for each scenario, against the inflation-adjusted goal. Contributions are {perMonth} per month.
-          </caption>
-          <thead className="sticky top-0 bg-slate-50 dark:bg-slate-900">
-            <tr className="muted border-b border-slate-200 text-xs dark:border-slate-800">
-              <th scope="col" className="px-3 py-2 text-left font-medium">
-                Year
-              </th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">
-                Goal
-              </th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">
-                Contributions <span className="font-normal">({perMonth}/month)</span>
-              </th>
-              {GOAL_PLAN_IDS.map((id) => (
-                <th key={id} scope="col" className="px-3 py-2 text-right font-medium">
-                  {GOAL_PLAN_LABELS[id]}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const isTarget = row.year === targetYear;
-              return (
-                <tr
-                  key={row.year}
-                  aria-current={isTarget ? 'true' : undefined}
-                  className={`border-b border-slate-100 last:border-0 dark:border-slate-800/60 ${isTarget ? 'bg-brand-50 font-medium dark:bg-brand-600/20' : ''}`}
-                >
-                  <th scope="row" className="px-3 py-1.5 text-left font-normal tabular-nums">
-                    {row.yearOffset === 0 ? 'Today' : row.year}
-                    {isTarget && <span className="ml-1.5 text-xs font-semibold text-brand-700 dark:text-brand-100">Target year</span>}
-                  </th>
-                  <td className={cell}>{formatMoney(row.goal, currency, { maxDigits: 0 })}</td>
-                  <td className={cell}>{formatMoney(row.contributed, currency, { maxDigits: 0 })}</td>
-                  {GOAL_PLAN_IDS.map((id) => (
-                    <PlanCell key={id} id={id} row={row} reachedYear={reached[id]} currency={currency} />
-                  ))}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      {selection.hasHidden && <p className="muted mb-2 text-xs">The CSV always contains every year and scenario, whatever is excluded here.</p>}
+      <SelectableTable
+        caption={`${column} per year for each scenario, against the inflation-adjusted goal. Contributions are ${perMonth} per month.`}
+        rowHeader="Year"
+        columns={columns}
+        rows={tableRows}
+        selection={selection}
+        tableClassName="w-full min-w-[40rem] text-sm"
+        scrollClassName="max-h-[28rem] overflow-auto rounded-lg border border-slate-200 dark:border-slate-800"
+        headClassName="sticky top-0 bg-slate-50 dark:bg-slate-900"
+      />
       <p className="muted mt-2 text-xs">Forecasts are approximate. Future values are calculated from today’s date and today’s portfolio.</p>
     </section>
   );
