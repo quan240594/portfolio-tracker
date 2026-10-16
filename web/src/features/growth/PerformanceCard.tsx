@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { DEFAULT_GROWTH_RANGE, downsampleEvenly, type AnalyticsGrowthResponse, type GrowthPeriod, type GrowthRange } from '@portfolio/shared';
 import { useGrowth } from '../../api/growthHooks';
 import { Change } from '../../components/Change';
@@ -14,7 +14,7 @@ import { SelectableChartOrTable } from './ChartOrTable';
 import { InfoNote } from './InfoNote';
 import { CompareToggle, RangeButtons } from './RangeButtons';
 import { TABLE_ROWS, availableBenchmarks, benchmarkColors, growthRows, lastBenchmarkValue, returnKey } from './growthFormat';
-import { legendEntries, selectionSummary, seriesKeys, shownLabels, visibleBenchmarks, type LineSeries } from './growthSelection';
+import { legendEntries, selectionSummary, seriesKeys, shownLabels, useVisibleBenchmarks, type LineSeries } from './growthSelection';
 import { NO_TRANSACTIONS_TEXT } from './ValueCard';
 
 interface Compare {
@@ -39,20 +39,25 @@ export function performanceSeries(data: AnalyticsGrowthResponse, period: GrowthP
 
 function PerformanceChartBlock({ data, period, compare }: Readonly<{ data: AnalyticsGrowthResponse; period: GrowthPeriod; compare: boolean }>) {
   const { theme } = useTheme();
-  const bench = compare ? availableBenchmarks(data) : [];
-  const rows = growthRows(data);
+  const bench = useMemo(() => (compare ? availableBenchmarks(data) : []), [data, compare]);
+  const rows = useMemo(() => growthRows(data), [data]);
   const series = performanceSeries(data, period, compare, theme);
   const selection = useSeriesSelection(seriesKeys(series));
+  const shown = useVisibleBenchmarks(bench, selection);
   const span = `from ${formatDate(period.from)} to ${formatDate(period.to)}`;
   const whole = `Cumulative time-weighted return ${span}: ${formatPercent(period.returnPct, { signed: true })}.`;
   const summary = selection.hasHidden ? selectionSummary('Cumulative time-weighted return', span, shownLabels(series, selection)) : whole;
   const columns = series.map(({ key, label }) => ({ key, label }));
-  const tableRows = downsampleEvenly(rows, TABLE_ROWS).map((r) => ({
-    id: String(r.date),
-    header: formatDate(String(r.date)),
-    selectable: false,
-    cells: [formatPercent(Number(r.returnPct), { signed: true }), ...bench.map((b) => formatPercent(Number(r[returnKey(b.index)]), { signed: true }))],
-  }));
+  const tableRows = useMemo(
+    () =>
+      downsampleEvenly(rows, TABLE_ROWS).map((r) => ({
+        id: String(r.date),
+        header: formatDate(String(r.date)),
+        selectable: false,
+        cells: [formatPercent(Number(r.returnPct), { signed: true }), ...bench.map((b) => formatPercent(Number(r[returnKey(b.index)]), { signed: true }))],
+      })),
+    [rows, bench],
+  );
   return (
     <SelectableChartOrTable
       id="growth-performance-body"
@@ -61,7 +66,16 @@ function PerformanceChartBlock({ data, period, compare }: Readonly<{ data: Analy
       legendTestId="growth-performance-legend"
       legendLabel="Portfolio performance series"
       chart={
-        <GrowthChart rows={rows} benchmarks={visibleBenchmarks(bench, selection)} showPortfolio={selection.isSeriesVisible('portfolio')} kind="return" currency={data.baseCurrency} summary={summary} testId="growth-performance-chart" />
+        <GrowthChart
+          rows={rows}
+          benchmarks={shown}
+          showPortfolio={selection.isSeriesVisible('portfolio')}
+          kind="return"
+          currency={data.baseCurrency}
+          summary={summary}
+          testId="growth-performance-chart"
+          focusKey={selection.focusKey}
+        />
       }
       table={<SelectableTable caption="Cumulative return over time" rowHeader="Date" columns={columns} rows={tableRows} selection={selection} />}
     />

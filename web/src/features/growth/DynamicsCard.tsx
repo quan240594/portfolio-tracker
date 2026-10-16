@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { AnalyticsGrowthResponse, GrowthMonthRow } from '@portfolio/shared';
 import { QueryBoundary } from '../../components/QueryBoundary';
@@ -11,7 +11,7 @@ import { DynamicsChart, dynamicsSummary, signedLabel } from './DynamicsChart';
 import { InfoNote } from './InfoNote';
 import { CompareToggle } from './RangeButtons';
 import { DYNAMICS_LAST_12M, availableBenchmarks, benchmarkColors, dynamicsMonths, dynamicsOptions, monthShortLabel } from './growthFormat';
-import { legendEntries, seriesKeys, shownLabels, visibleBenchmarks, type LineSeries } from './growthSelection';
+import { legendEntries, seriesKeys, shownLabels, useVisibleBenchmarks, type LineSeries } from './growthSelection';
 
 const TABLE_ID = 'growth-dynamics-table';
 
@@ -33,8 +33,10 @@ function DynamicsBody({ months, bench, details }: Readonly<{ months: readonly Gr
     seriesKeys(series),
     months.map((m) => m.month),
   );
-  const shownMonths = selectRows(months, (m) => m.month, selection);
-  const shownBench = visibleBenchmarks(bench, selection);
+  const { isRowVisible } = selection;
+  // memoised on the include/exclude state only, so a hover preview does not rebuild the chart data
+  const shownMonths = useMemo(() => selectRows(months, (m) => m.month, { isRowVisible }), [months, isRowVisible]);
+  const shownBench = useVisibleBenchmarks(bench, selection);
   const summary = dynamicsSummary(shownMonths, { portfolio: selection.isSeriesVisible('portfolio'), names: shownLabels(series, selection), hasHidden: selection.hasHidden });
   const rows = [...months].reverse().map((m) => ({
     id: m.month,
@@ -47,7 +49,7 @@ function DynamicsBody({ months, bench, details }: Readonly<{ months: readonly Gr
       {selection.nothingSelected ? (
         <NothingSelected onShowAll={selection.reset} />
       ) : (
-        <DynamicsChart months={shownMonths} benchmarks={shownBench} showPortfolio={selection.isSeriesVisible('portfolio')} summary={summary} />
+        <DynamicsChart months={shownMonths} benchmarks={shownBench} showPortfolio={selection.isSeriesVisible('portfolio')} summary={summary} focusKey={selection.focusKey} />
       )}
       <div id={TABLE_ID} className="mt-4" hidden={!details}>
         {details && (

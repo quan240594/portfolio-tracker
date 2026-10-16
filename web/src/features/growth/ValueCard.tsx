@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { DEFAULT_GROWTH_RANGE, downsampleEvenly, type AnalyticsGrowthResponse, type GrowthPeriod, type GrowthRange } from '@portfolio/shared';
 import { useGrowth } from '../../api/growthHooks';
 import { Change } from '../../components/Change';
@@ -14,7 +14,7 @@ import { SelectableChartOrTable } from './ChartOrTable';
 import { InfoNote } from './InfoNote';
 import { RangeButtons } from './RangeButtons';
 import { TABLE_ROWS, availableBenchmarks, benchmarkColors, firstBenchmarkValue, growthRows, headlineText, lastBenchmarkValue, valueKey } from './growthFormat';
-import { legendEntries, selectionSummary, seriesKeys, shownLabels, visibleBenchmarks, type LineSeries } from './growthSelection';
+import { legendEntries, selectionSummary, seriesKeys, shownLabels, useVisibleBenchmarks, type LineSeries } from './growthSelection';
 
 export const NO_TRANSACTIONS_TEXT = 'Add transactions to see how your portfolio grows.';
 
@@ -52,22 +52,26 @@ export function valueSeries(data: AnalyticsGrowthResponse, period: GrowthPeriod,
 function ValueChartBlock({ data, period }: Readonly<{ data: AnalyticsGrowthResponse; period: GrowthPeriod }>) {
   const { theme } = useTheme();
   const c = data.baseCurrency;
-  const rows = growthRows(data);
-  const bench = availableBenchmarks(data);
+  const rows = useMemo(() => growthRows(data), [data]);
+  const bench = useMemo(() => availableBenchmarks(data), [data]);
   const series = valueSeries(data, period, theme);
   const selection = useSeriesSelection(seriesKeys(series));
-  const shown = visibleBenchmarks(bench, selection);
+  const shown = useVisibleBenchmarks(bench, selection);
   const span = `from ${formatDate(period.from)} to ${formatDate(period.to)}`;
   const compared = bench.length > 0 ? `, compared with ${bench.map((b) => b.symbol).join(', ')} replayed with the same cash flows` : '';
   const whole = `Portfolio value ${span}: ${formatMoney(period.startValue, c)} to ${formatMoney(period.endValue, c)}, invested ${formatMoney(period.invested, c)}${compared}.`;
   const summary = selection.hasHidden ? selectionSummary('Portfolio value', span, shownLabels(series, selection)) : whole;
   const columns = series.map(({ key, label }) => ({ key, label }));
-  const tableRows = downsampleEvenly(rows, TABLE_ROWS).map((r) => ({
-    id: String(r.date),
-    header: formatDate(String(r.date)),
-    selectable: false,
-    cells: [formatMoney(Number(r.value), c), formatMoney(Number(r.invested), c), ...bench.map((b) => formatMoney(Number(r[valueKey(b.index)]), c))],
-  }));
+  const tableRows = useMemo(
+    () =>
+      downsampleEvenly(rows, TABLE_ROWS).map((r) => ({
+        id: String(r.date),
+        header: formatDate(String(r.date)),
+        selectable: false,
+        cells: [formatMoney(Number(r.value), c), formatMoney(Number(r.invested), c), ...bench.map((b) => formatMoney(Number(r[valueKey(b.index)]), c))],
+      })),
+    [rows, bench, c],
+  );
   return (
     <SelectableChartOrTable
       id="growth-value-body"
@@ -81,6 +85,7 @@ function ValueChartBlock({ data, period }: Readonly<{ data: AnalyticsGrowthRespo
           benchmarks={shown}
           showPortfolio={selection.isSeriesVisible('portfolio')}
           showInvested={selection.isSeriesVisible('invested')}
+          focusKey={selection.focusKey}
           kind="value"
           currency={c}
           summary={summary}

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { AssetHistoryResponse, AssetMarker, GrowthRange } from '@portfolio/shared';
 import { QueryBoundary } from '../../components/QueryBoundary';
@@ -12,7 +12,7 @@ import { SelectableChartOrTable } from '../growth/ChartOrTable';
 import { InfoNote } from '../growth/InfoNote';
 import { RangeButtons } from '../growth/RangeButtons';
 import { benchmarkColors } from '../growth/growthFormat';
-import { legendEntries, seriesKeys, shownLabels, visibleBenchmarks, type LineSeries } from '../growth/growthSelection';
+import { legendEntries, seriesKeys, shownLabels, useVisibleBenchmarks, type LineSeries } from '../growth/growthSelection';
 import { PriceChart } from './PriceChart';
 import { PRICE_KEY, availableBenchmarks, chartRows, chartSelectionSummary, chartSummary, plottedMarkers, selectableChartTable, type ChartMode } from './assetChartData';
 import { MARKER_LABELS, uniqueKeys } from './assetFormat';
@@ -90,12 +90,14 @@ function HistoryNotes({ data, mode }: Readonly<{ data: AssetHistoryResponse; mod
 
 function HistoryBody({ data, mode }: Readonly<{ data: AssetHistoryResponse; mode: ChartMode }>) {
   const { theme } = useTheme();
-  const rows = chartRows(data, mode);
-  const bench = mode === 'performance' ? availableBenchmarks(data) : [];
+  const rows = useMemo(() => chartRows(data, mode), [data, mode]);
+  const bench = useMemo(() => (mode === 'performance' ? availableBenchmarks(data) : []), [data, mode]);
+  const markers = useMemo(() => plottedMarkers(data, rows), [data, rows]);
   const series = priceSeries(data, mode, theme);
   const selection = useSeriesSelection(seriesKeys(series));
+  const shown = useVisibleBenchmarks(bench, selection);
   const showPrice = selection.isSeriesVisible(PRICE_KEY);
-  const table = selectableChartTable(data, mode, TABLE_ROWS);
+  const table = useMemo(() => selectableChartTable(data, mode, TABLE_ROWS), [data, mode]);
   const what = mode === 'price' ? 'closing prices' : 'price change';
   const summary = selection.hasHidden ? chartSelectionSummary(data, mode, shownLabels(series, selection)) : chartSummary(data, mode);
   const hasMarkers = data.markers.length > 0;
@@ -111,12 +113,13 @@ function HistoryBody({ data, mode }: Readonly<{ data: AssetHistoryResponse; mode
           <PriceChart
             rows={rows}
             mode={mode}
-            benchmarks={visibleBenchmarks(bench, selection)}
+            benchmarks={shown}
             showPrice={showPrice}
-            markers={plottedMarkers(data, rows)}
+            markers={markers}
             currency={data.currency}
             summary={summary}
             symbol={data.symbol}
+            focusKey={selection.focusKey}
           />
         }
         table={<SelectableTable caption={`${data.symbol} ${what} over time`} rowHeader="Date" columns={table.columns} rows={table.rows} selection={selection} />}

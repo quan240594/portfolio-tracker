@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { LegendSwatch, type LegendEntry, type SeriesSelection } from '../../components/charts/selection';
 
 type SeriesVisibility = Pick<SeriesSelection, 'isSeriesVisible'>;
@@ -22,6 +23,15 @@ export const seriesKeys = (series: readonly Pick<LineSeries, 'key'>[]): string[]
 /** The benchmarks that are not excluded; their colour comes from their index in the response, so it never shifts. */
 export const visibleBenchmarks = <T extends { symbol: string }>(benchmarks: readonly T[], selection: SeriesVisibility): T[] =>
   benchmarks.filter((b) => selection.isSeriesVisible(b.symbol));
+
+/**
+ * `visibleBenchmarks`, memoised on the include/exclude state only: the preview (hover / focus) re-renders the card but keeps the same
+ * array, so the chart data derived from it is not rebuilt.
+ */
+export function useVisibleBenchmarks<T extends { symbol: string }>(benchmarks: readonly T[], selection: SeriesVisibility): T[] {
+  const { isSeriesVisible } = selection;
+  return useMemo(() => visibleBenchmarks(benchmarks, { isSeriesVisible }), [benchmarks, isSeriesVisible]);
+}
 
 /** Labels of the series that are not excluded. */
 export const shownLabels = (series: readonly LineSeries[], selection: SeriesVisibility): string[] => series.filter((s) => selection.isSeriesVisible(s.key)).map((s) => s.label);
