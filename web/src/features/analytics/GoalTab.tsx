@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import type { AnalyticsGoalParams, AnalyticsGoalResponse, GoalScenario } from '@portfolio/shared';
 import { useAnalyticsGoal } from '../../api/analyticsHooks';
 import { QueryBoundary } from '../../components/QueryBoundary';
@@ -116,7 +116,9 @@ function GoalResults({ data }: Readonly<{ data: AnalyticsGoalResponse }>) {
   const { theme } = useTheme();
   const colours = scenarioColours(analyticsTheme(theme));
   const selection = useSliceSelection(data.scenarios.map((s) => s.id));
-  const shown = data.scenarios.filter((s) => selection.isSeriesVisible(s.id));
+  const { isSeriesVisible } = selection;
+  // only the include/exclude state changes the scenarios drawn: a hover preview keeps this array (and the chart's rows) as they are
+  const shown = useMemo(() => data.scenarios.filter((s) => isSeriesVisible(s.id)), [data.scenarios, isSeriesVisible]);
   return (
     <div className="space-y-4">
       <p className="text-sm">
@@ -133,7 +135,7 @@ function GoalResults({ data }: Readonly<{ data: AnalyticsGoalResponse }>) {
         {selection.nothingSelected ? (
           <NothingSelected onShowAll={selection.reset} />
         ) : (
-          <GoalChart scenarios={shown} targetIncome={inputs.targetIncome} currency={data.baseCurrency} filtered={selection.hasHidden} />
+          <GoalChart scenarios={shown} targetIncome={inputs.targetIncome} currency={data.baseCurrency} filtered={selection.hasHidden} focusKey={selection.focusKey} />
         )}
       </div>
       <SelectableTable

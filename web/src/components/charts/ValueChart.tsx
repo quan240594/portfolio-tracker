@@ -4,7 +4,7 @@ import { useTheme } from '../../theme/ThemeProvider';
 import { formatDate, formatMoney } from '../../lib/format';
 import { chartTheme } from './palette';
 import { compactMoneyTick, dateLabel, dateTickFormatter, moneyTooltip, valueSeriesName } from './chartFormatters';
-import { LegendSwatch, NothingSelected, SelectableLegend, useSeriesSelection } from './selection';
+import { LegendSwatch, NothingSelected, SelectableLegend, focusOpacity, useSeriesSelection } from './selection';
 
 const SERIES_KEYS = ['value', 'invested'];
 
@@ -38,6 +38,7 @@ export function ValueChart({ points, currency }: Readonly<Props>) {
   const selection = useSeriesSelection(SERIES_KEYS);
   const shown = { value: selection.isSeriesVisible('value'), invested: selection.isSeriesVisible('invested') };
   const summary = valueSummary(points, currency, shown);
+  const fade = (key: string) => focusOpacity(selection.focusKey, key);
   const entries = [
     { key: 'value', label: 'Value', swatch: <LegendSwatch shape="line" color={c.value} /> },
     { key: 'invested', label: 'Invested', swatch: <LegendSwatch shape="line" color={c.invested} dashed /> },
@@ -49,7 +50,7 @@ export function ValueChart({ points, currency }: Readonly<Props>) {
       {selection.nothingSelected ? (
         <NothingSelected onShowAll={selection.reset} />
       ) : (
-        <div role="img" aria-label={selection.hasHidden ? `${summary} Chart shows the current selection.` : summary} className="h-72 w-full" data-testid="value-chart">
+        <div role="img" aria-label={selection.hasHidden ? `${summary} Chart shows the current selection.` : summary} className="chart-focus h-72 w-full" data-testid="value-chart">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={points} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
               <defs>
@@ -66,8 +67,8 @@ export function ValueChart({ points, currency }: Readonly<Props>) {
                 labelFormatter={dateLabel}
                 formatter={moneyTooltip(currency, valueSeriesName)}
               />
-              {shown.value && <Area type="monotone" dataKey="value" stroke={c.value} strokeWidth={2} fill="url(#valueFill)" isAnimationActive={false} />}
-              {shown.invested && <Line type="stepAfter" dataKey="invested" stroke={c.invested} strokeWidth={1.5} strokeDasharray="5 4" dot={false} isAnimationActive={false} />}
+              {shown.value && <Area type="monotone" dataKey="value" stroke={c.value} strokeWidth={2} strokeOpacity={fade('value')} fill="url(#valueFill)" fillOpacity={fade('value')} isAnimationActive={false} />}
+              {shown.invested && <Line type="stepAfter" dataKey="invested" stroke={c.invested} strokeWidth={1.5} strokeOpacity={fade('invested')} strokeDasharray="5 4" dot={false} isAnimationActive={false} />}
             </ComposedChart>
           </ResponsiveContainer>
         </div>

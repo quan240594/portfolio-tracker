@@ -79,3 +79,15 @@
     transition: none;
   }
 }
+
+/* The "goal reached" dots of the Goals chart fade with their line. */
+.chart-focus .recharts-reference-dot-dot {
+  transition:
+    fill-opacity 120ms,
+    stroke-opacity 120ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chart-focus .recharts-reference-dot-dot {
+    transition: none;
+  }
+}

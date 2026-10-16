@@ -67,7 +67,7 @@ function ReturnsBody({ data, rows }: Readonly<{ data: AnalyticsReturnsResponse; 
           selection={selection}
           entries={[{ key: 'twrPct', label: 'Return (TWR)', swatch: <SignSwatch gain={c.gain} loss={c.loss} /> }]}
         />
-        {selection.nothingSelected ? <NothingSelected onShowAll={selection.reset} /> : <ReturnsBarChart rows={shown} period={data.period} filtered={selection.hasHidden} />}
+        {selection.nothingSelected ? <NothingSelected onShowAll={selection.reset} /> : <ReturnsBarChart rows={shown} period={data.period} filtered={selection.hasHidden} focusKey={selection.focusKey} />}
       </div>
       <SelectableTable caption={`Returns per ${data.period}, newest first`} rowHeader="Period" columns={columns} rows={tableRows} selection={selection} tableClassName="w-full text-sm" scrollClassName="overflow-x-auto" />
       <p className="muted text-xs">

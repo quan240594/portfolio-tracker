@@ -1,9 +1,10 @@
+import { useMemo } from 'react';
 import { CartesianGrid, Line, LineChart, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { GoalPlanId, GoalProjection, GoalRow } from '@portfolio/shared';
 import { useTheme, type Theme } from '../../theme/ThemeProvider';
 import { analyticsTheme, tooltipStyle } from '../../components/charts/analyticsTheme';
 import { compactMoneyTick, moneyTooltip } from '../../components/charts/chartFormatters';
-import { LegendSwatch, NothingSelected, SelectableLegend, selectRows, type SeriesSelection } from '../../components/charts/selection';
+import { LegendSwatch, NothingSelected, SelectableLegend, focusOpacity, selectRows, type SeriesSelection } from '../../components/charts/selection';
 import { formatMoney } from '../../lib/format';
 import { GOAL_MEASURE, verdictText } from './goalText';
 
@@ -49,12 +50,20 @@ export function GoalChart({ projection, selection }: Readonly<Props>) {
   const c = analyticsTheme(theme);
   const colours = goalLineColours(theme);
   const { scenarios, baseCurrency } = projection;
-  const rows = selectRows(projection.rows, (r) => String(r.year), selection);
-  const drawn = GOAL_SERIES.filter((key) => selection.isSeriesVisible(key));
-  const markers = scenarios.flatMap((s) => {
-    const row = rows.find((r) => r.year === s.reachedYear);
-    return row && selection.isSeriesVisible(s.id) ? [{ id: s.id, year: row.year, value: row[s.id] }] : [];
-  });
+  // the preview changes on every hover: these depend on what is included only, so they keep their identity meanwhile
+  const { isRowVisible, isSeriesVisible } = selection;
+  const rows = useMemo(() => selectRows(projection.rows, (r) => String(r.year), { isRowVisible }), [projection.rows, isRowVisible]);
+  const drawn = useMemo(() => GOAL_SERIES.filter((key) => isSeriesVisible(key)), [isSeriesVisible]);
+  const markers = useMemo(
+    () =>
+      scenarios.flatMap((s) => {
+        const row = rows.find((r) => r.year === s.reachedYear);
+        return row && isSeriesVisible(s.id) ? [{ id: s.id, year: row.year, value: row[s.id] }] : [];
+      }),
+    [scenarios, rows, isSeriesVisible],
+  );
+  // a line and its "goal reached" dot are one legend entry; the target-year rule is not a series and stays
+  const fade = (key: string) => focusOpacity(selection.focusKey, key);
   const entries = GOAL_SERIES.map((key) => ({ key, label: goalSeriesName(key), swatch: <LegendSwatch shape="line" color={colours[key]} dashed={key === 'goal'} /> }));
 
   return (
@@ -67,7 +76,7 @@ export function GoalChart({ projection, selection }: Readonly<Props>) {
         <NothingSelected onShowAll={selection.reset} />
       ) : (
         <>
-          <div aria-hidden="true" className="h-72 w-full sm:h-80" data-testid="goal-chart">
+          <div aria-hidden="true" className="chart-focus h-72 w-full sm:h-80" data-testid="goal-chart">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={rows} margin={{ top: 22, right: 12, bottom: 0, left: 0 }}>
                 <CartesianGrid stroke={c.grid} vertical={false} />
@@ -76,10 +85,10 @@ export function GoalChart({ projection, selection }: Readonly<Props>) {
                 <Tooltip contentStyle={tooltipStyle(c)} labelFormatter={String} formatter={moneyTooltip(baseCurrency, goalSeriesName)} />
                 <ReferenceLine x={projection.targetYear} stroke={c.axis} strokeWidth={1} label={{ value: `Target year ${projection.targetYear}`, fill: c.axis, fontSize: 11, position: 'top' }} />
                 {drawn.map((key) => (
-                  <Line key={key} type="monotone" dataKey={key} stroke={colours[key]} strokeWidth={LINE_WIDTHS[key]} strokeDasharray={key === 'goal' ? '6 4' : undefined} dot={false} isAnimationActive={false} />
+                  <Line key={key} type="monotone" dataKey={key} stroke={colours[key]} strokeWidth={LINE_WIDTHS[key]} strokeOpacity={fade(key)} strokeDasharray={key === 'goal' ? '6 4' : undefined} dot={false} isAnimationActive={false} />
                 ))}
                 {markers.map((m) => (
-                  <ReferenceDot key={m.id} x={m.year} y={m.value} r={5} fill={colours[m.id]} stroke={c.tooltipBg} strokeWidth={2} ifOverflow="hidden" />
+                  <ReferenceDot key={m.id} x={m.year} y={m.value} r={5} fill={colours[m.id]} fillOpacity={fade(m.id)} stroke={c.tooltipBg} strokeWidth={2} strokeOpacity={fade(m.id)} ifOverflow="hidden" />
                 ))}
               </LineChart>
             </ResponsiveContainer>
