@@ -62,7 +62,12 @@ class Infra:
         events = boto3.client("events", region_name="eu-west-1")
         sqs = boto3.client("sqs", region_name="eu-west-1")
         events.create_event_bus(Name=BUS)
-        self.queue_url = sqs.create_queue(QueueName="capture")["QueueUrl"]
+        # Tests pin the clock to fixed past dates but moto expires messages against the real clock: with the
+        # default 4 day retention every captured event vanished 4 days after the pinned date (a time bomb).
+        # A century of retention never expires in practice.
+        self.queue_url = sqs.create_queue(
+            QueueName="capture", Attributes={"MessageRetentionPeriod": str(100 * 365 * 24 * 3600)}
+        )["QueueUrl"]
         arn = sqs.get_queue_attributes(QueueUrl=self.queue_url, AttributeNames=["QueueArn"])["Attributes"][
             "QueueArn"
         ]
