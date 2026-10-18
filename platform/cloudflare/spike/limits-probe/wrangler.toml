@@ -1,0 +1,39 @@
+# Limits probe. FREE PLAN ONLY: no [limits] block, no routes, no paid bindings. Delete everything afterwards (README).
+name = "pt-limits-probe"
+main = "src/index.ts"
+compatibility_date = "2026-04-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+# Shows CPU time / wall time per invocation in the dashboard (Workers Logs, free: 200k events/day).
+[observability]
+enabled = true
+
+# SQLite-backed Durable Object (the only kind the Free plan offers).
+[[durable_objects.bindings]]
+name = "PROBE"
+class_name = "Probe"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Probe"]
+
+# D1: with wrangler >= 4.45 the database is provisioned automatically on first deploy.
+# Otherwise: `npx wrangler d1 create pt-limits-probe` and add the printed database_id below.
+[[d1_databases]]
+binding = "DB"
+database_name = "pt-limits-probe"
+
+# Queue producer + consumer (Free plan: 10,000 operations/day).
+[[queues.producers]]
+binding = "QUEUE"
+queue = "pt-limits-probe"
+
+[[queues.consumers]]
+queue = "pt-limits-probe"
+max_batch_size = 1
+max_retries = 0
+
+# One Cron Trigger (the Free plan allows 5 per account). It burns the amount set with /cron-set?ms=N.
+[triggers]
+crons = ["*/5 * * * *"]

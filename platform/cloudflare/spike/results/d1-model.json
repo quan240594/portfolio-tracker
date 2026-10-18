@@ -1,0 +1,1482 @@
+{
+  "generatedAt": "2026-10-17T13:48:33.732Z",
+  "node": "v24.13.1",
+  "caps": {
+    "d1RowsRead": 5000000,
+    "d1RowsWritten": 100000,
+    "workerRequests": 100000,
+    "queueOps": 10000,
+    "kvWrites": 1000
+  },
+  "endpoint": {
+    "day": [
+      {
+        "id": "portfolio",
+        "status": 200,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 2850,
+        "rowsWritten": 0
+      },
+      {
+        "id": "holdings",
+        "status": 200,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 2850,
+        "rowsWritten": 0
+      },
+      {
+        "id": "allocation (assetClass)",
+        "status": 200,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 2850,
+        "rowsWritten": 0
+      },
+      {
+        "id": "allocation (category)",
+        "status": 200,
+        "statements": 10,
+        "roundTrips": 10,
+        "rowsRead": 2091,
+        "rowsWritten": 0
+      },
+      {
+        "id": "history (1Y)",
+        "status": 200,
+        "statements": 6,
+        "roundTrips": 6,
+        "rowsRead": 10997,
+        "rowsWritten": 0
+      },
+      {
+        "id": "history (ALL)",
+        "status": 200,
+        "statements": 6,
+        "roundTrips": 6,
+        "rowsRead": 42211,
+        "rowsWritten": 0
+      },
+      {
+        "id": "dividends",
+        "status": 200,
+        "statements": 4,
+        "roundTrips": 4,
+        "rowsRead": 3379,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/summary",
+        "status": 200,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 42860,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/returns (year)",
+        "status": 200,
+        "statements": 4,
+        "roundTrips": 4,
+        "rowsRead": 42207,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/returns (month)",
+        "status": 200,
+        "statements": 4,
+        "roundTrips": 4,
+        "rowsRead": 42207,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/risk",
+        "status": 200,
+        "statements": 4,
+        "roundTrips": 4,
+        "rowsRead": 42207,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/benchmark (ALL)",
+        "status": 200,
+        "statements": 4,
+        "roundTrips": 4,
+        "rowsRead": 42207,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/dividend-growth",
+        "status": 200,
+        "statements": 3,
+        "roundTrips": 3,
+        "rowsRead": 2786,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/goal",
+        "status": 200,
+        "statements": 6,
+        "roundTrips": 6,
+        "rowsRead": 3439,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/growth (1Y)",
+        "status": 200,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 42408,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/growth (ALL, 3 bench)",
+        "status": 200,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 42408,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/holdings-performance (ALL)",
+        "status": 200,
+        "statements": 6,
+        "roundTrips": 6,
+        "rowsRead": 42267,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/metrics",
+        "status": 200,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 42268,
+        "rowsWritten": 0
+      },
+      {
+        "id": "dividends/overview",
+        "status": 200,
+        "statements": 6,
+        "roundTrips": 6,
+        "rowsRead": 3439,
+        "rowsWritten": 0
+      },
+      {
+        "id": "calendar",
+        "status": 200,
+        "statements": 9,
+        "roundTrips": 9,
+        "rowsRead": 3464,
+        "rowsWritten": 0
+      },
+      {
+        "id": "calendar.ics",
+        "status": 200,
+        "statements": 9,
+        "roundTrips": 9,
+        "rowsRead": 3464,
+        "rowsWritten": 0
+      },
+      {
+        "id": "goals (GET)",
+        "status": 200,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 3440,
+        "rowsWritten": 0
+      },
+      {
+        "id": "goals/calculate (POST)",
+        "status": 200,
+        "statements": 6,
+        "roundTrips": 6,
+        "rowsRead": 3439,
+        "rowsWritten": 0
+      },
+      {
+        "id": "assets/AAPL",
+        "status": 200,
+        "statements": 5,
+        "roundTrips": 5,
+        "rowsRead": 37,
+        "rowsWritten": 0
+      },
+      {
+        "id": "assets/AAPL/history (ALL)",
+        "status": 200,
+        "statements": 9,
+        "roundTrips": 9,
+        "rowsRead": 6443,
+        "rowsWritten": 0
+      },
+      {
+        "id": "assets/AAPL/positions",
+        "status": 200,
+        "statements": 14,
+        "roundTrips": 14,
+        "rowsRead": 4735,
+        "rowsWritten": 0
+      },
+      {
+        "id": "securities/closed",
+        "status": 200,
+        "statements": 4,
+        "roundTrips": 4,
+        "rowsRead": 2816,
+        "rowsWritten": 0
+      },
+      {
+        "id": "rebalance (buy-only)",
+        "status": 200,
+        "statements": 11,
+        "roundTrips": 11,
+        "rowsRead": 2092,
+        "rowsWritten": 0
+      },
+      {
+        "id": "rebalance (full)",
+        "status": 200,
+        "statements": 11,
+        "roundTrips": 11,
+        "rowsRead": 2092,
+        "rowsWritten": 0
+      },
+      {
+        "id": "export/transactions (csv)",
+        "status": 200,
+        "statements": 1,
+        "roundTrips": 1,
+        "rowsRead": 1500,
+        "rowsWritten": 0
+      },
+      {
+        "id": "export/backup (json)",
+        "status": 200,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 1536,
+        "rowsWritten": 0
+      },
+      {
+        "id": "health",
+        "status": 200,
+        "statements": 0,
+        "roundTrips": 0,
+        "rowsRead": 0,
+        "rowsWritten": 0
+      },
+      {
+        "id": "portfolios (list)",
+        "status": 200,
+        "statements": 1,
+        "roundTrips": 1,
+        "rowsRead": 3,
+        "rowsWritten": 0
+      },
+      {
+        "id": "transactions (list, all)",
+        "status": 200,
+        "statements": 1,
+        "roundTrips": 1,
+        "rowsRead": 1500,
+        "rowsWritten": 0
+      },
+      {
+        "id": "transactions (list, one pf)",
+        "status": 200,
+        "statements": 2,
+        "roundTrips": 2,
+        "rowsRead": 747,
+        "rowsWritten": 0
+      },
+      {
+        "id": "categories (list)",
+        "status": 200,
+        "statements": 3,
+        "roundTrips": 3,
+        "rowsRead": 25,
+        "rowsWritten": 0
+      },
+      {
+        "id": "assets (list)",
+        "status": 200,
+        "statements": 3,
+        "roundTrips": 3,
+        "rowsRead": 5,
+        "rowsWritten": 0
+      },
+      {
+        "id": "watchlist",
+        "status": 200,
+        "statements": 3,
+        "roundTrips": 3,
+        "rowsRead": 15,
+        "rowsWritten": 0
+      },
+      {
+        "id": "settings (GET)",
+        "status": 200,
+        "statements": 2,
+        "roundTrips": 2,
+        "rowsRead": 2,
+        "rowsWritten": 0
+      },
+      {
+        "id": "POST /transactions (1 buy)",
+        "status": 201,
+        "statements": 5,
+        "roundTrips": 5,
+        "rowsRead": 1502,
+        "rowsWritten": 1
+      },
+      {
+        "id": "PUT /goals",
+        "status": 200,
+        "statements": 8,
+        "roundTrips": 8,
+        "rowsRead": 3441,
+        "rowsWritten": 1
+      },
+      {
+        "id": "POST /watchlist",
+        "status": 201,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 5,
+        "rowsWritten": 2
+      }
+    ],
+    "packed": [
+      {
+        "id": "portfolio",
+        "status": 200,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 1570,
+        "rowsWritten": 0
+      },
+      {
+        "id": "holdings",
+        "status": 200,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 1570,
+        "rowsWritten": 0
+      },
+      {
+        "id": "allocation (assetClass)",
+        "status": 200,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 1570,
+        "rowsWritten": 0
+      },
+      {
+        "id": "allocation (category)",
+        "status": 200,
+        "statements": 10,
+        "roundTrips": 10,
+        "rowsRead": 811,
+        "rowsWritten": 0
+      },
+      {
+        "id": "history (1Y)",
+        "status": 200,
+        "statements": 6,
+        "roundTrips": 6,
+        "rowsRead": 1540,
+        "rowsWritten": 0
+      },
+      {
+        "id": "history (ALL)",
+        "status": 200,
+        "statements": 6,
+        "roundTrips": 6,
+        "rowsRead": 1660,
+        "rowsWritten": 0
+      },
+      {
+        "id": "dividends",
+        "status": 200,
+        "statements": 4,
+        "roundTrips": 4,
+        "rowsRead": 2099,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/summary",
+        "status": 200,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 2309,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/returns (year)",
+        "status": 200,
+        "statements": 4,
+        "roundTrips": 4,
+        "rowsRead": 1656,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/returns (month)",
+        "status": 200,
+        "statements": 4,
+        "roundTrips": 4,
+        "rowsRead": 1656,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/risk",
+        "status": 200,
+        "statements": 4,
+        "roundTrips": 4,
+        "rowsRead": 1656,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/benchmark (ALL)",
+        "status": 200,
+        "statements": 4,
+        "roundTrips": 4,
+        "rowsRead": 1656,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/dividend-growth",
+        "status": 200,
+        "statements": 3,
+        "roundTrips": 3,
+        "rowsRead": 1506,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/goal",
+        "status": 200,
+        "statements": 6,
+        "roundTrips": 6,
+        "rowsRead": 2159,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/growth (1Y)",
+        "status": 200,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 1696,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/growth (ALL, 3 bench)",
+        "status": 200,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 1696,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/holdings-performance (ALL)",
+        "status": 200,
+        "statements": 6,
+        "roundTrips": 6,
+        "rowsRead": 1716,
+        "rowsWritten": 0
+      },
+      {
+        "id": "analytics/metrics",
+        "status": 200,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 1717,
+        "rowsWritten": 0
+      },
+      {
+        "id": "dividends/overview",
+        "status": 200,
+        "statements": 6,
+        "roundTrips": 6,
+        "rowsRead": 2159,
+        "rowsWritten": 0
+      },
+      {
+        "id": "calendar",
+        "status": 200,
+        "statements": 9,
+        "roundTrips": 9,
+        "rowsRead": 2184,
+        "rowsWritten": 0
+      },
+      {
+        "id": "calendar.ics",
+        "status": 200,
+        "statements": 9,
+        "roundTrips": 9,
+        "rowsRead": 2184,
+        "rowsWritten": 0
+      },
+      {
+        "id": "goals (GET)",
+        "status": 200,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 2160,
+        "rowsWritten": 0
+      },
+      {
+        "id": "goals/calculate (POST)",
+        "status": 200,
+        "statements": 6,
+        "roundTrips": 6,
+        "rowsRead": 2159,
+        "rowsWritten": 0
+      },
+      {
+        "id": "assets/AAPL",
+        "status": 200,
+        "statements": 5,
+        "roundTrips": 5,
+        "rowsRead": 28,
+        "rowsWritten": 0
+      },
+      {
+        "id": "assets/AAPL/history (ALL)",
+        "status": 200,
+        "statements": 9,
+        "roundTrips": 9,
+        "rowsRead": 1558,
+        "rowsWritten": 0
+      },
+      {
+        "id": "assets/AAPL/positions",
+        "status": 200,
+        "statements": 14,
+        "roundTrips": 14,
+        "rowsRead": 2215,
+        "rowsWritten": 0
+      },
+      {
+        "id": "securities/closed",
+        "status": 200,
+        "statements": 4,
+        "roundTrips": 4,
+        "rowsRead": 1536,
+        "rowsWritten": 0
+      },
+      {
+        "id": "rebalance (buy-only)",
+        "status": 200,
+        "statements": 11,
+        "roundTrips": 11,
+        "rowsRead": 812,
+        "rowsWritten": 0
+      },
+      {
+        "id": "rebalance (full)",
+        "status": 200,
+        "statements": 11,
+        "roundTrips": 11,
+        "rowsRead": 812,
+        "rowsWritten": 0
+      },
+      {
+        "id": "export/transactions (csv)",
+        "status": 200,
+        "statements": 1,
+        "roundTrips": 1,
+        "rowsRead": 1500,
+        "rowsWritten": 0
+      },
+      {
+        "id": "export/backup (json)",
+        "status": 200,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 1536,
+        "rowsWritten": 0
+      },
+      {
+        "id": "health",
+        "status": 200,
+        "statements": 0,
+        "roundTrips": 0,
+        "rowsRead": 0,
+        "rowsWritten": 0
+      },
+      {
+        "id": "portfolios (list)",
+        "status": 200,
+        "statements": 1,
+        "roundTrips": 1,
+        "rowsRead": 3,
+        "rowsWritten": 0
+      },
+      {
+        "id": "transactions (list, all)",
+        "status": 200,
+        "statements": 1,
+        "roundTrips": 1,
+        "rowsRead": 1500,
+        "rowsWritten": 0
+      },
+      {
+        "id": "transactions (list, one pf)",
+        "status": 200,
+        "statements": 2,
+        "roundTrips": 2,
+        "rowsRead": 747,
+        "rowsWritten": 0
+      },
+      {
+        "id": "categories (list)",
+        "status": 200,
+        "statements": 3,
+        "roundTrips": 3,
+        "rowsRead": 25,
+        "rowsWritten": 0
+      },
+      {
+        "id": "assets (list)",
+        "status": 200,
+        "statements": 3,
+        "roundTrips": 3,
+        "rowsRead": 5,
+        "rowsWritten": 0
+      },
+      {
+        "id": "watchlist",
+        "status": 200,
+        "statements": 3,
+        "roundTrips": 3,
+        "rowsRead": 15,
+        "rowsWritten": 0
+      },
+      {
+        "id": "settings (GET)",
+        "status": 200,
+        "statements": 2,
+        "roundTrips": 2,
+        "rowsRead": 2,
+        "rowsWritten": 0
+      },
+      {
+        "id": "POST /transactions (1 buy)",
+        "status": 201,
+        "statements": 5,
+        "roundTrips": 5,
+        "rowsRead": 1502,
+        "rowsWritten": 1
+      },
+      {
+        "id": "PUT /goals",
+        "status": 200,
+        "statements": 8,
+        "roundTrips": 8,
+        "rowsRead": 2161,
+        "rowsWritten": 1
+      },
+      {
+        "id": "POST /watchlist",
+        "status": 201,
+        "statements": 7,
+        "roundTrips": 7,
+        "rowsRead": 5,
+        "rowsWritten": 2
+      }
+    ]
+  },
+  "baselineEndpointDayLayout": [
+    {
+      "id": "portfolio",
+      "status": 200,
+      "statements": 7,
+      "roundTrips": 7,
+      "rowsRead": 421,
+      "rowsWritten": 0
+    },
+    {
+      "id": "holdings",
+      "status": 200,
+      "statements": 7,
+      "roundTrips": 7,
+      "rowsRead": 421,
+      "rowsWritten": 0
+    },
+    {
+      "id": "allocation (assetClass)",
+      "status": 200,
+      "statements": 7,
+      "roundTrips": 7,
+      "rowsRead": 421,
+      "rowsWritten": 0
+    },
+    {
+      "id": "allocation (category)",
+      "status": 200,
+      "statements": 9,
+      "roundTrips": 9,
+      "rowsRead": 39,
+      "rowsWritten": 0
+    },
+    {
+      "id": "history (1Y)",
+      "status": 200,
+      "statements": 6,
+      "roundTrips": 6,
+      "rowsRead": 2143,
+      "rowsWritten": 0
+    },
+    {
+      "id": "history (ALL)",
+      "status": 200,
+      "statements": 6,
+      "roundTrips": 6,
+      "rowsRead": 2924,
+      "rowsWritten": 0
+    },
+    {
+      "id": "dividends",
+      "status": 200,
+      "statements": 4,
+      "roundTrips": 4,
+      "rowsRead": 410,
+      "rowsWritten": 0
+    },
+    {
+      "id": "analytics/summary",
+      "status": 200,
+      "statements": 7,
+      "roundTrips": 7,
+      "rowsRead": 2937,
+      "rowsWritten": 0
+    },
+    {
+      "id": "analytics/returns (year)",
+      "status": 200,
+      "statements": 4,
+      "roundTrips": 4,
+      "rowsRead": 2921,
+      "rowsWritten": 0
+    },
+    {
+      "id": "analytics/returns (month)",
+      "status": 200,
+      "statements": 4,
+      "roundTrips": 4,
+      "rowsRead": 2921,
+      "rowsWritten": 0
+    },
+    {
+      "id": "analytics/risk",
+      "status": 200,
+      "statements": 4,
+      "roundTrips": 4,
+      "rowsRead": 2921,
+      "rowsWritten": 0
+    },
+    {
+      "id": "analytics/benchmark (ALL)",
+      "status": 200,
+      "statements": 4,
+      "roundTrips": 4,
+      "rowsRead": 2921,
+      "rowsWritten": 0
+    },
+    {
+      "id": "analytics/dividend-growth",
+      "status": 200,
+      "statements": 3,
+      "roundTrips": 3,
+      "rowsRead": 406,
+      "rowsWritten": 0
+    },
+    {
+      "id": "analytics/goal",
+      "status": 200,
+      "statements": 6,
+      "roundTrips": 6,
+      "rowsRead": 422,
+      "rowsWritten": 0
+    },
+    {
+      "id": "analytics/growth (1Y)",
+      "status": 200,
+      "statements": 7,
+      "roundTrips": 7,
+      "rowsRead": 3044,
+      "rowsWritten": 0
+    },
+    {
+      "id": "analytics/growth (ALL, 3 bench)",
+      "status": 200,
+      "statements": 7,
+      "roundTrips": 7,
+      "rowsRead": 3044,
+      "rowsWritten": 0
+    },
+    {
+      "id": "analytics/holdings-performance (ALL)",
+      "status": 200,
+      "statements": 6,
+      "roundTrips": 6,
+      "rowsRead": 2933,
+      "rowsWritten": 0
+    },
+    {
+      "id": "analytics/metrics",
+      "status": 200,
+      "statements": 7,
+      "roundTrips": 7,
+      "rowsRead": 2934,
+      "rowsWritten": 0
+    },
+    {
+      "id": "dividends/overview",
+      "status": 200,
+      "statements": 6,
+      "roundTrips": 6,
+      "rowsRead": 422,
+      "rowsWritten": 0
+    },
+    {
+      "id": "calendar",
+      "status": 200,
+      "statements": 9,
+      "roundTrips": 9,
+      "rowsRead": 433,
+      "rowsWritten": 0
+    },
+    {
+      "id": "calendar.ics",
+      "status": 200,
+      "statements": 9,
+      "roundTrips": 9,
+      "rowsRead": 433,
+      "rowsWritten": 0
+    },
+    {
+      "id": "goals (GET)",
+      "status": 200,
+      "statements": 7,
+      "roundTrips": 7,
+      "rowsRead": 422,
+      "rowsWritten": 0
+    },
+    {
+      "id": "goals/calculate (POST)",
+      "status": 200,
+      "statements": 6,
+      "roundTrips": 6,
+      "rowsRead": 422,
+      "rowsWritten": 0
+    },
+    {
+      "id": "assets/AAPL",
+      "status": 200,
+      "statements": 5,
+      "roundTrips": 5,
+      "rowsRead": 14,
+      "rowsWritten": 0
+    },
+    {
+      "id": "assets/AAPL/history (ALL)",
+      "status": 200,
+      "statements": 9,
+      "roundTrips": 9,
+      "rowsRead": 1492,
+      "rowsWritten": 0
+    },
+    {
+      "id": "assets/AAPL/positions",
+      "status": 200,
+      "statements": 14,
+      "roundTrips": 14,
+      "rowsRead": 802,
+      "rowsWritten": 0
+    },
+    {
+      "id": "securities/closed",
+      "status": 200,
+      "statements": 4,
+      "roundTrips": 4,
+      "rowsRead": 412,
+      "rowsWritten": 0
+    },
+    {
+      "id": "rebalance (buy-only)",
+      "status": 200,
+      "statements": 10,
+      "roundTrips": 10,
+      "rowsRead": 40,
+      "rowsWritten": 0
+    },
+    {
+      "id": "rebalance (full)",
+      "status": 200,
+      "statements": 10,
+      "roundTrips": 10,
+      "rowsRead": 40,
+      "rowsWritten": 0
+    },
+    {
+      "id": "export/transactions (csv)",
+      "status": 200,
+      "statements": 1,
+      "roundTrips": 1,
+      "rowsRead": 21,
+      "rowsWritten": 0
+    },
+    {
+      "id": "export/backup (json)",
+      "status": 200,
+      "statements": 7,
+      "roundTrips": 7,
+      "rowsRead": 39,
+      "rowsWritten": 0
+    },
+    {
+      "id": "health",
+      "status": 200,
+      "statements": 0,
+      "roundTrips": 0,
+      "rowsRead": 0,
+      "rowsWritten": 0
+    },
+    {
+      "id": "portfolios (list)",
+      "status": 200,
+      "statements": 1,
+      "roundTrips": 1,
+      "rowsRead": 2,
+      "rowsWritten": 0
+    },
+    {
+      "id": "transactions (list, all)",
+      "status": 200,
+      "statements": 1,
+      "roundTrips": 1,
+      "rowsRead": 21,
+      "rowsWritten": 0
+    },
+    {
+      "id": "transactions (list, one pf)",
+      "status": 200,
+      "statements": 2,
+      "roundTrips": 2,
+      "rowsRead": 17,
+      "rowsWritten": 0
+    },
+    {
+      "id": "categories (list)",
+      "status": 200,
+      "statements": 3,
+      "roundTrips": 3,
+      "rowsRead": 11,
+      "rowsWritten": 0
+    },
+    {
+      "id": "assets (list)",
+      "status": 200,
+      "statements": 3,
+      "roundTrips": 3,
+      "rowsRead": 4,
+      "rowsWritten": 0
+    },
+    {
+      "id": "watchlist",
+      "status": 200,
+      "statements": 3,
+      "roundTrips": 3,
+      "rowsRead": 9,
+      "rowsWritten": 0
+    },
+    {
+      "id": "settings (GET)",
+      "status": 200,
+      "statements": 2,
+      "roundTrips": 2,
+      "rowsRead": 2,
+      "rowsWritten": 0
+    },
+    {
+      "id": "POST /transactions (1 buy)",
+      "status": 201,
+      "statements": 5,
+      "roundTrips": 5,
+      "rowsRead": 23,
+      "rowsWritten": 1
+    },
+    {
+      "id": "PUT /goals",
+      "status": 200,
+      "statements": 8,
+      "roundTrips": 8,
+      "rowsRead": 423,
+      "rowsWritten": 1
+    },
+    {
+      "id": "POST /watchlist",
+      "status": 201,
+      "statements": 7,
+      "roundTrips": 7,
+      "rowsRead": 3,
+      "rowsWritten": 2
+    }
+  ],
+  "storage": {
+    "day": {
+      "rows": 44315,
+      "megabytes": 5.5
+    },
+    "packed": {
+      "rows": 2451,
+      "megabytes": 1.8
+    }
+  },
+  "plans": {
+    "day: query(pk, sk range)": {
+      "sql": "SELECT pk, sk, data FROM items WHERE pk = ? AND sk >= ? AND sk < ? ORDER BY sk",
+      "plan": [
+        "SEARCH items USING PRIMARY KEY (pk=? AND sk>? AND sk<?)"
+      ]
+    },
+    "day: getMany(pk IN (...) AND sk = ?)": {
+      "sql": "SELECT pk, sk, data FROM items WHERE pk IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) AND sk = ?",
+      "plan": [
+        "SEARCH items USING PRIMARY KEY (pk=? AND sk=?)"
+      ]
+    },
+    "day: get": {
+      "sql": "SELECT pk, sk, data FROM items WHERE pk = ? AND sk = ?",
+      "plan": [
+        "SEARCH items USING PRIMARY KEY (pk=? AND sk=?)"
+      ]
+    },
+    "day: queryMany(pk IN (...), sk range) n=N": {
+      "sql": "SELECT pk, sk, data FROM items WHERE pk IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) AND sk >= ? AND sk < ? ORDER BY pk, sk",
+      "plan": [
+        "SEARCH items USING PRIMARY KEY (pk=? AND sk>? AND sk<?)"
+      ]
+    },
+    "day: getMany(pk = ? AND sk IN (...))": {
+      "sql": "SELECT pk, sk, data FROM items WHERE pk = ? AND sk IN (?)",
+      "plan": [
+        "SEARCH items USING PRIMARY KEY (pk=? AND sk=?)"
+      ]
+    },
+    "day: queryMany(pk IN (...), sk range) n=1": {
+      "sql": "SELECT pk, sk, data FROM items WHERE pk IN (?) AND sk >= ? AND sk < ? ORDER BY pk, sk",
+      "plan": [
+        "SEARCH items USING PRIMARY KEY (pk=? AND sk>? AND sk<?)"
+      ]
+    },
+    "day: put if not exists": {
+      "sql": "INSERT INTO items (pk, sk, data) VALUES (?, ?, ?) ON CONFLICT (pk, sk) DO NOTHING",
+      "plan": []
+    },
+    "day: put (upsert)": {
+      "sql": "INSERT INTO items (pk, sk, data) VALUES (?, ?, ?) ON CONFLICT (pk, sk) DO UPDATE SET data = excluded.data",
+      "plan": []
+    },
+    "day: batch: multi-row upsert (n=k)": {
+      "sql": "INSERT INTO items (pk, sk, data) VALUES (?,?,?) ON CONFLICT (pk, sk) DO UPDATE SET data = excluded.data",
+      "plan": []
+    },
+    "packed: query(pk, sk range)": {
+      "sql": "SELECT pk, sk, data FROM items WHERE pk = ? AND sk >= ? AND sk < ? ORDER BY sk",
+      "plan": [
+        "SEARCH items USING PRIMARY KEY (pk=? AND sk>? AND sk<?)"
+      ]
+    },
+    "packed: getMany(pk IN (...) AND sk = ?)": {
+      "sql": "SELECT pk, sk, data FROM items WHERE pk IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) AND sk = ?",
+      "plan": [
+        "SEARCH items USING PRIMARY KEY (pk=? AND sk=?)"
+      ]
+    },
+    "packed: get": {
+      "sql": "SELECT pk, sk, data FROM items WHERE pk = ? AND sk = ?",
+      "plan": [
+        "SEARCH items USING PRIMARY KEY (pk=? AND sk=?)"
+      ]
+    },
+    "packed: queryMany(pk IN (...), sk range) n=N": {
+      "sql": "SELECT pk, sk, data FROM items WHERE pk IN (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) AND sk >= ? AND sk < ? ORDER BY pk, sk",
+      "plan": [
+        "SEARCH items USING PRIMARY KEY (pk=? AND sk>? AND sk<?)"
+      ]
+    },
+    "packed: getMany(pk = ? AND sk IN (...))": {
+      "sql": "SELECT pk, sk, data FROM items WHERE pk = ? AND sk IN (?)",
+      "plan": [
+        "SEARCH items USING PRIMARY KEY (pk=? AND sk=?)"
+      ]
+    },
+    "packed: queryMany(pk IN (...), sk range) n=1": {
+      "sql": "SELECT pk, sk, data FROM items WHERE pk IN (?) AND sk >= ? AND sk < ? ORDER BY pk, sk",
+      "plan": [
+        "SEARCH items USING PRIMARY KEY (pk=? AND sk>? AND sk<?)"
+      ]
+    },
+    "packed: put if not exists": {
+      "sql": "INSERT INTO items (pk, sk, data) VALUES (?, ?, ?) ON CONFLICT (pk, sk) DO NOTHING",
+      "plan": []
+    },
+    "packed: put (upsert)": {
+      "sql": "INSERT INTO items (pk, sk, data) VALUES (?, ?, ?) ON CONFLICT (pk, sk) DO UPDATE SET data = excluded.data",
+      "plan": []
+    },
+    "packed: batch: multi-row upsert (n=k)": {
+      "sql": "INSERT INTO items (pk, sk, data) VALUES (?,?,?) ON CONFLICT (pk, sk) DO UPDATE SET data = excluded.data",
+      "plan": []
+    }
+  },
+  "planCheck": {
+    "statements": 18,
+    "selectAndDeleteStatements": 12,
+    "fullScansOfItems": [],
+    "allSearchPrimaryKey": true
+  },
+  "negativeControl": {
+    "sql": "SELECT data FROM items WHERE json_extract(data,'$.id') = ?",
+    "plan": [
+      "SCAN items"
+    ],
+    "rowsReadWouldBe": 44312
+  },
+  "jobs": [
+    {
+      "job": "price refresh: quotes only (x3/day)",
+      "layout": "day",
+      "statements": 3,
+      "roundTrips": 2,
+      "rowsRead": 35,
+      "rowsWritten": 35,
+      "note": "35 tracked symbols"
+    },
+    {
+      "job": "price refresh: end-of-day (x1/day)",
+      "layout": "day",
+      "statements": 7,
+      "roundTrips": 5,
+      "rowsRead": 35,
+      "rowsWritten": 72,
+      "note": "35 symbols"
+    },
+    {
+      "job": "enrichment of one new symbol (5y backfill)",
+      "layout": "day",
+      "statements": 58,
+      "roundTrips": 19,
+      "rowsRead": 0,
+      "rowsWritten": 1327,
+      "note": "1304 price rows backfilled"
+    },
+    {
+      "job": "calendar refresh (x1/day)",
+      "layout": "day",
+      "statements": 5,
+      "roundTrips": 5,
+      "rowsRead": 35,
+      "rowsWritten": 20,
+      "note": "20 rows written"
+    },
+    {
+      "job": "T212 first full sync (1500 txns, chunks of 300, validate=reread-all)",
+      "layout": "day",
+      "statements": 71,
+      "roundTrips": 26,
+      "rowsRead": 3030,
+      "rowsWritten": 1505,
+      "note": "5 invocations"
+    },
+    {
+      "job": "T212 first full sync (1500 txns, chunks of 300, validate=snapshot)",
+      "layout": "day",
+      "statements": 66,
+      "roundTrips": 21,
+      "rowsRead": 30,
+      "rowsWritten": 1505,
+      "note": "5 invocations"
+    },
+    {
+      "job": "T212 incremental sync (0 new, validate=reread-all)",
+      "layout": "day",
+      "statements": 3,
+      "roundTrips": 3,
+      "rowsRead": 1500,
+      "rowsWritten": 1
+    },
+    {
+      "job": "T212 incremental sync (3 new, validate=reread-all)",
+      "layout": "day",
+      "statements": 5,
+      "roundTrips": 5,
+      "rowsRead": 1503,
+      "rowsWritten": 4
+    },
+    {
+      "job": "T212 incremental sync (3 new, validate=snapshot)",
+      "layout": "day",
+      "statements": 4,
+      "roundTrips": 4,
+      "rowsRead": 3,
+      "rowsWritten": 4
+    },
+    {
+      "job": "CSV import of 1500 rows (COMPLETED, 71 KB)",
+      "layout": "day",
+      "statements": 69,
+      "roundTrips": 24,
+      "rowsRead": 1534,
+      "rowsWritten": 1502,
+      "cpuMs": 51.983,
+      "note": "cpuMs = whole processor incl. csv-parse + zod row validation + oversell replay (Node, cold-ish single run)"
+    },
+    {
+      "job": "delete portfolio with 672 txns (force)",
+      "layout": "day",
+      "statements": 20,
+      "roundTrips": 13,
+      "rowsRead": 672,
+      "rowsWritten": 673
+    },
+    {
+      "job": "price refresh: quotes only (x3/day)",
+      "layout": "packed",
+      "statements": 3,
+      "roundTrips": 2,
+      "rowsRead": 35,
+      "rowsWritten": 35,
+      "note": "35 tracked symbols"
+    },
+    {
+      "job": "price refresh: end-of-day (x1/day)",
+      "layout": "packed",
+      "statements": 9,
+      "roundTrips": 7,
+      "rowsRead": 71,
+      "rowsWritten": 72,
+      "note": "35 symbols"
+    },
+    {
+      "job": "enrichment of one new symbol (5y backfill)",
+      "layout": "packed",
+      "statements": 7,
+      "roundTrips": 7,
+      "rowsRead": 0,
+      "rowsWritten": 29,
+      "note": "1304 price rows backfilled"
+    },
+    {
+      "job": "calendar refresh (x1/day)",
+      "layout": "packed",
+      "statements": 5,
+      "roundTrips": 5,
+      "rowsRead": 35,
+      "rowsWritten": 20,
+      "note": "20 rows written"
+    },
+    {
+      "job": "T212 first full sync (1500 txns, chunks of 300, validate=reread-all)",
+      "layout": "packed",
+      "statements": 71,
+      "roundTrips": 26,
+      "rowsRead": 3030,
+      "rowsWritten": 1505,
+      "note": "5 invocations"
+    },
+    {
+      "job": "T212 first full sync (1500 txns, chunks of 300, validate=snapshot)",
+      "layout": "packed",
+      "statements": 66,
+      "roundTrips": 21,
+      "rowsRead": 30,
+      "rowsWritten": 1505,
+      "note": "5 invocations"
+    },
+    {
+      "job": "T212 incremental sync (0 new, validate=reread-all)",
+      "layout": "packed",
+      "statements": 3,
+      "roundTrips": 3,
+      "rowsRead": 1500,
+      "rowsWritten": 1
+    },
+    {
+      "job": "T212 incremental sync (3 new, validate=reread-all)",
+      "layout": "packed",
+      "statements": 5,
+      "roundTrips": 5,
+      "rowsRead": 1503,
+      "rowsWritten": 4
+    },
+    {
+      "job": "T212 incremental sync (3 new, validate=snapshot)",
+      "layout": "packed",
+      "statements": 4,
+      "roundTrips": 4,
+      "rowsRead": 3,
+      "rowsWritten": 4
+    },
+    {
+      "job": "CSV import of 1500 rows (COMPLETED, 71 KB)",
+      "layout": "packed",
+      "statements": 69,
+      "roundTrips": 24,
+      "rowsRead": 1534,
+      "rowsWritten": 1502,
+      "cpuMs": 63.225,
+      "note": "cpuMs = whole processor incl. csv-parse + zod row validation + oversell replay (Node, cold-ish single run)"
+    },
+    {
+      "job": "delete portfolio with 672 txns (force)",
+      "layout": "packed",
+      "statements": 20,
+      "roundTrips": 13,
+      "rowsRead": 672,
+      "rowsWritten": 673
+    }
+  ],
+  "projection": [
+    {
+      "layout": "row per day (DynamoDB parity)",
+      "apiCalls": 141,
+      "apiRowsRead": 1902932,
+      "apiRowsWritten": 5,
+      "apiStatements": 846,
+      "jobRowsRead": 1678,
+      "jobRowsWritten": 201,
+      "ledgerWrites": 147,
+      "totalRowsRead": 1904610,
+      "totalRowsWritten": 353,
+      "readsOfCap": "38.09%",
+      "writesOfCap": "0.35%",
+      "readHeadroomX": 2.6,
+      "writeHeadroomX": 283.3
+    },
+    {
+      "layout": "row per symbol-year (packed)",
+      "apiCalls": 141,
+      "apiRowsRead": 218672,
+      "apiRowsWritten": 5,
+      "apiStatements": 846,
+      "jobRowsRead": 1714,
+      "jobRowsWritten": 201,
+      "ledgerWrites": 147,
+      "totalRowsRead": 220386,
+      "totalRowsWritten": 353,
+      "readsOfCap": "4.41%",
+      "writesOfCap": "0.35%",
+      "readHeadroomX": 22.7,
+      "writeHeadroomX": 283.3
+    }
+  ],
+  "typicalDay": [
+    {
+      "id": "portfolios (list)",
+      "count": 12
+    },
+    {
+      "id": "portfolio",
+      "count": 12
+    },
+    {
+      "id": "holdings",
+      "count": 12
+    },
+    {
+      "id": "allocation (assetClass)",
+      "count": 12
+    },
+    {
+      "id": "history (1Y)",
+      "count": 12
+    },
+    {
+      "id": "analytics/summary",
+      "count": 12
+    },
+    {
+      "id": "analytics/growth (1Y)",
+      "count": 4
+    },
+    {
+      "id": "analytics/holdings-performance (ALL)",
+      "count": 4
+    },
+    {
+      "id": "analytics/metrics",
+      "count": 4
+    },
+    {
+      "id": "analytics/returns (year)",
+      "count": 4
+    },
+    {
+      "id": "analytics/risk",
+      "count": 4
+    },
+    {
+      "id": "analytics/benchmark (ALL)",
+      "count": 4
+    },
+    {
+      "id": "dividends",
+      "count": 4
+    },
+    {
+      "id": "dividends/overview",
+      "count": 4
+    },
+    {
+      "id": "analytics/dividend-growth",
+      "count": 4
+    },
+    {
+      "id": "calendar",
+      "count": 3
+    },
+    {
+      "id": "goals (GET)",
+      "count": 3
+    },
+    {
+      "id": "goals/calculate (POST)",
+      "count": 6
+    },
+    {
+      "id": "assets/AAPL",
+      "count": 4
+    },
+    {
+      "id": "assets/AAPL/history (ALL)",
+      "count": 4
+    },
+    {
+      "id": "assets/AAPL/positions",
+      "count": 4
+    },
+    {
+      "id": "rebalance (buy-only)",
+      "count": 2
+    },
+    {
+      "id": "transactions (list, all)",
+      "count": 3
+    },
+    {
+      "id": "POST /transactions (1 buy)",
+      "count": 2
+    },
+    {
+      "id": "PUT /goals",
+      "count": 1
+    },
+    {
+      "id": "POST /watchlist",
+      "count": 1
+    }
+  ]
+}

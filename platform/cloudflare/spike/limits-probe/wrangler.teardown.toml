@@ -1,0 +1,14 @@
+# Step 1 of the clean-up (see README): same Worker name, but no DO class, no bindings, no queue consumer, no cron.
+# Deploying it deletes the Durable Object namespace and its data (migration v2). Then run `npx wrangler delete`.
+name = "pt-limits-probe"
+main = "src/teardown.ts"
+compatibility_date = "2026-04-01"
+workers_dev = true
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Probe"]
+
+[[migrations]]
+tag = "v2"
+deleted_classes = ["Probe"]

@@ -1,0 +1,63 @@
+{
+  "node": "v20.19.0",
+  "day-plain": {
+    "decodeMs": {
+      "listTransactions (1,500 rows)": 2.16,
+      "getEod x30 symbols, 5y": 44.19,
+      "getFxHistory 5y": 0.72,
+      "getQuotes+getProfiles x30": 0.07,
+      "getDividendEvents x30": 0.43
+    },
+    "computeMs": {
+      "buildPositions (1,500 txns)": 0.2,
+      "calculatePortfolio": 0.63,
+      "buildValueHistory ALL (1,826 days)": 14.13,
+      "computeAnalyticsSummary": 18.9,
+      "computeReturns": 17.95,
+      "computeRisk": 17.99,
+      "computeBenchmark": 16.16,
+      "computeDividendGrowth": 1.49,
+      "computeGoal": 1.97,
+      "computeGrowth ALL": 19.91,
+      "computeMetrics": 18.97,
+      "computeHoldingsPerformance": 154.28,
+      "JSON.stringify(1,500 txns)": 0.68
+    },
+    "valueHistoryChunkMs": {
+      "7 days": 0.53,
+      "30 days": 0.7,
+      "90 days": 0.98,
+      "365 days": 2.66
+    }
+  },
+  "packed-d1": {
+    "decodeMs": {
+      "listTransactions (1,500 rows)": 2.16,
+      "getEod x30 symbols, 5y": 5.7,
+      "getFxHistory 5y": 0.4,
+      "getQuotes+getProfiles x30": 0.25,
+      "getDividendEvents x30": 0.58
+    },
+    "computeMs": {
+      "buildPositions (1,500 txns)": 0.41,
+      "calculatePortfolio": 0.62,
+      "buildValueHistory ALL (1,826 days)": 14.04,
+      "computeAnalyticsSummary": 17.84,
+      "computeReturns": 15.79,
+      "computeRisk": 18.61,
+      "computeBenchmark": 16.08,
+      "computeDividendGrowth": 1.6,
+      "computeGoal": 1.59,
+      "computeGrowth ALL": 18.63,
+      "computeMetrics": 19.84,
+      "computeHoldingsPerformance": 133.91,
+      "JSON.stringify(1,500 txns)": 0.67
+    },
+    "valueHistoryChunkMs": {
+      "7 days": 0.52,
+      "30 days": 0.57,
+      "90 days": 1.3,
+      "365 days": 2.44
+    }
+  }
+}

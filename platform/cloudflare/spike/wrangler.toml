@@ -1,0 +1,13 @@
+# Spike only: bundling dry-run and `wrangler dev --local`. Never deployed. Free-plan safe: no routes, no paid bindings.
+name = "portfolio-tracker-spike"
+main = "dist/worker.mjs"
+no_bundle = true
+# workerd 2026-04-26 (the local runtime shipped with the pinned wrangler) does not know later dates
+compatibility_date = "2026-04-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "portfolio-tracker-spike"
+database_id = "00000000-0000-0000-0000-000000000000"

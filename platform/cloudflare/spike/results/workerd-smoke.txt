@@ -1,0 +1,12 @@
+/health                                              status=200 queries=0 rows_read(ours)=0 rows_read(D1 meta)=0 bytes=15 wall=0.003109s
+/portfolios                                          status=200 queries=1 rows_read(ours)=3 rows_read(D1 meta)=4 bytes=440 wall=0.005110s
+/holdings                                            status=200 queries=7 rows_read(ours)=1570 rows_read(D1 meta)=1634 bytes=16500 wall=0.015372s
+/portfolio                                           status=200 queries=7 rows_read(ours)=1570 rows_read(D1 meta)=1634 bytes=403 wall=0.017151s
+/analytics/summary                                   status=200 queries=7 rows_read(ours)=2309 rows_read(D1 meta)=2493 bytes=4794 wall=0.047855s
+/analytics/returns?period=year                       status=200 queries=4 rows_read(ours)=1656 rows_read(D1 meta)=1720 bytes=1172 wall=0.032284s
+/history?range=ALL                                   status=200 queries=6 rows_read(ours)=1660 rows_read(D1 meta)=1724 bytes=24084 wall=0.039884s
+/calendar                                            status=200 queries=9 rows_read(ours)=2184 rows_read(D1 meta)=2462 bytes=22684 wall=0.120086s
+/dividends/overview                                  status=200 queries=6 rows_read(ours)=2159 rows_read(D1 meta)=2281 bytes=18519 wall=0.028648s
+/analytics/growth?range=1Y                           status=200 queries=7 rows_read(ours)=1696 rows_read(D1 meta)=1812 bytes=48773 wall=0.046776s
+/assets/AAPL/history?range=ALL&benchmarks=IWDA.AS    status=200 queries=9 rows_read(ours)=1558 rows_read(D1 meta)=1674 bytes=43711 wall=0.018426s
+/export/transactions                                 status=200 queries=1 rows_read(ours)=1500 rows_read(D1 meta)=1501 bytes=72635 wall=0.012267s

@@ -1331,3 +1331,338 @@ table, `aria-label`, and `title` as an extra):
 - the Benchmarks chips above the picker and the chart legends (symbol only; the name is in the picker, the chip's `title` and the data tables),
 - non-name text that is deliberately clamped: the transaction note column (`title` holds the whole note), account e-mail in the menu, and
   portfolio names in the scope `<select>` (`max-w-[14rem]`, native select clipping).
+
+## Cloudflare personal deployment: feasibility spike
+
+**Decision (owner).** One repository, two deployment targets of the *same features*: the AWS demo (stays deployable and
+tested in CI) and a **personal deployment on Cloudflare, strictly on the Free plan**. The owner will never pay: the design
+must always stay under the free caps, never need a paid feature or a payment method, and fail closed (reads only) instead of
+ever relying on exceeding a cap. The Python price service will be ported to TypeScript later. This section is the result of an
+**offline** spike (`platform/cloudflare/spike/`, throwaway, not part of the pnpm workspace, nothing deployed) plus a ready-to-run
+**limits probe** (`platform/cloudflare/spike/limits-probe/`) for the questions only a real free account can answer.
+
+**Result in one paragraph.** The AWS-shaped API does *not* fit a 10 ms Worker as is: on a heavy personal dataset (30 holdings,
+5 years, 1,500 transactions) **31 of 39 endpoints are RED** even with the best storage layout, because the server recomputes
+the daily value history from ~33,000 price rows on every call. Everything else fits comfortably (D1 reads 4 % of the daily
+cap, writes 0.4 %, queue operations 1.5 %). **Recommendation: HYBRID (option c)**: the Worker only stores and serves raw rows (cheap),
+the browser runs the shared, pure TypeScript engine (`packages/shared`, already shipped to the web app) behind an
+adapter-level *compute location* switch, with golden vectors proving identical results. A SQLite Durable Object that computes
+server-side (option b) replaces it **only if** the probe shows its CPU cap is at least 500 ms. Background jobs are chunked
+(<= 3 ms of CPU per invocation) and driven by Queues + a few Cron Triggers under a usage-ledger **budget guard**.
+
+### Verified free-plan limits
+
+Fetched with `curl -sL <url>/index.md` on **2026-10-18** (the owner's 2026-10-17 list was re-checked; differences marked).
+
+| Surface | Free-plan limit | Source |
+|---|---|---|
+| Workers requests | 100,000/day (then Error 1027, never a bill); static asset requests free and unlimited | [limits](https://developers.cloudflare.com/workers/platform/limits/), [static assets](https://developers.cloudflare.com/workers/static-assets/billing-and-limitations/) |
+| Workers CPU | **10 ms per invocation, HTTP and Cron** (I/O waiting excluded); over it: Error 1102 | [limits](https://developers.cloudflare.com/workers/platform/limits/#cpu-time) |
+| Workers memory / subrequests | 128 MB; **50 subrequests** per invocation (1,000 to Cloudflare services); 6 simultaneous connections | [limits](https://developers.cloudflare.com/workers/platform/limits/) |
+| Cron Triggers | 5 per account; wall time 15 min, CPU 10 ms | [limits](https://developers.cloudflare.com/workers/platform/limits/) |
+| Worker size | 64 MiB uncompressed (the Workflows page still says 3 MB: inconsistent docs; our bundle is 0.19 MB) | [limits](https://developers.cloudflare.com/workers/platform/limits/#worker-size) |
+| D1 | 5 M rows read/day, 100 k rows written/day, 5 GB per account, **500 MB per database, 10 databases** (new vs the brief); 50 queries per invocation, 100 bound parameters, 2 MB per row | [pricing](https://developers.cloudflare.com/d1/platform/pricing/), [limits](https://developers.cloudflare.com/d1/platform/limits/) |
+| Queues | 10,000 operations/day (a message = write + read + delete = 3; each retry +1 read), 24 h retention, 128 KB messages. **Consumer CPU: the Queues page says "30 s default, configurable", the Workers page says 10 ms on Free: ambiguous, probe** | [pricing](https://developers.cloudflare.com/queues/platform/pricing/), [limits](https://developers.cloudflare.com/queues/platform/limits/) |
+| Durable Objects | SQLite-backed only; 100,000 requests/day, 13,000 GB-s/day, 5 GB; SQL rows read/written 5 M / 100 k per day (same as D1); **CPU "30 s default" yet "Workers limits apply by plan": ambiguous, probe**; a failing alarm is retried up to 6 times | [limits](https://developers.cloudflare.com/durable-objects/platform/limits/), [pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/), [alarms](https://developers.cloudflare.com/durable-objects/api/alarms/) |
+| Workflows (optional) | 3,000 steps/day (billing active since 2026-08-10), **10 ms CPU per step**, 1 GB-month state, shares the 100 k requests, 100 concurrent instances | [limits](https://developers.cloudflare.com/workflows/reference/limits/), [pricing](https://developers.cloudflare.com/workflows/reference/pricing/) |
+| KV | 100 k reads, **1,000 writes/day** (too few for a ledger), 1 GB | [limits](https://developers.cloudflare.com/kv/platform/limits/) |
+| Workers Logs | 200,000 events/day, 3 days retention | [workers-logs](https://developers.cloudflare.com/workers/observability/logs/workers-logs/) |
+
+### Method, and honest sources of imprecision
+
+The real route handlers (`services/api`), the shared engine and the real seed run against two datasets: **baseline** (the
+demo seed: 4 holdings, ~2,900 price days) and **heavy** (30 holdings in USD/EUR/GBP + crypto, 5 years, 1,500 transactions,
+593 dividend events, 3 portfolios; deterministic, built with the seed's own generators). CPU is `process.cpuUsage()` (V8,
+user + system) on arm64 Node 20, 25 (heavy) / 60 (baseline) warm runs: median and p95, plus one *cold* call in a fresh process.
+*Estimated Worker CPU = 2 x p95.* Verdicts: **GREEN <= 3 ms, AMBER 3-8 ms, RED > 8 ms** (10 ms cap, headroom for the unknowns).
+`packed` = price rows stored one row per symbol-year (the recommended layout), with a D1-style result hand-over modelled; `day`
+= one row per day (DynamoDB parity). The harness lives in `src/bench/`; the bundle also ran in **local workerd** with a real D1
+binding (`results/workerd-smoke.txt`, `workerd-write-smoke.txt`: 200s, 201 on a write, `rows_written: 2`).
+
+What the numbers are **not**:
+
+1. **Node V8 on an Apple M-series core is a proxy for workerd on Cloudflare hardware.** The x2 factor is a judgement call, not a
+   constant (edge cores are plausibly 1.3-2x slower; offsetting, `cpuUsage` also counts V8's GC/JIT helper threads that the
+   per-isolate Workers clock may not). `wrangler dev --local` does not enforce `cpu_ms`, so only the probe can calibrate it.
+2. **p95 of 25 runs is essentially the maximum** and includes GC pauses; median-based verdicts are the optimistic bound
+   (below).
+3. **Cold calls** include first-run JIT. A personal app is mostly cold, so cold matters: even at demo size 30 of 39 cold
+   verdicts are RED (`health` is 0.4 ms cold, the small list endpoints 2-7 ms). Whether workerd's cold CPU resembles Node's is
+   unmeasured (optional real-handler deploy in the probe README); it is one more reason to keep the Worker's per-request work minimal.
+4. D1 result decoding is *modelled* (one JSON round trip per result set); the real binding's marshalling cost is unmeasured.
+   D1's own `meta.rows_read` was 4-13 % above our count in the smoke run: all D1 projections carry a x1.15 margin.
+5. Datasets are synthetic; real data is lumpier. Trading 212 payload costs use synthetic, smaller-than-real items (lower bound).
+6. Inside a Worker `Date.now()` is frozen: no in-Worker timing is possible, the platform's `cpuTime` (tail/Logs) is the only gauge.
+
+### CPU: heavy personal dataset vs demo-size baseline
+
+Packed layout + D1 decode, warm. Median / p95 in ms of Node CPU, then the estimated Worker CPU (2 x p95). Full tables for all 39
+endpoints and the day layout: `platform/cloudflare/spike/results/tables.md`.
+
+| Endpoint | Baseline med / p95 | est | | Heavy med / p95 | est | |
+|---|---|---|---|---|---|---|
+| health, settings, portfolios list | 0.0 / 0.2 | <= 0.5 | GREEN | 0.0 / 0.2 | <= 0.5 | GREEN |
+| assets/AAPL (single asset) | 0.0 / 0.7 | 1.5 | GREEN | 0.5 / 2.7 | 5.4 | AMBER |
+| export/transactions (csv) | 0.0 / 0.5 | 1.0 | GREEN | 3.2 / 3.9 | 7.7 | AMBER |
+| transactions (list, 1,500 rows) | 0.0 / 0.5 | 1.0 | GREEN | 3.0 / 6.3 | 13 | RED |
+| portfolio / holdings | 0.2-0.5 / 2.7-3.1 | 5-6 | AMBER | 4.3-4.8 / 11-23 | 22-47 | RED |
+| dividends/overview, goals (GET) | 0.4-0.9 / 2.2-2.8 | 4-6 | AMBER | 10-11 / 22-25 | 44-50 | RED |
+| history (ALL) | 2.8 / 8.6 | 17 | RED | 30 / 55 | 110 | RED |
+| analytics/summary | 1.9 / 6.2 | 12 | RED | 28 / 49 | 97 | RED |
+| analytics/returns, risk, metrics | 1.4-2.6 / 6.0-8.4 | 12-17 | RED | 25-28 / 35-60 | 70-119 | RED |
+| analytics/growth (ALL, 3 benchmarks) | 3.8 / 11 | 22 | RED | 37 / 61 | 123 | RED |
+| analytics/holdings-performance (ALL) | 4.5 / 9.4 | 19 | RED | **138 / 207** | **414** | RED |
+| calendar / calendar.ics | 0.7-1.3 / 2.5-4.9 | 5-10 | AMBER/RED | **108-119 / 182-187** | **363-374** | RED |
+
+**Verdict counts (39 endpoints, warm, 2 x p95):**
+
+| Dataset / layout | GREEN | AMBER | RED | Using 2 x median instead |
+|---|---|---|---|---|
+| Heavy, packed + D1 decode | 6 | 2 | **31** | 8 / 8 / 23 |
+| Heavy, row per day | 7 | 1 | 31 | 8 / 7 / 24 |
+| Baseline, packed + D1 decode | 13 | 14 | 12 | 30 / 8 / 1 |
+| Baseline, row per day | 14 | 10 | 15 | 26 / 7 / 6 |
+
+Reading: the packed layout does not rescue the heavy endpoints (it cuts the *decode*, not the *compute*); it matters for D1 reads
+(next sections). At demo size, a Worker computing the API is plausible only if the real runtime is faster than the x2 assumption.
+On the heavy dataset it is not, under any reading of the numbers.
+
+### Where the CPU goes (heavy, packed, median ms)
+
+| Part | ms | Note |
+|---|---|---|
+| Decode 30 symbols x 5 years of EOD prices | 5.7 (day layout: **44**) | the packed layout's whole benefit |
+| Decode 1,500 transactions / FX / quotes / events | 2.2 / 0.4 / 0.3 / 0.6 | |
+| `buildValueHistory` ALL (1,821 days x 30 positions x FX) | **14.1** | 69-88 % of summary, returns, risk, benchmark, growth, metrics |
+| What is left of those six after the history | 2.0-6.4 | `analytics/returns` 2.0, `benchmark` 2.8, `risk` 3.8, `growth` 4.5, `summary` 4.7, `metrics` 6.4 |
+| `computeHoldingsPerformance` | **126** beyond the history | one replay per holding |
+| Value history in resumable chunks of 7 / 30 / 90 / 365 days | 0.5 / 0.6 / 1.3 / 2.4 | sizing of a background materialisation |
+| Parse CSV rows (zod-validated) 25 / 100 / 500 / 1,500 | 1.6 / 1.7 / 9.7 / **31** | a 1,500-row import cannot be one request |
+| One Trading 212 orders page (50 items) parse + validate | 1.7 (p95 8.0) | mapping adds the same order of magnitude |
+| Twelve Data 5-year series (1,300 bars) parse + pack | 0.5 | EODHD dividends 0.01; Alpha Vantage earnings CSV (316 KB) filter 0.25 |
+| Memory: peak heap allocated by one call | 20 MB max | 128 MB cap |
+
+The compute is a pure function of the raw rows (`compute*(data: AnalyticsData)` in `packages/shared`), which is what makes the
+hybrid option possible without touching the engine.
+
+### D1 daily projection (heavy dataset, a "typical" personal day of 141 API calls plus the daily jobs)
+
+| Layout | Rows read | % of 5 M | Rows written | % of 100 k | Headroom (read / write) |
+|---|---|---|---|---|---|
+| Row per day (DynamoDB parity) | 1,904,610 | **38 %** | 353 | 0.35 % | 2.6x / 283x |
+| Row per symbol-year (packed) | 220,386 | **4.4 %** | 353 | 0.35 % | **22.7x** / 283x |
+
+A single `history?range=ALL` costs 42,211 rows read in the day layout and 1,660 packed, so **packed price rows are mandatory**
+(the day layout would reach the daily cap after ~118 full-history calls). Query plans were checked with `EXPLAIN QUERY PLAN`:
+all 18 statements use the primary key (a `json_extract` filter would scan 44,312 rows, kept as a negative control). Storage: 1.8 MB
+packed vs 5.5 MB per day for 5 years x 30 symbols (cap 500 MB per database). Per job: `T212 first sync` (1,500 txns) 1,505 rows
+written; `CSV import` 1,502; enrichment of one new symbol 29 (day layout 1,327, 58 statements: over the 50-per-invocation cap);
+daily EOD refresh 72; quote refresh 35 each; calendar 20; deleting a 672-transaction portfolio 673.
+
+### Worker bundle and compatibility
+
+The naive esbuild bundle of the API handlers is 1.28 MB (251 KB gzip) and pulls the AWS SDK and the Powertools logger, 14 `node:*`
+imports (`node:crypto`, `node:http`, `node:fs`, ...). The **Workers-ready bundle** (items repository on D1 + the real handlers +
+shared engine, AWS SDK/logger/broker-sync replaced by three small shims) is **187 KB minified, 55.6 KB gzip, 48.8 KB brotli**,
+no `node:` imports, no `eval`/`new Function`, no `require`, one `Buffer` use (covered by `nodejs_compat`). Breakdown:
+`packages/shared` 84 KB, zod 60 KB, `services/api` 28 KB, adapters 15 KB. Findings: (1) the AWS-specific code is confined to the
+repository/event/signer adapters, so a D1 adapter is a drop-in; (2) the engine and zod are ~77 % of the bundle: a lean raw-row
+Worker (no zod, no engine) cuts bundle and cold-start work; (3) D1 allows 100 bound parameters per statement: multi-row upserts
+use 33 rows of 3 columns, deletes 50.
+
+### The key architecture question: where do the heavy analytics run?
+
+| | (a) Worker + D1, heavy endpoints made cheap | (b) SQLite Durable Object serves the API | (c) **HYBRID**: Worker serves raw rows, browser computes |
+|---|---|---|---|
+| Idea | Background jobs write materialised daily value series / cached responses; endpoints read them | One DO ("compute host", data stays in packed D1) runs the existing handlers | Worker = cheap reads; `packages/shared` engine runs in the browser behind a switch |
+| Free-plan risk | High: needs chunking to <= 3 ms, every engine path rewritten as resumable pieces | **Unknown until probed** (DO CPU "30 s" vs "10 ms") | None: no server CPU beyond I/O |
+| Engine changes | Large (incremental/resumable variants, invalidation graph) | None | None (+ a memoised context, optional) |
+| Parity risk | High: two code paths | None (same code) | Low: same code, different JS engine (see parity) |
+| Extra payload / client CPU | none | none | measured below |
+| Measured vs unknown | Quantified below from the breakdown | needs the probe | measured offline |
+
+**(a) quantified.** The value-history replay is 14.1 ms (69-88 % of six endpoints). Materialising the portfolio series (1,821 days,
+35 KB JSON, 8 KB brotli, **0.3 ms to decode**) leaves 2.0-6.4 ms of maths per endpoint: 2.3-6.7 ms median, i.e. an estimated
+4.6-13 ms: `returns` and `benchmark` become AMBER, `summary`, `risk`, `growth` and `metrics` stay RED. Only caching the *final
+responses* makes reads GREEN (one row, ~0.3 ms), and every daily price refresh or edited transaction invalidates them, so recompute
+has to be chunked too (history 7 days = 0.5 ms, 365 days = 2.4 ms median). `holdings-performance` (126 ms beyond the history)
+and `calendar` (108 ms) cannot be derived from the series at all: they need one chunk per holding / month, i.e. engine rewrites.
+Achievable, but it is the most expensive option and keeps a second, incremental implementation of the engine alive. Not recommended
+as the main path; the materialised series remains a cheap *optimisation* for (c) (see below).
+
+**(b)** is attractive precisely because it changes nothing in the engine: a Durable Object running the same handlers would also
+make jobs trivial (alarms without chunking). Whether it works on the Free plan hinges on one number the probe measures (`/do-burn`).
+If it works, the DO is a stateless compute host in front of D1 (D1 stays the single store, so the AWS repository parity and the budget
+guard are unchanged) and duration stays far below 13,000 GB-s/day (a 300 ms request is ~0.04 GB-s).
+
+**(c) quantified (heavy dataset, one portfolio view including one benchmark; `results/hybrid-node20.json`).**
+
+| Item | Value |
+|---|---|
+| Raw rows | 33,218 EOD rows, 1,084 FX days, 1,500 transactions, 593 dividend events |
+| JSON as the API serves it today | 2.84 MB, 259 KB gzip, 153 KB brotli |
+| Compact wire format (per-symbol arrays, closes at 4 decimals) | **1.15 MB, 153 KB gzip, 105 KB brotli** |
+| Worker CPU to serve it (ready-made JSON text concatenated, no parse) | **0.3 ms median** (p95 3.5 with GC) |
+| Browser: parse + decode compact payload | 7.6 ms (Node) |
+| Browser: the whole analytics page (7 computations incl. holdings-performance) | 335 ms (Node), about 250 ms with the value history built once; an assumed 3-5x slower mid-range phone gives roughly 0.75-1.7 s, to be run in a Web Worker |
+| Repeat visits | payload cached (IndexedDB) and refreshed with day deltas; the materialised series (8 KB brotli) can replace the prices for the common charts |
+
+So (c) costs about 105 KB of brotli on first load and a fraction of a second of client CPU, in exchange for **zero** server compute
+risk. Two things cannot move to the browser: the `calendar.ics` subscription feed (an external calendar app fetches it by URL; it
+must be a pre-rendered row refreshed by the daily job) and server-side jobs (chunked, below).
+
+**Recommendation and decision tree.**
+
+1. Build for (c): packed D1 layout; lean raw-row Worker endpoints (`/data/...` returning stored JSON text); a
+   `ComputeLocation = 'server' | 'browser'` seam in the web API clients (`web/src/api/*Client.ts`): each typed function
+   (`getAnalyticsSummary`, `getReturns`, ...) is served by `serverAdapter` (the existing `fetch`) or `browserAdapter` (load raw data
+   once, memoise the context, call `compute*`). AWS builds keep `server`; the Cloudflare build sets `VITE_COMPUTE_LOCATION=browser`,
+   with an optional per-route override and an automatic fall-back to the browser on a 503.
+2. Run the probe (10 minutes, below). Then:
+
+```
+DO request CPU cap (real ms, from /do-burn + tail)
+ |-- >= 500 ms  -> (b): route the compute-heavy endpoints to a Durable Object compute host (worst measured estimate 414 ms);
+ |                  keep the browser adapter as the fall-back; jobs may use DO alarms with big chunks.
+ |-- 100-500 ms -> mixed: (b) for routes whose estimate (2 x p95) is <= cap / 1.5, (c) for the rest (holdings-performance,
+ |                  calendar, growth ALL, risk); per-route switch.
+ `-- < 100 ms (about the 10 ms of Workers) -> (c) everywhere (the default plan); materialise only the ICS feed.
+Worker/queue/cron real CPU cap about 10 ms (expected)      -> chunk every job to <= 3 ms median (already the design).
+db.batch() of N statements counts as N subrequests          -> at most ~45 statements per invocation, else 1 per batch.
+Browser CPU for the analytics page > ~2 s on the owner's phone -> add the materialised value series (option a, one table).
+```
+
+**Guaranteeing identical results (golden vectors).** A committed `golden/` suite: inputs (`AnalyticsData` wire JSON for the baseline
+and a reduced heavy dataset) and expected outputs per case (`{route, params}`), *generated once from the existing AWS route handlers*
+(the reference). The same cases run against: (1) the handlers on the in-memory repository (CI, unchanged); (2) the browser adapter in
+vitest/jsdom and in **real browsers** (Playwright chromium, firefox, webkit: `Math.exp/pow/log` may differ in the last bit between
+engines, so numbers compare with a 1e-9 relative tolerance and everything else exactly); (3) the Cloudflare Worker in local workerd:
+the raw-row endpoints must return exactly what `loadAnalyticsData` builds from the same rows. A change to the engine or to a response
+type must update the golden files on purpose, so a divergence between the two targets cannot merge silently.
+
+### Job design under the free caps
+
+Every job is **chunked** (<= 3 ms median CPU, <= 20 subrequests per invocation), **resumable** (cursor in a `job_runs` table, advanced
+in the same D1 batch as the data) and **idempotent** (deterministic ids: `t212-{orderId}-{fillId}`, price rows keyed by
+symbol-year, import chunks by `importId#n`; queue delivery is at-least-once, so a consumer first checks `job_runs`).
+
+| Job | Driver and why | Chunk (one invocation) | Cost |
+|---|---|---|---|
+| **T212 first full sync** (~8 min: orders/dividends/transactions 20 req/min, positions 1/s, instruments 1 per 50 s) | **Queue**, self-chaining message with `delaySeconds` ~3 (`max_concurrency = 1`), started by `POST /brokers/trading212/sync`. A page parse+validate is 1.7 ms median and mapping + write encoding are the same order (~4 ms estimated), so **one 50-item page per message**; a cron cannot go faster than 1/min and a DO alarm depends on the probe | 1 page: 1 T212 call + 1 D1 batch (cursor + <= 50 txns) | ~55-80 messages = **~240 queue ops**, 1,505 rows written, validation on a position snapshot (30 rows) with a compensating delete on failure |
+| T212 incremental | **Cron** (every 6 h) enqueues 1 message; stops at the first page older than watermark - 7 days (usually 1-3 pages) | as above | ~4 messages/day |
+| Price refresh (Twelve Data 800/day) | **Cron** 4x/weekday (07/11/15/19 UTC) quotes + 22:30 EOD+FX: the cron only enqueues; **Queue** messages of 8 symbols, spaced 60 s (8 requests/min) | 8 symbols: 1 provider call + 1 batch | 20 + 5 messages/day, ~140 provider credits (17.5 %) |
+| Enrichment of a new symbol (5-year backfill) | **Queue**, one message per symbol, triggered by sync/import/new transaction | 1 call (parse+pack 0.5 ms) + 1 batch of 29 packed rows | 3 ops, 29 rows written |
+| Calendar refresh | **Cron** 03:00 UTC enqueues 1-3 messages: Alpha Vantage earnings (1 call/day of 25), EODHD dividends rotating through <= 12 symbols/day (cap 20) | 1 call each | ~9 ops |
+| **CSV import, 1,500 rows** | **Browser-driven**: the browser parses the file and POSTs **50-row chunks** (30 requests, `importId#n`); a whole-file parse is 31 ms median | 50 rows: parse+zod ~1 ms median (p95 ~6) + oversell replay + 1 batch of 50 | 30 requests, 1,502 rows written, no queue |
+| Goals save | Plain `PUT /goals` (one row upsert, ~1 ms); projections (`goals/calculate`) run in the browser | 1 | negligible |
+| Value series / ICS feed (optional) | **Queue** chunks of 180 days (<= 2.4 ms), rebuilt after price refresh or transaction edit | 1 chunk | ~15 messages per full rebuild |
+
+*Why these drivers.* **Cron** only schedules (5 allowed, 4 used: sync 6 h, quotes, EOD, daily 03:00; one spare). **Queues** carry multi-step work:
+3 operations per message against 10,000/day, a typical day ~50 messages = **~150 ops (1.5 %)**, the worst day (first sync + 30
+enrichments + retries x3) ~1,200 (12 %). `max_retries = 2` with backoff, **no dead-letter queue** (a DLQ write costs operations; failures are
+stored in `job_runs` and shown in the app). **DO alarms** are not used unless option (b) wins: they retry up to 6 times on a thrown error, which
+the guard would have to count. **Workflows** (3,000 steps/day, 10 ms CPU *per step*, built-in sleep/resume) would suit the first sync (~110 steps,
+3.7 %) and is a valid alternative to the self-chaining queue; it is not in the probe yet (to be added if the queue consumer cap turns out to be 10 ms
+and the delay semantics are unsuitable). **Provider limits:** Twelve Data 800/day, EODHD 20/day (the guard caps itself at 12), Alpha Vantage 25/day:
+a provider answering 429/limit stops its jobs until the next UTC day (no retry loop).
+
+### Free-tier budget guard (hard requirement)
+
+Principle: **the app never relies on exceeding a cap; when it nears one it does less, and in the end only reads.** Cloudflare itself
+only fails calls over a cap (Error 1027/1102, D1 "daily limit exceeded"), it never bills on Free, but a failure in the middle of a
+chunk is what the guard exists to avoid.
+
+* **Usage ledger.** D1 table `usage(day TEXT, metric TEXT, count INTEGER, PRIMARY KEY(day, metric))`, one upsert statement
+  (`ON CONFLICT DO UPDATE SET count = count + excluded.count`) appended to the **same batch** as the invocation's own work, so it costs
+  no extra round trip. Counted: D1 rows read and written (from each statement's `meta.rows_read` / `rows_written`, authoritative),
+  authenticated requests, queue operations (+1 per send, +1 per delivery attempt via `message.attempts`, +1 per ack), provider calls,
+  subrequests per invocation. **Its own write cost is counted** (the ledger's rows go into `d1_rows_written`; with
+  coalescing to one flush per isolate per minute for pure reads it is ~150-1,000 rows/day = 0.15-1 %). Unauthenticated hits never write
+  (the session check is stateless, so a flood cannot burn the write cap). The ledger is an *estimate* (isolates can be evicted between
+  flushes): the thresholds carry the x1.15 margin and Cloudflare's dashboard stays the authority.
+* **Thresholds, per metric, worst one wins:**
+
+| Used | Mode | What stops |
+|---|---|---|
+| < 60 % | normal | nothing |
+| >= 60 % | **saving** | non-essential work: enrichment backfills, calendar/dividend rotation, intraday quote refresh (EOD only), value-series rebuilds, provider polls beyond EOD |
+| >= 80 % | **reads only** | every write and every job (queue consumers ack and drop messages, crons exit at once); authenticated reads continue |
+| >= 95 % | **shell only** | API answers `503 FREE_TIER_PROTECTED` (except `/usage`), the static app still loads; resets at 00:00 UTC |
+
+* **No unbounded retries:** queue `max_retries = 2`, `job_runs.attempts <= 3` then `failed` until the next day, provider errors stop the
+  provider for the day, no alarm loops, no client-side auto-retry beyond one fall-back. **Idempotency keys** everywhere (above), so a
+  redelivered message or a re-sent import chunk writes the same rows. Per-invocation guards: <= 40 subrequests (cap 50), fixed chunk sizes.
+* **In-app "Free-tier usage" indicator:** `GET /usage` returns today's `{metric, used, cap, pct}` rows and the mode; Settings shows a table,
+  the header a small chip (green < 60 %, amber, red) and a banner explains `saving` / `reads only`, with a link to the Cloudflare dashboard.
+* **Never paid.** The Worker's config is validated in CI by an allow-list test: only `assets`, `d1_databases`, `queues`, `vars`,
+  `triggers.crons` (<= 5), `observability`; it fails on `[limits]`, `usage_model`, R2, Hyperdrive, Vectorize, Containers, routes/custom
+  domains, KV, extra Workers. Free plan only, **never click Upgrade, no payment method on the account, `*.workers.dev` only.**
+
+| Cap | Free limit | Typical day (projected) | Worst day | Headroom (typical) |
+|---|---|---|---|---|
+| Worker requests | 100,000/day | ~300 (141 API + jobs + data fetches; static assets not counted) | ~1,000 (first sync + import) | ~300x |
+| Worker CPU per invocation | 10 ms | <= 3 ms median by chunking (est. 6) | same | 1.7x by design, measured only by the probe |
+| Subrequests per invocation | 50 | <= 20 (1 provider call + <= 14 D1 statements measured) | 40 guard | 2.5x |
+| D1 rows read | 5 M/day | 220 k (253 k with margin) | 5 full-history loads extra: ~0.5 M | **20x** (day layout would be 2.6x) |
+| D1 rows written | 100 k/day | 353 | ~3,500 (sync 1,505 + import 1,502 + 5 enrichments) | **283x** |
+| D1 storage | 500 MB per DB, 5 GB account | 1.8 MB for 5 years (+0.4 MB/year) | - | ~270x |
+| D1 row size / bound params | 2 MB / 100 | ~10 KB packed row / 99 (33 rows x 3 columns) | - | 200x / at the limit by design |
+| Queue operations | 10,000/day | ~150 | ~1,200 incl. retries | 66x |
+| Cron Triggers | 5 | 4 | - | 1 spare |
+| Memory | 128 MB | 20 MB peak (measured) | - | 6x |
+| Worker size | 64 MiB | 0.19 MB | - | >> |
+| Twelve Data / EODHD / Alpha Vantage | 800 / 20 / 25 per day | ~140 / <= 12 (guard) / 1-2 | ~300 / 12 / 5 | 5.7x / 1.7x / 12x |
+| Workflows steps (if used) | 3,000/day | 0 | ~110 | 27x |
+| Workers Logs events | 200,000/day | ~300 | - | ~660x |
+| DO (only if option b) | 100 k requests, 13,000 GB-s, 5 M/100 k rows | ~150 requests, < 10 GB-s | - | >> |
+
+**Other paid-or-card products, checked.** *Zero Trust / Access*: onboarding asks for payment details even on its Free plan ([setup](https://developers.cloudflare.com/cloudflare-one/setup/),
+step 3) and is therefore excluded. *Containers*: priced under the $5 Workers Paid plan: excluded. *R2*: separate product with its own billing
+(not verified here whether a card is needed to enable it): not used. *Hyperdrive* (external Postgres/MySQL only), *Vectorize*, *KV* (1,000 writes/day):
+not needed. Static assets, D1, Queues, Cron and Workers Logs are the only features used; all are in the Free plan.
+
+### Sign-in for the personal deployment
+
+**Cloudflare Access is out** (card at onboarding). **Recommended: "Sign in with GitHub" (OAuth App) restricted to the owner's numeric GitHub user id.**
+Creating an OAuth App needs no card. The Worker implements `AUTH_MODE=github` next to the existing `cognito` and `demo` modes of `resolveUserId`:
+`/auth/login` (random `state` cookie, redirect), `/auth/callback` (two subrequests: code -> token at github.com, `GET api.github.com/user`; no
+scopes needed), compare `user.id` (immutable, unlike the login name) with the `OWNER_GITHUB_ID` variable, then set an `HttpOnly; Secure;
+SameSite=Lax` cookie carrying `{sub, exp}` signed with HMAC-SHA256 (Web Crypto, ~0.1 ms) using `SESSION_SECRET`. Sessions are stateless: **no D1 write
+per request**, which matters for the budget. `GITHUB_CLIENT_SECRET` and `SESSION_SECRET` are set with `wrangler secret put` (free; the repo stays secret-free); the
+resolved `ctx.userId` is a constant for the single owner, so handlers stay unchanged. Mutating requests also require a same-origin check.
+Rejected: password + TOTP in the Worker (password hashing such as PBKDF2 would eat the 10 ms CPU), first-come "claim" screens. Risk: GitHub
+account takeover or outage; enable GitHub 2FA/passkey. Evaluated on paper only: **unverified** until built (OAuth flow CPU, cookie behaviour on `workers.dev`).
+
+### Risks
+
+| Risk | Mitigation |
+|---|---|
+| Real workerd is slower than 2x Node, or cold CPU is as bad as Node's | Probe + optional real-handler deploy; the hybrid keeps server work to I/O |
+| DO / queue-consumer CPU caps are 10 ms (docs ambiguous) | Decision tree; jobs chunked to 3 ms from the start |
+| Browser compute is slow on an old phone | Web Worker, memoised context, materialised series fall-back |
+| Float differences between JS engines | Golden vectors with 1e-9 tolerance in three browsers |
+| Packed rows are read-modify-write | One writer (`max_concurrency = 1`, no concurrent crons on the same symbol-year) + idempotent re-derivation |
+| Budget ledger is approximate | 1.15 margin, 60/80/95 thresholds, dashboard as authority |
+| Free-plan terms change | Re-fetch the limits before each phase; the allow-list test and the ledger are the safety net |
+| `calendar.ics` needs the server | Pre-rendered row refreshed by the daily job (or (b)) |
+| Python price service port (TD/EODHD/AV clients) | Plain HTTPS + JSON; parse costs measured <= 0.5 ms per payload |
+
+### What must be measured on a real account (the probe, ~10 minutes)
+
+`platform/cloudflare/spike/limits-probe/` (Worker + SQLite DO + Queue consumer + Cron + D1; free plan only, no secrets, no personal data, no paid binding)
+settles: (1) the real CPU cap of a Worker request, a **Durable Object request**, a **DO alarm**, a **queue consumer** and a **Cron** run
+(`find-cap.sh` doubles then bisects a fixed amount of work, records Error 1102, `wrangler tail` converts nominal ms to real CPU ms); (2) whether D1
+statements count as subrequests and whether one `db.batch()` counts as 1 or N; (3) the real `rows_written` of multi-row inserts; (4) the 50-subrequest cap.
+Unmeasured and *not* covered by the probe: workerd cold CPU of the real handlers (optional deploy in the probe README), the D1 binding's result
+marshalling, Worker response compression (brotli) for the raw payload, browser CPU on the owner's phone, the GitHub OAuth flow, `delaySeconds` /
+`max_concurrency` behaviour of Queues on Free, Workflows per-step CPU.
+
+```bash
+cd platform/cloudflare/spike/limits-probe && npm install && npx wrangler queues create pt-limits-probe && npx wrangler d1 create pt-limits-probe
+npx wrangler deploy                               # first deploy: choose a neutral workers.dev subdomain (it is public in every URL)
+BASE=https://pt-limits-probe.<subdomain>.workers.dev ./scripts/run-all.sh     # results.csv + summary.txt
+npx wrangler deploy -c wrangler.teardown.toml && npx wrangler delete --name pt-limits-probe && npx wrangler queues delete pt-limits-probe && npx wrangler d1 delete pt-limits-probe
+```
+
+Reproduction of every number above: `platform/cloudflare/spike/README.md` (`src/bench/*`, results in `results/`; `hybrid.ts` produced the
+payload and materialisation figures).

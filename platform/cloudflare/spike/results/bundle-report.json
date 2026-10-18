@@ -1,0 +1,149 @@
+{
+  "generatedAt": "2026-10-17T13:33:53.510Z",
+  "esbuild": "0.25.12",
+  "naive": {
+    "ok": true,
+    "errors": [],
+    "externalNodeModules": [
+      "node:async_hooks",
+      "node:child_process",
+      "node:console",
+      "node:crypto",
+      "node:fs",
+      "node:fs/promises",
+      "node:http",
+      "node:https",
+      "node:os",
+      "node:path",
+      "node:stream",
+      "node:util"
+    ],
+    "importers": {
+      "node:async_hooks": [
+        "@aws+lambda-invoke-store@0.3.0/node_modules/@aws/lambda-invoke-store/dist-es/invoke-store.js"
+      ],
+      "node:console": [
+        "@aws-lambda-powertools+logger@2.36.0/node_modules/@aws-lambda-powertools/logger/lib/esm/Logger.js"
+      ],
+      "node:crypto": [
+        "@aws-lambda-powertools+logger@2.36.0/node_modules/@aws-lambda-powertools/logger/lib/esm/Logger.js",
+        "@aws-sdk+credential-provider-login@3.972.81/node_modules/@aws-sdk/credential-provider-login/dist-es/LoginCredentialsFetcher.js"
+      ],
+      "node:http": [
+        "@smithy+credential-provider-imds@4.5.2/node_modules/@smithy/credential-provider-imds/dist-es/remoteProvider/node-http.js",
+        "@smithy+node-http-handler@4.12.1/node_modules/@smithy/node-http-handler/dist-es/node-http-handler.js"
+      ],
+      "node:https": [
+        "@smithy+node-http-handler@4.12.1/node_modules/@smithy/node-http-handler/dist-es/node-https.js"
+      ],
+      "node:stream": [
+        "@smithy+node-http-handler@4.12.1/node_modules/@smithy/node-http-handler/dist-es/write-request-body.js"
+      ],
+      "node:http2": [
+        "@smithy+node-http-handler@4.12.1/node_modules/@smithy/node-http-handler/dist-es/node-http2.js",
+        "@smithy+node-http-handler@4.12.1/node_modules/@smithy/node-http-handler/dist-es/node-http2-connection-manager.js"
+      ],
+      "node:fs/promises": [
+        "@aws-sdk+credential-provider-http@3.972.76/node_modules/@aws-sdk/credential-provider-http/dist-es/fromHttp/fromHttp.js"
+      ],
+      "node:fs": [
+        "@aws-sdk+token-providers@3.1150.0/node_modules/@aws-sdk/token-providers/dist-es/writeSSOTokenToFile.js",
+        "@aws-sdk+credential-provider-login@3.972.81/node_modules/@aws-sdk/credential-provider-login/dist-es/LoginCredentialsFetcher.js",
+        "@aws-sdk+credential-provider-web-identity@3.972.80/node_modules/@aws-sdk/credential-provider-web-identity/dist-es/fromTokenFile.js"
+      ],
+      "node:os": [
+        "@aws-sdk+credential-provider-login@3.972.81/node_modules/@aws-sdk/credential-provider-login/dist-es/LoginCredentialsFetcher.js"
+      ],
+      "node:path": [
+        "@aws-sdk+credential-provider-login@3.972.81/node_modules/@aws-sdk/credential-provider-login/dist-es/LoginCredentialsFetcher.js"
+      ],
+      "node:child_process": [
+        "@aws-sdk+credential-provider-process@3.972.74/node_modules/@aws-sdk/credential-provider-process/dist-es/resolveProcessCredentials.js"
+      ],
+      "node:util": [
+        "@aws-sdk+credential-provider-process@3.972.74/node_modules/@aws-sdk/credential-provider-process/dist-es/resolveProcessCredentials.js"
+      ]
+    },
+    "size": {
+      "bytes": 1279057,
+      "gzip": 250559,
+      "brotli": 192984
+    },
+    "scan": {
+      "new Function(": 0,
+      "eval(": 0,
+      "require(": 3,
+      "process.": 46,
+      "Buffer": 27,
+      "node: imports": 14,
+      "__dirname": 0
+    },
+    "breakdownBytes": {
+      "@smithy/core": 267606,
+      "@portfolio/shared (src)": 158903,
+      "@aws-sdk/nested-clients": 138696,
+      "zod": 120888,
+      "@aws-sdk/core": 118214,
+      "@aws-lambda-powertools/logger": 57874,
+      "@aws-sdk/client-dynamodb": 56549,
+      "services/api (src)": 49826,
+      "spike adapters (items-repository, d1-store, entry, shims)": 26236,
+      "@smithy/signature-v4": 25035,
+      "@smithy/credential-provider-imds": 19809,
+      "@smithy/node-http-handler": 19076,
+      "@aws-sdk/credential-provider-ini": 14921,
+      "@aws-sdk/credential-provider-login": 13065,
+      "@aws-lambda-powertools/commons": 12314,
+      "mnemonist": 11307,
+      "@aws-sdk/credential-provider-sso": 9574,
+      "@aws-sdk/util-dynamodb": 9319,
+      "@aws-sdk/credential-provider-http": 8317,
+      "@aws-sdk/signature-v4-multi-region": 8222,
+      "@aws-sdk/lib-dynamodb": 8053,
+      "@aws-sdk/token-providers": 7512,
+      "@aws-sdk/xml-builder": 7399,
+      "@aws-sdk/credential-provider-node": 6243,
+      "@aws-sdk/dynamodb-codec": 4812
+    }
+  },
+  "workersReady": {
+    "ok": true,
+    "errors": [],
+    "externalNodeModules": [],
+    "sizeUnminified": {
+      "bytes": 356570,
+      "gzip": 77659,
+      "brotli": 64367
+    },
+    "sizeMinified": {
+      "bytes": 186989,
+      "gzip": 55599,
+      "brotli": 48760
+    },
+    "scan": {
+      "new Function(": 0,
+      "eval(": 0,
+      "require(": 0,
+      "process.": 0,
+      "Buffer": 1,
+      "node: imports": 0,
+      "__dirname": 0
+    },
+    "breakdownBytesMinified": {
+      "@portfolio/shared (src)": 83590,
+      "zod": 59661,
+      "services/api (src)": 28219,
+      "spike adapters (items-repository, d1-store, entry, shims)": 15403
+    }
+  },
+  "sharedEngineOnly": {
+    "bytes": 165475,
+    "gzip": 52252,
+    "brotli": 45787
+  },
+  "zodOnly": {
+    "bytes": 59576,
+    "gzip": 14173,
+    "brotli": 12630
+  }
+}

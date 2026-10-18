@@ -1,0 +1,43 @@
+{
+  "node": "v20.19.0",
+  "parse": {
+    "25 rows (1 KB)": {
+      "median": 1.56,
+      "p95": 6.11
+    },
+    "50 rows (2 KB)": {
+      "median": 0.88,
+      "p95": 5.66
+    },
+    "100 rows (5 KB)": {
+      "median": 1.71,
+      "p95": 11.62
+    },
+    "200 rows (9 KB)": {
+      "median": 3.21,
+      "p95": 13.73
+    },
+    "500 rows (23 KB)": {
+      "median": 9.7,
+      "p95": 39.66
+    },
+    "1500 rows (71 KB)": {
+      "median": 31.04,
+      "p95": 69.96
+    }
+  },
+  "positions": {
+    "buildPositions(100 txns)": {
+      "median": 0.03,
+      "p95": 0.35
+    },
+    "buildPositions(500 txns)": {
+      "median": 0.35,
+      "p95": 1.96
+    },
+    "buildPositions(1500 txns)": {
+      "median": 0.16,
+      "p95": 4.72
+    }
+  }
+}
