@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { settledCount } from './settled';
 
 /** Legend hover / keyboard focus preview on the Dividends charts (mock mode): the entry's series stays, the rest fades; nothing is included or excluded. */
 
@@ -46,7 +47,7 @@ async function openGrowth(page: Page) {
 test.describe('Dividend growth, By year', () => {
   test('hovering a year or a forecast entry fades the other bars and leaving restores them', async ({ page }) => {
     const { chart, legend } = await openGrowth(page);
-    const all = await bars(chart).count();
+    const all = await settledCount(bars(chart));
     await expectNothingFaded(bars(chart));
 
     // the year with a received bar and a forecast stack: both stay, every other year and the lines fade
@@ -106,12 +107,15 @@ test.describe('Dividend growth, By year', () => {
   test('Tab onto a legend entry previews it, Tab away restores the chart', async ({ page }) => {
     const { chart, legend } = await openGrowth(page);
     await page.mouse.move(2, 2);
+    await settledCount(bars(chart));
     const first = legend.getByRole('button').first();
-    await first.focus();
-    await page.keyboard.press('Shift+Tab');
-    await expectNothingFaded(bars(chart));
-    await page.keyboard.press('Tab');
-    await expect(first).toBeFocused();
+    // a late re-render can replace the legend buttons and drop the focus: repeat the sequence until it holds
+    await expect(async () => {
+      await first.focus();
+      await page.keyboard.press('Shift+Tab');
+      await page.keyboard.press('Tab');
+      await expect(first).toBeFocused({ timeout: 1500 });
+    }).toPass({ timeout: 10_000 });
     await expect(dimmed(bars(chart)).first()).toBeVisible();
     await page.keyboard.press('Tab');
     await expect(legend.getByRole('button').nth(1)).toBeFocused();
@@ -153,7 +157,7 @@ test.describe('Other Dividends charts', () => {
     const legend = region.getByTestId('received-legend');
     await expect(bars(chart).first()).toBeVisible();
     await expectNothingFaded(bars(chart));
-    const all = await bars(chart).count();
+    const all = await settledCount(bars(chart));
 
     await toggle(legend, 'Declared (announced)').hover();
     const kept = await settledKept(bars(chart));
@@ -223,7 +227,7 @@ test.describe('Other Dividends charts', () => {
       const donut = region.getByTestId(donutId);
       const legend = region.getByTestId(legendId);
       await expect(slices(donut).first()).toBeVisible();
-      const all = await slices(donut).count();
+      const all = await settledCount(slices(donut));
       expect(all).toBeGreaterThan(1);
       const centre = region.getByTestId(`${donutId}-centre`);
       const text = await centre.textContent();

@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { settledCount } from './settled';
 
 /** Include / exclude of series and rows through the legend and the data table of the Growth tab and the asset detail charts (mock mode). */
 
@@ -74,7 +75,7 @@ test.describe('Growth tab', () => {
     const region = card(page, 'Dynamics of portfolio returns');
     const chart = region.getByTestId('growth-dynamics-chart');
     await expect(bars(chart).first()).toBeVisible();
-    const all = await bars(chart).count();
+    const all = await settledCount(bars(chart));
     await region.getByRole('button', { name: 'View details' }).click();
     const table = region.getByRole('table', { name: 'Monthly returns, newest first' });
     await expect(table).toHaveAccessibleDescription('Click a column or row header to include or exclude it from the chart');
@@ -95,7 +96,7 @@ test.describe('Growth tab', () => {
     const region = card(page, 'Holdings performance');
     const chart = region.getByTestId('growth-holdings-chart');
     await expect(bars(chart).first()).toBeVisible();
-    const all = await bars(chart).count();
+    const all = await settledCount(bars(chart));
     await region.getByRole('radio', { name: 'Table' }).click();
     const table = region.getByRole('table', { name: 'Return per holding, best first' });
     await table.getByRole('rowheader').first().getByRole('button').click();

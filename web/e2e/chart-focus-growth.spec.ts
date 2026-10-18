@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { settledCount } from './settled';
 
 /** Legend hover / keyboard focus preview on the Growth tab and the asset detail charts (mock mode): the entry's series stays, the rest fades; nothing is included or excluded. */
 
@@ -148,7 +149,7 @@ test.describe('Dynamics of portfolio returns', () => {
     const chart = region.getByTestId('growth-dynamics-chart');
     const legend = region.getByTestId('growth-dynamics-legend');
     await expect(bars(chart).first()).toBeVisible();
-    const all = await bars(chart).count();
+    const all = await settledCount(bars(chart));
     await expectNothingFaded(bars(chart), 'fill-opacity');
 
     await toggle(legend, /^Portfolio/).hover();
@@ -239,7 +240,7 @@ test.describe('Asset detail', () => {
     const chart = page.getByTestId('asset-dividend-chart');
     const legend = page.getByTestId('asset-dividend-legend');
     await expect(bars(chart).first()).toBeVisible();
-    const all = await bars(chart).count();
+    const all = await settledCount(bars(chart));
     await expectNothingFaded(bars(chart), 'fill-opacity');
 
     await toggle(legend, 'Full year').hover();
