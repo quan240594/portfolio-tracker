@@ -1666,7 +1666,7 @@ npx wrangler deploy -c wrangler.teardown.toml && npx wrangler delete --name pt-l
 
 Reproduction of every number above: `platform/cloudflare/spike/README.md` (`src/bench/*`, results in `results/`; `hybrid.ts` produced the
 payload and materialisation figures).
-=======
+
 ## Platform ports
 
 The application runs on more than one platform with **one implementation of every feature**. The AWS stack (Lambda, API
@@ -1827,4 +1827,3 @@ is where the AWS adapters meet the contracts.
 adapter), gets a contract test when it adds or changes what a port must do, and is verified on the AWS stack (CI) and on the
 Cloudflare deployment before it is called done. A feature that needs a capability a platform lacks is redesigned until it fits
 every platform, not special-cased.
->>>>>>> 0e7f136 (refactor: platform ports and AWS adapters (ItemStore, SecretStore, JobQueue, FileStore, resumable jobs))
