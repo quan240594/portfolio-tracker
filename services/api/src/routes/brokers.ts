@@ -1,3 +1,4 @@
+import { JOBS } from '@portfolio/platform';
 import {
   BROKER_ID,
   brokerScopeSchema,
@@ -43,7 +44,7 @@ export async function brokerStatus(ctx: RouteContext): Promise<RouteResult> {
 /** PUT: verifies the key against Trading 212, stores it (Secrets Manager, keyed by the caller) and records the connection. */
 export async function connectBroker(ctx: RouteContext): Promise<RouteResult> {
   const { portfolioId, ...credentials } = validate(
-    connectBrokerSchema.safeParse(parseJsonBody(ctx.body, ctx.isBase64Encoded)),
+    connectBrokerSchema.safeParse(parseJsonBody(ctx.body)),
     'Invalid Trading 212 connection request',
   );
   const broker = requireBroker(ctx);
@@ -90,11 +91,11 @@ export async function disconnectBroker(ctx: RouteContext): Promise<RouteResult> 
 /** POST: starts an asynchronous sync of one connected portfolio. */
 export async function syncBroker(ctx: RouteContext): Promise<RouteResult> {
   const { portfolioId } = validate(
-    brokerScopeSchema.safeParse(parseJsonBody(ctx.body, ctx.isBase64Encoded)),
+    brokerScopeSchema.safeParse(parseJsonBody(ctx.body)),
     'Invalid sync request',
   );
   const broker = requireBroker(ctx);
   await requireConnected(broker, ctx, portfolioId);
-  await broker.invokeSync({ userId: ctx.userId, portfolioId });
+  await broker.jobs.enqueue({ job: JOBS.syncBroker, payload: { userId: ctx.userId, portfolioId } });
   return ok({ accepted: true } satisfies SyncBrokerResponse, 202);
 }

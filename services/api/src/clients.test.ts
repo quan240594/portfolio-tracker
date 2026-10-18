@@ -24,7 +24,7 @@ afterEach(() => {
 });
 
 describe('createAwsDeps', () => {
-  it('wires repository, publisher and signer to the configured resources (AWS)', async () => {
+  it('wires repository, publisher and file store to the configured resources (AWS)', async () => {
     const config = loadConfig({ TABLE_NAME: 'tbl', EVENT_BUS_NAME: 'bus', IMPORT_BUCKET: 'bkt', AWS_REGION: 'eu-central-1' });
     const deps = createAwsDeps(config);
     expect(deps.config).toBe(config);
@@ -42,7 +42,7 @@ describe('createAwsDeps', () => {
     expect(put.args[0].input.Entries![0]!.EventBusName).toBe('bus');
     expect(await clientConfig(put.thisValue).region()).toBe('eu-central-1');
 
-    const url = new URL(await deps.signer.signCsvUpload('imports/u/i.csv', 60));
+    const url = new URL((await deps.files.createUpload({ key: 'imports/u/i.csv', contentType: 'text/csv', expiresInSeconds: 60 })).url);
     expect(url.hostname).toBe('bkt.s3.eu-central-1.amazonaws.com');
     expect(url.searchParams.get('X-Amz-Expires')).toBe('60');
   });
@@ -61,7 +61,7 @@ describe('createAwsDeps', () => {
     const ebEndpoint = await clientConfig(ebMock.commandCalls(PutEventsCommand)[0]!.thisValue).endpoint!();
     expect(ebEndpoint).toMatchObject({ hostname: 'localhost', port: 4566 });
 
-    const url = new URL(await deps.signer.signCsvUpload('imports/u/i.csv', 300));
+    const url = new URL((await deps.files.createUpload({ key: 'imports/u/i.csv', contentType: 'text/csv', expiresInSeconds: 300 })).url);
     expect(`${url.origin}${url.pathname}`).toBe('http://localhost:4566/bkt/imports/u/i.csv');
   });
 

@@ -1,6 +1,6 @@
 import type { SQSBatchItemFailure, SQSBatchResponse, SQSEvent, SQSRecord } from 'aws-lambda';
+import { logger } from '@portfolio/platform';
 import { allSettledOrThrow, groupBy, sequentially } from '@portfolio/shared';
-import { logger } from './logger.js';
 import { extractS3Objects, type S3ObjectRef } from './messages.js';
 import { importOwner, processImportObject, type IngestDeps } from './processor.js';
 

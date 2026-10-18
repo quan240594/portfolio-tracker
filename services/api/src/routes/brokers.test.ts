@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
+import { MemoryJobQueue } from '@portfolio/platform';
 import { BrokerError, MemoryBrokerStore, type CredentialStore } from '@portfolio/broker-sync';
 import type { BrokerSyncState, Trading212Credentials } from '@portfolio/shared';
-import { createHandler } from '../app.js';
+import { createHandler } from '../lambda/handler.js';
 import type { BrokerDeps } from '../broker-deps.js';
 import { apiEvent, fakeDeps, portfolio } from '../testing/fakes.js';
 
@@ -25,15 +26,15 @@ class FakeCredentials implements Pick<CredentialStore, 'put' | 'delete'> {
 function setup(opts: { verify?: BrokerDeps['verify'] } = {}) {
   const store = new MemoryBrokerStore();
   const secrets = new FakeCredentials();
-  const invokeSync = vi.fn<BrokerDeps['invokeSync']>(() => Promise.resolve());
+  const jobs = new MemoryJobQueue();
   const verify = vi.fn(opts.verify ?? (() => Promise.resolve({ accountCurrency: 'EUR' })));
-  const broker: BrokerDeps = { store, credentials: secrets, verify, invokeSync };
+  const broker: BrokerDeps = { store, credentials: secrets, verify, jobs };
   const ctx = fakeDeps({ broker });
   ctx.repo.portfolios = [
     portfolio({ portfolioId: 'trading-212', name: 'Trading 212' }),
     portfolio({ portfolioId: 'other', name: 'Other' }),
   ];
-  return { ...ctx, store, secrets, invokeSync, verify, handler: createHandler(() => ctx.deps) };
+  return { ...ctx, store, secrets, jobs, verify, handler: createHandler(() => ctx.deps) };
 }
 
 const connectBody = (over: Record<string, unknown> = {}) => ({ portfolioId: 'trading-212', ...credentials(), ...over });
@@ -191,20 +192,20 @@ describe('GET /brokers/trading212', () => {
 
 describe('POST /brokers/trading212/sync', () => {
   it('starts an asynchronous sync for the caller (202)', async () => {
-    const { handler, invokeSync } = setup();
+    const { handler, jobs } = setup();
     await handler(apiEvent('PUT', '/brokers/trading212', { body: connectBody() }));
     const res = await handler(apiEvent('POST', '/brokers/trading212/sync', { body: { portfolioId: 'trading-212', userId: 'mallory' } }));
     expect(res.statusCode).toBe(202);
     expect(json(res)).toEqual({ accepted: true });
-    expect(invokeSync).toHaveBeenCalledWith({ userId: 'demo', portfolioId: 'trading-212' });
+    expect(jobs.enqueued).toEqual([{ job: 'syncBroker', payload: { userId: 'demo', portfolioId: 'trading-212' } }]);
   });
 
   it('404s when not connected and does not invoke', async () => {
-    const { handler, invokeSync } = setup();
+    const { handler, jobs } = setup();
     const res = await handler(apiEvent('POST', '/brokers/trading212/sync', { body: { portfolioId: 'trading-212' } }));
     expect(res.statusCode).toBe(404);
     expect(json(res).error.code).toBe('NOT_CONNECTED');
-    expect(invokeSync).not.toHaveBeenCalled();
+    expect(jobs.enqueued).toEqual([]);
   });
 
   it('validates the body', async () => {

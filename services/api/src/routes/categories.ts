@@ -33,7 +33,7 @@ export async function getPortfolioSettings(ctx: RouteContext): Promise<RouteResu
 
 export async function updatePortfolioSettings(ctx: RouteContext): Promise<RouteResult> {
   const portfolioId = await requirePathPortfolio(ctx);
-  const input = validate(portfolioSettingsSchema.safeParse(parseJsonBody(ctx.body, ctx.isBase64Encoded)), 'Invalid settings');
+  const input = validate(portfolioSettingsSchema.safeParse(parseJsonBody(ctx.body)), 'Invalid settings');
   const settings: PortfolioSettings = {
     portfolioId,
     userId: ctx.userId,
@@ -82,7 +82,7 @@ function assertUniqueName(others: readonly Category[], name: string): void {
 
 export async function createCategory(ctx: RouteContext): Promise<RouteResult> {
   const portfolioId = await requirePathPortfolio(ctx);
-  const input = validate(createCategorySchema.safeParse(parseJsonBody(ctx.body, ctx.isBase64Encoded)), 'Invalid category');
+  const input = validate(createCategorySchema.safeParse(parseJsonBody(ctx.body)), 'Invalid category');
   const { mgmt, now, uuid } = ctx.deps;
   const existing = await mgmt.listCategories(ctx.userId, portfolioId);
   if (existing.length >= MAX_CATEGORIES) throw new HttpError(422, 'UNPROCESSABLE', `A portfolio can have at most ${MAX_CATEGORIES} categories`);
@@ -104,7 +104,7 @@ async function requireCategory(ctx: RouteContext, portfolioId: string): Promise<
 
 export async function updateCategory(ctx: RouteContext): Promise<RouteResult> {
   const portfolioId = await requirePathPortfolio(ctx);
-  const input = validate(updateCategorySchema.safeParse(parseJsonBody(ctx.body, ctx.isBase64Encoded)), 'Invalid category');
+  const input = validate(updateCategorySchema.safeParse(parseJsonBody(ctx.body)), 'Invalid category');
   const { category, others } = await requireCategory(ctx, portfolioId);
   if (input.name !== undefined) assertUniqueName(others, input.name);
   const next: Category = { ...category, ...input, updatedAt: ctx.deps.now().toISOString() };
@@ -133,7 +133,7 @@ async function isAssignable(ctx: RouteContext, portfolioId: string): Promise<(sy
 /** Replaces the holdings of a category; a symbol listed here leaves any other category (one category per holding). */
 export async function assignCategoryHoldings(ctx: RouteContext): Promise<RouteResult> {
   const portfolioId = await requirePathPortfolio(ctx);
-  const { symbols } = validate(assignHoldingsSchema.safeParse(parseJsonBody(ctx.body, ctx.isBase64Encoded)), 'Invalid holdings');
+  const { symbols } = validate(assignHoldingsSchema.safeParse(parseJsonBody(ctx.body)), 'Invalid holdings');
   const { category } = await requireCategory(ctx, portfolioId);
   const wanted = [...new Set(symbols)];
   const assignable = await isAssignable(ctx, portfolioId);

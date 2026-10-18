@@ -1,10 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { PutEventsCommand } from '@aws-sdk/client-eventbridge';
 import type { Transaction } from '@portfolio/shared';
 import { createHandler } from './app.js';
 import { loadConfig } from './config.js';
 import { AUTH_REJECTED_MESSAGE, BrokerError, describeError } from './errors.js';
-import { EventBridgePublisher } from './events.js';
 import { MemoryBrokerStore } from './memory-store.js';
 import { REDACTED, redact } from './redact.js';
 import { QUANTITY_TOLERANCE, reconcilePositions } from './reconcile.js';
@@ -76,24 +74,6 @@ describe('loadConfig', () => {
   });
 });
 
-describe('EventBridgePublisher', () => {
-  const detail = { userId: 'u', portfolioId: 'p', symbols: ['A'], reason: 'IMPORTED' as const };
-  it('publishes TransactionsChanged on the custom bus', async () => {
-    const send = vi.fn().mockResolvedValue({ FailedEntryCount: 0 });
-    await new EventBridgePublisher({ send }, 'bus').transactionsChanged(detail);
-    const input = (send.mock.calls[0]![0] as PutEventsCommand).input.Entries![0]!;
-    expect(input).toMatchObject({ EventBusName: 'bus', Source: 'portfolio.broker', DetailType: 'TransactionsChanged' });
-    expect(JSON.parse(input.Detail!)).toEqual(detail);
-  });
-
-  it('throws on failed entries', async () => {
-    const send = vi.fn().mockResolvedValue({ FailedEntryCount: 1, Entries: [{ ErrorCode: 'Denied' }] });
-    await expect(new EventBridgePublisher({ send }, 'bus').transactionsChanged(detail)).rejects.toThrow('PutEvents failed: Denied');
-    send.mockResolvedValue({ FailedEntryCount: 1 });
-    await expect(new EventBridgePublisher({ send }, 'bus').transactionsChanged(detail)).rejects.toThrow('PutEvents failed: unknown');
-  });
-});
-
 describe('MemoryBrokerStore', () => {
   const state = (over: Partial<BrokerSyncState> = {}): BrokerSyncState => ({
     userId: 'u1',
@@ -111,7 +91,9 @@ describe('MemoryBrokerStore', () => {
     const store = new MemoryBrokerStore([txn('seed')]);
     await store.createState(state());
     await store.createState(state({ userId: 'u2' }));
-    expect(await store.listUserIds()).toEqual(['u1', 'u2']);
+    await store.registerUser('u1');
+    await store.registerUser('u2');
+    expect((await store.listUserIds()).sort((a, b) => a.localeCompare(b))).toEqual(['u1', 'u2']);
     expect((await store.listStates('u1')).length).toBe(1);
     await store.saveState(state({ status: 'SUCCEEDED' }));
     await store.saveState(state({ portfolioId: 'gone' }));
@@ -135,13 +117,15 @@ describe('MemoryBrokerStore', () => {
   it('stores transactions, users, tickers and rates', async () => {
     const store = new MemoryBrokerStore([txn('seed'), txn('other', 'u2')]);
     await store.putTransactions([txn('a')]);
-    expect((await store.listTransactions('u1')).map((t) => t.id)).toEqual(['seed', 'a']);
+    expect((await store.listTransactions('u1')).map((t) => t.id).sort((a, b) => a.localeCompare(b))).toEqual(['a', 'seed']);
     await store.registerUser('u1');
     await store.trackTickers([{ symbol: 'A', currency: 'USD' }]);
-    await store.ensurePortfolio();
+    await store.ensurePortfolio('u1', 'p9', 'Nine', 'now');
+    await store.ensurePortfolio('u1', 'p9', 'Renamed', 'later');
     store.fxRates = { USD: 1.1 };
     expect(await store.getFxRates()).toEqual({ USD: 1.1 });
     expect(store.users.has('u1') && store.tracked.get('A') === 'USD').toBe(true);
+    expect((await store.items.get({ PK: 'USER#u1', SK: 'PORTFOLIO#p9' }))?.name).toBe('Nine');
   });
 });
 

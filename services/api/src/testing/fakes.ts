@@ -10,12 +10,10 @@ import type {
   StoredEarningsEvent,
   StoredSplitEvent,
   Transaction,
-  TransactionsChangedDetail,
 } from '@portfolio/shared';
+import { MemoryFileStore, RecordingEventPublisher } from '@portfolio/platform';
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import type { Deps } from '../deps.js';
-import type { EventPublisher } from '../events.js';
-import type { UploadUrlSigner } from '../presigner.js';
 import type { Repository } from '../repository.js';
 import { InMemoryManagementRepository } from './management-fakes.js';
 
@@ -120,36 +118,23 @@ export class InMemoryRepository implements Repository {
   }
 }
 
-export class RecordingPublisher implements EventPublisher {
-  published: TransactionsChangedDetail[] = [];
-  transactionsChanged(detail: TransactionsChangedDetail) {
-    this.published.push(detail);
-    return Promise.resolve();
-  }
-}
-
-export class FakeSigner implements UploadUrlSigner {
-  signCsvUpload(key: string, expiresInSeconds: number) {
-    return Promise.resolve(`https://bucket.example/${key}?X-Amz-Expires=${expiresInSeconds}`);
-  }
-}
-
 export function fakeDeps(overrides: Partial<Deps> = {}) {
   const repo = new InMemoryRepository();
   const mgmt = new InMemoryManagementRepository();
-  const events = new RecordingPublisher();
+  const events = new RecordingEventPublisher();
+  const files = new MemoryFileStore('https://bucket.example');
   let n = 0;
   const deps: Deps = {
     repo,
     mgmt,
     events,
-    signer: new FakeSigner(),
+    files,
     config: { baseCurrency: 'EUR', authMode: 'demo', demoUserId: 'demo', corsAllowedOrigin: 'http://localhost:5173' },
     now: () => new Date('2026-06-15T12:00:00.000Z'),
     uuid: () => `uuid-${++n}`,
     ...overrides,
   };
-  return { deps, repo, mgmt, events };
+  return { deps, repo, mgmt, events, files };
 }
 
 const serializeBody = (body: unknown): string | undefined => {

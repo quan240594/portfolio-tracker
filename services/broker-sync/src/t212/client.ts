@@ -1,3 +1,4 @@
+import { encodeBase64 } from '@portfolio/platform';
 import { T212_BASE_URLS, paginate, retryAttempts, type Trading212Credentials } from '@portfolio/shared';
 import type { z } from 'zod';
 import { AUTH_REJECTED_MESSAGE, BrokerError } from '../errors.js';
@@ -24,6 +25,8 @@ import {
 export interface Page<T> {
   items: T[];
   invalid: number;
+  /** The `nextPagePath` of a paged history: pass it as `from` to continue after this page. Absent on the last page. */
+  next?: string;
 }
 
 /** What the sync needs from Trading 212 (read-only). Implemented by Trading212Client and by test fakes. */
@@ -31,11 +34,11 @@ export interface Trading212Api {
   accountSummary(): Promise<AccountSummary>;
   /** Open positions (used to reconcile the imported transactions). */
   positions(): Promise<Page<OpenPosition>>;
-  /** Newest first. */
-  historyOrders(): AsyncGenerator<Page<HistoricalOrder>, void, undefined>;
-  historyDividends(): AsyncGenerator<Page<HistoryDividend>, void, undefined>;
+  /** Newest first. `from` resumes after the page whose `next` it is (a sync step that ran out of budget). */
+  historyOrders(from?: string): AsyncGenerator<Page<HistoricalOrder>, void, undefined>;
+  historyDividends(from?: string): AsyncGenerator<Page<HistoryDividend>, void, undefined>;
   /** Newest first. The endpoint only accepts `time` together with a `cursor`, so there is no start-time filter. */
-  historyTransactions(): AsyncGenerator<Page<CashTransaction>, void, undefined>;
+  historyTransactions(from?: string): AsyncGenerator<Page<CashTransaction>, void, undefined>;
   instruments(): Promise<TradableInstrument[]>;
   exchanges(): Promise<Exchange[]>;
 }
@@ -100,7 +103,7 @@ export class Trading212Client implements Trading212Api {
   constructor(private readonly options: ClientOptions) {
     const { apiKey, apiSecret, environment } = options.credentials;
     this.origin = T212_BASE_URLS[environment];
-    const token = Buffer.from(`${apiKey}:${apiSecret}`).toString('base64');
+    const token = encodeBase64(`${apiKey}:${apiSecret}`);
     this.authorization = `Basic ${token}`;
     this.fetchFn = options.fetchFn ?? fetch;
     this.sleep = options.sleep ?? defaultSleep;
@@ -120,16 +123,16 @@ export class Trading212Client implements Trading212Api {
     return this.list(`${API_PREFIX}positions`, positionSchema);
   }
 
-  historyOrders() {
-    return this.pages(`${API_PREFIX}history/orders?limit=${PAGE_LIMIT}`, historicalOrderSchema);
+  historyOrders(from?: string) {
+    return this.pages(`${API_PREFIX}history/orders?limit=${PAGE_LIMIT}`, historicalOrderSchema, from);
   }
 
-  historyDividends() {
-    return this.pages(`${API_PREFIX}history/dividends?limit=${PAGE_LIMIT}`, dividendSchema);
+  historyDividends(from?: string) {
+    return this.pages(`${API_PREFIX}history/dividends?limit=${PAGE_LIMIT}`, dividendSchema, from);
   }
 
-  historyTransactions() {
-    return this.pages(`${API_PREFIX}history/transactions?limit=${PAGE_LIMIT}`, cashTransactionSchema);
+  historyTransactions(from?: string) {
+    return this.pages(`${API_PREFIX}history/transactions?limit=${PAGE_LIMIT}`, cashTransactionSchema, from);
   }
 
   async instruments(): Promise<TradableInstrument[]> {
@@ -152,15 +155,17 @@ export class Trading212Client implements Trading212Api {
     return validateItems(body, schema);
   }
 
-  private pages<S extends z.ZodTypeAny>(firstPath: string, schema: S): AsyncGenerator<Page<z.output<S>>, void, undefined> {
+  private pages<S extends z.ZodTypeAny>(firstPath: string, schema: S, from?: string): AsyncGenerator<Page<z.output<S>>, void, undefined> {
     let fetched = 0;
     // The cursor is the raw `nextPagePath`; it is validated when the following page is requested, i.e. after the previous page was yielded.
     return paginate<Page<z.output<S>>, string>(async (cursor) => {
-      const path = cursor === undefined ? firstPath : this.nextPath(cursor);
+      const start = cursor ?? from;
+      const path = start === undefined ? firstPath : this.nextPath(start);
       if (fetched++ >= this.maxPages) throw new BrokerError('T212_BAD_RESPONSE', 'Pagination did not terminate');
       const envelope = pageSchema.safeParse(await this.request(path));
       if (!envelope.success) throw new BrokerError('T212_BAD_RESPONSE', `Unexpected response shape from ${path.split('?')[0]}`);
-      return { page: validateItems(envelope.data.items, schema), next: envelope.data.nextPagePath || undefined };
+      const next = envelope.data.nextPagePath || undefined;
+      return { page: { ...validateItems(envelope.data.items, schema), ...(next ? { next } : {}) }, next };
     });
   }
 

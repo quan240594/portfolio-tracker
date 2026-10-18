@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import type { EodPrice } from '@portfolio/shared';
-import { createHandler } from './app.js';
+import { createHandler } from './lambda/handler.js';
 import { apiEvent, fakeDeps, portfolio, txn } from './testing/fakes.js';
 
 const json = (res: APIGatewayProxyStructuredResultV2) => (res.body ? JSON.parse(res.body) : undefined);

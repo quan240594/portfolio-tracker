@@ -64,6 +64,28 @@ describe('Trading212Client requests', () => {
     expect(urlOf(fetchFn, 1)).toBe('https://live.trading212.com/api/v0/equity/history/orders?limit=50&cursor=123');
   });
 
+  it('exposes the page link as `next` and resumes a history from it', async () => {
+    const order = { order: { id: 1, side: 'BUY', instrument: { ticker: 'AAPL_US_EQ', currency: 'USD' } }, fill: { id: 2, price: 1, quantity: 1, filledAt: '2024-01-01T00:00:00Z' } };
+    const link = '/api/v0/equity/history/orders?limit=50&cursor=123';
+    const first = setup([json({ items: [order], nextPagePath: link })]);
+    const page = (await first.client.historyOrders().next()).value!;
+    expect(page.next).toBe(link);
+
+    const resumed = setup([json({ items: [order, order], nextPagePath: null })]);
+    const pages = [];
+    for await (const p of resumed.client.historyOrders(page.next)) pages.push(p);
+    expect(urlOf(resumed.fetchFn, 0)).toBe(`https://live.trading212.com${link}`);
+    expect(pages).toEqual([{ items: expect.any(Array), invalid: 0 }]);
+    expect(pages[0]).not.toHaveProperty('next');
+  });
+
+  it('refuses to resume from a link that leaves the equity API', async () => {
+    const { client, fetchFn } = setup([]);
+    await expect(client.historyDividends('https://evil.example/x').next()).rejects.toMatchObject({ code: 'T212_BAD_RESPONSE', message: 'Unexpected pagination link' });
+    await expect(client.historyTransactions('/api/v0/account/secret').next()).rejects.toMatchObject({ code: 'T212_BAD_RESPONSE' });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
   it('reads dividends, cash transactions (no time filter: the API needs a cursor with it), positions, instruments and exchanges', async () => {
     const dividend = {
       reference: 'r1',

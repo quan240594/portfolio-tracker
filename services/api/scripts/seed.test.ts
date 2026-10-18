@@ -1,26 +1,16 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { mockClient } from 'aws-sdk-client-mock';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { BatchWriteCommand, DynamoDBDocumentClient, QueryCommand } from '@aws-sdk/lib-dynamodb';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryItemStore } from '@portfolio/platform';
 import { buildPositions, calculatePortfolio, cashBalances, type FxDay, type FxRates, type InstrumentProfile, type Quote, type Transaction } from '@portfolio/shared';
 import { generateFxDays, isEcbBusinessDay, seed } from './seed.js';
 
-const ddbMock = mockClient(DynamoDBDocumentClient);
-const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'eu-west-1' }));
 const TODAY = '2026-10-13';
+let store: MemoryItemStore;
 
 beforeEach(() => {
-  ddbMock.reset();
-  ddbMock.on(QueryCommand).resolves({ Items: [] });
-  ddbMock.on(BatchWriteCommand).resolves({});
+  store = new MemoryItemStore();
 });
 
-const written = () =>
-  ddbMock
-    .commandCalls(BatchWriteCommand)
-    .flatMap((c) => c.args[0].input.RequestItems!.tbl!)
-    .map((r) => r.PutRequest?.Item as Record<string, unknown>)
-    .filter(Boolean);
+const written = () => store.snapshot() as Record<string, unknown>[];
 
 describe('isEcbBusinessDay', () => {
   it('excludes weekends and TARGET holidays (incl. Good Friday / Easter Monday)', () => {
@@ -65,7 +55,7 @@ describe('generateFxDays', () => {
 
 describe('seed', () => {
   it('writes two portfolios and assigns USD trades to Trading 212, everything else to the main portfolio', async () => {
-    const { portfolios, transactions } = await seed({ doc, tableName: 'tbl', today: TODAY, log: () => {} });
+    const { portfolios, transactions } = await seed({ store, today: TODAY, log: () => {} });
     expect(portfolios.map((p) => [p.portfolioId, p.name])).toEqual([
       ['default', 'Main portfolio'],
       ['trading-212', 'Trading 212'],
@@ -83,31 +73,35 @@ describe('seed', () => {
     }
   });
 
-  it('removes earlier seed transactions in both the current and the pre-portfolio key layout', async () => {
-    ddbMock.on(QueryCommand).resolvesOnce({
-      Items: [{ PK: 'USER#demo', SK: 'TXN#2025-01-02#seed-01' }],
-      LastEvaluatedKey: { PK: 'USER#demo', SK: 'TXN#2025-01-02#seed-01' },
-    }).resolvesOnce({ Items: [{ PK: 'USER#demo', SK: 'TXN#default#2025-01-03#seed-02' }] });
-    const { removed } = await seed({ doc, tableName: 'tbl', today: TODAY, log: () => {} });
-    expect(removed).toBe(2);
-    const query = ddbMock.commandCalls(QueryCommand)[0]!.args[0].input;
-    expect(query.ExpressionAttributeValues).toEqual({ ':pk': 'USER#demo', ':sk': 'TXN#', ':seed': 'seed-' });
-    const deletes = ddbMock
-      .commandCalls(BatchWriteCommand)
-      .flatMap((c) => c.args[0].input.RequestItems!.tbl!)
-      .map((r) => r.DeleteRequest?.Key)
-      .filter(Boolean);
-    expect(deletes).toEqual([
-      { PK: 'USER#demo', SK: 'TXN#2025-01-02#seed-01' },
-      { PK: 'USER#demo', SK: 'TXN#default#2025-01-03#seed-02' },
+  it('removes earlier seed transactions in both the current and the pre-portfolio key layout, but not other items', async () => {
+    store.load([
+      { PK: 'USER#demo', SK: 'TXN#2025-01-02#seed-01', id: 'seed-01' },
+      { PK: 'USER#demo', SK: 'TXN#default#2025-01-03#seed-02', id: 'seed-02' },
+      { PK: 'USER#demo', SK: 'TXN#default#2025-01-03#mine', id: 'mine' },
+      { PK: 'USER#other', SK: 'TXN#default#2025-01-03#seed-03', id: 'seed-03' },
     ]);
+    const batches = vi.spyOn(store, 'batchWrite');
+    const { removed } = await seed({ store, today: TODAY, log: () => {} });
+    expect(removed).toBe(2);
+    const keys = written().map((i) => i.SK);
+    expect(keys).not.toContain('TXN#2025-01-02#seed-01');
+    expect(keys).not.toContain('TXN#default#2025-01-03#seed-02');
+    expect(keys).toContain('TXN#default#2025-01-03#mine');
+    expect(written().some((i) => i.PK === 'USER#other')).toBe(true);
     // Deletes are sent before any put, so a stale key equal to a fresh one cannot remove the new item.
-    const firstPut = ddbMock.commandCalls(BatchWriteCommand).findIndex((c) => c.args[0].input.RequestItems!.tbl![0]!.PutRequest);
-    expect(firstPut).toBe(1);
+    expect(batches.mock.calls[0]![0].every((op) => op.type === 'delete')).toBe(true);
+    expect(batches.mock.calls[1]![0].every((op) => op.type === 'put')).toBe(true);
+  });
+
+  it('is idempotent: seeding twice leaves the same items', async () => {
+    await seed({ store, today: TODAY, log: () => {} });
+    const first = store.size;
+    await seed({ store, today: TODAY, log: () => {} });
+    expect(store.size).toBe(first);
   });
 
   it('writes daily FX_DAY items and a LATEST item matching the newest fixing', async () => {
-    const { fxDays } = await seed({ doc, tableName: 'tbl', today: TODAY, log: () => {} });
+    const { fxDays } = await seed({ store, today: TODAY, log: () => {} });
     const items = written();
     const dayItems = items.filter((i) => i.entityType === 'FX_DAY');
     expect(dayItems).toHaveLength(fxDays.length);
@@ -124,7 +118,7 @@ describe('seed', () => {
   });
 
   it('gives some USD transactions a broker fxRate near the ECB fixing and leaves the rest on ECB', async () => {
-    const { transactions, fxDays } = await seed({ doc, tableName: 'tbl', today: TODAY, log: () => {} });
+    const { transactions, fxDays } = await seed({ store, today: TODAY, log: () => {} });
     const fixing = (date: string) => fxDays.filter((d) => d.date <= date).at(-1)!.rates.USD!;
     const withBroker = transactions.filter((t) => t.fxRate !== undefined);
     expect(withBroker.map((t) => [t.id, t.type, t.symbol])).toEqual([
@@ -145,13 +139,13 @@ describe('seed', () => {
   });
 
   it('keeps full English country names on profiles', async () => {
-    await seed({ doc, tableName: 'tbl', today: TODAY, log: () => {} });
+    await seed({ store, today: TODAY, log: () => {} });
     const countries = new Set(written().filter((i) => i.entityType === 'PROFILE').map((i) => i.country));
     expect([...countries].sort()).toEqual(['Germany', 'Global', 'Netherlands', 'United States']);
   });
 
   it('gives AAPL and MSFT a P/E (with its date) and leaves ASML without, so P/E coverage is partial', async () => {
-    await seed({ doc, tableName: 'tbl', today: TODAY, log: () => {} });
+    await seed({ store, today: TODAY, log: () => {} });
     const profiles = Object.fromEntries(written().filter((i) => i.entityType === 'PROFILE').map((i) => [String(i.symbol), i]));
     expect(profiles.AAPL).toMatchObject({ peRatio: 33.4, fundamentalsAsOf: TODAY });
     expect(profiles.MSFT).toMatchObject({ peRatio: 34.9, fundamentalsAsOf: TODAY });
@@ -160,7 +154,7 @@ describe('seed', () => {
   });
 
   it('yields a negative currency effect on USD holdings as EUR strengthens', async () => {
-    await seed({ doc, tableName: 'tbl', today: TODAY, log: () => {} });
+    await seed({ store, today: TODAY, log: () => {} });
     const items = written();
     const of = <T>(type: string) => items.filter((i) => i.entityType === type) as unknown as T[];
     const quotes = Object.fromEntries(of<Quote>('QUOTE').map((q) => [q.symbol, q]));
@@ -180,7 +174,7 @@ describe('seed', () => {
   });
 
   it('seeds cash, a split, categories with targets, custom assets, settings and a watchlist', async () => {
-    const { transactions } = await seed({ doc, tableName: 'tbl', today: TODAY, log: () => {} });
+    const { transactions } = await seed({ store, today: TODAY, log: () => {} });
     const items = written();
     const of = <T>(type: string) => items.filter((i) => i.entityType === type) as unknown as T[];
 
@@ -202,7 +196,7 @@ describe('seed', () => {
   });
 
   it('keeps the ASML position as before the split (6 shares) and the cash balance positive', async () => {
-    await seed({ doc, tableName: 'tbl', today: TODAY, log: () => {} });
+    await seed({ store, today: TODAY, log: () => {} });
     const txns = written().filter((i) => i.entityType === 'TRANSACTION') as unknown as Transaction[];
     const asml = buildPositions(txns.filter((t) => t.portfolioId === 'default')).get('ASML.AS')!;
     expect(asml.quantity).toBe(6); // 2 pre-split shares x 2 + 2 bought later

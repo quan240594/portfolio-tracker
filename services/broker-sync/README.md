@@ -5,14 +5,17 @@ verified API behaviour: [docs/architecture.md → "Trading 212 sync"](../../docs
 
 ```
 src/index.ts        Lambda entry point (EventBridge Scheduler {"all":true}, API invoke {userId, portfolioId, full?})
-src/lib.ts          surface the API imports (client, stores, credential store, errors) – never the entry point
-src/sync.ts         one run: lock → fetch → map → validate → write changed → event → state
+src/app.ts          `brokerSyncJob` (the resumable `syncBroker` job handler) and the Lambda shape that runs it to completion
+src/lib.ts          platform-neutral surface the API imports (client, stores, credential store, errors) – never the entry point
+src/aws.ts          AWS composition (DynamoDB, Secrets Manager, EventBridge from the environment): `@portfolio/broker-sync/aws`
+src/sync.ts         one run as resumable steps: lock → account → orders → dividends → cash → prepare → write → announce → finish
 src/mapper.ts       T212 order / dividend / split → Transaction (pure)
 src/symbols.ts      ticker/ISIN/exchange → Yahoo-style symbol (rules live in packages/shared/src/broker-symbols.ts)
 src/reconcile.ts    open positions of Trading 212 vs positions replayed from the imported transactions
 src/t212/           typed fetch client (Basic auth, timeouts, retries, rate limits, pagination) + tolerant zod schemas
-src/credentials.ts  Secrets Manager store (per user) and the local env/file source for the CLI
-src/store.ts        DynamoDB persistence (state item, transactions, tracked tickers); memory-store.ts for dry runs/tests
+src/credentials.ts  per-user credentials on the SecretStore port (Secrets Manager on AWS)
+src/local-credentials.ts  the env/file source for the CLI
+src/store.ts        persistence on the ItemStore port (state item, transactions, tracked tickers); memory-store.ts for dry runs/tests
 src/cli.ts          local CLI
 ```
 

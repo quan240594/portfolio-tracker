@@ -4,14 +4,16 @@ Single Lambda (`portfolio-tracker-api-{env}`) behind an API Gateway HTTP API (pa
 Routes are the `API_ROUTES` contract in `@portfolio/shared`; calculations come from the shared package.
 
 ```
-src/index.ts        Lambda entry (index.handler) – creates AWS clients once per container
-src/app.ts          request → router → route handler, error mapping, CORS, structured logging
+src/index.ts        Lambda entry (index.handler): composes the AWS adapters once per container
+src/lambda/         API Gateway (payload 2.0) <-> portable request/response; the only place that knows the event shape
+src/portable.ts     platform-neutral surface (createApp, repositories, deps) for any other adapter, e.g. a Worker
+src/clients.ts      AWS composition: DynamoDB ItemStore, EventBridge, S3 presigned uploads, Secrets Manager + Lambda (via @portfolio/aws)
+src/app.ts          createApp: PortableRequest -> router -> route handler -> PortableResponse (error mapping, CORS, logging)
 src/router.ts       matches API_ROUTES (strips trailing slash and an optional /api prefix)
 src/routes/*        portfolios (CRUD + read scope) | portfolio | holdings | allocation | history | dividends | transactions | imports | brokers (Trading 212 connect/status/sync/disconnect, see docs/architecture.md)
-src/repository.ts   DynamoDB single-table access (DocumentClient)
-src/events.ts       EventBridge TransactionsChanged publisher (source portfolio.api)
-src/presigner.ts    S3 presigned PUT URLs for CSV imports
-src/local.ts        local HTTP server on :3001 wrapping the handler
+src/repository.ts   domain repository on the ItemStore port: key scheme, item shapes and queries, written once for every storage adapter
+src/management-repository.ts  the same for settings, categories, custom assets, watchlist and goals
+src/local.ts        local HTTP server on :3001 serving the portable app
 scripts/seed.ts     idempotent LocalStack seed for user `demo`: portfolios `default` (Main portfolio, EUR) and `trading-212`
                     (Trading 212, USD stocks) plus daily ECB fixings FX_DAY for USD/GBP/CHF
 ```

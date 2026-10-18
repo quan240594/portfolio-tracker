@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "./src/portable.ts",
+  "types": "./src/portable.ts",
+  "exports": {
+    ".": "./src/portable.ts"
+  },
   "scripts": {
     "build": "node ../../scripts/lambda/build.mjs api",
     "package": "node ../../scripts/lambda/build.mjs api && node ../../scripts/lambda/package.mjs api",
@@ -15,18 +20,18 @@
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
-    "@aws-lambda-powertools/logger": "^2.36.0",
+    "@portfolio/aws": "workspace:*",
+    "@portfolio/broker-sync": "workspace:*",
+    "@portfolio/platform": "workspace:*",
+    "@portfolio/shared": "workspace:*"
+  },
+  "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.1150.0",
     "@aws-sdk/client-eventbridge": "^3.1150.0",
     "@aws-sdk/client-lambda": "^3.1150.0",
     "@aws-sdk/client-s3": "^3.1150.0",
     "@aws-sdk/client-secrets-manager": "^3.1150.0",
     "@aws-sdk/lib-dynamodb": "^3.1150.0",
-    "@aws-sdk/s3-request-presigner": "^3.1150.0",
-    "@portfolio/broker-sync": "workspace:*",
-    "@portfolio/shared": "workspace:*"
-  },
-  "devDependencies": {
     "@eslint/js": "^9.39.5",
     "@types/aws-lambda": "^8.10.164",
     "@types/node": "^20.19.43",

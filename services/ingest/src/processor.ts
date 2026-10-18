@@ -1,14 +1,16 @@
+import { logger, runToCompletion, type EventPublisher, type FileStore, type JobHandler, type JobPayloads } from '@portfolio/platform';
 import { buildPositions, isMarketSymbol, parseImportObjectKey, PortfolioError, importObjectKey, type Transaction } from '@portfolio/shared';
 import { MAX_ERRORS, parseImportCsv, type ParsedRow, type RowError } from './csv.js';
-import type { EventPublisher } from './events.js';
-import { logger } from './logger.js';
 import type { S3ObjectRef } from './messages.js';
-import { MAX_OBJECT_BYTES, type ObjectReader } from './objects.js';
 import type { IngestStore } from './store.js';
+
+/** Largest CSV the ingestion reads. */
+export const MAX_OBJECT_BYTES = 1024 * 1024;
 
 export interface IngestDeps {
   store: IngestStore;
-  reader: ObjectReader;
+  /** Where the uploaded CSV files live. */
+  files: FileStore;
   events: EventPublisher;
   now: () => Date;
 }
@@ -62,16 +64,28 @@ function currencyConflict(existing: readonly Transaction[], rows: ParsedRow[]): 
 }
 
 /**
- * Processes one uploaded CSV. Domain problems (bad rows, oversell, too large, missing file) mark the import FAILED
- * and resolve normally; infrastructure errors are thrown so the SQS message is retried.
+ * Processes the upload of an S3 object (AWS: one S3 event of the ingest queue) by running the `importUploaded` job; objects
+ * outside `imports/` are ignored.
  */
-export async function processImportObject(deps: IngestDeps, ref: S3ObjectRef): Promise<ProcessOutcome> {
+export function processImportObject(deps: IngestDeps, ref: S3ObjectRef): Promise<ProcessOutcome> {
   const parsedKey = safeParseKey(ref.key);
   if (!parsedKey) {
     logger.info('Ignoring object outside the imports/ layout', { key: ref.key });
-    return 'IGNORED';
+    return Promise.resolve('IGNORED');
   }
-  const { userId, importId } = parsedKey;
+  return runToCompletion(importUploadedJob(deps), parsedKey);
+}
+
+/** The `importUploaded` job: one step, idempotent (a finished import is acknowledged, a half-written one is redone). */
+export function importUploadedJob(deps: IngestDeps): JobHandler<JobPayloads['importUploaded'], ProcessOutcome> {
+  return async ({ payload }) => ({ done: true, result: await processImport(deps, payload) });
+}
+
+/**
+ * Processes one uploaded CSV. Domain problems (bad rows, oversell, too large, missing file) mark the import FAILED
+ * and resolve normally; infrastructure errors are thrown so the message is retried.
+ */
+export async function processImport(deps: IngestDeps, { userId, importId }: { userId: string; importId: string }): Promise<ProcessOutcome> {
   const log = logger.createChild({ persistentKeys: { userId, importId } });
 
   const existing = await deps.store.getImport(userId, importId);
@@ -100,7 +114,7 @@ export async function processImportObject(deps: IngestDeps, ref: S3ObjectRef): P
     return fail(0, [{ row: 0, message: `Portfolio ${portfolioId} not found` }]);
   }
 
-  const file = await deps.reader.readText(ref.bucket, importObjectKey(userId, importId), MAX_OBJECT_BYTES);
+  const file = await deps.files.readText(importObjectKey(userId, importId), MAX_OBJECT_BYTES);
   if (!file.ok) return fail(0, [{ row: 0, message: file.reason }]);
 
   const parsed = parseImportCsv(file.content);

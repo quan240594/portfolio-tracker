@@ -8,15 +8,15 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
-import { EventBridgeClient } from '@aws-sdk/client-eventbridge';
-import { awsCommon, createDocClient } from './clients.js';
+import { createEventBridgePublisher } from '@portfolio/aws';
+import { BROKER_EVENT_SOURCE } from '@portfolio/shared';
+import { createItemStore } from './clients.js';
 import { loadConfig } from './config.js';
-import { LocalCredentialSource, loadLocalCredentials, type LocalCredentialDeps } from './credentials.js';
 import { BrokerError } from './errors.js';
-import { EventBridgePublisher } from './events.js';
+import { LocalCredentialSource, loadLocalCredentials, type LocalCredentialDeps } from './local-credentials.js';
 import { MemoryBrokerStore } from './memory-store.js';
 import { formatResult, whoami } from './report.js';
-import { DynamoBrokerStore } from './store.js';
+import { ItemBrokerStore } from './store.js';
 import { runSync, type SyncDeps } from './sync.js';
 import { Trading212Client } from './t212/client.js';
 
@@ -58,8 +58,8 @@ async function main(): Promise<number> {
     ? { ...base, store: new MemoryBrokerStore(), events: { transactionsChanged: () => Promise.resolve() } }
     : {
         ...base,
-        store: new DynamoBrokerStore(createDocClient(config), config.tableName),
-        events: new EventBridgePublisher(new EventBridgeClient(awsCommon(config)), config.eventBusName),
+        store: new ItemBrokerStore(createItemStore(config)),
+        events: createEventBridgePublisher(config, config.eventBusName, BROKER_EVENT_SOURCE),
       };
 
   // Fail early with a readable message instead of a confusing 401 on an empty key.

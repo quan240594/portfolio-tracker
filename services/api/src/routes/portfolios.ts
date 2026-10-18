@@ -108,7 +108,7 @@ export async function listPortfolios(ctx: RouteContext): Promise<RouteResult> {
 }
 
 export async function createPortfolio(ctx: RouteContext): Promise<RouteResult> {
-  const { name } = validate(createPortfolioSchema.safeParse(parseJsonBody(ctx.body, ctx.isBase64Encoded)), 'Invalid portfolio');
+  const { name } = validate(createPortfolioSchema.safeParse(parseJsonBody(ctx.body)), 'Invalid portfolio');
   const { repo, now, uuid } = ctx.deps;
   const existing = await repo.listPortfolios(ctx.userId);
   assertUniqueName(existing, name);
@@ -125,7 +125,7 @@ export async function createPortfolio(ctx: RouteContext): Promise<RouteResult> {
 
 export async function updatePortfolio(ctx: RouteContext): Promise<RouteResult> {
   const id = pathPortfolioId(ctx);
-  const { name } = validate(updatePortfolioSchema.safeParse(parseJsonBody(ctx.body, ctx.isBase64Encoded)), 'Invalid portfolio');
+  const { name } = validate(updatePortfolioSchema.safeParse(parseJsonBody(ctx.body)), 'Invalid portfolio');
   const { repo, now } = ctx.deps;
   const portfolios = await repo.listPortfolios(ctx.userId);
   if (!portfolios.some((p) => p.portfolioId === id)) throw notFound(id);

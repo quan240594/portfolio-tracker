@@ -1,9 +1,10 @@
 /**
- * Local HTTP server on :3001 that wraps the Lambda handler (API Gateway HTTP API payload v2).
- * Run with `pnpm --filter @portfolio/api dev` after `docker compose up -d` and `pnpm --filter @portfolio/api seed`.
+ * Local HTTP server on :3001 serving the portable app (the same `PortableRequest -> PortableResponse` contract the
+ * Lambda adapter and a Worker use). Run with `pnpm --filter @portfolio/api dev` after `docker compose up -d` and
+ * `pnpm --filter @portfolio/api seed`.
  */
 import { createServer, type IncomingMessage } from 'node:http';
-import type { APIGatewayProxyEventV2 } from 'aws-lambda';
+import type { PortableRequest } from '@portfolio/platform';
 
 const LOCAL_ENV: Record<string, string> = {
   TABLE_NAME: 'portfolio-tracker-local',
@@ -19,8 +20,16 @@ const LOCAL_ENV: Record<string, string> = {
 };
 for (const [k, v] of Object.entries(LOCAL_ENV)) process.env[k] ??= v;
 
-const { handler } = await import('./index.js');
+const { createApp } = await import('./app.js');
+const { createAwsDeps } = await import('./clients.js');
+const { loadConfig } = await import('./config.js');
+const { setLogger, createConsoleLogger } = await import('@portfolio/platform');
 const PORT = Number(process.env.PORT ?? 3001);
+
+setLogger(createConsoleLogger({ service: 'portfolio-tracker-api' }));
+const config = loadConfig();
+const deps = createAwsDeps(config);
+const app = createApp(() => deps);
 
 async function readBody(req: IncomingMessage): Promise<string | undefined> {
   const chunks: Buffer[] = [];
@@ -28,43 +37,25 @@ async function readBody(req: IncomingMessage): Promise<string | undefined> {
   return chunks.length ? Buffer.concat(chunks).toString('utf8') : undefined;
 }
 
-export function toEvent(req: IncomingMessage, body: string | undefined): APIGatewayProxyEventV2 {
+export function toRequest(req: IncomingMessage, body: string | undefined): PortableRequest {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   const headers: Record<string, string> = {};
   for (const [k, v] of Object.entries(req.headers)) if (v !== undefined) headers[k] = Array.isArray(v) ? v.join(',') : v;
-  const query = Object.fromEntries(url.searchParams.entries());
-  const method = (req.method ?? 'GET').toUpperCase();
-  const now = new Date();
   return {
-    version: '2.0',
-    routeKey: '$default',
-    rawPath: url.pathname,
-    rawQueryString: url.searchParams.toString(),
+    method: (req.method ?? 'GET').toUpperCase(),
+    path: url.pathname,
+    query: Object.fromEntries(url.searchParams.entries()),
     headers,
-    queryStringParameters: Object.keys(query).length ? query : undefined,
-    body,
-    isBase64Encoded: false,
-    requestContext: {
-      accountId: '000000000000',
-      apiId: 'local',
-      domainName: headers.host ?? 'localhost',
-      domainPrefix: 'localhost',
-      http: { method, path: url.pathname, protocol: 'HTTP/1.1', sourceIp: req.socket.remoteAddress ?? '127.0.0.1', userAgent: headers['user-agent'] ?? '' },
-      requestId: crypto.randomUUID(),
-      routeKey: '$default',
-      stage: '$default',
-      time: now.toUTCString(),
-      timeEpoch: now.getTime(),
-    },
+    ...(body === undefined ? {} : { body }),
+    requestId: crypto.randomUUID(),
   };
 }
 
 const server = createServer(async (req, res) => {
   try {
-    const event = toEvent(req, await readBody(req));
-    const result = await handler(event, { awsRequestId: event.requestContext.requestId });
-    res.writeHead(result.statusCode ?? 200, result.headers as Record<string, string>);
-    res.end(result.body ?? '');
+    const result = await app(toRequest(req, await readBody(req)));
+    res.writeHead(result.status, result.headers);
+    res.end(result.body);
   } catch (err) {
     console.error(err);
     res.writeHead(500, { 'content-type': 'application/json' });
@@ -73,5 +64,5 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`[api] listening on http://localhost:${PORT} (table=${process.env.TABLE_NAME}, endpoint=${process.env.AWS_ENDPOINT_URL})`);
+  console.log(`[api] listening on http://localhost:${PORT} (table=${config.tableName}, endpoint=${config.endpointUrl})`);
 });

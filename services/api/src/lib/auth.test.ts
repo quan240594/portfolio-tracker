@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { resolveUserId, type AuthConfig } from './auth.js';
+import { toPortableRequest } from '@portfolio/aws';
+import { resolveUserId as resolvePortable, type AuthConfig } from './auth.js';
 import { HttpError } from './http.js';
 import { apiEvent } from '../testing/fakes.js';
+
+/** The API Gateway event as the application sees it: through the adapter's translation. */
+const resolveUserId = (event: Parameters<typeof toPortableRequest>[0], config: AuthConfig) => resolvePortable(toPortableRequest(event), config);
 
 const cognito: AuthConfig = { authMode: 'cognito', demoUserId: 'demo' };
 const demo: AuthConfig = { authMode: 'demo', demoUserId: 'demo' };
@@ -52,5 +56,15 @@ describe('resolveUserId (demo mode)', () => {
   it('still honours a validated sub claim and keeps rejecting unsafe ones', () => {
     expect(resolveUserId(withClaims({ sub: 'user-123' }), demo)).toBe('user-123');
     expect(() => resolveUserId(withClaims({ sub: 'a/b' }), demo)).toThrow(HttpError);
+  });
+});
+
+describe('resolveUserId on a portable request', () => {
+  it('uses the identity the platform verified, and fails closed without one', () => {
+    expect(resolvePortable({ identity: { subject: 'abc' } }, cognito)).toBe('abc');
+    expect(resolvePortable({ identity: { subject: 'abc' } }, demo)).toBe('abc');
+    expect(resolvePortable({}, demo)).toBe('demo');
+    expect(() => resolvePortable({}, cognito)).toThrow(expect.objectContaining({ statusCode: 401 }));
+    expect(() => resolvePortable({ identity: { subject: 'a/b' } }, demo)).toThrow(expect.objectContaining({ statusCode: 401 }));
   });
 });

@@ -21,7 +21,7 @@ import { loadConfig } from './config.js';
 import { LOCALSTACK_ENDPOINT, localAwsConfig, localStackAvailable } from './testing/localstack.js';
 
 const available = await localStackAvailable();
-const runId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+const runId = `${Date.now().toString(36)}${crypto.randomUUID().slice(0, 4)}`;
 const TABLE = `portfolio-tracker-it-${runId}`;
 const BUCKET = `portfolio-tracker-imports-it-${runId}`;
 const BUS = `portfolio-tracker-it-${runId}`;

@@ -52,7 +52,7 @@ export async function listAssets(ctx: RouteContext): Promise<RouteResult> {
 
 export async function createAsset(ctx: RouteContext): Promise<RouteResult> {
   const portfolioId = await requirePathPortfolio(ctx);
-  const input = validate(createCustomAssetSchema.safeParse(parseJsonBody(ctx.body, ctx.isBase64Encoded)), 'Invalid asset');
+  const input = validate(createCustomAssetSchema.safeParse(parseJsonBody(ctx.body)), 'Invalid asset');
   const { mgmt, now, uuid } = ctx.deps;
   if ((await mgmt.listCustomAssets(ctx.userId, portfolioId)).length >= MAX_CUSTOM_ASSETS) {
     throw new HttpError(422, 'UNPROCESSABLE', `A portfolio can have at most ${MAX_CUSTOM_ASSETS} custom assets`);
@@ -77,7 +77,7 @@ export async function createAsset(ctx: RouteContext): Promise<RouteResult> {
 
 export async function updateAsset(ctx: RouteContext): Promise<RouteResult> {
   const portfolioId = await requirePathPortfolio(ctx);
-  const { growthRate, ...fields } = validate(updateCustomAssetSchema.safeParse(parseJsonBody(ctx.body, ctx.isBase64Encoded)), 'Invalid asset');
+  const { growthRate, ...fields } = validate(updateCustomAssetSchema.safeParse(parseJsonBody(ctx.body)), 'Invalid asset');
   const { growthRate: previous, ...current } = await requireAsset(ctx, portfolioId);
   // `growthRate: null` removes the rate, an absent field keeps it.
   const nextGrowth = growthRate === undefined ? previous : (growthRate ?? undefined);
@@ -101,7 +101,7 @@ export async function deleteAsset(ctx: RouteContext): Promise<RouteResult> {
 /** Adds or replaces the valuation point of a date. */
 export async function putValuation(ctx: RouteContext): Promise<RouteResult> {
   const portfolioId = await requirePathPortfolio(ctx);
-  const point = validate(valuationSchema.safeParse(parseJsonBody(ctx.body, ctx.isBase64Encoded)), 'Invalid valuation');
+  const point = validate(valuationSchema.safeParse(parseJsonBody(ctx.body)), 'Invalid valuation');
   const asset = await requireAsset(ctx, portfolioId);
   const next = upsertValuation(asset, point);
   if (!next) throw new HttpError(422, 'UNPROCESSABLE', 'Too many valuation points');

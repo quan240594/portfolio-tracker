@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DividendsOverviewResponse } from '@portfolio/shared';
-import { createHandler } from './app.js';
+import { createHandler } from './lambda/handler.js';
 import { apiEvent, fakeDeps, portfolio, txn } from './testing/fakes.js';
 
 /** Today is 2026-06-15 (fakeDeps). */

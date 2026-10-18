@@ -131,6 +131,8 @@ export interface BrokerSyncState {
   updatedAt: string;
   /** Set when a run starts; a RUNNING state older than the stale-lock window may be taken over. */
   runStartedAt?: string;
+  /** Token of the run that holds the lock: a redelivered start step of that run may take the lock again (see `beginRun`). */
+  runId?: string;
   lastSyncAt?: string;
   lastSuccessAt?: string;
   /** Incremental sync watermarks (ISO timestamps of the newest processed item per source). */
@@ -160,7 +162,7 @@ export interface BrokerStatusResponse {
 
 export function toBrokerStatus(portfolioId: string, state: BrokerSyncState | null | undefined): BrokerStatusResponse {
   if (!state) return { broker: BROKER_ID, portfolioId, connected: false };
-  const { userId: _u, cursors: _c, runStartedAt: _r, updatedAt: _t, portfolioId: _p, broker: _b, ...rest } = state;
+  const { userId: _u, cursors: _c, runStartedAt: _r, runId: _i, updatedAt: _t, portfolioId: _p, broker: _b, ...rest } = state;
   return { broker: BROKER_ID, portfolioId, connected: true, ...rest };
 }
 

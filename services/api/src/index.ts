@@ -1,7 +1,11 @@
-import { createHandler } from './app.js';
+import { createPowertoolsLogger } from '@portfolio/aws';
+import { setLogger } from '@portfolio/platform';
 import { createAwsDeps } from './clients.js';
 import { loadConfig } from './config.js';
 import type { Deps } from './deps.js';
+import { createHandler } from './lambda/handler.js';
+
+setLogger(createPowertoolsLogger('portfolio-tracker-api'));
 
 let deps: Deps | undefined;
 

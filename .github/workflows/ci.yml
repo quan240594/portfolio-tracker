@@ -159,7 +159,7 @@ jobs:
         ports:
           - 4566:4566
         env:
-          SERVICES: dynamodb,s3,sqs,events,ssm
+          SERVICES: dynamodb,s3,sqs,events,ssm,secretsmanager
           AWS_DEFAULT_REGION: eu-west-1
           EAGER_SERVICE_LOADING: "1"
         options: >-
@@ -189,6 +189,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Bootstrap LocalStack resources
         run: bash infra/localstack/init/ready.d/01-bootstrap.sh
+      - run: pnpm --filter @portfolio/aws test:integration # the port contract suites against DynamoDB, S3 and Secrets Manager
       - run: pnpm --filter @portfolio/api test:integration
       - run: pnpm --filter @portfolio/ingest test:integration
 

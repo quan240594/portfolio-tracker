@@ -6,7 +6,8 @@
   "main": "./src/lib.ts",
   "types": "./src/lib.ts",
   "exports": {
-    ".": "./src/lib.ts"
+    ".": "./src/lib.ts",
+    "./aws": "./src/aws.ts"
   },
   "scripts": {
     "build": "node ../../scripts/lambda/build.mjs broker-sync",
@@ -18,11 +19,8 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@aws-lambda-powertools/logger": "^2.36.0",
-    "@aws-sdk/client-dynamodb": "^3.1150.0",
-    "@aws-sdk/client-eventbridge": "^3.1150.0",
-    "@aws-sdk/client-secrets-manager": "^3.1150.0",
-    "@aws-sdk/lib-dynamodb": "^3.1150.0",
+    "@portfolio/aws": "workspace:*",
+    "@portfolio/platform": "workspace:*",
     "@portfolio/shared": "workspace:*",
     "zod": "^3.23.0"
   },
@@ -31,7 +29,6 @@
     "@types/aws-lambda": "^8.10.164",
     "@types/node": "^20.19.43",
     "archiver": "^8.0.0",
-    "aws-sdk-client-mock": "^4.1.0",
     "esbuild": "^0.28.2",
     "eslint": "^9.39.5",
     "tsx": "^4.23.15",

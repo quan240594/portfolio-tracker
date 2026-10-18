@@ -25,7 +25,7 @@ async function project(ctx: RouteContext, settings: GoalSettings) {
 }
 
 function requestSettings(ctx: RouteContext): GoalSettings {
-  return validate(goalSettingsSchemaFor(today(ctx)).safeParse(parseJsonBody(ctx.body, ctx.isBase64Encoded)), 'Invalid goal');
+  return validate(goalSettingsSchemaFor(today(ctx)).safeParse(parseJsonBody(ctx.body)), 'Invalid goal');
 }
 
 export async function getGoal(ctx: RouteContext): Promise<RouteResult> {

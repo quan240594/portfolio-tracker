@@ -30,7 +30,6 @@ import {
   rebalanceQuerySchema,
   sortValuations,
   toRebalanceHoldings,
-  trackTickerUpdates,
   transactionInputSchema,
   transactionsToCsv,
   updateCategorySchema,
@@ -84,17 +83,6 @@ describe('symbols', () => {
     expect(normalizeHoldingSymbol(' aapl ')).toBe('AAPL');
     expect(normalizeHoldingSymbol('cash.eur')).toBe('CASH.EUR');
     expect(normalizeHoldingSymbol('custom:AbC-1')).toBe('CUSTOM:abc-1');
-  });
-
-  it('never registers cash or custom symbols as tracked tickers', () => {
-    const inputs = trackTickerUpdates('tbl', [{ symbol: 'AAPL', currency: 'USD' }, { symbol: 'CASH.EUR', currency: 'EUR' }, { symbol: 'CUSTOM:x', currency: 'EUR' }], 'now');
-    expect(inputs.map((i) => i.Key.SK)).toEqual(['TICKER#AAPL']);
-  });
-
-  it('registers watchlist symbols without a currency', () => {
-    const [input] = trackTickerUpdates('tbl', [{ symbol: 'NVDA' }], 'now');
-    expect(input!.UpdateExpression).toBe('SET entityType = :t, symbol = :s, updatedAt = :now, createdAt = if_not_exists(createdAt, :now)');
-    expect(input!.ExpressionAttributeValues).toEqual({ ':t': ENTITY.trackedTicker, ':s': 'NVDA', ':now': 'now' });
   });
 });
 

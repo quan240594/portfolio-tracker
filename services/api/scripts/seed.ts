@@ -3,9 +3,9 @@
  *   pnpm --filter @portfolio/api seed
  * Prerequisite: `docker compose up -d` (the LocalStack init hook creates the table).
  */
-import { DescribeTableCommand, DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { BatchWriteCommand, DynamoDBDocumentClient, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { pathToFileURL } from 'node:url';
+import { createDynamoItemStore } from '@portfolio/aws';
+import { queryAll, type Item, type ItemStore } from '@portfolio/platform';
 import {
   DEFAULT_PORTFOLIO_ID,
   DEFAULT_PORTFOLIO_NAME,
@@ -260,8 +260,8 @@ export function generateFxDays(from: string, to: string): FxDay[] {
 }
 
 export interface SeedOptions {
-  doc: DynamoDBDocumentClient;
-  tableName: string;
+  /** Any ItemStore: the local DynamoDB table, or a D1 database. */
+  store: ItemStore;
   userId?: string;
   today?: string;
   log?: (msg: string) => void;
@@ -364,7 +364,7 @@ const seedPrice = (type: TransactionType, dividend: number | undefined, close: (
   return type === 'DIVIDEND' ? dividend! : round(close(), 4);
 };
 
-export async function seed({ doc, tableName, userId = 'demo', today = iso(new Date()), log = console.log }: SeedOptions) {
+export async function seed({ store, userId = 'demo', today = iso(new Date()), log = console.log }: SeedOptions) {
   const firstTxnDate = addDays(today, -Math.max(...TXNS.map((t) => t[0])));
   const eodFrom = addDays(today, -Math.max(MIN_EOD_DAYS, daysBetween(firstTxnDate, today) + 10));
   const now = new Date().toISOString();
@@ -455,78 +455,39 @@ export async function seed({ doc, tableName, userId = 'demo', today = iso(new Da
 
   // Seed transaction dates are relative to today: remove earlier seed runs so re-seeding never duplicates.
   // The query covers every TXN# key, so it also removes items of the pre-portfolio key layout (TXN#{date}#{id}).
-  const stale = await querySeedTransactionKeys(doc, tableName, userId);
-  const deletes = stale.map((Key) => ({ DeleteRequest: { Key } }));
-  await batchWrite(doc, tableName, deletes);
-  await batchWrite(doc, tableName, items.map((Item) => ({ PutRequest: { Item } })));
+  const stale = await querySeedTransactionKeys(store, userId);
+  await store.batchWrite(stale.map((key) => ({ type: 'delete', key })));
+  await store.batchWrite(items.map((item) => ({ type: 'put', item: item as Item })));
 
   log(`Seeded user '${userId}': ${portfolios.length} portfolios, ${transactions.length} transactions, ${INSTRUMENTS.length} instruments, ` +
     `${fxDays.length} FX fixings, ${items.length} items total (EOD/FX ${eodFrom}..${today}); removed ${stale.length} stale seed transactions.`);
   return { portfolios, transactions, fxDays, itemCount: items.length, removed: stale.length };
 }
 
-async function querySeedTransactionKeys(
-  doc: DynamoDBDocumentClient,
-  tableName: string,
-  userId: string,
-  ExclusiveStartKey?: Record<string, unknown>,
-): Promise<{ PK: string; SK: string }[]> {
-  const res = await doc.send(
-    new QueryCommand({
-      TableName: tableName,
-      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
-      FilterExpression: 'begins_with(id, :seed)',
-      ExpressionAttributeValues: { ':pk': keys.user(userId).PK, ':sk': keys.transactionPrefix, ':seed': 'seed-' },
-      ProjectionExpression: 'PK, SK',
-      ExclusiveStartKey,
-    }),
-  );
-  const page = (res.Items ?? []) as { PK: string; SK: string }[];
-  // Each page needs the previous page's cursor, so pages are fetched sequentially.
-  return res.LastEvaluatedKey ? [...page, ...(await querySeedTransactionKeys(doc, tableName, userId, res.LastEvaluatedKey))] : page;
+async function querySeedTransactionKeys(store: ItemStore, userId: string): Promise<{ PK: string; SK: string }[]> {
+  const transactions = await queryAll(store, { pk: keys.user(userId).PK, sk: { beginsWith: keys.transactionPrefix } });
+  return transactions.filter((t) => String(t.id).startsWith('seed-')).map(({ PK, SK }) => ({ PK, SK }));
 }
 
-type WriteRequest = { PutRequest?: { Item: Record<string, unknown> }; DeleteRequest?: { Key: Record<string, unknown> } };
-
-/** Writes one batch, retrying unprocessed items with exponential backoff (each retry depends on the previous response). */
-async function writeChunk(doc: DynamoDBDocumentClient, tableName: string, pending: WriteRequest[], attempt = 0): Promise<void> {
-  if (attempt > 8) throw new Error('BatchWrite: unprocessed items remain after retries');
-  if (attempt > 0) await new Promise((r) => setTimeout(r, Math.min(100 * 2 ** attempt, 3000)));
-  const res = await doc.send(new BatchWriteCommand({ RequestItems: { [tableName]: pending } }));
-  const unprocessed = (res.UnprocessedItems?.[tableName] ?? []) as WriteRequest[];
-  if (unprocessed.length > 0) await writeChunk(doc, tableName, unprocessed, attempt + 1);
-}
-
-async function batchWrite(doc: DynamoDBDocumentClient, tableName: string, requests: WriteRequest[], concurrency = 8) {
-  const chunks: WriteRequest[][] = [];
-  for (let i = 0; i < requests.length; i += 25) chunks.push(requests.slice(i, i + 25));
-  let next = 0;
-  // Workers drain a shared queue so at most `concurrency` batches are in flight.
-  const worker = async (): Promise<void> => {
-    if (next >= chunks.length) return;
-    await writeChunk(doc, tableName, chunks[next++]!);
-    return worker();
-  };
-  await Promise.all(Array.from({ length: Math.min(concurrency, chunks.length) }, worker));
-}
-
-export function createLocalDocClient() {
+/** The local DynamoDB table (LocalStack) as an ItemStore. */
+export function createLocalStore() {
   for (const [k, v] of Object.entries(LOCAL_ENV)) process.env[k] ??= v;
-  const client = new DynamoDBClient({ region: process.env.AWS_REGION, endpoint: process.env.AWS_ENDPOINT_URL || undefined });
-  return { client, doc: DynamoDBDocumentClient.from(client), tableName: process.env.TABLE_NAME! };
+  const tableName = process.env.TABLE_NAME!;
+  const store = createDynamoItemStore({ region: process.env.AWS_REGION!, endpointUrl: process.env.AWS_ENDPOINT_URL || undefined }, tableName);
+  return { store, tableName };
 }
 
 async function main() {
-  const { client, doc, tableName } = createLocalDocClient();
+  const { store, tableName } = createLocalStore();
   try {
-    await client.send(new DescribeTableCommand({ TableName: tableName }));
+    await store.get({ PK: 'SEED#PROBE', SK: 'SEED#PROBE' });
   } catch (err) {
     const name = (err as Error).name;
     const reason = name === 'ResourceNotFoundException' ? `table '${tableName}' does not exist` : `cannot reach DynamoDB at ${process.env.AWS_ENDPOINT_URL} (${(err as Error).message || (err as { code?: string }).code || name})`;
     console.error(`\n✖ Seed aborted: ${reason}.\n  Start LocalStack first (it creates the table): docker compose up -d\n`);
     process.exit(1);
   }
-  await seed({ doc, tableName, userId: process.env.SEED_USER_ID ?? 'demo' });
+  await seed({ store, userId: process.env.SEED_USER_ID ?? 'demo' });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

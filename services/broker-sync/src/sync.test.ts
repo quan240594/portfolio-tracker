@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { BrokerSyncState, Transaction } from '@portfolio/shared';
 import { BrokerError } from './errors.js';
 import { MemoryBrokerStore } from './memory-store.js';
-import { STALE_LOCK_MS, countCash, runAll, runSync, validateMerged, type SyncDeps } from './sync.js';
+import { runToCompletion, type JobStep } from '@portfolio/platform';
+import { DEFAULT_PAGES_PER_STEP, DEFAULT_WRITE_CHUNK, STALE_LOCK_MS, countCash, runAll, runSync, syncAllJob, syncJob, validateMerged, type SyncDeps, type SyncResult } from './sync.js';
 import type { Page, Trading212Api } from './t212/client.js';
 import type { CashTransaction, HistoricalOrder, HistoryDividend, OpenPosition } from './t212/schemas.js';
 import { cash, dividend, order } from './testing/fixtures.js';
@@ -19,6 +20,8 @@ interface FakeData {
   pageSize?: number;
   invalid?: number;
   cashError?: Error;
+  /** Pages carry no `next` link, so a step cannot stop in the middle of a history. */
+  unresumable?: boolean;
 }
 
 class FakeApi implements Trading212Api {
@@ -31,21 +34,23 @@ class FakeApi implements Trading212Api {
   positions() {
     return Promise.resolve({ items: this.data.positions ?? [], invalid: 0 });
   }
-  private async *paged<T>(name: string, items: T[], invalid = 0): AsyncGenerator<Page<T>, void, undefined> {
+  /** Pages of `pageSize` items; `from` is the `next` of a page (its index), like Trading 212's `nextPagePath`. */
+  private async *paged<T>(name: string, items: T[], invalid = 0, from?: string): AsyncGenerator<Page<T>, void, undefined> {
     const size = this.data.pageSize ?? 2;
-    for (let i = 0; i < Math.max(items.length, 1); i += size) {
+    for (let i = from === undefined ? 0 : Number(from) * size; i < Math.max(items.length, 1); i += size) {
       this.requested.push(`${name}:${i / size}`);
       await Promise.resolve();
-      yield { items: items.slice(i, i + size), invalid: i === 0 ? invalid : 0 };
+      const hasMore = i + size < items.length;
+      yield { items: items.slice(i, i + size), invalid: i === 0 ? invalid : 0, ...(hasMore && !this.data.unresumable ? { next: String(i / size + 1) } : {}) };
     }
   }
-  historyOrders() {
-    return this.paged('orders', this.data.orders ?? [], this.data.invalid);
+  historyOrders(from?: string) {
+    return this.paged('orders', this.data.orders ?? [], this.data.invalid, from);
   }
-  historyDividends() {
-    return this.paged('dividends', this.data.dividends ?? []);
+  historyDividends(from?: string) {
+    return this.paged('dividends', this.data.dividends ?? [], 0, from);
   }
-  historyTransactions() {
+  historyTransactions(from?: string) {
     if (this.data.cashError) {
       const error = this.data.cashError;
       // eslint-disable-next-line require-yield
@@ -54,7 +59,7 @@ class FakeApi implements Trading212Api {
         throw error;
       })();
     }
-    return this.paged('cash', this.data.cash ?? []);
+    return this.paged('cash', this.data.cash ?? [], 0, from);
   }
   instruments() {
     return Promise.resolve([]);
@@ -83,8 +88,8 @@ function setup(data: FakeData = {}, over: Partial<SyncDeps> = {}) {
     now: () => NOW,
     ...over,
   };
-  const connect = (patch: Partial<BrokerSyncState> = {}) =>
-    store.createState({
+  const connect = async (patch: Partial<BrokerSyncState> = {}) => {
+    const state: BrokerSyncState = {
       userId: 'u1',
       portfolioId: 'p1',
       broker: 'trading212',
@@ -93,7 +98,10 @@ function setup(data: FakeData = {}, over: Partial<SyncDeps> = {}) {
       connectedAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
       ...patch,
-    });
+    };
+    await store.createState(state);
+    await store.registerUser(state.userId);
+  };
   return { store, api, deps, published, connect };
 }
 
@@ -290,6 +298,13 @@ describe('runSync', () => {
     expect((await runSync(stale.deps, REQ)).status).toBe('SUCCEEDED');
   });
 
+  it('does not keep the run id of a crashed run when it takes over a stale lock', async () => {
+    const stale = setup({ orders: [buy(1, '2026-01-02T10:00:00Z')] });
+    await stale.connect({ status: 'RUNNING', runId: 'crashed', runStartedAt: new Date(NOW.getTime() - STALE_LOCK_MS - 1000).toISOString() });
+    expect((await runSync(stale.deps, REQ)).status).toBe('SUCCEEDED');
+    expect(stale.store.states.get('u1|p1')).not.toHaveProperty('runId');
+  });
+
   it('lets the sync continue without cash history when the key lacks that scope', async () => {
     const { deps, connect } = setup({ cashError: new BrokerError('T212_AUTH_REJECTED', 'nope', 403) });
     await connect();
@@ -436,10 +451,211 @@ describe('validateMerged', () => {
   });
 
   it('rethrows unexpected errors', () => {
-    const spy = vi.spyOn(Array.prototype, 'filter').mockImplementationOnce(() => {
-      throw new TypeError('boom');
-    });
+    const filter = Array.prototype.filter;
+    const spy = vi
+      .spyOn(Array.prototype, 'filter')
+      // The first call is the lookup of the stored transactions; the one inside the position check fails.
+      .mockImplementationOnce(function (this: unknown[], ...args: Parameters<typeof filter>) {
+        return filter.apply(this, args);
+      })
+      .mockImplementationOnce(() => {
+        throw new TypeError('boom');
+      });
     expect(() => validateMerged([], [], 'p1', '')).toThrow(TypeError);
     spy.mockRestore();
+  });
+});
+
+describe('resumable steps', () => {
+  const DATA: FakeData = {
+    orders: [
+      buy(5, '2026-03-05T10:00:00Z', { side: 'SELL', quantity: -1, price: 120 }),
+      buy(4, '2026-03-04T10:00:00Z', { ticker: 'ASMLa_EQ', currency: 'EUR', isin: 'NL0010273215', price: 700, quantity: 1, fxRate: undefined, netValue: 700 }),
+      buy(3, '2026-03-03T10:00:00Z', { quantity: 1, price: 110 }),
+      buy(2, '2026-02-02T10:00:00Z', { quantity: 1, price: 105 }),
+      buy(1, '2026-01-02T10:00:00Z', { quantity: 3, price: 100 }),
+    ],
+    dividends: [dividend({ reference: 'd2', paidOn: '2026-03-01T00:00:00Z' }), dividend({ reference: 'd1', paidOn: '2026-02-15T00:00:00Z' }), dividend({ reference: 'd0', paidOn: '2026-01-15T00:00:00Z' })],
+    cash: [cash('DEPOSIT'), cash('FEE'), cash('INTEREST_ON_FREE_CASH')],
+  };
+  const SMALL_STEPS = { pagesPerStep: 1, writeChunk: 2 };
+
+  /** A restarted worker: new dependencies and a new API client around the same persistent store. */
+  const restarted = (store: MemoryBrokerStore, published: unknown[], data: FakeData = DATA): SyncDeps => ({
+    ...setup(data).deps,
+    store,
+    events: { transactionsChanged: (d) => { published.push(d); return Promise.resolve(); } },
+    limits: SMALL_STEPS,
+  });
+
+  const phaseOf = (next: string) => (JSON.parse(next) as { phase: string }).phase;
+
+  /** The cursors of an uninterrupted run, and its result. */
+  async function uninterrupted(req = REQ, data: FakeData = DATA) {
+    const { store, deps, published, connect } = setup(data, { limits: SMALL_STEPS });
+    await connect();
+    const cursors: (string | undefined)[] = [undefined];
+    let step: JobStep<SyncResult>;
+    do {
+      step = await syncJob(deps)({ payload: req, cursor: cursors.at(-1) });
+      if (!step.done) cursors.push(step.next);
+    } while (!step.done);
+    return { cursors, result: step.result, store, published };
+  }
+
+  /** The stored items; the registry rows carry the wall-clock time of the write, which is not part of the comparison. */
+  const snapshot = (store: MemoryBrokerStore) =>
+    store.items
+      .snapshot()
+      .map(({ createdAt, updatedAt, ...item }) => (item.PK === 'USERS' || item.PK === 'TRACKED' ? item : { ...item, createdAt, updatedAt }))
+      .sort((a, b) => `${a.PK}${a.SK}`.localeCompare(`${b.PK}${b.SK}`));
+
+  it('splits a sync into bounded steps with a cursor each: lock, account, orders, dividends, cash, prepare, write, announce, finish', async () => {
+    const { cursors, result } = await uninterrupted();
+    const phases = cursors.slice(1).map((c) => phaseOf(c!));
+    expect([...new Set(phases)]).toEqual(['lock', 'account', 'orders', 'dividends', 'cash', 'prepare', 'write', 'announce', 'finish']);
+    expect(phases.filter((p) => p === 'orders')).toHaveLength(3);
+    expect(phases.filter((p) => p === 'write')).toHaveLength(4);
+    expect(result).toMatchObject({ status: 'SUCCEEDED', counts: { orders: 5, dividends: 3, written: 8 } });
+    // Each cursor is plain JSON and the raw history is dropped once it has been mapped.
+    expect(JSON.parse(cursors.at(-1)!).orders.items).toEqual([]);
+  });
+
+  it('reads every page once across steps (the Trading 212 page link is the cursor)', async () => {
+    const api = new FakeApi(DATA);
+    const { deps, connect } = setup(DATA, { createApi: () => api, limits: SMALL_STEPS });
+    await connect();
+    await runSync(deps, REQ);
+    expect(api.requested).toEqual(['orders:0', 'orders:1', 'orders:2', 'dividends:0', 'dividends:1', 'cash:0', 'cash:1']);
+  });
+
+  /**
+   * A run whose worker dies after `interruptAfter` steps: the next step has executed but its cursor was lost, so a new
+   * worker (new dependencies, new API client) is handed the same cursor again and runs it a second time.
+   */
+  async function interrupted(req: typeof REQ & { dryRun?: boolean }, interruptAfter: number, connected = true) {
+    const { store, connect } = setup(DATA);
+    if (connected) await connect();
+    const published: unknown[] = [];
+    const job = () => syncJob(restarted(store, published));
+    let cursor: string | undefined;
+    for (let i = 0; i < interruptAfter; i++) {
+      const step = await job()({ payload: req, cursor });
+      cursor = step.done ? cursor : step.next;
+    }
+    await job()({ payload: req, cursor });
+    let step: JobStep<SyncResult>;
+    do {
+      step = await job()({ payload: req, cursor });
+      if (!step.done) cursor = step.next;
+    } while (!step.done);
+    return { result: step.result, store, published };
+  }
+
+  it('gives the same result as one run when interrupted after any step', async () => {
+    const baseline = await uninterrupted();
+    expect(baseline.cursors.length).toBeGreaterThan(10);
+    for (let interruptAfter = 0; interruptAfter < baseline.cursors.length; interruptAfter++) {
+      const run = await interrupted(REQ, interruptAfter);
+      expect(run.result, `interrupted after step ${interruptAfter}`).toEqual(baseline.result);
+      expect(snapshot(run.store), `interrupted after step ${interruptAfter}`).toEqual(snapshot(baseline.store));
+      // Delivery is at-least-once: the event may repeat, never differ.
+      expect(new Set(run.published.map((p) => JSON.stringify(p)))).toEqual(new Set(baseline.published.map((p) => JSON.stringify(p))));
+    }
+  });
+
+  it('resumes an interrupted dry run to the same result without writing anything', async () => {
+    const req = { ...REQ, dryRun: true };
+    const baseline = await uninterrupted(req);
+    expect(baseline.cursors.map((c) => c && phaseOf(c))).not.toContain('write');
+    for (let interruptAfter = 0; interruptAfter < baseline.cursors.length; interruptAfter++) {
+      const run = await interrupted(req, interruptAfter, false);
+      expect(run.result, `interrupted after step ${interruptAfter}`).toEqual(baseline.result);
+      expect(run.store.transactions.size).toBe(0);
+      expect(run.store.states.size).toBe(0);
+    }
+    expect(baseline.result).toMatchObject({ status: 'SUCCEEDED', dryRun: true });
+  });
+
+  it('does not lock out its own redelivered lock step, but skips a second run while one is active', async () => {
+    const { deps, connect, store } = setup(DATA, { limits: SMALL_STEPS });
+    await connect();
+    const lockStep = async () => {
+      const first = await syncJob(deps)({ payload: REQ });
+      return syncJob(deps)({ payload: REQ, cursor: first.done ? undefined : first.next });
+    };
+    expect(await lockStep()).toMatchObject({ done: false });
+    expect(await store.getState('u1', 'p1')).toMatchObject({ status: 'RUNNING', runId: expect.any(String) });
+    expect(await lockStep()).toMatchObject({ done: true, result: { status: 'SKIPPED', error: 'A sync is already running for this portfolio' } });
+  });
+
+  it('records a failure that happens in a later step and ends the job', async () => {
+    const failing = Object.assign(new FakeApi(DATA), { historyDividends: () => { throw new BrokerError('T212_HTTP_ERROR', 'boom', 500); } });
+    const { deps, connect, store } = setup(DATA, { createApi: () => failing, limits: SMALL_STEPS });
+    await connect();
+    const result = await runSync(deps, REQ);
+    expect(result).toMatchObject({ status: 'FAILED', error: 'T212_HTTP_ERROR: boom' });
+    expect(await store.getState('u1', 'p1')).toMatchObject({ status: 'FAILED', lastError: 'T212_HTTP_ERROR: boom' });
+  });
+
+  it('reads a history to its end in one step when its pages cannot be resumed', async () => {
+    const { deps, connect, store } = setup({ ...DATA, unresumable: true }, { limits: SMALL_STEPS });
+    await connect();
+    const result = await runSync(deps, REQ);
+    expect(result).toMatchObject({ status: 'SUCCEEDED', counts: { orders: 5, written: 8 } });
+    expect(store.transactions.size).toBe(8);
+  });
+
+  it('has defaults that fit a whole history into a few steps', async () => {
+    expect(DEFAULT_PAGES_PER_STEP).toBeGreaterThanOrEqual(5);
+    expect(DEFAULT_WRITE_CHUNK).toBeGreaterThanOrEqual(25);
+    const { deps, connect } = setup(DATA);
+    await connect();
+    const steps: string[] = [];
+    await runToCompletion(syncJob(deps), REQ, { onStep: (step) => { if (!step.done) steps.push(phaseOf(step.next)); } });
+    expect(steps).toEqual(['lock', 'account', 'orders', 'dividends', 'cash', 'prepare', 'write', 'announce', 'finish']);
+  });
+
+  it('resumes the scheduled run over every portfolio after any step', async () => {
+    const build = async () => {
+      const ctx = setup({ orders: [buy(1, '2026-01-02T10:00:00Z')] }, { limits: SMALL_STEPS });
+      await ctx.connect();
+      await ctx.connect({ userId: 'u2', portfolioId: 'p9' });
+      await ctx.connect({ userId: 'u3', portfolioId: 'p1' });
+      await ctx.connect({ userId: 'u3', portfolioId: 'p2' });
+      return { ...ctx, deps: { ...ctx.deps, credentials: { get: (userId: string) => Promise.resolve(userId === 'u2' ? null : creds) } } };
+    };
+    const reference = await build();
+    const cursors: (string | undefined)[] = [undefined];
+    let step: JobStep<SyncResult[]>;
+    do {
+      step = await syncAllJob(reference.deps)({ payload: undefined, cursor: cursors.at(-1) });
+      if (!step.done) cursors.push(step.next);
+    } while (!step.done);
+    const expected = step.result;
+    expect(expected.map((r) => [r.userId, r.portfolioId, r.status])).toEqual([
+      ['u1', 'p1', 'SUCCEEDED'],
+      ['u2', 'p9', 'FAILED'],
+      ['u3', 'p1', 'SUCCEEDED'],
+      ['u3', 'p2', 'SUCCEEDED'],
+    ]);
+
+    for (let interruptAfter = 0; interruptAfter < cursors.length; interruptAfter++) {
+      const run = await build();
+      const job = () => syncAllJob(run.deps);
+      let cursor: string | undefined;
+      for (let i = 0; i < interruptAfter; i++) {
+        const next = await job()({ payload: undefined, cursor });
+        cursor = next.done ? cursor : next.next;
+      }
+      await job()({ payload: undefined, cursor });
+      let next: JobStep<SyncResult[]>;
+      do {
+        next = await job()({ payload: undefined, cursor });
+        if (!next.done) cursor = next.next;
+      } while (!next.done);
+      expect(next.result, `interrupted after step ${interruptAfter}`).toEqual(expected);
+      expect(snapshot(run.store), `interrupted after step ${interruptAfter}`).toEqual(snapshot(reference.store));
+    }
   });
 });

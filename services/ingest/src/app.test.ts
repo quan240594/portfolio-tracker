@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHandler } from './app.js';
-import { logger } from './logger.js';
+import { logger } from '@portfolio/platform';
 import { eventBridgeBody, fakeIngestDeps, s3NotificationBody, sqsEvent } from './testing/fakes.js';
 
 const BUCKET = 'portfolio-tracker-imports-test';
@@ -15,7 +15,7 @@ const GOOD_CSV = `${HEADER}
 function setup(csv = GOOD_CSV, importId = 'imp1', userId = 'demo') {
   const ctx = fakeIngestDeps();
   ctx.store.addImport(userId, importId);
-  ctx.reader.objects.set(`${BUCKET}/imports/${userId}/${importId}.csv`, csv);
+  ctx.files.files.set(`imports/${userId}/${importId}.csv`, csv);
   return { ...ctx, handler: createHandler(() => ctx.deps), key: `imports/${userId}/${importId}.csv` };
 }
 
@@ -96,7 +96,7 @@ describe('ingest handler', () => {
   it('reports only the throttled message as a batch item failure and does not mark it FAILED', async () => {
     const ctx = setup();
     ctx.store.addImport('demo', 'imp2');
-    ctx.reader.objects.set(`${BUCKET}/imports/demo/imp2.csv`, GOOD_CSV);
+    ctx.files.files.set(`imports/demo/imp2.csv`, GOOD_CSV);
     const original = ctx.store.listTransactions.bind(ctx.store);
     let calls = 0;
     ctx.store.listTransactions = async (userId: string) => {
@@ -154,7 +154,7 @@ describe('ingest handler', () => {
       const ctx = fakeIngestDeps();
       for (const [userId, importId] of refs) {
         ctx.store.addImport(userId, importId);
-        ctx.reader.objects.set(`${BUCKET}/imports/${userId}/${importId}.csv`, csvFor('AAPL'));
+        ctx.files.files.set(`imports/${userId}/${importId}.csv`, csvFor('AAPL'));
       }
       const handler = createHandler(() => ctx.deps);
       const body = multiBody(...refs.map(([u, i]) => `imports/${u}/${i}.csv`));
@@ -162,16 +162,16 @@ describe('ingest handler', () => {
     }
 
     it('processes the refs of one user strictly in order while other users run concurrently', async () => {
-      const { handler, reader, body, store } = multiSetup([['alice', 'a1'], ['alice', 'a2'], ['bob', 'b1']]);
+      const { handler, files, body, store } = multiSetup([['alice', 'a1'], ['alice', 'a2'], ['bob', 'b1']]);
       const trace: string[] = [];
       const gates = new Map<string, () => void>();
-      const original = reader.readText.bind(reader);
-      reader.readText = async (bucket, key, max) => {
+      const original = files.readText.bind(files);
+      files.readText = async (key, max) => {
         trace.push(`start ${key}`);
         // alice's first import only finishes after bob's has started, proving the groups overlap.
         if (key.endsWith('alice/a1.csv')) await new Promise<void>((resolve) => gates.set('a1', resolve));
         if (key.endsWith('bob/b1.csv')) gates.get('a1')!();
-        const res = await original(bucket, key, max);
+        const res = await original(key, max);
         trace.push(`end ${key}`);
         return res;
       };

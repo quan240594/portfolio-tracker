@@ -1,13 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mockClient } from 'aws-sdk-client-mock';
-import { ConditionalCheckFailedException, DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { BatchWriteCommand, DynamoDBDocumentClient, GetCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
-import type { Transaction } from '@portfolio/shared';
-import { BATCH_SIZE, DynamoIngestStore } from './store.js';
+import { MemoryItemStore } from '@portfolio/platform';
+import type { ImportStatus, Transaction } from '@portfolio/shared';
+import { ItemIngestStore } from './store.js';
 
-const ddbMock = mockClient(DynamoDBDocumentClient);
-const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'eu-west-1' }));
 const NOW = '2026-06-15T12:00:00.000Z';
+
+const setup = () => {
+  const items = new MemoryItemStore();
+  return { items, store: new ItemIngestStore(items) };
+};
+
+const importItem = (over: Partial<ImportStatus> = {}) => ({
+  PK: 'USER#u',
+  SK: 'IMPORT#i',
+  entityType: 'IMPORT',
+  importId: 'i',
+  userId: 'u',
+  portfolioId: 'p1',
+  fileName: 'f.csv',
+  status: 'PENDING',
+  createdAt: 'c',
+  updatedAt: 'c',
+  ...over,
+});
 
 const txn = (i: number): Transaction => ({
   id: `imp-${i}`,
@@ -23,227 +38,123 @@ const txn = (i: number): Transaction => ({
   createdAt: 'x',
   importId: 'imp',
 });
-const txns = (n: number) => Array.from({ length: n }, (_, i) => txn(i + 1));
-const updates = () => ddbMock.commandCalls(UpdateCommand).map((c) => c.args[0].input);
 
 beforeEach(() => {
-  ddbMock.reset();
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date(NOW));
 });
-afterEach(() => {
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-});
+afterEach(() => vi.useRealTimers());
 
-describe('DynamoIngestStore.getImport', () => {
-  const store = new DynamoIngestStore(doc, 'tbl');
-
-  it('reads the IMPORT item consistently and strips key attributes', async () => {
-    ddbMock.on(GetCommand).resolves({ Item: { PK: 'USER#u', SK: 'IMPORT#i', entityType: 'IMPORT', importId: 'i', userId: 'u', status: 'PENDING' } });
-    expect(await store.getImport('u', 'i')).toEqual({ importId: 'i', userId: 'u', status: 'PENDING' });
-    expect(ddbMock.commandCalls(GetCommand)[0]!.args[0].input).toEqual({ TableName: 'tbl', Key: { PK: 'USER#u', SK: 'IMPORT#i' }, ConsistentRead: true });
-  });
-
-  it('returns null when the item does not exist', async () => {
-    ddbMock.on(GetCommand).resolves({});
+describe('ItemIngestStore reads', () => {
+  it('reads the IMPORT item consistently without key attributes, or null', async () => {
+    const { items, store } = setup();
+    const get = vi.spyOn(items, 'get');
     expect(await store.getImport('u', 'i')).toBeNull();
+    await items.put(importItem());
+    expect(await store.getImport('u', 'i')).toMatchObject({ importId: 'i', userId: 'u', status: 'PENDING' });
+    expect(await store.getImport('u', 'i')).not.toHaveProperty('PK');
+    expect(get).toHaveBeenCalledWith({ PK: 'USER#u', SK: 'IMPORT#i' }, { consistent: true });
   });
-});
 
-describe('DynamoIngestStore.portfolioExists', () => {
-  const store = new DynamoIngestStore(doc, 'tbl');
-
-  it('reads the PORTFOLIO item consistently, projecting only the key', async () => {
-    ddbMock.on(GetCommand).resolvesOnce({ Item: { PK: 'USER#u' } }).resolvesOnce({});
+  it('checks whether the PORTFOLIO item exists, consistently', async () => {
+    const { items, store } = setup();
+    const get = vi.spyOn(items, 'get');
+    await items.put({ PK: 'USER#u', SK: 'PORTFOLIO#p1' });
     expect(await store.portfolioExists('u', 'p1')).toBe(true);
     expect(await store.portfolioExists('u', 'gone')).toBe(false);
-    expect(ddbMock.commandCalls(GetCommand)[0]!.args[0].input).toEqual({
-      TableName: 'tbl',
-      Key: { PK: 'USER#u', SK: 'PORTFOLIO#p1' },
-      ConsistentRead: true,
-      ProjectionExpression: 'PK',
-    });
+    expect(get).toHaveBeenCalledWith({ PK: 'USER#u', SK: 'PORTFOLIO#p1' }, { consistent: true });
+  });
+
+  it('lists the transactions of the user (every portfolio) without key attributes', async () => {
+    const { store } = setup();
+    await store.putTransactions([txn(1), { ...txn(2), portfolioId: 'p2' }]);
+    expect((await store.listTransactions('u')).map((t) => t.id)).toEqual(['imp-1', 'imp-2']);
+    expect(await store.listTransactions('other')).toEqual([]);
   });
 });
 
-describe('DynamoIngestStore.markProcessing', () => {
-  const store = new DynamoIngestStore(doc, 'tbl');
-
-  it('conditionally moves PENDING/PROCESSING to PROCESSING', async () => {
-    ddbMock.on(UpdateCommand).resolves({});
+describe('ItemIngestStore.markProcessing', () => {
+  it('moves PENDING and PROCESSING to PROCESSING and stamps updatedAt', async () => {
+    const { items, store } = setup();
+    await items.put(importItem());
     expect(await store.markProcessing('u', 'i')).toBe(true);
-    expect(updates()[0]).toMatchObject({
-      Key: { PK: 'USER#u', SK: 'IMPORT#i' },
-      ConditionExpression: 'attribute_exists(PK) AND #s IN (:pending, :processing)',
-      ExpressionAttributeValues: { ':processing': 'PROCESSING', ':pending': 'PENDING', ':now': NOW },
-    });
+    expect(await items.get({ PK: 'USER#u', SK: 'IMPORT#i' })).toMatchObject({ status: 'PROCESSING', updatedAt: NOW });
+    expect(await store.markProcessing('u', 'i')).toBe(true);
   });
 
-  it('returns false for a ConditionalCheckFailed error identified only by name', async () => {
-    ddbMock.on(UpdateCommand).rejects(Object.assign(new Error('failed'), { name: 'ConditionalCheckFailedException' }));
+  it('refuses a terminal or missing import', async () => {
+    const { items, store } = setup();
     expect(await store.markProcessing('u', 'i')).toBe(false);
+    expect(await items.get({ PK: 'USER#u', SK: 'IMPORT#i' })).toBeUndefined();
+    for (const status of ['COMPLETED', 'FAILED']) {
+      await items.put(importItem({ status: status as ImportStatus['status'] }));
+      expect(await store.markProcessing('u', 'i')).toBe(false);
+      expect((await items.get({ PK: 'USER#u', SK: 'IMPORT#i' }))?.status).toBe(status);
+    }
   });
 
-  it('returns false for a ConditionalCheckFailedException instance', async () => {
-    ddbMock.on(UpdateCommand).rejects(new ConditionalCheckFailedException({ message: 'nope', $metadata: {} }));
-    expect(await store.markProcessing('u', 'i')).toBe(false);
-  });
-
-  it('rethrows other errors (e.g. throttling) so the message is retried', async () => {
-    ddbMock.on(UpdateCommand).rejects(Object.assign(new Error('slow down'), { name: 'ProvisionedThroughputExceededException' }));
-    await expect(store.markProcessing('u', 'i')).rejects.toThrow('slow down');
+  it('surfaces storage errors (e.g. throttling) so the message is retried', async () => {
+    const { items, store } = setup();
+    vi.spyOn(items, 'update').mockRejectedValue(Object.assign(new Error('Rate exceeded'), { name: 'ThrottlingException' }));
+    await expect(store.markProcessing('u', 'i')).rejects.toThrow('Rate exceeded');
   });
 });
 
-describe('DynamoIngestStore status updates', () => {
-  const store = new DynamoIngestStore(doc, 'tbl');
-  beforeEach(() => ddbMock.on(UpdateCommand).resolves({}));
-
+describe('ItemIngestStore status updates', () => {
   it('markFailed stores the errors with importedCount 0', async () => {
-    const errors = [{ row: 2, message: 'bad' }];
-    await store.markFailed('u', 'i', 7, errors);
-    expect(updates()[0]).toMatchObject({
-      TableName: 'tbl',
-      Key: { PK: 'USER#u', SK: 'IMPORT#i' },
-      ExpressionAttributeValues: { ':failed': 'FAILED', ':rc': 7, ':zero': 0, ':errors': errors, ':now': NOW },
+    const { items, store } = setup();
+    await items.put(importItem({ status: 'PROCESSING' }));
+    await store.markFailed('u', 'i', 3, [{ row: 2, message: 'bad' }]);
+    expect(await items.get({ PK: 'USER#u', SK: 'IMPORT#i' })).toMatchObject({
+      status: 'FAILED',
+      rowCount: 3,
+      importedCount: 0,
+      errors: [{ row: 2, message: 'bad' }],
+      updatedAt: NOW,
     });
   });
 
   it('markCompleted stores the counts and removes previous errors', async () => {
-    await store.markCompleted('u', 'i', 7, 6);
-    const input = updates()[0]!;
-    expect(input.UpdateExpression).toMatch(/REMOVE #e$/);
-    expect(input.ExpressionAttributeValues).toEqual({ ':completed': 'COMPLETED', ':rc': 7, ':ic': 6, ':now': NOW });
+    const { items, store } = setup();
+    await items.put({ ...importItem({ status: 'PROCESSING' }), errors: [{ row: 1, message: 'old' }] });
+    await store.markCompleted('u', 'i', 4, 4);
+    const done = await items.get({ PK: 'USER#u', SK: 'IMPORT#i' });
+    expect(done).toMatchObject({ status: 'COMPLETED', rowCount: 4, importedCount: 4, updatedAt: NOW });
+    expect(done).not.toHaveProperty('errors');
   });
+});
 
+describe('ItemIngestStore registry and writes', () => {
   it('registerUser upserts the registry item keeping the original createdAt', async () => {
+    const { items, store } = setup();
     await store.registerUser('u');
-    expect(updates()[0]).toMatchObject({
-      Key: { PK: 'USERS', SK: 'USER#u' },
-      UpdateExpression: expect.stringContaining('createdAt = if_not_exists(createdAt, :now)'),
-      ExpressionAttributeValues: { ':t': 'USER', ':u': 'u', ':now': NOW },
-    });
+    vi.setSystemTime(new Date('2026-07-01T00:00:00.000Z'));
+    await store.registerUser('u');
+    expect(await items.get({ PK: 'USERS', SK: 'USER#u' })).toMatchObject({ entityType: 'USER', userId: 'u', createdAt: NOW, updatedAt: '2026-07-01T00:00:00.000Z' });
   });
 
   it('trackTickers upserts one item per ticker without overwriting an existing currency', async () => {
-    await store.trackTickers([
-      { symbol: 'AAPL', currency: 'USD' },
-      { symbol: 'ASML.AS', currency: 'EUR' },
-    ]);
-    const inputs = updates();
-    expect(inputs.map((i) => i.Key)).toEqual([
-      { PK: 'TRACKED', SK: 'TICKER#AAPL' },
-      { PK: 'TRACKED', SK: 'TICKER#ASML.AS' },
-    ]);
-    expect(inputs[1]).toMatchObject({
-      UpdateExpression: expect.stringContaining('currency = if_not_exists(currency, :c)'),
-      ExpressionAttributeValues: { ':t': 'TRACKED_TICKER', ':s': 'ASML.AS', ':c': 'EUR', ':now': NOW },
-    });
-  });
-
-  it('trackTickers with no tickers makes no calls', async () => {
+    const { items, store } = setup();
+    await store.trackTickers([{ symbol: 'AAPL', currency: 'USD' }, { symbol: 'CASH.EUR', currency: 'EUR' }]);
+    await store.trackTickers([{ symbol: 'AAPL', currency: 'EUR' }]);
+    expect(items.size).toBe(1);
+    expect(await items.get({ PK: 'TRACKED', SK: 'TICKER#AAPL' })).toMatchObject({ entityType: 'TRACKED_TICKER', symbol: 'AAPL', currency: 'USD' });
     await store.trackTickers([]);
-    expect(updates()).toHaveLength(0);
-  });
-});
-
-describe('DynamoIngestStore.listTransactions', () => {
-  const store = new DynamoIngestStore(doc, 'tbl');
-
-  it('follows LastEvaluatedKey across pages and strips key attributes', async () => {
-    const lek = { PK: 'USER#u', SK: 'TXN#p1#2025-01-01#a' };
-    ddbMock
-      .on(QueryCommand)
-      .resolvesOnce({ Items: [{ PK: 'USER#u', SK: 'TXN#p1#2025-01-01#a', entityType: 'TRANSACTION', id: 'a' }], LastEvaluatedKey: lek })
-      .resolvesOnce({ Items: [{ PK: 'USER#u', SK: 'TXN#p1#2025-01-02#b', entityType: 'TRANSACTION', id: 'b' }] });
-    expect(await store.listTransactions('u')).toEqual([{ id: 'a' }, { id: 'b' }]);
-    const inputs = ddbMock.commandCalls(QueryCommand).map((c) => c.args[0].input);
-    expect(inputs[0]).toMatchObject({ ExpressionAttributeValues: { ':pk': 'USER#u', ':sk': 'TXN#' }, ExclusiveStartKey: undefined });
-    expect(inputs[1]!.ExclusiveStartKey).toEqual(lek);
+    expect(items.size).toBe(1);
   });
 
-  it('handles a page without Items', async () => {
-    ddbMock.on(QueryCommand).resolves({});
-    expect(await store.listTransactions('u')).toEqual([]);
-  });
-});
-
-describe('DynamoIngestStore.putTransactions', () => {
-  it('writes nothing for an empty list', async () => {
-    await new DynamoIngestStore(doc, 'tbl', async () => {}).putTransactions([]);
-    expect(ddbMock.commandCalls(BatchWriteCommand)).toHaveLength(0);
+  it('putTransactions writes nothing for an empty list and stores items with keys and entity type', async () => {
+    const { items, store } = setup();
+    await store.putTransactions([]);
+    expect(items.size).toBe(0);
+    await store.putTransactions(Array.from({ length: 60 }, (_, i) => ({ ...txn(i + 1), fxRate: 1.1 })));
+    expect(items.size).toBe(60);
+    expect(await items.get({ PK: 'USER#u', SK: 'TXN#p1#2025-01-01#imp-1' })).toMatchObject({ entityType: 'TRANSACTION', id: 'imp-1', fxRate: 1.1 });
   });
 
-  it('chunks by BATCH_SIZE and stores items with keys and entity type', async () => {
-    ddbMock.on(BatchWriteCommand).resolves({});
-    const sleep = vi.fn(async (_ms: number) => {});
-    await new DynamoIngestStore(doc, 'tbl', sleep).putTransactions(txns(2 * BATCH_SIZE + 1));
-    const calls = ddbMock.commandCalls(BatchWriteCommand).map((c) => c.args[0].input.RequestItems!.tbl!);
-    expect(calls.map((c) => c.length)).toEqual([25, 25, 1]);
-    expect(calls[2]![0]!.PutRequest!.Item).toEqual({ PK: 'USER#u', SK: 'TXN#p1#2025-01-01#imp-51', entityType: 'TRANSACTION', ...txn(51) });
-    expect(sleep).not.toHaveBeenCalled();
-  });
-
-  it('stores a broker fxRate on the transaction item', async () => {
-    ddbMock.on(BatchWriteCommand).resolves({});
-    await new DynamoIngestStore(doc, 'tbl', async () => {}).putTransactions([{ ...txn(1), currency: 'USD', fxRate: 1.0842 }]);
-    const item = ddbMock.commandCalls(BatchWriteCommand)[0]!.args[0].input.RequestItems!.tbl![0]!.PutRequest!.Item;
-    expect(item).toMatchObject({ PK: 'USER#u', SK: 'TXN#p1#2025-01-01#imp-1', entityType: 'TRANSACTION', currency: 'USD', fxRate: 1.0842 });
-  });
-
-  it('retries only the unprocessed items, ignoring other tables in the response', async () => {
-    ddbMock
-      .on(BatchWriteCommand)
-      .callsFakeOnce((input) => ({ UnprocessedItems: { tbl: input.RequestItems.tbl.slice(1), other: [{}] } }))
-      .resolves({ UnprocessedItems: { other: [{}] } });
-    const sleep = vi.fn(async (_ms: number) => {});
-    await new DynamoIngestStore(doc, 'tbl', sleep).putTransactions(txns(3));
-    const sent = ddbMock.commandCalls(BatchWriteCommand).map((c) => c.args[0].input.RequestItems!.tbl!.map((r) => r.PutRequest!.Item!.id));
-    expect(sent).toEqual([['imp-1', 'imp-2', 'imp-3'], ['imp-2', 'imp-3']]);
-    expect(sleep).toHaveBeenCalledTimes(1);
-  });
-
-  it('backs off exponentially (capped at 5s) and gives up after 8 attempts', async () => {
-    ddbMock.on(BatchWriteCommand).callsFake((input) => ({ UnprocessedItems: input.RequestItems }));
-    const sleep = vi.fn(async (_ms: number) => {});
-    const err = await new DynamoIngestStore(doc, 'tbl', sleep, () => 1).putTransactions(txns(30)).catch((e: Error) => e);
-    expect(err).toMatchObject({ name: 'UnprocessedItemsError', message: 'BatchWrite: 25 unprocessed items after 8 attempts' });
-    expect(ddbMock.commandCalls(BatchWriteCommand)).toHaveLength(8);
-    expect(sleep.mock.calls.map(([ms]) => ms)).toEqual([100, 200, 400, 800, 1600, 3200, 5000]);
-  });
-
-  it('applies jitter of down to half the backoff', async () => {
-    ddbMock.on(BatchWriteCommand).callsFakeOnce((input) => ({ UnprocessedItems: input.RequestItems })).resolves({});
-    const sleep = vi.fn(async (_ms: number) => {});
-    await new DynamoIngestStore(doc, 'tbl', sleep, () => 0).putTransactions(txns(1));
-    expect(sleep).toHaveBeenCalledWith(50);
-  });
-
-  it('uses a secure random jitter within [50%, 100%) of the backoff by default', async () => {
-    ddbMock.on(BatchWriteCommand).callsFakeOnce((input) => ({ UnprocessedItems: input.RequestItems })).resolves({});
-    const sleep = vi.fn(async (_ms: number) => {});
-    await new DynamoIngestStore(doc, 'tbl', sleep).putTransactions(txns(1));
-    const ms = sleep.mock.calls[0]![0];
-    expect(ms).toBeGreaterThanOrEqual(50);
-    expect(ms).toBeLessThan(100);
-  });
-
-  it('propagates BatchWrite errors', async () => {
-    ddbMock.on(BatchWriteCommand).rejects(Object.assign(new Error('throttled'), { name: 'ThrottlingException' }));
-    await expect(new DynamoIngestStore(doc, 'tbl', async () => {}).putTransactions(txns(1))).rejects.toThrow('throttled');
-  });
-
-  it('waits with a real timer by default', async () => {
-    vi.useFakeTimers();
-    ddbMock.on(BatchWriteCommand).callsFakeOnce((input) => ({ UnprocessedItems: input.RequestItems })).resolves({});
-    let done = false;
-    const p = new DynamoIngestStore(doc, 'tbl', undefined, () => 0).putTransactions(txns(1)).then(() => (done = true));
-    await vi.advanceTimersByTimeAsync(49);
-    expect(done).toBe(false);
-    expect(ddbMock.commandCalls(BatchWriteCommand)).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(1);
-    await p;
-    expect(ddbMock.commandCalls(BatchWriteCommand)).toHaveLength(2);
+  it('propagates write failures, so the import is redelivered', async () => {
+    const { items, store } = setup();
+    vi.spyOn(items, 'batchWrite').mockRejectedValue(new Error('boom'));
+    await expect(store.putTransactions([txn(1)])).rejects.toThrow('boom');
   });
 });
