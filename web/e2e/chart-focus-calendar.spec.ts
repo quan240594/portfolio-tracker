@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { settledCount } from './settled';
 
 /** Legend hover / keyboard focus preview of the Calendar income chart (mock mode): the status stays, the rest fades; nothing is included or excluded. */
 
@@ -45,7 +46,7 @@ const avgLabel = (chart: Locator) => chart.locator('.recharts-reference-line tex
 test.describe('Calendar income chart: legend preview', () => {
   test('hovering a status keeps its segments, fades the rest and the labels a little; leaving restores; nothing is included or excluded', async ({ page }) => {
     const { region, chart, legend } = await openCalendar(page);
-    const all = await bars(chart).count();
+    const all = await settledCount(bars(chart));
     await expectNothingFaded(bars(chart));
     const kpiValues = await kpis(page);
     const grid = await page.getByRole('region', { name: 'Events' }).innerText();

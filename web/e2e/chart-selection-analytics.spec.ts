@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { settledCount } from './settled';
 
 /** Include / exclude of series and rows through the legend and the data table: Dashboard, Analytics tabs and Goals (mock mode). */
 
@@ -58,7 +59,7 @@ test.describe('Dashboard', () => {
     const donut = card.getByTestId('allocation-donut');
     const legend = card.getByTestId('allocation-legend');
     await expect(slices(donut).first()).toBeVisible();
-    const all = await slices(donut).count();
+    const all = await settledCount(slices(donut));
     expect(all).toBeGreaterThan(1);
     const centre = card.getByTestId('allocation-donut-centre');
     const before = await centre.textContent();
@@ -109,7 +110,7 @@ test.describe('Analytics tabs', () => {
     const legend = page.getByTestId('returns-legend');
     const table = page.getByRole('table', { name: 'Returns per year, newest first' });
     await expect(bars(chart).first()).toBeVisible();
-    const all = await bars(chart).count();
+    const all = await settledCount(bars(chart));
     const rows = await table.getByRole('rowheader').count();
     expect(rows).toBeGreaterThan(1);
 

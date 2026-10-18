@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { settledCount } from './settled';
 
 /** Include / exclude of series and rows through the legend and the data table of the Dividends charts (mock mode). */
 
@@ -27,7 +28,7 @@ test.describe('Yield / payout', () => {
     const chart = region.getByTestId('yield-payout-chart');
     const legend = region.getByTestId('yield-payout-legend');
     await expect(bars(chart).first()).toBeVisible();
-    const all = await bars(chart).count();
+    const all = await settledCount(bars(chart));
     const dots = chart.locator('circle.recharts-dot');
     expect(await dots.count()).toBeGreaterThan(0);
 
@@ -63,7 +64,7 @@ test.describe('Donuts', () => {
     const donut = region.getByTestId('income-donut');
     const legend = region.getByTestId('income-legend');
     await expect(slices(donut).first()).toBeVisible();
-    const all = await slices(donut).count();
+    const all = await settledCount(slices(donut));
     const centre = region.getByTestId('income-donut-centre');
     const before = await centre.textContent();
 
@@ -97,7 +98,7 @@ test.describe('Donuts', () => {
     const donut = region.getByTestId('consistency-donut');
     const legend = region.getByTestId('consistency-legend');
     await expect(slices(donut).first()).toBeVisible();
-    const all = await slices(donut).count();
+    const all = await settledCount(slices(donut));
     const centre = region.getByTestId('consistency-donut-centre');
     const before = Number((await centre.textContent())!.replace(/\D/g, ''));
     await legend.getByRole('button', { name: /^Reliable/ }).click();
@@ -116,7 +117,7 @@ test.describe('Bar charts', () => {
     const chart = region.getByTestId('future-chart');
     const legend = region.getByTestId('future-legend');
     await expect(bars(chart).first()).toBeVisible();
-    const all = await bars(chart).count();
+    const all = await settledCount(bars(chart));
     const line = chart.locator('.recharts-reference-line line');
     await expect(line).toHaveCount(1);
     const y = await line.getAttribute('y1');
@@ -144,7 +145,7 @@ test.describe('Bar charts', () => {
     const legend = region.getByTestId('received-legend');
     await expect(bars(chart).first()).toBeVisible();
     const headline = await region.getByTestId('received-total').textContent();
-    const all = await bars(chart).count();
+    const all = await settledCount(bars(chart));
     await expect(chart.getByText('avg', { exact: true })).toHaveCount(1);
 
     await toggle(legend, 'Declared (announced)').click();
@@ -175,7 +176,7 @@ test.describe('Bar charts', () => {
       const region = card(page, name);
       const chart = region.getByTestId(testId);
       await expect(bars(chart).first()).toBeVisible();
-      const all = await bars(chart).count();
+      const all = await settledCount(bars(chart));
       const table = await openTable(region, tableName);
       await table.getByRole('rowheader').first().getByRole('button').click();
       await expect(table.getByRole('rowheader').first().getByRole('button')).toHaveAttribute('aria-pressed', 'false');
@@ -193,7 +194,7 @@ test.describe('Bar charts', () => {
     // the forecast bars arrive with the overview: wait for it before counting
     await expect(region.getByTestId('forecast-summary')).toBeVisible();
     await expect(bars(chart).first()).toBeVisible();
-    const all = await bars(chart).count();
+    const all = await settledCount(bars(chart));
     await expect(chart.locator('path.recharts-line-curve')).toHaveCount(1);
 
     await toggle(legend, '2026').click();

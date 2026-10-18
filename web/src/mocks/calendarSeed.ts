@@ -51,8 +51,14 @@ const PLANS: EarningsPlan[] = [
 const fiscalPeriodEnd = (reportDate: string): string => calendarLastDay(calendarAddMonths(calendarMonthOf(reportDate), -1));
 
 export function createCalendarSeed(today: string): CalendarSeed {
+  const busyDate = addDays(today, BUSY_DAY);
+  // A report pushed off a weekend must not land on the busy day: the cluster there is exactly what the demo shows.
+  const reportDate = (daysAhead: number): string => {
+    const date = nextWeekday(addDays(today, daysAhead));
+    return date === busyDate ? nextWeekday(addDays(date, 1)) : date;
+  };
   const upcoming = PLANS.map<StoredEarningsEvent>((p) => {
-    const date = p.daysAhead === BUSY_DAY ? addDays(today, BUSY_DAY) : nextWeekday(addDays(today, p.daysAhead));
+    const date = p.daysAhead === BUSY_DAY ? busyDate : reportDate(p.daysAhead);
     return { symbol: p.symbol, name: p.name, date, fiscalPeriodEnd: fiscalPeriodEnd(date), epsEstimate: p.eps, currency: 'USD', timeOfDay: p.timeOfDay, source: 'alphavantage' };
   });
   // Last quarter's reports, to browse back in time.
