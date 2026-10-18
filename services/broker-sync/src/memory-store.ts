@@ -11,7 +11,7 @@ export class MemoryBrokerStore extends ItemBrokerStore {
   readonly items: MemoryItemStore;
 
   constructor(existing: readonly Transaction[] = []) {
-    const items = new MemoryItemStore().load(existing.map(transactionItem));
+    const items = new MemoryItemStore().load(existing.map((transaction) => transactionItem(transaction)));
     super(items);
     this.items = items;
   }

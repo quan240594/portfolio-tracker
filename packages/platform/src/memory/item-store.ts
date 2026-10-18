@@ -17,11 +17,11 @@ import {
 
 const idOf = ({ PK, SK }: ItemKey): string => `${PK}\u0000${SK}`;
 
-/** What a store returns: a deep copy without `undefined` values, so callers can never alias stored state. */
-const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+/** What a store returns: a deep copy, so callers can never alias stored state. */
+const clone = <T>(value: T): T => structuredClone(value);
 
 /** Runs a synchronous step as a promise: a thrown error becomes a rejection, like in a real adapter. */
-const settle = <T>(step: () => T): Promise<T> => new Promise((resolve) => resolve(step()));
+const settle = <T>(step: () => T): Promise<T> => Promise.resolve().then(step);
 
 const compareText = (a: string, b: string): number => {
   if (a === b) return 0;

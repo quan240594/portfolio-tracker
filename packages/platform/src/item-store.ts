@@ -64,7 +64,7 @@ export function evaluateCondition(item: Item | undefined, condition: Condition):
     case 'compare':
       return compare(item?.[condition.attr], condition.op, condition.value);
     case 'in':
-      return condition.values.some((value) => item?.[condition.attr] === value);
+      return (condition.values as readonly unknown[]).includes(item?.[condition.attr]);
     case 'and':
       return condition.conditions.every((c) => evaluateCondition(item, c));
     case 'or':
