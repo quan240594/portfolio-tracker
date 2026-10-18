@@ -1,0 +1,19 @@
+{
+  "name": "cf-limits-probe",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Tiny Worker + SQLite Durable Object + Queue + Cron to measure the EFFECTIVE free-plan CPU/subrequest/D1 limits on a real account.",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail --format json",
+    "typecheck": "tsc --noEmit",
+    "calibrate": "node scripts/calibrate.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260426.1",
+    "typescript": "^5.6.0",
+    "wrangler": "^4.0.0"
+  }
+}

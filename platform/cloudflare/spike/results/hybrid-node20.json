@@ -1,0 +1,131 @@
+{
+  "node": "v20.19.0",
+  "arch": "arm64",
+  "dataset": "heavy (30 holdings, 5 years, 1,500 transactions)",
+  "buildContextMs": {
+    "median": 14.11,
+    "p95": 29.21
+  },
+  "split": {
+    "analytics/summary": {
+      "totalMedian": 18.34,
+      "totalP95": 29.29,
+      "contextMedian": 14.11,
+      "tailMedian": 4.23,
+      "tailShare": "23%"
+    },
+    "analytics/returns": {
+      "totalMedian": 15.26,
+      "totalP95": 20.75,
+      "contextMedian": 14.11,
+      "tailMedian": 1.15,
+      "tailShare": "8%"
+    },
+    "analytics/risk": {
+      "totalMedian": 15.86,
+      "totalP95": 23.37,
+      "contextMedian": 14.11,
+      "tailMedian": 1.75,
+      "tailShare": "11%"
+    },
+    "analytics/benchmark (ALL)": {
+      "totalMedian": 18.53,
+      "totalP95": 29.4,
+      "contextMedian": 14.11,
+      "tailMedian": 4.42,
+      "tailShare": "24%"
+    },
+    "analytics/growth (ALL)": {
+      "totalMedian": 18.15,
+      "totalP95": 20.78,
+      "contextMedian": 14.11,
+      "tailMedian": 4.04,
+      "tailShare": "22%"
+    },
+    "analytics/metrics": {
+      "totalMedian": 20.97,
+      "totalP95": 32.97,
+      "contextMedian": 14.11,
+      "tailMedian": 6.86,
+      "tailShare": "33%"
+    },
+    "analytics/holdings-performance (ALL)": {
+      "totalMedian": 130.48,
+      "totalP95": 138.66,
+      "contextMedian": 14.11,
+      "tailMedian": 116.37,
+      "tailShare": "89%"
+    },
+    "analytics/dividend-growth": {
+      "totalMedian": 1.63,
+      "totalP95": 5.24,
+      "contextMedian": 0,
+      "tailMedian": 1.63,
+      "tailShare": "100%"
+    }
+  },
+  "materialised": {
+    "days": 1821,
+    "jsonObjects": {
+      "bytes": 109924,
+      "gzip": 17021,
+      "brotli": 10548
+    },
+    "jsonPackedArrays": {
+      "bytes": 35293,
+      "gzip": 10487,
+      "brotli": 8325
+    },
+    "decodePackedMs": {
+      "median": 0.11,
+      "p95": 2.34
+    },
+    "note": "portfolio-level series only; per-holding series (30 holdings) would be 30x this and is NOT materialised, see holdings-performance"
+  },
+  "payload": {
+    "eodRows": 33218,
+    "fxDays": 1084,
+    "transactions": 1500,
+    "dividendEvents": 593,
+    "analyticsDataNaiveJson": {
+      "bytes": 2844711,
+      "gzip": 259414,
+      "brotli": 152744
+    },
+    "analyticsDataCompactJson": {
+      "bytes": 1146231,
+      "gzip": 152786,
+      "brotli": 104668
+    },
+    "eodOnlyNaive": {
+      "bytes": 2348723,
+      "gzip": 207528,
+      "brotli": 120598
+    },
+    "eodOnlyCompact": {
+      "bytes": 650243,
+      "gzip": 100122,
+      "brotli": 73034
+    },
+    "parseNaiveMs": {
+      "median": 10.29,
+      "p95": 12.86
+    },
+    "parseAndDecodeCompactMs": {
+      "median": 4.93,
+      "p95": 6.96
+    },
+    "workerPassThroughConcatMs": {
+      "median": 0.3,
+      "p95": 3.52
+    },
+    "note": "raw rows of ONE portfolio view incl. one benchmark; the browser keeps them in memory/IndexedDB and re-downloads only new days (deltas)"
+  },
+  "browserEngine": {
+    "wholeAnalyticsPageMsNode": {
+      "median": 229.13,
+      "p95": 323.89
+    },
+    "note": "sum of 7 analytics computations on already-parsed data; a mid-range phone is typically 3-5x slower than an M-series core (ASSUMPTION, not measured)"
+  }
+}

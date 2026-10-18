@@ -1,0 +1,29 @@
+{
+  "node": "v20.19.0",
+  "note": "zod + JSON.parse only (the mapper adds the same order of magnitude); synthetic items are smaller than real T212 items, so treat as a lower bound",
+  "t212 orders page (50 items, 31 KB)": {
+    "medianMs": 1.738,
+    "p95Ms": 7.988
+  },
+  "t212 dividends page (50 items)": {
+    "medianMs": 0.253,
+    "p95Ms": 2.098
+  },
+  "t212 cash page (50 items)": {
+    "medianMs": 0.708,
+    "p95Ms": 3.343
+  },
+  "twelvedata 5y daily series (1,300 bars, 145 KB) JSON.parse + pack": {
+    "medianMs": 0.526,
+    "p95Ms": 0.604
+  },
+  "eodhd dividends (24 events)": {
+    "medianMs": 0.01,
+    "p95Ms": 0.273
+  },
+  "alphavantage earnings csv (4,600 rows, 316 KB) filter to tracked": {
+    "medianMs": 0.245,
+    "p95Ms": 0.283
+  },
+  "filtered rows found": 115
+}
