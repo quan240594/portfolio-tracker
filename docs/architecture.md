@@ -1827,3 +1827,77 @@ is where the AWS adapters meet the contracts.
 adapter), gets a contract test when it adds or changes what a port must do, and is verified on the AWS stack (CI) and on the
 Cloudflare deployment before it is called done. A feature that needs a capability a platform lacks is redesigned until it fits
 every platform, not special-cased.
+
+## Cloudflare limits probe: results so far (18 Oct 2026, in progress)
+
+Status of the on-account measurements that close the "unverified" list of the feasibility spike. The probe
+(`platform/cloudflare/spike/limits-probe`) is **deployed on the personal free account and must be torn down** (see
+"Still to do"). Nothing was billed: no payment method, Free plan only.
+
+### Setup and environment findings
+
+- A neutral `workers.dev` subdomain was registered (the first choice was taken by another account, so a variant with a
+  different suffix was used). It is not recorded here on purpose: it is public in every URL, and the probe is unauthenticated.
+- Deployed on the account: Worker `pt-limits-probe`, SQLite Durable Object class `Probe`, Queue `pt-limits-probe` (producer
+  and consumer), D1 database `pt-limits-probe`, one Cron Trigger (`*/5 * * * *`).
+- **`*.workers.dev` is unreachable from the owner's work laptop** (TLS handshake reset, while `cloudflare.com` and
+  `blog.cloudflare.com` work), and so is `wrangler tail` (its WebSocket host is also on `workers.dev`). This is the
+  corporate network, not Cloudflare, and is not worked around. Consequences:
+  - The probe is driven from a throwaway GitHub Actions workflow (`.github/workflows/cf-probe.yml` on the branch
+    `chore/cf-probe-results`, never merged). The probe URL is the repository secret `PROBE_BASE`, so it is masked in logs.
+  - The personal app on `workers.dev` will not open on the work laptop either; use a personal device or network, or a custom
+    domain (costs money, so not planned).
+- Real CPU time is read from the GraphQL Analytics API (`workersInvocationsAdaptive`, `quantiles.cpuTime*` in microseconds,
+  per minute), which works with the `wrangler login` token. The Workers Observability telemetry API does not (authentication
+  error: missing scope). `eventType` is not a dimension, so invocation types in the same minute cannot be told apart: each
+  calibration batch gets its own minute (run 2, `marks.txt`).
+
+### Run 1 (from GitHub Actions, 18:37-18:55 UTC)
+
+"Nominal ms" is the probe's fixed unit of work, not real CPU (see the probe README).
+
+| Entry point | Largest surviving nominal ms | Result |
+|---|---|---|
+| Worker HTTP | 848 (849 fails) | Platform reports the killed calls at **exactly 10.0 ms CPU**: the documented **10 ms** Free cap is real. Provisional factor about 0.012 ms of real CPU per nominal ms (10 / 848), to be confirmed by the calibration batch. |
+| Durable Object request | no failure up to 4096 | **Not limited to 10 ms** (4096 nominal is about 48 ms at the provisional factor). The real cap is still unknown. |
+| Durable Object alarm | no failure up to 4096 | Same as the request. |
+| Queue consumer | 1024 (1025 fails) | Killed just above the Worker HTTP threshold, so in the 10 to 12 ms class (not the 30 s of the Queues docs). CPU figures reported for killed invocations are coarse (10, 50, 2010, 2050 ms) and must not be used. |
+| Cron Trigger | 50 tested, completed | Only far below the cap so far (5, 12, 50 nominal all completed); the cap itself is tested in run 2. |
+
+| Check | Result |
+|---|---|
+| Subrequests per invocation | **50 succeed, the 51st fails** ("Too many subrequests by single Worker invocation"). |
+| D1 queries through the binding | **60 separate statements all succeeded**: D1 calls do not count against the 50 subrequests. |
+| One `db.batch()` of 120 statements | Succeeded. |
+| 2000 rows through 61 multi-row inserts | `rowsWritten` = 2000 (one per row; index maintenance would add more), `rowsRead` = 2000. |
+
+### What this changes in the decision
+
+- A Worker (HTTP, queue consumer) has about 10 ms per invocation, so the hybrid design stands: the Worker stores and serves raw
+  rows and the browser runs the shared engine.
+- The Durable Object path is **not** capped at 10 ms, which keeps option (b) (a SQLite Durable Object as compute host)
+  possible. The rule from the spike still decides: real cap of at least 500 ms (about 42,000 nominal at the provisional factor)
+  means (b), 100 to 500 ms a per-route mix, under 100 ms hybrid everywhere.
+- D1 statements do not eat the 50-subrequest budget, so a job step can issue many statements. The packed price layout still
+  keeps writes far under 100,000 rows per day.
+
+### Run 2 (in progress when this was written)
+
+GitHub Actions run 39156535221 on `chore/cf-probe-results`, artifact `cf-probe-results-2`:
+
+1. Calibration: 20 `/burn` calls each at 100, 400 and 800 nominal ms in separate minutes, then 6 queue-burn calls at 900
+   (minutes listed in `marks.txt`). Read `cpuTimeP50/P99` per minute from the GraphQL API to get real ms per nominal ms.
+2. Durable Object request and alarm searched up to 262,144 nominal ms (`results2.csv`, `summary2.txt`).
+3. Cron Trigger at 700, 1500 and 6000 nominal ms, one per 5-minute tick (`cron2.txt`): an entry without `finished` was killed.
+
+### Still to do
+
+1. Download `cf-probe-results-2` (`gh run download 39156535221 -n cf-probe-results-2`), convert nominal ms to real CPU ms with
+   the calibration minutes, and fill in the real caps of the Durable Object (request, alarm) and the cron here.
+2. Decide architecture (b) or (c) with the rule above and record it in "Cloudflare personal deployment: feasibility spike".
+3. **Tear down**, in this order, then confirm in the dashboard that nothing is left and nothing was billed:
+   `npx wrangler deploy -c wrangler.teardown.toml` (removes the Durable Object class, cron and queue consumer), then
+   `npx wrangler delete --name pt-limits-probe`, `npx wrangler queues delete pt-limits-probe`,
+   `npx wrangler d1 delete pt-limits-probe` (all from `platform/cloudflare/spike/limits-probe`).
+4. Delete the GitHub secret `PROBE_BASE` (`gh secret delete PROBE_BASE`) and the branch `chore/cf-probe-results`; do not merge
+   its workflow. Merge only this documentation (without `cf-probe.yml`).
