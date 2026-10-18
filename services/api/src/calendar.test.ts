@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
-import { createHandler } from './app.js';
+import { createHandler } from './lambda/handler.js';
 import type { Deps } from './deps.js';
 import { apiEvent, fakeDeps, portfolio, txn } from './testing/fakes.js';
 

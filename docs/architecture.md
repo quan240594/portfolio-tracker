@@ -111,7 +111,7 @@ on the ingest queue (S3 *notification* shape locally vs. EventBridge shape in AW
 handler accepts both). Then:
 
 1. `pnpm --filter @portfolio/api seed` — demo user, transactions, profiles, 1y EOD prices, FX, dividend events.
-2. `pnpm --filter @portfolio/api dev` — local HTTP server on `:3001` wrapping the Lambda handler.
+2. `pnpm --filter @portfolio/api dev` — local HTTP server on `:3001` serving the same portable `handle(PortableRequest)` as the Lambda adapter (see [Platform ports](#platform-ports)).
 3. `pnpm --filter @portfolio/ingest dev` — long-polls the local ingest queue and invokes the handler.
 4. `pnpm --filter @portfolio/web dev` — Vite on `:5173`, proxies `/api/*` → `:3001` (prefix stripped).
 5. Optional: `cd services/prices && python -m prices.local refresh` with `MARKET_DATA_PROVIDER=mock`.
@@ -340,7 +340,7 @@ optional `growthRate` %/year and a list of valuation points. Value on a date = l
 compounded at the growth rate for the days since (365-day year); 0 before the first valuation. Converted to EUR at the
 latest rate, included in totals, allocation (`ASSET_CLASSES` gained `REAL_ESTATE` and `DEPOSIT`) and history. `CASH.*` and
 `CUSTOM:*` are never written to `TRACKED` and never published in `TransactionsChanged` (`isMarketSymbol`,
-`trackTickerUpdates`, `publishChange`, ingest), so the prices service never fetches them.
+`trackTickers`, `publishChange`, ingest), so the prices service never fetches them.
 
 ### Watchlist
 
@@ -1666,3 +1666,164 @@ npx wrangler deploy -c wrangler.teardown.toml && npx wrangler delete --name pt-l
 
 Reproduction of every number above: `platform/cloudflare/spike/README.md` (`src/bench/*`, results in `results/`; `hybrid.ts` produced the
 payload and materialisation figures).
+
+## Platform ports
+
+The application runs on more than one platform with **one implementation of every feature**. The AWS stack (Lambda, API
+Gateway, DynamoDB, S3, SQS/EventBridge, Secrets Manager, Cognito) stays deployable and fully tested in CI; a second deployment
+(a personal one on Cloudflare's free plan: Workers, D1, Queues, Cron) is just another set of adapters. Business logic
+never imports a cloud SDK: it talks to *ports* (TypeScript interfaces in
+[`packages/platform`](../packages/platform/src)) and each platform supplies the *adapters*
+([`packages/aws`](../packages/aws/src) today). `packages/platform` is plain TypeScript on Web-standard APIs (`fetch`,
+`crypto.subtle`, `TextEncoder`, `btoa`): no Node built-ins and no AWS imports (ESLint enforces both), so it bundles for Workers.
+
+```mermaid
+flowchart TB
+  subgraph Adapters["Platform adapters (the only code that knows a platform)"]
+    L["AWS Lambda shapes<br/>API Gateway, SQS, EventBridge, async invoke<br/>services/*/src/lambda, app.ts, index.ts"]
+    CF["Cloudflare Worker<br/>fetch / queue / scheduled (next)"]
+    LOCAL["Local dev server and CLI<br/>services/api/src/local.ts, broker-sync cli.ts"]
+  end
+  subgraph App["Platform-neutral application (services/*, once)"]
+    H["Handlers and routes<br/>handle(PortableRequest) and JobHandler"]
+    R["Domain repositories<br/>key scheme, item shapes, marshalling, queries"]
+  end
+  subgraph Ports["packages/platform: ports, in-memory reference implementations, contract suites"]
+    P["ItemStore, SecretStore, JobQueue and EventPublisher,<br/>FileStore, Scheduler (declarative), Identity, Logger,<br/>PortableRequest and PortableResponse, MarketDataService"]
+  end
+  subgraph Impl["Port implementations"]
+    AWS["packages/aws: DynamoDB, Secrets Manager, EventBridge,<br/>Lambda invoke, S3 presigned URLs"]
+    MEM["MemoryItemStore, MemorySecretStore, MemoryJobQueue,<br/>MemoryFileStore (reference, test fakes, dry runs)"]
+    D1["D1, Queues, R2 (next)"]
+  end
+  L --> H
+  CF --> H
+  LOCAL --> H
+  H --> R
+  R --> P
+  H --> P
+  P -.implemented by.-> AWS
+  P -.implemented by.-> MEM
+  P -.implemented by.-> D1
+```
+
+Layering: **handlers / routes** (platform-agnostic) → **domain repositories** (key scheme, item shapes, marshalling and queries,
+written once: `ItemRepository`, `ItemManagementRepository`, `ItemIngestStore`, `ItemBrokerStore`) → **`ItemStore` port** →
+**adapter** (DynamoDB now, D1/SQLite later). The item shapes and keys are unchanged by the port: the DynamoDB table, the
+Terraform, the Lambda `package` scripts and the deploy workflows are the same as before.
+
+### The ports
+
+All ports are in `@portfolio/platform` (`src/*.ts`). Values are JSON; every adapter is exercised by the same contract suite.
+
+| Port | Interface (abridged) | AWS implementation (`@portfolio/aws`) | In-memory (reference and test fake) |
+| --- | --- | --- | --- |
+| `ItemStore` | `get(key, {consistent}) / getMany(keys) / put(item, {condition}) → boolean / update(key, {set, setIfAbsent, remove}, {condition}) → Item \| undefined / delete(key, {condition}) → boolean / query({pk, sk?, limit?, reverse?, cursor?, consistent?}) → {items, cursor?} / batchWrite(ops)` | `DynamoItemStore` (Get, BatchGet, Put, Update, Delete, Query, BatchWrite) | `MemoryItemStore` |
+| `SecretStore` | `get(name) → string \| null / put(name, value) / delete(name)` | `SecretsManagerSecretStore` | `MemorySecretStore` (values are private fields, never in dumps) |
+| `JobQueue` | `enqueue({job, payload, delayMs?})`; handlers are `JobHandler`s (see below) | `LambdaJobQueue` (asynchronous `Invoke`) | `MemoryJobQueue` (re-queues continuations, redelivers failures, dead-letters) |
+| `EventPublisher` | `transactionsChanged(detail)` | `EventBridgeEventPublisher` (`PutEvents`, rules in `events.tf`) | `RecordingEventPublisher`; `QueueEventPublisher` turns an event into an `enrichTransactions` job on any `JobQueue` |
+| `FileStore` | `createUpload({key, contentType, expiresInSeconds}) → {url, method, headers} / readText(key, maxBytes) → {ok, content} \| {ok: false, reason} / delete(key)` | `S3FileStore` (presigned PUT) | `MemoryFileStore` |
+| `Scheduler` (declarative) | `SCHEDULED_JOBS: {name, job, payload, timezone, minute, hours, weekdaysOnly}[]` plus `toAwsCron` / `toUnixCron` | EventBridge Scheduler (`infra/terraform/scheduler.tf`, `calendar.tf`, `broker.tf`) | none needed: it is data |
+| `Identity` | `IdentityResolver<Raw>.identify(raw) → {subject} \| undefined`; the app's `resolveUserId` stays the only source of identity and fails closed (`cognito`: 401 without an identity; `demo`: `DEMO_USER_ID`) | `apiGatewayIdentity` (JWT authorizer `sub`) | a `PortableRequest.identity` set by the test |
+| HTTP | `PortableHandler = (PortableRequest) → Promise<PortableResponse>` (`createApp(getDeps)` in `services/api`) | `toPortableRequest` / `toApiGatewayResult` in `@portfolio/aws`, wired by `services/api/src/lambda` | requests built in the tests; the local dev server uses the same contract |
+| `Logger` | `debug/info/warn/error`, `appendKeys`, `createChild`; `setLogger` installs the platform's | `createPowertoolsLogger` | `silentLogger`, `createConsoleLogger` |
+| `MarketDataService` | types only, see below | – | – |
+
+`ItemStore` semantics that every adapter must honour: items live under string `PK` + `SK`; `put`/`update`/`delete` take a
+`Condition` (`exists`, `notExists`, `attrMissing`, `eq`/`ne`/`lt`, `oneOf`, `and`, `or`; a comparison on a missing attribute is
+false) and resolve `false`/`undefined` (writing nothing) when it fails; `query` returns one page in sort-key order (descending
+with `reverse`) with an **opaque cursor** (`encodeCursor`/`decodeCursor`, `queryAll` follows it); `batchWrite` chunks to the
+store's limit, retries what the store reports as *unprocessed* and rejects with `UnprocessedItemsError` only when it still
+cannot, so a caller that sees it retries the whole (idempotent) batch. There is no multi-item transaction because nothing uses
+one: every multi-item write is a batch of deterministic keys.
+
+### Jobs and the resumable job contract
+
+Background work is a named job with a JSON payload (`JOBS`: `importUploaded`, `syncBroker`, `enrichTransactions`,
+`refreshPrices`, `refreshCalendar`; `JobPayloads` types each payload). A job is a `JobHandler`:
+
+```ts
+type JobStep<R> = { done: true; result: R } | { done: false; next: string; delayMs?: number };
+type JobHandler<P, R> = (invocation: { payload: P; cursor?: string }) => Promise<JobStep<R>>;
+```
+
+A handler does a *bounded* amount of work per call. When the job is not finished it returns `{ done: false, next }`, where
+`next` is an **opaque continuation** (a JSON string only the handler understands: the page cursor, what was read so far,
+what is left to write); the adapter calls the handler again with `cursor = next`, after `delayMs` when given. Delivery is
+at-least-once, so every step is idempotent: after a crash the adapter delivers the same invocation again and the result
+must not change.
+
+- **AWS** has minutes per invocation, so the Lambda shapes (`runToCompletion(handler, payload)`) loop over the steps inside the
+  invocation, exactly the behaviour from before steps existed. The event is the bare payload (EventBridge Scheduler
+  `{"all":true}`, the API's asynchronous `Invoke` `{userId, portfolioId}`); the SQS/S3 shape of the CSV import maps an
+  object key to the `importUploaded` payload.
+- **Cloudflare (free plan: 10 ms CPU, 50 subrequests per invocation)** persists `next`, re-enqueues the job (a Queue message
+  with `delaySeconds`, or a D1 row for a Cron-driven runner) and runs one step per invocation. A cursor that grows
+  (the broker-sync cursor carries the history read so far) must be kept outside the message, e.g. in D1, when the queue's
+  message-size limit is smaller than the cursor.
+- `MemoryJobQueue` behaves like such a budgeted adapter and is the reference the contract is written against.
+
+**Trading 212 sync** (`services/broker-sync/src/sync.ts`) is built on it. One run is a chain of steps whose cursor holds
+everything the next needs (the connection state read at the start, a run id, the pages read so far, what is left to write):
+
+`begin` (read or create the state; cursor only) → `lock` (the optimistic run lock) → `account` → `orders` → `dividends` →
+`cash` (each reads up to `pagesPerStep` history pages; the Trading 212 `nextPagePath` is the page cursor) → `prepare` (map,
+validate against the stored transactions, work out what changed, reconcile) → `write` (`writeChunk` transactions per step,
+`batchWrite`) → `announce` (user registry, tracked tickers, `TransactionsChanged`) → `finish` (state item, result).
+
+Reads have no side effects, writes use deterministic keys, `registerUser`/`trackTickers` are upserts and a duplicate event is
+harmless, so repeating any step cannot change the result. The lock is the only non-idempotent step: the run id in the
+cursor is stored with the lock (`runId` on the state item, removed when the run settles), so a redelivered `lock` step
+takes the lock again while a second run is still skipped (`SKIPPED`). Domain and API failures are recorded in the state item
+and end the job with a `FAILED` result; they are never thrown, so an asynchronous invocation is not retried blindly.
+`runSync`/`runAll` run the steps to the end inside the call (CLI, Lambda, tests). `syncAllJob` is the same for every
+connected portfolio. A test interrupts a run after every step and checks that it resumes to the identical result and
+stored items.
+
+### Market data (types only)
+
+`MarketDataService`, `MarketDataProvider` (alias `PriceProvider`), `FxProvider`, `EarningsSource` and `CorporateActionsSource`
+in `packages/platform/src/market-data.ts` mirror the operations of the Python price service (`prices/handlers.py`,
+`calendar_handlers.py`, `providers/base.py`, `calendar_providers.py`): `refreshScheduled`, `enrichSymbols`,
+`backfillFxHistory`, `refreshCalendar`. They exist for the later TypeScript port; the Python service is unchanged.
+
+### Adding an adapter (checklist)
+
+1. Create the package or folder of the platform (`packages/<platform>`), depending on `@portfolio/platform` only for types and
+   the contract suites.
+2. Implement `ItemStore` first and run `runItemStoreContract('<name>', () => new MyItemStore(...))` in its tests; then
+   `SecretStore`, `FileStore` and `JobQueue` (`runSecretStoreContract`, `runFileStoreContract`, `runJobQueueContract`). A
+   contract failure is a bug in the adapter, not in the contract.
+3. Wire the platform's entry points to the platform-neutral code: HTTP → `createApp(getDeps)` from `@portfolio/api`
+   (translate the request to a `PortableRequest`, set `identity` from the verified token, translate the `PortableResponse`
+   back; about 50 lines for a Worker `fetch`); queue messages and cron triggers → `JobHandler`s (`brokerSyncJob`,
+   `importUploadedJob`, the future price jobs) through the job queue.
+4. Generate the schedules from `SCHEDULED_JOBS` (`toUnixCron`; Cloudflare cron is UTC, so convert the time zone and the
+   daylight-saving shift) instead of copying them.
+5. Build `Deps` (`repo`, `mgmt`, `events`, `files`, `broker`) from the adapters; no business logic in the adapter.
+6. Keep the platform package free of Node built-ins (Web-standard APIs only) and the cloud SDK out of every service.
+7. Add the platform to CI (the AWS adapters run against LocalStack in the `integration` job) and prove behavioural parity with
+   the same service tests.
+
+### Contract tests
+
+`@portfolio/platform/testing` exports the reusable suites; they import `vitest`, so only test files use them.
+
+| Suite | Covers | Runs against |
+| --- | --- | --- |
+| `runItemStoreContract(name, create)` | get/put/replace, unicode keys, aliasing, conditional put/update/delete (every `Condition`), `getMany` beyond one chunk, `update` (`set`/`setIfAbsent`/`remove`, reserved words, invalid patches), `query` (prefix, ranges, `reverse`, `limit`, opaque cursors, `queryAll`, consistent reads), `batchWrite` (more than one chunk, mixed puts and deletes, empty, idempotent) | `MemoryItemStore` (unit tests), `DynamoItemStore` (command-level unit tests with a mocked client; the contract itself on **LocalStack** in `packages/aws/src/adapters.int.test.ts`) |
+| `runSecretStoreContract(name, create)` | missing → `null`, create/replace, isolation by name, idempotent delete, recreate | `MemorySecretStore`, `SecretsManagerSecretStore` (LocalStack) |
+| `runFileStoreContract(name, create)` | upload target, read back, size in bytes, missing/too large as a permanent `{ok: false}`, idempotent delete | `MemoryFileStore`, `S3FileStore` (LocalStack, a real presigned PUT) |
+| `runJobQueueContract(name, create)` | payload delivery, re-delivery with the cursor until done, redelivery of a failed step with the same cursor, independent jobs | `MemoryJobQueue` |
+
+Each test works in its own random namespace, so a suite can run against a shared long-lived table. `SCHEDULED_JOBS` has a test
+that parses `infra/terraform/*.tf` and checks name, cron, time zone and payload of every `aws_scheduler_schedule`.
+The integration job (`pnpm --filter @portfolio/aws test:integration`, LocalStack with `dynamodb,s3,sqs,events,ssm,secretsmanager`)
+is where the AWS adapters meet the contracts.
+
+### Rule
+
+**A feature is done only when it works on every adapter.** New behaviour is written once against the ports (never in an
+adapter), gets a contract test when it adds or changes what a port must do, and is verified on the AWS stack (CI) and on the
+Cloudflare deployment before it is called done. A feature that needs a capability a platform lacks is redesigned until it fits
+every platform, not special-cased.

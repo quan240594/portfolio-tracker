@@ -33,7 +33,7 @@ describe('Lambda handler', () => {
     expect(JSON.parse(res.body!)).toEqual({ transactions: [{ id: 'a', date: '2025-01-01', createdAt: 'x' }] });
     expect(ddbMock.commandCalls(QueryCommand)[0]!.args[0].input).toMatchObject({
       TableName: 'prod-table',
-      ExpressionAttributeValues: { ':pk': 'USER#demo' },
+      ExpressionAttributeValues: { ':v0': 'USER#demo' },
     });
   });
 
@@ -59,6 +59,6 @@ describe('Lambda handler', () => {
 
     const authed = await handler(apiEvent('GET', '/transactions', { sub: 'user-1' }));
     expect(authed.statusCode).toBe(200);
-    expect(ddbMock.commandCalls(QueryCommand)[0]!.args[0].input).toMatchObject({ ExpressionAttributeValues: { ':pk': 'USER#user-1' } });
+    expect(ddbMock.commandCalls(QueryCommand)[0]!.args[0].input).toMatchObject({ ExpressionAttributeValues: { ':v0': 'USER#user-1' } });
   });
 });

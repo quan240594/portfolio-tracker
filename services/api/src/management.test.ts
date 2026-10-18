@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { MANAGEMENT_ROUTES, MAX_CATEGORIES, MAX_CUSTOM_ASSETS, MAX_VALUATIONS, MAX_WATCHLIST } from '@portfolio/shared';
-import { createHandler } from './app.js';
+import { createHandler } from './lambda/handler.js';
 import { matchRoute } from './router.js';
 import { toResponse } from './lib/http.js';
 import { apiEvent, fakeDeps, portfolio, txn } from './testing/fakes.js';

@@ -24,23 +24,14 @@ describe('Lambda entry point', () => {
 });
 
 describe('library surface', () => {
-  it('exposes what the API needs', async () => {
-    const lib = await import('./lib.js');
-    expect(Object.keys(lib)).toEqual(expect.arrayContaining(['createHandler', 'createAwsDeps', 'Trading212Client', 'SecretsManagerCredentialStore', 'DynamoBrokerStore', 'BrokerError', 'loadConfig', 'MemoryBrokerStore']));
+  it('exposes what the API needs, without the AWS composition', async () => {
+    const keys = Object.keys(await import('./lib.js'));
+    expect(keys).toEqual(expect.arrayContaining(['createHandler', 'brokerSyncJob', 'syncJob', 'Trading212Client', 'SecretCredentialStore', 'ItemBrokerStore', 'BrokerError', 'MemoryBrokerStore']));
+    expect(keys).not.toEqual(expect.arrayContaining(['createAwsDeps']));
+    expect(keys).not.toContain('loadConfig');
   });
-});
 
-describe('logger', () => {
-  it('defaults to INFO and honours LOG_LEVEL', async () => {
-    vi.stubEnv('LOG_LEVEL', '');
-    const quiet = await import('./logger.js');
-    expect(quiet.logger).toBeDefined();
-    vi.resetModules();
-    vi.stubEnv('LOG_LEVEL', 'debug');
-    expect((await import('./logger.js')).logger.getLevelName()).toBe('DEBUG');
-    vi.resetModules();
-    vi.unstubAllEnvs();
-    delete process.env.LOG_LEVEL;
-    expect((await import('./logger.js')).logger.getLevelName()).toBe('INFO');
+  it('keeps the AWS composition on its own entry', async () => {
+    expect(Object.keys(await import('./aws.js'))).toEqual(expect.arrayContaining(['createAwsDeps', 'createCredentialStore', 'createItemStore', 'loadConfig']));
   });
 });

@@ -54,7 +54,7 @@ export async function listWatchlist(ctx: RouteContext): Promise<RouteResult> {
  * TransactionsChanged event (the prices handler only reads `detail.symbols`).
  */
 export async function addWatchlist(ctx: RouteContext): Promise<RouteResult> {
-  const { symbol } = validate(addWatchlistSchema.safeParse(parseJsonBody(ctx.body, ctx.isBase64Encoded)), 'Invalid symbol');
+  const { symbol } = validate(addWatchlistSchema.safeParse(parseJsonBody(ctx.body)), 'Invalid symbol');
   const { mgmt, repo, now } = ctx.deps;
   if ((await mgmt.listWatchlist(ctx.userId)).length >= MAX_WATCHLIST) {
     throw new HttpError(422, 'UNPROCESSABLE', `The watchlist can hold at most ${MAX_WATCHLIST} symbols`);

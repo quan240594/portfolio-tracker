@@ -1,8 +1,7 @@
-import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2, Context } from 'aws-lambda';
+import { logger, type PortableHandler } from '@portfolio/platform';
 import { MissingFxRateError, PortfolioError } from '@portfolio/shared';
 import { errorBody, HttpError, toResponse, type RouteResult } from './lib/http.js';
 import { resolveUserId } from './lib/auth.js';
-import { logger } from './lib/logger.js';
 import { matchRoute } from './router.js';
 import type { Deps } from './deps.js';
 
@@ -19,36 +18,28 @@ export function errorToResult(err: unknown): RouteResult {
   return { statusCode: 500, body: errorBody('INTERNAL_ERROR', 'Internal server error') };
 }
 
-export type ApiHandler = (
-  event: APIGatewayProxyEventV2,
-  context?: Partial<Context>,
-) => Promise<APIGatewayProxyStructuredResultV2>;
-
-export function createHandler(getDeps: () => Deps): ApiHandler {
-  return async (event, context) => {
+/**
+ * The whole API as one platform-neutral function: a `PortableRequest` in, a `PortableResponse` out. Adapters translate
+ * their native request (API Gateway event, Node request, Worker `Request`) to and from these types and nothing else.
+ * `getDeps` is called per request, so an adapter can build its clients lazily and reuse them.
+ */
+export function createApp(getDeps: () => Deps): PortableHandler {
+  return async (request) => {
     const started = Date.now();
-    const method = event.requestContext.http.method.toUpperCase();
-    const requestId = context?.awsRequestId ?? event.requestContext.requestId;
-    logger.appendKeys({ requestId });
+    const { method } = request;
+    if (request.requestId) logger.appendKeys({ requestId: request.requestId });
     const deps = getDeps();
-    let route = `${method} ${event.rawPath}`;
+    let route = `${method} ${request.path}`;
     let result: RouteResult;
     try {
       if (method === 'OPTIONS') {
         result = { statusCode: 204, body: undefined };
       } else {
         // Authenticate before routing so unauthenticated callers learn nothing about which routes exist.
-        const userId = resolveUserId(event, deps.config);
-        const matched = matchRoute(method, event.rawPath);
+        const userId = resolveUserId(request, deps.config);
+        const matched = matchRoute(method, request.path);
         route = matched.route;
-        result = await matched.handler({
-          deps,
-          userId,
-          pathParams: matched.pathParams,
-          query: event.queryStringParameters ?? {},
-          body: event.body,
-          isBase64Encoded: event.isBase64Encoded,
-        });
+        result = await matched.handler({ deps, userId, pathParams: matched.pathParams, query: request.query, body: request.body });
       }
     } catch (err) {
       result = errorToResult(err);

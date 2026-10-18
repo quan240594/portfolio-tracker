@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Transaction } from '@portfolio/shared';
-import { MAX_OBJECT_BYTES } from './objects.js';
-import { processImportObject } from './processor.js';
+import { MAX_OBJECT_BYTES, importUploadedJob, processImport, processImportObject } from './processor.js';
 import { fakeIngestDeps } from './testing/fakes.js';
 
 const BUCKET = 'bucket';
@@ -25,7 +24,7 @@ const stored = (over: Partial<Transaction>): Transaction => ({
 function setup(csv?: string, importId = 'imp1') {
   const ctx = fakeIngestDeps();
   ctx.store.addImport('demo', importId);
-  if (csv !== undefined) ctx.reader.objects.set(`${BUCKET}/imports/demo/${importId}.csv`, csv);
+  if (csv !== undefined) ctx.files.files.set(`imports/demo/${importId}.csv`, csv);
   const run = (key = `imports/demo/${importId}.csv`) => processImportObject(ctx.deps, { bucket: BUCKET, key });
   return { ...ctx, run };
 }
@@ -42,10 +41,10 @@ describe('processImportObject', () => {
   it('decodes URL-encoded keys and reads the canonical object key', async () => {
     const ctx = fakeIngestDeps();
     ctx.store.addImport('demo', 'my file');
-    ctx.reader.objects.set(`${BUCKET}/imports/demo/my file.csv`, `${HEADER}\n2025-01-02,BUY,AAPL,1,1,0,USD\n`);
-    const readSpy = vi.spyOn(ctx.reader, 'readText');
+    ctx.files.files.set(`imports/demo/my file.csv`, `${HEADER}\n2025-01-02,BUY,AAPL,1,1,0,USD\n`);
+    const readSpy = vi.spyOn(ctx.files, 'readText');
     expect(await processImportObject(ctx.deps, { bucket: BUCKET, key: 'imports/demo/my%20file.csv' })).toBe('COMPLETED');
-    expect(readSpy).toHaveBeenCalledWith(BUCKET, 'imports/demo/my file.csv', MAX_OBJECT_BYTES);
+    expect(readSpy).toHaveBeenCalledWith('imports/demo/my file.csv', MAX_OBJECT_BYTES);
     expect(ctx.store.transactions.map((t) => t.id)).toEqual(['my file-1']);
   });
 
@@ -57,18 +56,18 @@ describe('processImportObject', () => {
   });
 
   it.each(['COMPLETED', 'FAILED'] as const)('acknowledges a redelivery of a %s import without re-reading the file', async (status) => {
-    const { run, store, reader } = setup(`${HEADER}\n2025-01-02,BUY,AAPL,1,1,0,USD\n`);
+    const { run, store, files } = setup(`${HEADER}\n2025-01-02,BUY,AAPL,1,1,0,USD\n`);
     store.imp('demo', 'imp1')!.status = status;
-    const read = vi.spyOn(reader, 'readText');
+    const read = vi.spyOn(files, 'readText');
     expect(await run()).toBe('ALREADY_DONE');
     expect(read).not.toHaveBeenCalled();
     expect(store.imp('demo', 'imp1')!.status).toBe(status);
   });
 
   it('acknowledges when the import turns terminal between the read and the conditional update', async () => {
-    const { run, store, reader } = setup(`${HEADER}\n2025-01-02,BUY,AAPL,1,1,0,USD\n`);
+    const { run, store, files } = setup(`${HEADER}\n2025-01-02,BUY,AAPL,1,1,0,USD\n`);
     vi.spyOn(store, 'markProcessing').mockResolvedValue(false);
-    const read = vi.spyOn(reader, 'readText');
+    const read = vi.spyOn(files, 'readText');
     expect(await run()).toBe('ALREADY_DONE');
     expect(read).not.toHaveBeenCalled();
     expect(store.transactions).toHaveLength(0);
@@ -170,9 +169,9 @@ describe('processImportObject', () => {
 
   describe('target portfolio', () => {
     it('fails an import without a target portfolio before reading the file', async () => {
-      const { run, store, reader } = setup(`${HEADER}\n2025-01-02,BUY,AAPL,1,1,0,USD\n`);
+      const { run, store, files } = setup(`${HEADER}\n2025-01-02,BUY,AAPL,1,1,0,USD\n`);
       delete (store.imp('demo', 'imp1') as { portfolioId?: string }).portfolioId;
-      const read = vi.spyOn(reader, 'readText');
+      const read = vi.spyOn(files, 'readText');
       expect(await run()).toBe('FAILED');
       expect(store.imp('demo', 'imp1')).toMatchObject({ status: 'FAILED', rowCount: 0, errors: [{ row: 0, message: 'Import has no target portfolio' }] });
       expect(read).not.toHaveBeenCalled();
@@ -190,7 +189,7 @@ describe('processImportObject', () => {
     it('writes the rows into the import portfolio and publishes it', async () => {
       const ctx = fakeIngestDeps();
       ctx.store.addImport('demo', 'imp9', 'PENDING', 'broker');
-      ctx.reader.objects.set(`${BUCKET}/imports/demo/imp9.csv`, `${HEADER}\n2025-01-02,BUY,AAPL,1,1,0,USD\n`);
+      ctx.files.files.set(`imports/demo/imp9.csv`, `${HEADER}\n2025-01-02,BUY,AAPL,1,1,0,USD\n`);
       expect(await processImportObject(ctx.deps, { bucket: BUCKET, key: 'imports/demo/imp9.csv' })).toBe('COMPLETED');
       expect(ctx.store.transactions).toEqual([expect.objectContaining({ id: 'imp9-1', portfolioId: 'broker', importId: 'imp9' })]);
       expect(ctx.events.published).toEqual([{ userId: 'demo', portfolioId: 'broker', symbols: ['AAPL'], reason: 'IMPORTED', importId: 'imp9' }]);
@@ -205,7 +204,7 @@ describe('processImportObject', () => {
 
       const intoBroker = fakeIngestDeps();
       intoBroker.store.addImport('demo', 'imp2', 'PENDING', 'broker');
-      intoBroker.reader.objects.set(`${BUCKET}/imports/demo/imp2.csv`, csv);
+      intoBroker.files.files.set(`imports/demo/imp2.csv`, csv);
       // A later oversell stored in another portfolio does not block this import.
       intoBroker.store.transactions.push(stored({ id: 'b' }), stored({ id: 'x', portfolioId: 'broker' }), stored({ id: 's', date: '2025-06-01', type: 'SELL', quantity: 9 }));
       expect(await processImportObject(intoBroker.deps, { bucket: BUCKET, key: 'imports/demo/imp2.csv' })).toBe('COMPLETED');
@@ -224,5 +223,24 @@ describe('processImportObject', () => {
       store.transactions.push(stored({ id: 'o', userId: 'someone-else' }));
       expect(await run()).toBe('COMPLETED');
     });
+  });
+});
+
+describe('portable entry points', () => {
+  it('processImport processes an upload identified by user and import id, without any storage key', async () => {
+    const { store } = setup(`${HEADER}\n2025-01-02,BUY,AAPL,1,1,0,USD\n`);
+    const ctx = setup(`${HEADER}\n2025-01-02,BUY,AAPL,1,1,0,USD\n`, 'imp7');
+    expect(await processImport(ctx.deps, { userId: 'demo', importId: 'imp7' })).toBe('COMPLETED');
+    expect(ctx.store.imp('demo', 'imp7')!.status).toBe('COMPLETED');
+    expect(store.imp('demo', 'imp1')!.status).toBe('PENDING');
+  });
+
+  it('the importUploaded job is one idempotent step', async () => {
+    const ctx = setup(`${HEADER}\n2025-01-02,BUY,AAPL,1,1,0,USD\n`);
+    const job = importUploadedJob(ctx.deps);
+    expect(await job({ payload: { userId: 'demo', importId: 'imp1' } })).toEqual({ done: true, result: 'COMPLETED' });
+    expect(await job({ payload: { userId: 'demo', importId: 'imp1' } })).toEqual({ done: true, result: 'ALREADY_DONE' });
+    expect(ctx.store.transactions).toHaveLength(1);
+    expect(await job({ payload: { userId: 'demo', importId: 'unknown' } })).toEqual({ done: true, result: 'NOT_FOUND' });
   });
 });

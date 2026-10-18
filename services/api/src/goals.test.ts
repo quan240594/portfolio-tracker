@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { GOALS_ROUTES, defaultGoalSettings, type GoalResponse } from '@portfolio/shared';
-import { createHandler } from './app.js';
+import { createHandler } from './lambda/handler.js';
 import { matchRoute } from './router.js';
 import { apiEvent, fakeDeps, portfolio, txn } from './testing/fakes.js';
 

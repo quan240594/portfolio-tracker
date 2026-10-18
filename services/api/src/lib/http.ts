@@ -1,4 +1,4 @@
-import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
+import type { PortableResponse } from '@portfolio/platform';
 import type { ApiError } from '@portfolio/shared';
 
 export class HttpError extends Error {
@@ -33,12 +33,9 @@ function serializeBody(result: RouteResult): string {
   return result.contentType && typeof result.body === 'string' ? result.body : JSON.stringify(result.body);
 }
 
-export function toResponse(
-  result: RouteResult,
-  corsOrigin: string,
-): APIGatewayProxyStructuredResultV2 {
+export function toResponse(result: RouteResult, corsOrigin: string): PortableResponse {
   return {
-    statusCode: result.statusCode,
+    status: result.statusCode,
     headers: {
       'content-type': result.contentType ?? 'application/json',
       'access-control-allow-origin': corsOrigin,
@@ -63,11 +60,10 @@ export function validate<T>(
   return result.data;
 }
 
-export function parseJsonBody(body: string | undefined, isBase64Encoded?: boolean): unknown {
+export function parseJsonBody(body: string | undefined): unknown {
   if (!body) throw new HttpError(400, 'VALIDATION_ERROR', 'Request body is required');
-  const raw = isBase64Encoded ? Buffer.from(body, 'base64').toString('utf8') : body;
   try {
-    return JSON.parse(raw);
+    return JSON.parse(body);
   } catch {
     throw new HttpError(400, 'VALIDATION_ERROR', 'Request body must be valid JSON');
   }

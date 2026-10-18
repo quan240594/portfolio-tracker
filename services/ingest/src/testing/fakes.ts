@@ -1,7 +1,6 @@
-import type { ImportStatus, Transaction, TransactionsChangedDetail } from '@portfolio/shared';
+import type { ImportStatus, Transaction } from '@portfolio/shared';
 import type { SQSEvent, SQSRecord } from 'aws-lambda';
-import type { EventPublisher } from '../events.js';
-import type { ObjectReader, ReadResult } from '../objects.js';
+import { MemoryFileStore, RecordingEventPublisher } from '@portfolio/platform';
 import type { IngestDeps } from '../processor.js';
 import type { IngestStore } from '../store.js';
 
@@ -72,30 +71,12 @@ export class InMemoryIngestStore implements IngestStore {
   }
 }
 
-export class FakeReader implements ObjectReader {
-  objects = new Map<string, string>();
-  readText(bucket: string, key: string, maxBytes: number): Promise<ReadResult> {
-    const content = this.objects.get(`${bucket}/${key}`);
-    if (content === undefined) return Promise.resolve({ ok: false, reason: 'Uploaded file not found' });
-    if (Buffer.byteLength(content) > maxBytes) return Promise.resolve({ ok: false, reason: 'File too large' });
-    return Promise.resolve({ ok: true, content });
-  }
-}
-
-export class RecordingPublisher implements EventPublisher {
-  published: TransactionsChangedDetail[] = [];
-  transactionsChanged(detail: TransactionsChangedDetail) {
-    this.published.push(detail);
-    return Promise.resolve();
-  }
-}
-
 export function fakeIngestDeps() {
   const store = new InMemoryIngestStore();
-  const reader = new FakeReader();
-  const events = new RecordingPublisher();
-  const deps: IngestDeps = { store, reader, events, now: () => new Date('2026-06-15T12:00:00.000Z') };
-  return { deps, store, reader, events };
+  const files = new MemoryFileStore();
+  const events = new RecordingEventPublisher();
+  const deps: IngestDeps = { store, files, events, now: () => new Date('2026-06-15T12:00:00.000Z') };
+  return { deps, store, files, events };
 }
 
 export const eventBridgeBody = (bucket: string, key: string) =>

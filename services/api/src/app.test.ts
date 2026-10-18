@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { MissingFxRateError, PortfolioError } from '@portfolio/shared';
-import { createHandler, errorToResult } from './app.js';
+import { errorToResult } from './app.js';
+import { createHandler } from './lambda/handler.js';
 import { HttpError } from './lib/http.js';
-import { logger } from './lib/logger.js';
+import { logger } from '@portfolio/platform';
 import { apiEvent, fakeDeps, portfolio, txn } from './testing/fakes.js';
 import type { Deps } from './deps.js';
 
@@ -250,7 +251,7 @@ describe('imports', () => {
     expect(res.statusCode).toBe(201);
     expect(json(res)).toEqual({
       importId: 'uuid-1',
-      uploadUrl: 'https://bucket.example/imports/demo/uuid-1.csv?X-Amz-Expires=300',
+      uploadUrl: 'https://bucket.example/imports/demo/uuid-1.csv?expires=300',
       expiresInSeconds: 300,
     });
     expect(repo.imports.get('demo/uuid-1')).toMatchObject({ status: 'PENDING', fileName: 'trades.csv', userId: 'demo', portfolioId: 'default' });
@@ -522,9 +523,9 @@ describe('imports edge cases', () => {
 
   it('signs the upload for the user-scoped key with the documented expiry', async () => {
     const { handler, deps } = setup();
-    const sign = vi.spyOn(deps.signer, 'signCsvUpload');
+    const create = vi.spyOn(deps.files, 'createUpload');
     await handler(apiEvent('POST', '/imports', { body: { portfolioId: 'default', fileName: 'a.csv' }, sub: 'alice' }));
-    expect(sign).toHaveBeenCalledWith('imports/alice/uuid-1.csv', 300);
+    expect(create).toHaveBeenCalledWith({ key: 'imports/alice/uuid-1.csv', contentType: 'text/csv', expiresInSeconds: 300 });
   });
 
   it('rejects an empty body and invalid import requests with a specific message', async () => {

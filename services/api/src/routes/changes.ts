@@ -1,5 +1,5 @@
 import { marketSymbols, type TransactionsChangedDetail } from '@portfolio/shared';
-import { logger } from '../lib/logger.js';
+import { logger } from '@portfolio/platform';
 import type { RouteContext } from '../deps.js';
 
 /**

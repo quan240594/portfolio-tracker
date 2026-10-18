@@ -1,24 +1,8 @@
 import {
-  BatchGetCommand,
-  BatchWriteCommand,
-  DeleteCommand,
-  GetCommand,
-  PutCommand,
-  QueryCommand,
-  UpdateCommand,
-  type DynamoDBDocumentClient,
-  type QueryCommandInput,
-} from '@aws-sdk/lib-dynamodb';
-import {
   calendarKeys,
-  drain,
   ENTITY,
   fromItem,
   keys,
-  registerUserUpdate,
-  retryAttempts,
-  sequentially,
-  trackTickerUpdates,
   transactionItem,
   type DividendEvent,
   type EodPrice,
@@ -33,8 +17,9 @@ import {
   type StoredSplitEvent,
   type Transaction,
 } from '@portfolio/shared';
+import { cond, listByPrefix, listTransactions, queryAll, registerUser, trackTickers, type ItemStore } from '@portfolio/platform';
 
-/** Data access used by the route handlers. Implemented by DynamoRepository and by in-memory fakes in tests. */
+/** Data access used by the route handlers. Implemented by `ItemRepository` (any ItemStore) and by in-memory fakes in tests. */
 export interface Repository {
   /** All portfolios of the user (unsorted). */
   listPortfolios(userId: string): Promise<Portfolio[]>;
@@ -50,7 +35,7 @@ export interface Repository {
   findTransaction(userId: string, id: string): Promise<Transaction | null>;
   putTransaction(txn: Transaction): Promise<void>;
   deleteTransaction(txn: Transaction): Promise<void>;
-  /** Batch delete (chunks of 25, retrying unprocessed items). */
+  /** Batch delete (the ItemStore chunks and retries unprocessed items). */
   deleteTransactions(txns: readonly Transaction[]): Promise<void>;
   getQuotes(symbols: string[]): Promise<Record<string, Quote>>;
   getProfiles(symbols: string[]): Promise<Record<string, InstrumentProfile>>;
@@ -68,190 +53,79 @@ export interface Repository {
   getImport(userId: string, importId: string): Promise<ImportStatus | null>;
 }
 
-const chunk = <T>(arr: readonly T[], size: number): T[][] => {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-};
+/**
+ * Repository on an ItemStore: the key scheme (see `keys` in @portfolio/shared), item shapes and queries of the main
+ * entities, written once for every storage adapter.
+ */
+export class ItemRepository implements Repository {
+  constructor(private readonly store: ItemStore) {}
 
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-const isConditionalCheckFailure = (err: unknown) => (err as Error | undefined)?.name === 'ConditionalCheckFailedException';
-
-export const BATCH_WRITE_SIZE = 25;
-const MAX_BATCH_ATTEMPTS = 9;
-
-export class DynamoRepository implements Repository {
-  constructor(
-    private readonly doc: DynamoDBDocumentClient,
-    private readonly tableName: string,
-  ) {}
-
-  private async queryAll(
-    input: Omit<QueryCommandInput, 'TableName'>,
-    ExclusiveStartKey?: Record<string, unknown>,
-  ): Promise<Record<string, unknown>[]> {
-    const res = await this.doc.send(new QueryCommand({ ...input, TableName: this.tableName, ExclusiveStartKey }));
-    const items = (res.Items ?? []) as Record<string, unknown>[];
-    // Pages depend on the previous page's cursor, so they are fetched sequentially.
-    return res.LastEvaluatedKey ? [...items, ...(await this.queryAll(input, res.LastEvaluatedKey))] : items;
-  }
-
-  private async batchGet(keyList: { PK: string; SK: string }[]): Promise<Record<string, unknown>[]> {
-    const parts = await Promise.all(chunk(keyList, 100).map((part) => this.batchGetChunk(part)));
-    return parts.flat();
-  }
-
-  /** Retries unprocessed keys with exponential backoff; each retry depends on the previous response. */
-  private async batchGetChunk(pending: Record<string, unknown>[], attempt = 0): Promise<Record<string, unknown>[]> {
-    if (attempt > 8) throw new Error('BatchGet: unprocessed keys remain after retries');
-    if (attempt > 0) await sleep(Math.min(50 * 2 ** attempt, 2000));
-    const res = await this.doc.send(new BatchGetCommand({ RequestItems: { [this.tableName]: { Keys: pending } } }));
-    const out = (res.Responses?.[this.tableName] ?? []) as Record<string, unknown>[];
-    const unprocessed = res.UnprocessedKeys?.[this.tableName]?.Keys as Record<string, unknown>[] | undefined;
-    return unprocessed && unprocessed.length > 0 ? [...out, ...(await this.batchGetChunk(unprocessed, attempt + 1))] : out;
-  }
-
-  /** Writes the requests in batches of 25, one batch after another, retrying unprocessed items with backoff. */
-  private async batchWrite(requests: Record<string, unknown>[]): Promise<void> {
-    await drain(sequentially(chunk(requests, BATCH_WRITE_SIZE), (part) => this.writeBatch(part)));
-  }
-
-  private async writeBatch(requests: Record<string, unknown>[]): Promise<void> {
-    let pending = requests;
-    const attempts = retryAttempts(
-      async () => {
-        const res = await this.doc.send(new BatchWriteCommand({ RequestItems: { [this.tableName]: pending as never } }));
-        return (res.UnprocessedItems?.[this.tableName] ?? []) as Record<string, unknown>[];
-      },
-      { maxAttempts: MAX_BATCH_ATTEMPTS, delayMs: (retry) => Math.min(50 * 2 ** retry, 2000), sleep },
-    );
-    for await (const unprocessed of attempts) {
-      if (unprocessed.length === 0) return;
-      pending = unprocessed;
-    }
-    throw new Error('BatchWrite: unprocessed items remain after retries');
-  }
-
-  async listPortfolios(userId: string): Promise<Portfolio[]> {
-    const items = await this.queryAll({
-      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
-      ExpressionAttributeValues: { ':pk': keys.user(userId).PK, ':sk': keys.portfolioPrefix },
-      ConsistentRead: true,
-    });
-    return items.map((i) => fromItem<Portfolio>(i));
+  listPortfolios(userId: string): Promise<Portfolio[]> {
+    return listByPrefix<Portfolio>(this.store, keys.user(userId).PK, keys.portfolioPrefix, { consistent: true });
   }
 
   async getPortfolio(userId: string, portfolioId: string): Promise<Portfolio | null> {
-    const res = await this.doc.send(
-      new GetCommand({ TableName: this.tableName, Key: keys.portfolio(userId, portfolioId), ConsistentRead: true }),
-    );
-    return res.Item ? fromItem<Portfolio>(res.Item) : null;
+    const item = await this.store.get(keys.portfolio(userId, portfolioId), { consistent: true });
+    return item ? fromItem<Portfolio>(item) : null;
   }
 
-  async createPortfolio(portfolio: Portfolio): Promise<boolean> {
-    try {
-      await this.doc.send(
-        new PutCommand({
-          TableName: this.tableName,
-          Item: { ...keys.portfolio(portfolio.userId, portfolio.portfolioId), entityType: ENTITY.portfolio, ...portfolio },
-          ConditionExpression: 'attribute_not_exists(PK)',
-        }),
-      );
-      return true;
-    } catch (err) {
-      if (isConditionalCheckFailure(err)) return false;
-      throw err;
-    }
+  createPortfolio(portfolio: Portfolio): Promise<boolean> {
+    return this.store.put(
+      { ...keys.portfolio(portfolio.userId, portfolio.portfolioId), entityType: ENTITY.portfolio, ...portfolio },
+      { condition: cond.notExists },
+    );
   }
 
   async renamePortfolio(userId: string, portfolioId: string, name: string, updatedAt: string): Promise<Portfolio | null> {
-    try {
-      const res = await this.doc.send(
-        new UpdateCommand({
-          TableName: this.tableName,
-          Key: keys.portfolio(userId, portfolioId),
-          UpdateExpression: 'SET #n = :name, updatedAt = :now',
-          ConditionExpression: 'attribute_exists(PK)',
-          ExpressionAttributeNames: { '#n': 'name' },
-          ExpressionAttributeValues: { ':name': name, ':now': updatedAt },
-          ReturnValues: 'ALL_NEW',
-        }),
-      );
-      return fromItem<Portfolio>(res.Attributes ?? {});
-    } catch (err) {
-      if (isConditionalCheckFailure(err)) return null;
-      throw err;
-    }
+    const item = await this.store.update(keys.portfolio(userId, portfolioId), { set: { name, updatedAt } }, { condition: cond.exists });
+    return item ? fromItem<Portfolio>(item) : null;
   }
 
   async deletePortfolio(userId: string, portfolioId: string): Promise<void> {
-    await this.doc.send(new DeleteCommand({ TableName: this.tableName, Key: keys.portfolio(userId, portfolioId) }));
+    await this.store.delete(keys.portfolio(userId, portfolioId));
   }
 
-  async listTransactions(userId: string, portfolioId?: string): Promise<Transaction[]> {
-    const prefix = portfolioId === undefined ? keys.transactionPrefix : keys.portfolioTransactionPrefix(portfolioId);
-    const items = await this.queryAll({
-      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
-      ExpressionAttributeValues: { ':pk': keys.user(userId).PK, ':sk': prefix },
-    });
-    return items.map((i) => fromItem<Transaction>(i));
+  listTransactions(userId: string, portfolioId?: string): Promise<Transaction[]> {
+    return listTransactions(this.store, userId, portfolioId);
   }
 
   async findTransaction(userId: string, id: string): Promise<Transaction | null> {
-    const items = await this.queryAll({
-      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
-      FilterExpression: 'id = :id',
-      ExpressionAttributeValues: { ':pk': keys.user(userId).PK, ':sk': keys.transactionPrefix, ':id': id },
-    });
-    return items[0] ? fromItem<Transaction>(items[0]) : null;
+    return (await listTransactions(this.store, userId)).find((t) => t.id === id) ?? null;
   }
 
   async putTransaction(txn: Transaction): Promise<void> {
-    await this.doc.send(
-      new PutCommand({
-        TableName: this.tableName,
-        Item: transactionItem(txn),
-        ConditionExpression: 'attribute_not_exists(PK)',
-      }),
-    );
+    if (!(await this.store.put(transactionItem(txn), { condition: cond.notExists }))) {
+      throw new Error(`Transaction ${txn.id} already exists`);
+    }
   }
 
   async deleteTransaction(txn: Transaction): Promise<void> {
-    await this.doc.send(
-      new DeleteCommand({ TableName: this.tableName, Key: keys.transaction(txn.userId, txn.portfolioId, txn.date, txn.id) }),
-    );
+    await this.store.delete(keys.transaction(txn.userId, txn.portfolioId, txn.date, txn.id));
   }
 
-  async deleteTransactions(txns: readonly Transaction[]): Promise<void> {
-    await this.batchWrite(
-      txns.map((t) => ({ DeleteRequest: { Key: keys.transaction(t.userId, t.portfolioId, t.date, t.id) } })),
-    );
+  deleteTransactions(txns: readonly Transaction[]): Promise<void> {
+    return this.store.batchWrite(txns.map((t) => ({ type: 'delete', key: keys.transaction(t.userId, t.portfolioId, t.date, t.id) })));
   }
 
   async getQuotes(symbols: string[]): Promise<Record<string, Quote>> {
-    const items = await this.batchGet(symbols.map((s) => keys.quote(s)));
+    const items = await this.store.getMany(symbols.map((s) => keys.quote(s)));
     return Object.fromEntries(items.map((i) => [String(i.symbol), fromItem<Quote>(i)]));
   }
 
   async getProfiles(symbols: string[]): Promise<Record<string, InstrumentProfile>> {
-    const items = await this.batchGet(symbols.map((s) => keys.profile(s)));
+    const items = await this.store.getMany(symbols.map((s) => keys.profile(s)));
     return Object.fromEntries(items.map((i) => [String(i.symbol), fromItem<InstrumentProfile>(i)]));
   }
 
   async getFx(base: string): Promise<FxRates | null> {
-    const res = await this.doc.send(new GetCommand({ TableName: this.tableName, Key: keys.fx(base) }));
-    return res.Item ? fromItem<FxRates>(res.Item) : null;
+    const item = await this.store.get(keys.fx(base));
+    return item ? fromItem<FxRates>(item) : null;
   }
 
   async getFxHistory(base: string, from: string, to: string): Promise<FxDay[]> {
-    const items = await this.queryAll({
-      KeyConditionExpression: 'PK = :pk AND SK BETWEEN :from AND :to',
-      ExpressionAttributeValues: {
-        ':pk': keys.fxDay(base, from).PK,
-        ':from': keys.fxDay(base, from).SK,
-        ':to': keys.fxDay(base, to).SK,
-      },
+    const items = await queryAll(this.store, {
+      pk: keys.fxDay(base, from).PK,
+      sk: { between: [keys.fxDay(base, from).SK, keys.fxDay(base, to).SK] },
     });
     return items.map((i) => ({
       base: typeof i.base === 'string' ? i.base : base,
@@ -261,31 +135,17 @@ export class DynamoRepository implements Repository {
   }
 
   async getEod(symbol: string, from: string, to: string): Promise<EodPrice[]> {
-    const items = await this.queryAll({
-      KeyConditionExpression: 'PK = :pk AND SK BETWEEN :from AND :to',
-      ExpressionAttributeValues: {
-        ':pk': keys.tickerPk(symbol),
-        ':from': keys.eod(symbol, from).SK,
-        ':to': keys.eod(symbol, to).SK,
-      },
-    });
+    const items = await queryAll(this.store, { pk: keys.tickerPk(symbol), sk: { between: [keys.eod(symbol, from).SK, keys.eod(symbol, to).SK] } });
     return items.map((i) => fromItem<EodPrice>(i));
   }
 
-  async getDividendEvents(symbol: string): Promise<DividendEvent[]> {
-    const items = await this.queryAll({
-      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
-      ExpressionAttributeValues: { ':pk': keys.tickerPk(symbol), ':sk': keys.dividendPrefix },
-    });
-    return items.map((i) => fromItem<DividendEvent>(i));
+  getDividendEvents(symbol: string): Promise<DividendEvent[]> {
+    return listByPrefix<DividendEvent>(this.store, keys.tickerPk(symbol), keys.dividendPrefix);
   }
 
   async getCalendarEvents(symbols: string[], from: string, to: string): Promise<StoredCalendarEvents> {
     const between = (symbol: string, key: typeof calendarKeys.earnings) =>
-      this.queryAll({
-        KeyConditionExpression: 'PK = :pk AND SK BETWEEN :from AND :to',
-        ExpressionAttributeValues: { ':pk': calendarKeys.tickerPk(symbol), ':from': key(symbol, from).SK, ':to': key(symbol, to).SK },
-      });
+      queryAll(this.store, { pk: calendarKeys.tickerPk(symbol), sk: { between: [key(symbol, from).SK, key(symbol, to).SK] } });
     const [earnings, splits] = await Promise.all([
       Promise.all(symbols.map((s) => between(s, calendarKeys.earnings))),
       Promise.all(symbols.map((s) => between(s, calendarKeys.split))),
@@ -296,28 +156,20 @@ export class DynamoRepository implements Repository {
     };
   }
 
-  async registerUser(userId: string): Promise<void> {
-    await this.doc.send(new UpdateCommand(registerUserUpdate(this.tableName, userId, new Date().toISOString())));
+  registerUser(userId: string): Promise<void> {
+    return registerUser(this.store, userId, new Date().toISOString());
   }
 
-  async trackTickers(tickers: { symbol: string; currency?: string }[]): Promise<void> {
-    const updates = trackTickerUpdates(this.tableName, tickers, new Date().toISOString());
-    await Promise.all(updates.map((input) => this.doc.send(new UpdateCommand(input))));
+  trackTickers(tickers: { symbol: string; currency?: string }[]): Promise<void> {
+    return trackTickers(this.store, tickers, new Date().toISOString());
   }
 
   async putImport(status: ImportStatus): Promise<void> {
-    await this.doc.send(
-      new PutCommand({
-        TableName: this.tableName,
-        Item: { ...keys.import(status.userId, status.importId), entityType: ENTITY.import, ...status },
-      }),
-    );
+    await this.store.put({ ...keys.import(status.userId, status.importId), entityType: ENTITY.import, ...status });
   }
 
   async getImport(userId: string, importId: string): Promise<ImportStatus | null> {
-    const res = await this.doc.send(
-      new GetCommand({ TableName: this.tableName, Key: keys.import(userId, importId), ConsistentRead: true }),
-    );
-    return res.Item ? fromItem<ImportStatus>(res.Item) : null;
+    const item = await this.store.get(keys.import(userId, importId), { consistent: true });
+    return item ? fromItem<ImportStatus>(item) : null;
   }
 }

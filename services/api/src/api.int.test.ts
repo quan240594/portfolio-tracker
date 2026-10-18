@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CreateTableCommand, DeleteTableCommand, DynamoDBClient, waitUntilTableExists } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import { createDynamoItemStore } from '@portfolio/aws';
 import { CreateBucketCommand, DeleteBucketCommand, DeleteObjectCommand, HeadObjectCommand, ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
 import { CreateEventBusCommand, DeleteEventBusCommand, EventBridgeClient } from '@aws-sdk/client-eventbridge';
 import { importObjectKey } from '@portfolio/shared';
-import { createHandler } from './app.js';
+import { createHandler } from './lambda/handler.js';
 import { createAwsDeps } from './clients.js';
 import { loadConfig } from './config.js';
 import { apiEvent } from './testing/fakes.js';
@@ -12,7 +12,7 @@ import { LOCALSTACK_ENDPOINT, localAwsConfig, localStackAvailable } from './test
 import { seed } from '../scripts/seed.js';
 
 const available = await localStackAvailable();
-const runId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+const runId = `${Date.now().toString(36)}${crypto.randomUUID().slice(0, 4)}`;
 // Isolated resources so the suite never touches the shared developer table/bucket.
 const TABLE = `portfolio-tracker-it-${runId}`;
 const BUCKET = `portfolio-tracker-imports-it-${runId}`;
@@ -50,7 +50,7 @@ describe.skipIf(!available)('api against LocalStack', () => {
     await waitUntilTableExists({ client: ddb, maxWaitTime: 60 }, { TableName: TABLE });
     await s3.send(new CreateBucketCommand({ Bucket: BUCKET, CreateBucketConfiguration: { LocationConstraint: 'eu-west-1' } }));
     await eb.send(new CreateEventBusCommand({ Name: BUS }));
-    await seed({ doc: DynamoDBDocumentClient.from(ddb), tableName: TABLE, userId: 'demo', log: () => {} });
+    await seed({ store: createDynamoItemStore({ region: 'eu-west-1', endpointUrl: LOCALSTACK_ENDPOINT }, TABLE), userId: 'demo', log: () => {} });
   });
 
   afterAll(async () => {
@@ -63,7 +63,7 @@ describe.skipIf(!available)('api against LocalStack', () => {
 
   it('seed is idempotent', async () => {
     const before = (await call('GET', '/transactions')).body.transactions.length;
-    await seed({ doc: DynamoDBDocumentClient.from(ddb), tableName: TABLE, userId: 'demo', log: () => {} });
+    await seed({ store: createDynamoItemStore({ region: 'eu-west-1', endpointUrl: LOCALSTACK_ENDPOINT }, TABLE), userId: 'demo', log: () => {} });
     expect((await call('GET', '/transactions')).body.transactions.length).toBe(before);
   });
 

@@ -1,10 +1,8 @@
 /**
- * Pure DynamoDB item/command-input builders shared by the API and ingest services.
- * Deliberately free of AWS SDK imports (this package is also bundled into the web app): callers wrap the returned
- * inputs in their own `UpdateCommand` and send them with their own document client.
+ * Pure helpers for the single-table item layout, shared by every service. Free of any storage SDK (this package is
+ * also bundled into the web app); writes go through the `ItemStore` port of @portfolio/platform.
  */
 import { ENTITY, keys } from './keys.js';
-import { isMarketSymbol } from './management-api.js';
 import type { Transaction } from './types.js';
 
 const KEY_ATTRS = new Set(['PK', 'SK', 'entityType']);
@@ -22,42 +20,3 @@ export const transactionItem = (t: Transaction) => ({
   entityType: ENTITY.transaction,
   ...t,
 });
-
-/** Structurally compatible with `UpdateCommandInput` from `@aws-sdk/lib-dynamodb`. */
-export interface UpdateInput {
-  TableName: string;
-  Key: { PK: string; SK: string };
-  UpdateExpression: string;
-  ExpressionAttributeValues: Record<string, unknown>;
-}
-
-/** Upserts the user registry row, preserving `createdAt` on later writes. */
-export const registerUserUpdate = (tableName: string, userId: string, now: string): UpdateInput => ({
-  TableName: tableName,
-  Key: keys.userRegistry(userId),
-  UpdateExpression: 'SET entityType = :t, userId = :u, updatedAt = :now, createdAt = if_not_exists(createdAt, :now)',
-  ExpressionAttributeValues: { ':t': ENTITY.user, ':u': userId, ':now': now },
-});
-
-/**
- * One upsert per ticker, preserving `currency` and `createdAt` on later writes. Cash (`CASH.*`) and custom (`CUSTOM:*`)
- * symbols have no price feed and are never registered. `currency` may be omitted (watchlist symbols).
- */
-export const trackTickerUpdates = (
-  tableName: string,
-  tickers: readonly { symbol: string; currency?: string }[],
-  now: string,
-): UpdateInput[] =>
-  tickers
-    .filter((t) => isMarketSymbol(t.symbol))
-    .map((t) => ({
-      TableName: tableName,
-      Key: keys.trackedTicker(t.symbol),
-      UpdateExpression: `SET entityType = :t, symbol = :s, ${t.currency ? 'currency = if_not_exists(currency, :c), ' : ''}updatedAt = :now, createdAt = if_not_exists(createdAt, :now)`,
-      ExpressionAttributeValues: {
-        ':t': ENTITY.trackedTicker,
-        ':s': t.symbol,
-        ...(t.currency ? { ':c': t.currency } : {}),
-        ':now': now,
-      },
-    }));

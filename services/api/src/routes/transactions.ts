@@ -21,7 +21,7 @@ export async function listTransactions(ctx: RouteContext): Promise<RouteResult> 
 
 export async function createTransaction(ctx: RouteContext): Promise<RouteResult> {
   const input = validate(
-    transactionInputSchema.safeParse(parseJsonBody(ctx.body, ctx.isBase64Encoded)),
+    transactionInputSchema.safeParse(parseJsonBody(ctx.body)),
     'Invalid transaction',
   );
   const { repo, now, uuid } = ctx.deps;

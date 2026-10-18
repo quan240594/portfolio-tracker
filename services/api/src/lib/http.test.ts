@@ -24,7 +24,7 @@ describe('ok / errorBody', () => {
 describe('toResponse', () => {
   it('serialises the body as JSON and sets CORS/caching headers', () => {
     expect(toResponse({ statusCode: 201, body: { id: 'a' } }, 'https://app.example')).toEqual({
-      statusCode: 201,
+      status: 201,
       headers: {
         'content-type': 'application/json',
         'access-control-allow-origin': 'https://app.example',
@@ -77,16 +77,9 @@ describe('parseJsonBody', () => {
     expect(parseJsonBody('{"a":[1,2]}')).toEqual({ a: [1, 2] });
   });
 
-  it('decodes base64-encoded bodies', () => {
-    const body = Buffer.from(JSON.stringify({ fileName: 'ä.csv' }), 'utf8').toString('base64');
-    expect(parseJsonBody(body, true)).toEqual({ fileName: 'ä.csv' });
-  });
-
   it('rejects malformed JSON with a 400', () => {
     expect(() => parseJsonBody('{nope')).toThrow(
       expect.objectContaining({ statusCode: 400, code: 'VALIDATION_ERROR', message: 'Request body must be valid JSON' }),
     );
-    // Base64 of something that is not JSON
-    expect(() => parseJsonBody(Buffer.from('not json').toString('base64'), true)).toThrow('Request body must be valid JSON');
   });
 });

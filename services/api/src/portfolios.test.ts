@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { MAX_PORTFOLIOS } from '@portfolio/shared';
-import { createHandler } from './app.js';
-import { logger } from './lib/logger.js';
+import { createHandler } from './lambda/handler.js';
+import { logger } from '@portfolio/platform';
 import { apiEvent, fakeDeps, portfolio, txn } from './testing/fakes.js';
 
 const json = (res: APIGatewayProxyStructuredResultV2) => (res.body ? JSON.parse(res.body) : undefined);

@@ -7,16 +7,20 @@ export const UPLOAD_URL_EXPIRES_SECONDS = 300;
 
 export async function createImport(ctx: RouteContext): Promise<RouteResult> {
   const { fileName, portfolioId } = validate(
-    createImportSchema.safeParse(parseJsonBody(ctx.body, ctx.isBase64Encoded)),
+    createImportSchema.safeParse(parseJsonBody(ctx.body)),
     'Invalid import request',
   );
-  const { repo, signer, now, uuid } = ctx.deps;
+  const { repo, files, now, uuid } = ctx.deps;
   await requirePortfolio(ctx, portfolioId);
   const importId = uuid();
   const ts = now().toISOString();
   const status: ImportStatus = { importId, userId: ctx.userId, portfolioId, fileName, status: 'PENDING', createdAt: ts, updatedAt: ts };
   await repo.putImport(status);
-  const uploadUrl = await signer.signCsvUpload(importObjectKey(ctx.userId, importId), UPLOAD_URL_EXPIRES_SECONDS);
+  const { url: uploadUrl } = await files.createUpload({
+    key: importObjectKey(ctx.userId, importId),
+    contentType: 'text/csv',
+    expiresInSeconds: UPLOAD_URL_EXPIRES_SECONDS,
+  });
   return ok({ importId, uploadUrl, expiresInSeconds: UPLOAD_URL_EXPIRES_SECONDS } satisfies CreateImportResponse, 201);
 }
 

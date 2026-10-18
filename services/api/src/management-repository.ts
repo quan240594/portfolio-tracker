@@ -1,16 +1,10 @@
-import {
-  DeleteCommand,
-  GetCommand,
-  PutCommand,
-  QueryCommand,
-  type DynamoDBDocumentClient,
-  type QueryCommandInput,
-} from '@aws-sdk/lib-dynamodb';
+import { cond, listByPrefix, type Item, type ItemKey, type ItemStore } from '@portfolio/platform';
 import {
   GOAL_ENTITY,
   MANAGEMENT_ENTITY,
   fromItem,
   goalKeys,
+  keys,
   managementKeys,
   type Category,
   type CategoryAssignment,
@@ -50,44 +44,34 @@ export interface ManagementRepository {
   deletePortfolioData(userId: string, portfolioId: string): Promise<void>;
 }
 
-const isConditionalCheckFailure = (err: unknown) => (err as Error | undefined)?.name === 'ConditionalCheckFailedException';
+/** ManagementRepository on an ItemStore: every item lives under `PK = USER#{userId}` (see `managementKeys`). */
+export class ItemManagementRepository implements ManagementRepository {
+  constructor(private readonly store: ItemStore) {}
 
-export class DynamoManagementRepository implements ManagementRepository {
-  constructor(
-    private readonly doc: DynamoDBDocumentClient,
-    private readonly tableName: string,
-  ) {}
-
-  private async queryAll(input: Omit<QueryCommandInput, 'TableName'>, ExclusiveStartKey?: Record<string, unknown>): Promise<Record<string, unknown>[]> {
-    const res = await this.doc.send(new QueryCommand({ ...input, TableName: this.tableName, ExclusiveStartKey }));
-    const items = (res.Items ?? []) as Record<string, unknown>[];
-    // Each page needs the previous page's cursor, so pages are fetched sequentially.
-    return res.LastEvaluatedKey ? [...items, ...(await this.queryAll(input, res.LastEvaluatedKey))] : items;
+  private listUser<T>(userId: string, prefix: string): Promise<T[]> {
+    return listByPrefix<T>(this.store, keys.user(userId).PK, prefix, { consistent: true });
   }
 
-  private listByPrefix<T>(userId: string, prefix: string): Promise<T[]> {
-    return this.queryAll({
-      KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
-      ExpressionAttributeValues: { ':pk': `USER#${userId}`, ':sk': prefix },
-      ConsistentRead: true,
-    }).then((items) => items.map((i) => fromItem<T>(i)));
+  private async getOne<T>(key: ItemKey): Promise<T | null> {
+    const item = await this.store.get(key, { consistent: true });
+    return item ? fromItem<T>(item) : null;
   }
 
-  private put(key: { PK: string; SK: string }, entityType: string, item: object, condition?: string): Promise<unknown> {
-    return this.doc.send(new PutCommand({ TableName: this.tableName, Item: { ...key, entityType, ...item }, ConditionExpression: condition }));
+  private put(key: ItemKey, entityType: string, item: object, createOnly = false): Promise<boolean> {
+    const stored: Item = { ...key, entityType, ...item };
+    return this.store.put(stored, createOnly ? { condition: cond.notExists } : undefined);
   }
 
-  private remove(key: { PK: string; SK: string }): Promise<unknown> {
-    return this.doc.send(new DeleteCommand({ TableName: this.tableName, Key: key }));
+  private async remove(key: ItemKey): Promise<void> {
+    await this.store.delete(key);
   }
 
-  async getSettings(userId: string, portfolioId: string): Promise<PortfolioSettings | null> {
-    const res = await this.doc.send(new GetCommand({ TableName: this.tableName, Key: managementKeys.settings(userId, portfolioId), ConsistentRead: true }));
-    return res.Item ? fromItem<PortfolioSettings>(res.Item) : null;
+  getSettings(userId: string, portfolioId: string): Promise<PortfolioSettings | null> {
+    return this.getOne(managementKeys.settings(userId, portfolioId));
   }
 
   listSettings(userId: string): Promise<PortfolioSettings[]> {
-    return this.listByPrefix(userId, managementKeys.settingsPrefix);
+    return this.listUser(userId, managementKeys.settingsPrefix);
   }
 
   async putSettings(s: PortfolioSettings): Promise<void> {
@@ -95,7 +79,7 @@ export class DynamoManagementRepository implements ManagementRepository {
   }
 
   listCategories(userId: string, portfolioId?: string): Promise<Category[]> {
-    return this.listByPrefix(userId, managementKeys.categoryPrefix(portfolioId));
+    return this.listUser(userId, managementKeys.categoryPrefix(portfolioId));
   }
 
   async putCategory(c: Category): Promise<void> {
@@ -109,7 +93,7 @@ export class DynamoManagementRepository implements ManagementRepository {
   }
 
   listAssignments(userId: string, portfolioId?: string): Promise<CategoryAssignment[]> {
-    return this.listByPrefix(userId, managementKeys.assignmentPrefix(portfolioId));
+    return this.listUser(userId, managementKeys.assignmentPrefix(portfolioId));
   }
 
   async putAssignments(assignments: readonly CategoryAssignment[]): Promise<void> {
@@ -123,61 +107,43 @@ export class DynamoManagementRepository implements ManagementRepository {
   }
 
   listCustomAssets(userId: string, portfolioId?: string): Promise<CustomAsset[]> {
-    return this.listByPrefix(userId, managementKeys.customAssetPrefix(portfolioId));
+    return this.listUser(userId, managementKeys.customAssetPrefix(portfolioId));
   }
 
-  async getCustomAsset(userId: string, portfolioId: string, assetId: string): Promise<CustomAsset | null> {
-    const res = await this.doc.send(
-      new GetCommand({ TableName: this.tableName, Key: managementKeys.customAsset(userId, portfolioId, assetId), ConsistentRead: true }),
-    );
-    return res.Item ? fromItem<CustomAsset>(res.Item) : null;
+  getCustomAsset(userId: string, portfolioId: string, assetId: string): Promise<CustomAsset | null> {
+    return this.getOne(managementKeys.customAsset(userId, portfolioId, assetId));
   }
 
   async putCustomAsset(a: CustomAsset): Promise<void> {
     await this.put(managementKeys.customAsset(a.userId, a.portfolioId, a.assetId), MANAGEMENT_ENTITY.customAsset, a);
   }
 
-  async deleteCustomAsset(userId: string, portfolioId: string, assetId: string): Promise<void> {
-    await this.remove(managementKeys.customAsset(userId, portfolioId, assetId));
+  deleteCustomAsset(userId: string, portfolioId: string, assetId: string): Promise<void> {
+    return this.remove(managementKeys.customAsset(userId, portfolioId, assetId));
   }
 
   listWatchlist(userId: string): Promise<WatchlistEntry[]> {
-    return this.listByPrefix(userId, managementKeys.watchlistPrefix);
+    return this.listUser(userId, managementKeys.watchlistPrefix);
   }
 
-  async addWatchlistEntry(entry: WatchlistEntry): Promise<boolean> {
-    try {
-      await this.put(managementKeys.watchlist(entry.userId, entry.symbol), MANAGEMENT_ENTITY.watchlist, entry, 'attribute_not_exists(PK)');
-      return true;
-    } catch (err) {
-      if (isConditionalCheckFailure(err)) return false;
-      throw err;
-    }
+  addWatchlistEntry(entry: WatchlistEntry): Promise<boolean> {
+    return this.put(managementKeys.watchlist(entry.userId, entry.symbol), MANAGEMENT_ENTITY.watchlist, entry, true);
   }
 
-  async deleteWatchlistEntry(userId: string, symbol: string): Promise<boolean> {
-    try {
-      await this.doc.send(
-        new DeleteCommand({ TableName: this.tableName, Key: managementKeys.watchlist(userId, symbol), ConditionExpression: 'attribute_exists(PK)' }),
-      );
-      return true;
-    } catch (err) {
-      if (isConditionalCheckFailure(err)) return false;
-      throw err;
-    }
+  deleteWatchlistEntry(userId: string, symbol: string): Promise<boolean> {
+    return this.store.delete(managementKeys.watchlist(userId, symbol), { condition: cond.exists });
   }
 
-  async getGoal(userId: string, scope: string): Promise<GoalItem | null> {
-    const res = await this.doc.send(new GetCommand({ TableName: this.tableName, Key: goalKeys.goal(userId, scope), ConsistentRead: true }));
-    return res.Item ? fromItem<GoalItem>(res.Item) : null;
+  getGoal(userId: string, scope: string): Promise<GoalItem | null> {
+    return this.getOne(goalKeys.goal(userId, scope));
   }
 
   async putGoal(goal: GoalItem): Promise<void> {
     await this.put(goalKeys.goal(goal.userId, goal.portfolioId), GOAL_ENTITY, goal);
   }
 
-  async deleteGoal(userId: string, scope: string): Promise<void> {
-    await this.remove(goalKeys.goal(userId, scope));
+  deleteGoal(userId: string, scope: string): Promise<void> {
+    return this.remove(goalKeys.goal(userId, scope));
   }
 
   async deletePortfolioData(userId: string, portfolioId: string): Promise<void> {

@@ -10,7 +10,7 @@ const HEADER = 'date,type,symbol,quantity,price,fee,currency';
 function setup(csv: string) {
   const ctx = fakeIngestDeps();
   ctx.store.addImport('demo', 'imp1');
-  ctx.reader.objects.set(`${BUCKET}/imports/demo/imp1.csv`, csv);
+  ctx.files.files.set(`imports/demo/imp1.csv`, csv);
   return { ...ctx, run: () => processImportObject(ctx.deps, { bucket: BUCKET, key: 'imports/demo/imp1.csv' }) };
 }
 

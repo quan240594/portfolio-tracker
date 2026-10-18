@@ -1,7 +1,11 @@
+import { setLogger } from '@portfolio/platform';
+import { createPowertoolsLogger } from '@portfolio/aws';
 import { createHandler } from './app.js';
 import { createAwsDeps } from './clients.js';
 import { loadConfig } from './config.js';
 import type { SyncDeps } from './sync.js';
+
+setLogger(createPowertoolsLogger('portfolio-tracker-broker-sync'));
 
 let deps: SyncDeps | undefined;
 

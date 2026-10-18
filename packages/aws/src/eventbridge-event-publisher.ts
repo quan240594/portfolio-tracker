@@ -1,14 +1,16 @@
 import { PutEventsCommand, type EventBridgeClient } from '@aws-sdk/client-eventbridge';
-import { DETAIL_TYPES, EVENT_SOURCES, type TransactionsChangedDetail } from '@portfolio/shared';
+import type { EventPublisher } from '@portfolio/platform';
+import { DETAIL_TYPES, type TransactionsChangedDetail } from '@portfolio/shared';
 
-export interface EventPublisher {
-  transactionsChanged(detail: TransactionsChangedDetail): Promise<void>;
-}
-
-export class EventBridgePublisher implements EventPublisher {
+/**
+ * EventPublisher on an EventBridge bus. `source` identifies the emitting service (`EVENT_SOURCES.api`, `.ingest`,
+ * `BROKER_EVENT_SOURCE`); the bus rules (infra/terraform/events.tf) route TransactionsChanged to the enrich queue.
+ */
+export class EventBridgeEventPublisher implements EventPublisher {
   constructor(
-    private readonly client: EventBridgeClient,
+    private readonly client: Pick<EventBridgeClient, 'send'>,
     private readonly eventBusName: string,
+    private readonly source: string,
   ) {}
 
   async transactionsChanged(detail: TransactionsChangedDetail): Promise<void> {
@@ -17,7 +19,7 @@ export class EventBridgePublisher implements EventPublisher {
         Entries: [
           {
             EventBusName: this.eventBusName,
-            Source: EVENT_SOURCES.api,
+            Source: this.source,
             DetailType: DETAIL_TYPES.transactionsChanged,
             Detail: JSON.stringify(detail),
           },

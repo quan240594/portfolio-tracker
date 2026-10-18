@@ -20,6 +20,10 @@ Each SQS message body is either an EventBridge S3 `Object Created` event (AWS) o
 
 Transient errors (throttling, network, PutEvents failures) are thrown and reported as batch item failures so SQS retries.
 
+The import itself is platform-neutral (`importUploadedJob` / `processImport` in `src/processor.ts`, exported by `src/portable.ts`):
+it reads the CSV through the `FileStore` port and writes through the `ItemStore` port. `src/app.ts` (SQS/S3 event shapes) and
+`src/clients.ts` (AWS wiring) are the AWS adapter.
+
 ## CSV format
 
 Header names are case-insensitive and order-independent (`CSV_COLUMNS` in `@portfolio/shared`):
