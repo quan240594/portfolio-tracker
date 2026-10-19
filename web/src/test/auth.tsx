@@ -5,6 +5,7 @@ import { vi } from 'vitest';
 import { routes, ROUTER_FUTURE } from '../App';
 import { AuthProvider } from '../features/auth/AuthProvider';
 import type { AuthConfig } from '../features/auth/config';
+import type { GithubSessionService } from '../features/auth/githubSession';
 import type { AuthService } from '../features/auth/types';
 import { ThemeProvider } from '../theme/ThemeProvider';
 import { createTestQueryClient } from './utils';
@@ -31,17 +32,31 @@ export function fakeAuthService(overrides: Partial<AuthService> = {}) {
 }
 
 /** The real route tree behind the real AuthProvider, with a scripted Cognito service. */
-export function renderAuthApp(service: AuthService, { route = '/', config = COGNITO_CONFIG }: { route?: string; config?: AuthConfig } = {}) {
+export function renderAuthApp(
+  service: AuthService,
+  { route = '/', config = COGNITO_CONFIG, githubSession }: { route?: string; config?: AuthConfig; githubSession?: GithubSessionService } = {},
+) {
   const queryClient = createTestQueryClient();
   const router = createMemoryRouter(routes, { initialEntries: [route], future: ROUTER_FUTURE });
   const view = render(
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
-        <AuthProvider config={config} loadService={() => Promise.resolve(service)}>
+        <AuthProvider config={config} loadService={() => Promise.resolve(service)} githubSession={githubSession}>
           <RouterProvider router={router} future={{ v7_startTransition: true }} />
         </AuthProvider>
       </QueryClientProvider>
     </ThemeProvider>,
   );
   return { queryClient, router, ...view };
+}
+
+export const GITHUB_CONFIG: AuthConfig = { mode: 'github' };
+
+/** GithubSessionService whose methods are vi.fn(); defaults model "the owner is signed in as octo-owner". */
+export function fakeGithubSession(overrides: Partial<GithubSessionService> = {}) {
+  return {
+    fetchSession: vi.fn().mockResolvedValue('octo-owner'),
+    logout: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  } as { [K in keyof GithubSessionService]: ReturnType<typeof vi.fn> & GithubSessionService[K] };
 }

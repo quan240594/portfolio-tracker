@@ -35,6 +35,22 @@ describe('readAuthConfig', () => {
     expect(readAuthConfig({ ...cognitoEnv, VITE_COGNITO_REGION: 'mars' }, false)).toMatchObject({ mode: 'invalid', reason: expect.stringContaining('mars') });
   });
 
+  it('reads GitHub mode (same-origin cookie session) with no further settings', () => {
+    expect(readAuthConfig({ VITE_AUTH_MODE: ' GitHub ' }, false)).toEqual({ mode: 'github' });
+    expect(readAuthConfig({ VITE_AUTH_MODE: 'github', VITE_API_BASE_URL: '/api' }, false)).toEqual({ mode: 'github' });
+    expect(readAuthConfig({ VITE_AUTH_MODE: 'github', VITE_API_BASE_URL: '  ' }, false)).toEqual({ mode: 'github' });
+    expect(readAuthConfig({ VITE_AUTH_MODE: 'github' }, true)).toEqual({ mode: 'none' });
+  });
+
+  it('fails closed in GitHub mode when the API is on another origin (the cookie would never be sent)', () => {
+    for (const base of ['https://api.example.com', 'http://localhost:3000/api', '//api.example.com']) {
+      expect(readAuthConfig({ VITE_AUTH_MODE: 'github', VITE_API_BASE_URL: base }, false)).toMatchObject({
+        mode: 'invalid',
+        reason: expect.stringContaining('same-origin'),
+      });
+    }
+  });
+
   it('the build used by the test suite has auth off', () => {
     expect(AUTH_CONFIG).toEqual({ mode: 'none' });
   });
