@@ -2132,3 +2132,48 @@ to `USE_MOCKS` only, and mock mode forces auth off, so the personal deployment n
 GitHub-mode Vite server on `$E2E_GITHUB_PORT`, default 5374; `/auth/*` and `/api/*` are Playwright route mocks that simulate the cookie
 and the GitHub redirect; pinned clock; `settledCount` for the holdings rows; no horizontal overflow at 320 and 1280 px). It also runs in
 `pnpm --filter @portfolio/web test:e2e`. Not verified against the real Worker: that needs the `packages/platform` auth handlers.
+
+## Cloudflare Durable Object adapters (`packages/cloudflare`)
+
+The platform ports on the SQLite database and the alarm of one Durable Object, for the personal Cloudflare deployment. The
+package is plain TypeScript against a **structural** view of `ctx.storage` (`SqlStorageHost`/`AlarmStorageHost`, no Cloudflare
+type package), so the same code runs in workerd and in Node tests. The Hub Durable Object class builds everything with one call:
+
+```ts
+const platform = createDurableObjectPlatform({ ctx, secretsKey: env.SECRETS_KEY, now: () => new Date(), onUsage, uploadBaseUrl });
+// platform.items, .secrets, .files, .jobs (ports) and:
+//   await platform.arm()               in the constructor, inside ctx.blockConcurrencyWhile (cron schedules + alarm)
+//   await platform.runAlarm(handlers)  in alarm(), handlers: JobRegistry
+//   platform.acceptUpload(token, body) for the Worker's PUT /api/uploads/<token> route
+//   platform.setUploadBaseUrl(origin)  per request, when the origin is not a constant
+```
+
+| Adapter | Behaviour |
+|---|---|
+| `SqlItemStore` | Table `items(pk TEXT, sk TEXT, data TEXT, PRIMARY KEY (pk, sk)) WITHOUT ROWID`: one b-tree, no index, one written row per write. `pk`/`sk` use SQLite's BINARY collation = UTF-8 byte order = DynamoDB's sort order, so ranges, `beginsWith` and `reverse` match the AWS adapter (`beginsWith` is a `sk >= prefix AND sk < upperBound(prefix)` range, never `LIKE`). Conditions are the shared `Condition` AST evaluated in JS inside `transactionSync` (one request at a time + an atomic transaction = atomic read-modify-write). A query fetches `limit + 1` rows to know whether a cursor is needed; `consistent` is ignored (always consistent). All values are bound parameters. |
+| `SqlSecretStore` | AES-256-GCM, key = HKDF-SHA-256 of a base64 master key (>= 32 random bytes, `generateSecretsKey()`; the Worker's secret binding), random 12 byte IV per write, the secret name as AAD; stored as `v1.<iv>.<ciphertext>`. A wrong key or tampered row makes `get` reject (`could not be decrypted`); plaintext never reaches SQLite or an error message. |
+| `SqlFileStore` | Blobs in SQLite, at most 1.5 MiB (`MAX_FILE_BYTES`, below the 2 MB row cap; the web app already limits CSVs to 1 MiB). See the upload contract below. |
+| `AlarmJobQueue` | Jobs in table `jobs` (finished jobs are deleted; failed ones kept 7 days). `enqueue` inserts and sets the alarm to the earliest due time (only when it is earlier than the armed one). `runAlarm(handlers)` runs due jobs oldest first through the resumable `JobHandler` contract and persists `cursor`/`due_at` after each step; a failing step is retried with the same cursor after `min(15 min, 5 s * 2^(n-1))` and the job is marked `failed` after 5 deliveries (never loops; 10,000 steps cap). One alarm runs at most 200 steps / 20 s, then re-arms itself for "now". |
+| Cron | `SCHEDULED_JOBS` are enqueued by the same alarm: table `schedules` stores each schedule's next slot, computed by the pure `nextCronRun(cron, from, timeZone)` from `toUnixCron` on the schedule's own IANA time zone (DST-aware; classic 5-field cron). A due slot is enqueued once under the id `schedule:<name>:<slot>`; after a long absence it fires once, not once per missed slot. |
+
+**Idempotent alarms.** A second `runAlarm` while one runs joins it (same promise: no parallel duplicate step); a second one after
+it finds nothing due and changes nothing. A step that crashed is delivered again (at-least-once, like every adapter).
+**Usage hook.** Every adapter passes the rows of each statement (`cursor.rowsRead`/`rowsWritten`) to `onUsage({ rowsRead,
+rowsWritten })`; the budget guard plugs in there. The alarm only calls `setAlarm` when the armed time differs (a set is a written row).
+
+**Upload contract (Worker <-> `SqlFileStore`).** There is no presigned URL, so `createUpload({ key, contentType, expiresInSeconds })`
+stores a random single-use token (32 random bytes, base64url) and returns `PUT <uploadBaseUrl>/api/uploads/<token>` with the
+`content-type` header (`UPLOAD_PATH_PREFIX`; `uploadTokenFromUrl(url)` extracts the token). The Worker must serve that route
+**without sign-in** (the token is the credential), reject a `content-length` above `MAX_FILE_BYTES` before reading the body, forward
+the bytes to the Hub, which calls `acceptUpload(token, bytes)`, and answer 204 for `{ ok: true }` or `result.status` (404 unknown
+token, 410 expired, 413 too large) with `result.reason`. A successful upload consumes the token; a 413 leaves it usable until it
+expires. `readText` never loads a blob over the limit and keeps a leading BOM like S3.
+
+**Tests.** `pnpm --filter @portfolio/cloudflare test`. The four contract suites (`runItemStoreContract`, `runSecretStoreContract`,
+`runFileStoreContract`, `runJobQueueContract`) run twice: in Node against real SQLite compiled to WebAssembly (`sql.js`, via a
+`SqlStorageLike` test double, so coverage is measured) and in **real workerd** (`miniflare` boots a test Worker + SQLite-backed
+Durable Object from `test/worker.ts`; a JSON-RPC proxy in `test/workerd-harness.ts` implements the port interfaces on the Node
+side, and job handlers called by the alarm are bridged back to Node through a service binding). The workerd suite also checks
+the real `rowsRead`/`rowsWritten` counters, UTF-8 byte ordering, the largest file, and an alarm that fires by itself. No network,
+no Cloudflare account; the workerd binary comes from the `workerd` npm package. New devDependencies: `miniflare`, `esbuild`
+(bundles the test Worker), `sql.js` and `@types/sql.js`.
