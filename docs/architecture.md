@@ -1907,3 +1907,83 @@ tens of seconds, so:
 
 Cold-start CPU of the real handlers on the runtime, response compression, the OAuth flow and Durable Object alarm retry cost
 under failure. These are checked when the Cloudflare adapter is built; none changes the decision.
+
+## Owner sign-in with GitHub
+
+Cloudflare Zero Trust needs a payment card, so the personal deployment authenticates its single owner itself. The server side
+lives in `packages/platform/src/auth/github/` (runtime-neutral: only `crypto.subtle`, an injected `fetch` and an injected
+clock, no Node built-ins), is exported from `@portfolio/platform`, and is used by the Worker in front of the Durable Object.
+Only one numeric GitHub user id (`ownerGithubId`) can ever obtain a session.
+
+### Contract
+
+Configuration (`GithubAuthConfig`): `clientId`, `clientSecret`, `ownerGithubId` (number), `sessionSecret` (at least 32
+characters, validated at construction), `origin` (e.g. `https://host.example`, https only, `http` allowed for localhost),
+`sessionTtlSeconds` (default 7 days), `now` (epoch milliseconds, default `Date.now`) and `fetch` (default global `fetch`).
+Construction throws on a missing or short secret, a bad id, ttl or origin; error messages never contain secret values.
+
+| Route | Behaviour |
+| --- | --- |
+| `GET /auth/login?returnTo=<path>` | 302 to `https://github.com/login/oauth/authorize` with `client_id`, `redirect_uri=<origin>/auth/callback`, an empty `scope` (the public `/user` endpoint is enough, so no repository access is ever requested) and a random `state`. Sets the signed `pt_oauth_state` cookie (`HttpOnly; Secure; SameSite=Lax; Path=/auth; Max-Age=600`) carrying the state and the validated `returnTo`. |
+| `GET /auth/callback?code&state` | Verifies the state cookie (signature, 10 minute expiry, constant-time equality with the query `state`), exchanges the code, reads `GET https://api.github.com/user`, and only when `id === ownerGithubId` sets `pt_session`, clears `pt_oauth_state` and answers 302 to `returnTo`. Another GitHub user: 403 with a neutral text body (never the owner id or login), no session. Missing/invalid/expired state or a rejected code: 400. GitHub or network failure: 502, no tokens in the body. The access token is used once and discarded; it is never stored or logged. |
+| `GET /auth/session` | Always 200, `Cache-Control: no-store`, JSON `{"authenticated":true,"login":"..."}` or `{"authenticated":false}` (never 401, so the SPA can render a sign-in page). |
+| `POST /auth/logout` | 204 and clears `pt_session`; same-origin required (403 otherwise). GET is 405. |
+| any other `/auth/*` | 404 (and `undefined` for non-`/auth` paths, so the caller routes on). |
+
+`returnTo` must be a same-origin absolute path: one leading `/`, not `//`, no backslash, no control characters, at most 512
+characters and not an `/auth` path; anything else (`//evil.com`, `/\evil`, `https://evil`, `%2f%2f`, a newline) becomes `/`.
+It is checked again when read back from the state cookie.
+
+Session cookie `pt_session`: `HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=<ttl>`, value
+`base64url(JSON {sub:"github:<id>", login, iat, exp}) + "." + base64url(HMAC-SHA256)` (seconds since epoch). The MAC covers
+`<purpose>.<encoded payload>`, with a different purpose per cookie, so a state cookie can never be replayed as a session.
+Verification checks the MAC with a constant-time comparison before parsing anything, then the structure (exactly two parts,
+exact field types), that `sub` equals `github:<ownerGithubId>` and that the cookie has not expired. The session is stateless:
+nothing is stored server side.
+
+Exports: `createAuthRoutes(config)` returns `(PortableRequest) => Promise<PortableResponse | undefined>`;
+`createAuthFetchHandler(config)` is the same over a Workers `Request`/`Response` (`undefined` for non-`/auth` paths);
+`createGithubIdentityResolver(config)` is an `IdentityResolver` over a `PortableRequest` or a `Request` returning
+`{ subject: "github:<id>" }` for a valid session and `undefined` otherwise (the app fails closed);
+`requireSameOrigin(request, origin)` returns a 403 `PortableResponse` or `undefined` and `isSameOrigin` returns a boolean
+(safe methods pass; otherwise the `Origin` header must equal `origin`, or, without an `Origin`, `Sec-Fetch-Site` must be
+`same-origin`); the Worker applies it to every non-GET/HEAD/OPTIONS `/api/*` request, in addition to `SameSite=Lax`.
+Also exported: `constantTimeEqual`, `sanitizeReturnTo`, `fetchRequestToPortable`, `portableToFetchResponse`.
+
+`PortableResponse` gained an optional `cookies: string[]` (one `Set-Cookie` value per entry, since a header map cannot hold
+several); the API Gateway adapter maps it to the HTTP API `cookies` array.
+
+### Threat model
+
+Protected: nobody but the owner's GitHub account obtains a session (the id, not the login name, is compared, so renaming or
+re-registering a username changes nothing); cookies cannot be forged, edited, extended or moved between purposes without the
+secret; cross-site requests cannot mutate data (`SameSite=Lax`, the `Origin`/`Sec-Fetch-Site` check and JSON bodies); there
+is no open redirect; the OAuth `state` ties a callback to the browser that started it; no repository or profile scope is
+requested; no secret, token or owner identity appears in a response or log.
+
+Not protected: a stolen valid session cookie works until it expires or the secret is rotated (there is no server-side
+revocation, by design); the state cookie can be replayed for up to 10 minutes but is useless without a fresh single-use code
+from GitHub; a compromised GitHub account of the owner is a compromised app (enable two-factor authentication on it);
+anything that can read the Worker secrets can mint sessions.
+
+### One-time setup (owner)
+
+1. GitHub, Settings, Developer settings, OAuth Apps, New OAuth App. Homepage URL `<origin>`, Authorization callback URL
+   `<origin>/auth/callback`. No device flow, no extra permissions.
+2. Note the Client ID and generate a Client secret.
+3. Find your numeric GitHub user id (`https://api.github.com/users/<your-login>`, field `id`).
+4. Store `clientSecret` and a freshly generated `sessionSecret` (at least 32 random characters, for example
+   `openssl rand -base64 48`) as Cloudflare Worker secrets (`wrangler secret put ...`, or the dashboard). The client id, the
+   owner id and the origin are not secret but also stay out of the repo; configure them as Worker variables. Never commit any
+   of these values.
+
+Rotation: change `sessionSecret` (and redeploy) to sign everybody out at once; every existing cookie then fails its MAC
+check and the owner just signs in again. Rotate `clientSecret` in the OAuth App settings and the Worker secret together.
+Changing `ownerGithubId` invalidates sessions of the previous owner (the `sub` no longer matches).
+
+### Tests
+
+`pnpm --filter @portfolio/platform test` (use `test:coverage` for coverage). The suites use an injected clock and a fake
+GitHub `fetch`, so there is no network and no real time. They cover tampered signature, wrong secret, expiry, structure and
+purpose confusion, state mismatch/expiry/replay, open-redirect attempts, non-owner ids, config validation, cookie attributes,
+the absence of secrets in responses and logs, the constant-time helper and the same-origin cases.

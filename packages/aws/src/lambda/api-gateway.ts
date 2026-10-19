@@ -28,5 +28,10 @@ export function toPortableRequest(event: APIGatewayProxyEventV2, requestId?: str
 }
 
 export function toApiGatewayResult(response: PortableResponse): APIGatewayProxyStructuredResultV2 {
-  return { statusCode: response.status, headers: response.headers, body: response.body };
+  return {
+    statusCode: response.status,
+    headers: response.headers,
+    body: response.body,
+    ...(response.cookies?.length ? { cookies: response.cookies } : {}),
+  };
 }

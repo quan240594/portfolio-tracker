@@ -56,4 +56,9 @@ describe('toApiGatewayResult', () => {
   it('maps the portable response', () => {
     expect(toApiGatewayResult({ status: 201, headers: { a: 'b' }, body: 'x' })).toEqual({ statusCode: 201, headers: { a: 'b' }, body: 'x' });
   });
+
+  it('maps several Set-Cookie values to the HTTP API cookies array', () => {
+    expect(toApiGatewayResult({ status: 302, headers: {}, body: '', cookies: ['a=1; Path=/', 'b=2; Path=/'] }).cookies).toEqual(['a=1; Path=/', 'b=2; Path=/']);
+    expect(toApiGatewayResult({ status: 200, headers: {}, body: '', cookies: [] })).not.toHaveProperty('cookies');
+  });
 });

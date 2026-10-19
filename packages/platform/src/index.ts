@@ -14,3 +14,4 @@ export { MemoryItemStore } from './memory/item-store.js';
 export { MemorySecretStore } from './memory/secret-store.js';
 export { MemoryJobQueue, type DeadLetter, type MemoryJobQueueOptions } from './memory/job-queue.js';
 export { MemoryFileStore } from './memory/file-store.js';
+export * from './auth/github/index.js';
