@@ -25,6 +25,7 @@ export class Hub extends DeployedHub {
   override async fetch(request: Request): Promise<Response> {
     const { pathname } = new URL(request.url);
     const core = this.hubCore!;
+    await this.started();
     if (pathname === '/__test/enqueue') {
       await core.platform.jobs.enqueue((await request.json()) as never);
       return new Response(null, { status: 204 });

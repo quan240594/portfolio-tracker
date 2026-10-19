@@ -33,14 +33,16 @@ export class Hub extends DurableObject<HubEnv> {
   #started: Promise<void> | undefined;
 
   /** Arms the alarm and the schedules once, before the first request or alarm is served (inputs stay blocked meanwhile). */
-  #start(core: HubCore): Promise<void> {
+  protected started(): Promise<void> {
+    const core = this.core;
+    if (!core) return Promise.resolve();
     this.#started ??= this.ctx.blockConcurrencyWhile(() => core.start());
     return this.#started;
   }
 
   async fetch(request: Request): Promise<Response> {
     if (this.core) {
-      await this.#start(this.core);
+      await this.started();
       return this.core.handle(request);
     }
     return Promise.resolve(errorResponse(503, 'NOT_CONFIGURED', `The Hub is not configured: ${this.problems.join('; ')}`));
@@ -48,7 +50,7 @@ export class Hub extends DurableObject<HubEnv> {
 
   async alarm(): Promise<void> {
     if (!this.core) return;
-    await this.#start(this.core);
+    await this.started();
     await this.core.alarm();
   }
 
