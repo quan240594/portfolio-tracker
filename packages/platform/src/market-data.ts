@@ -98,7 +98,7 @@ export interface FxBackfillSummary {
   lastDay: string | null;
 }
 
-export type CalendarStatus = 'ok' | 'no-provider' | 'no-symbols' | 'budget-exhausted' | 'failed';
+export type CalendarStatus = 'ok' | 'no-provider' | 'no-symbols' | 'budget-exhausted' | 'rate-limited' | 'failed';
 
 export interface CalendarRefreshSummary {
   tracked: number;

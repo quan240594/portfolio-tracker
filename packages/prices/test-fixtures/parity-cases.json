@@ -1,0 +1,4155 @@
+[
+  {
+    "kind": "provider",
+    "id": "twelvedata-quotes-batches-of-8",
+    "python": "test_providers_http.py::test_twelvedata_batches_quotes_by_8",
+    "provider": "twelvedata",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "/quote",
+        "responses": [
+          {
+            "S0": {
+              "symbol": "S0",
+              "currency": "USD",
+              "close": "10.5",
+              "previous_close": "10",
+              "timestamp": 1792000000
+            },
+            "S1": {
+              "symbol": "S1",
+              "currency": "USD",
+              "close": "10.5",
+              "previous_close": "10",
+              "timestamp": 1792000000
+            },
+            "S2": {
+              "symbol": "S2",
+              "currency": "USD",
+              "close": "10.5",
+              "previous_close": "10",
+              "timestamp": 1792000000
+            },
+            "S3": {
+              "symbol": "S3",
+              "currency": "USD",
+              "close": "10.5",
+              "previous_close": "10",
+              "timestamp": 1792000000
+            },
+            "S4": {
+              "symbol": "S4",
+              "currency": "USD",
+              "close": "10.5",
+              "previous_close": "10",
+              "timestamp": 1792000000
+            },
+            "S5": {
+              "symbol": "S5",
+              "currency": "USD",
+              "close": "10.5",
+              "previous_close": "10",
+              "timestamp": 1792000000
+            },
+            "S6": {
+              "symbol": "S6",
+              "currency": "USD",
+              "close": "10.5",
+              "previous_close": "10",
+              "timestamp": 1792000000
+            },
+            "S7": {
+              "symbol": "S7",
+              "currency": "USD",
+              "close": "10.5",
+              "previous_close": "10",
+              "timestamp": 1792000000
+            }
+          },
+          {
+            "S8": {
+              "symbol": "S8",
+              "currency": "USD",
+              "close": "1",
+              "previous_close": "1",
+              "timestamp": 1792000000
+            },
+            "BRK.B": {
+              "code": 400,
+              "status": "error",
+              "message": "not found"
+            }
+          }
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_quotes",
+        "args": [
+          [
+            "S0",
+            "S1",
+            "S2",
+            "S3",
+            "S4",
+            "S5",
+            "S6",
+            "S7",
+            "S8",
+            "BRK-B"
+          ]
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        {
+          "quotes": {
+            "S0": {
+              "symbol": "S0",
+              "price": 10.5,
+              "previousClose": 10.0,
+              "currency": "USD",
+              "asOf": "2026-10-14T17:46:40.000Z",
+              "source": "twelvedata"
+            },
+            "S1": {
+              "symbol": "S1",
+              "price": 10.5,
+              "previousClose": 10.0,
+              "currency": "USD",
+              "asOf": "2026-10-14T17:46:40.000Z",
+              "source": "twelvedata"
+            },
+            "S2": {
+              "symbol": "S2",
+              "price": 10.5,
+              "previousClose": 10.0,
+              "currency": "USD",
+              "asOf": "2026-10-14T17:46:40.000Z",
+              "source": "twelvedata"
+            },
+            "S3": {
+              "symbol": "S3",
+              "price": 10.5,
+              "previousClose": 10.0,
+              "currency": "USD",
+              "asOf": "2026-10-14T17:46:40.000Z",
+              "source": "twelvedata"
+            },
+            "S4": {
+              "symbol": "S4",
+              "price": 10.5,
+              "previousClose": 10.0,
+              "currency": "USD",
+              "asOf": "2026-10-14T17:46:40.000Z",
+              "source": "twelvedata"
+            },
+            "S5": {
+              "symbol": "S5",
+              "price": 10.5,
+              "previousClose": 10.0,
+              "currency": "USD",
+              "asOf": "2026-10-14T17:46:40.000Z",
+              "source": "twelvedata"
+            },
+            "S6": {
+              "symbol": "S6",
+              "price": 10.5,
+              "previousClose": 10.0,
+              "currency": "USD",
+              "asOf": "2026-10-14T17:46:40.000Z",
+              "source": "twelvedata"
+            },
+            "S7": {
+              "symbol": "S7",
+              "price": 10.5,
+              "previousClose": 10.0,
+              "currency": "USD",
+              "asOf": "2026-10-14T17:46:40.000Z",
+              "source": "twelvedata"
+            },
+            "S8": {
+              "symbol": "S8",
+              "price": 1.0,
+              "previousClose": 1.0,
+              "currency": "USD",
+              "asOf": "2026-10-14T17:46:40.000Z",
+              "source": "twelvedata"
+            }
+          },
+          "failed": {
+            "BRK-B": {
+              "kind": "not-found",
+              "retryable": false
+            }
+          }
+        }
+      ],
+      "urls": [
+        "https://api.twelvedata.com/quote?symbol=S0,S1,S2,S3,S4,S5,S6,S7",
+        "https://api.twelvedata.com/quote?symbol=S8,BRK.B"
+      ],
+      "headers": {
+        "accept": "application/json",
+        "authorization": "apikey k3y-should-never-leak"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "twelvedata-quote-errors-and-429",
+    "python": "test_providers_http.py::test_twelvedata_per_symbol_errors_and_429 + test_twelvedata_batch_entry_429",
+    "provider": "twelvedata",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "symbol=AAPL,NOPE",
+        "responses": [
+          {
+            "AAPL": {
+              "symbol": "AAPL",
+              "currency": "USD",
+              "close": "1",
+              "previous_close": "1",
+              "timestamp": 1792000000
+            },
+            "NOPE": {
+              "code": 404,
+              "status": "error"
+            }
+          }
+        ]
+      },
+      {
+        "match": "symbol=MSFT",
+        "responses": [
+          {
+            "code": 429,
+            "status": "error",
+            "message": "out of credits"
+          }
+        ]
+      },
+      {
+        "match": "symbol=AAPL,MSFT",
+        "responses": [
+          {
+            "AAPL": {
+              "symbol": "AAPL",
+              "currency": "USD",
+              "close": "1",
+              "previous_close": "1",
+              "timestamp": 1792000000
+            },
+            "MSFT": {
+              "code": 429,
+              "status": "error"
+            }
+          }
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_quotes",
+        "args": [
+          [
+            "AAPL",
+            "NOPE"
+          ]
+        ]
+      },
+      {
+        "method": "get_quotes",
+        "args": [
+          [
+            "MSFT"
+          ]
+        ]
+      },
+      {
+        "method": "get_quotes",
+        "args": [
+          [
+            "AAPL",
+            "MSFT"
+          ]
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        {
+          "quotes": {
+            "AAPL": {
+              "symbol": "AAPL",
+              "price": 1.0,
+              "previousClose": 1.0,
+              "currency": "USD",
+              "asOf": "2026-10-14T17:46:40.000Z",
+              "source": "twelvedata"
+            }
+          },
+          "failed": {
+            "NOPE": {
+              "kind": "not-found",
+              "retryable": false
+            }
+          }
+        },
+        {
+          "quotes": {},
+          "failed": {
+            "MSFT": {
+              "kind": "rate-limited",
+              "retryable": true
+            }
+          }
+        },
+        {
+          "quotes": {},
+          "failed": {
+            "AAPL": {
+              "kind": "rate-limited",
+              "retryable": true
+            },
+            "MSFT": {
+              "kind": "rate-limited",
+              "retryable": true
+            }
+          }
+        }
+      ],
+      "urls": [
+        "https://api.twelvedata.com/quote?symbol=AAPL,NOPE",
+        "https://api.twelvedata.com/quote?symbol=MSFT",
+        "https://api.twelvedata.com/quote?symbol=AAPL,MSFT"
+      ],
+      "headers": {
+        "accept": "application/json",
+        "authorization": "apikey k3y-should-never-leak"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "twelvedata-single-symbol-quote",
+    "python": "test_providers_http.py (single-symbol response shape of get_quotes)",
+    "provider": "twelvedata",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "/quote",
+        "responses": [
+          {
+            "symbol": "AAPL",
+            "currency": "usd",
+            "close": "230.12",
+            "previous_close": "228.5",
+            "last_quote_at": 1792000000
+          },
+          {
+            "symbol": "XYZ",
+            "currency": "GBp",
+            "close": "7250",
+            "timestamp": 1792000000
+          },
+          {
+            "symbol": "NOCLOSE",
+            "close": null
+          },
+          {
+            "code": 404,
+            "status": "error",
+            "message": "unknown"
+          }
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_quotes",
+        "args": [
+          [
+            "AAPL"
+          ]
+        ]
+      },
+      {
+        "method": "get_quotes",
+        "args": [
+          [
+            "XYZ"
+          ]
+        ]
+      },
+      {
+        "method": "get_quotes",
+        "args": [
+          [
+            "NOCLOSE"
+          ]
+        ]
+      },
+      {
+        "method": "get_quotes",
+        "args": [
+          [
+            "NOPE"
+          ]
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        {
+          "quotes": {
+            "AAPL": {
+              "symbol": "AAPL",
+              "price": 230.12,
+              "previousClose": 228.5,
+              "currency": "USD",
+              "asOf": "2026-10-14T17:46:40.000Z",
+              "source": "twelvedata"
+            }
+          },
+          "failed": {}
+        },
+        {
+          "quotes": {
+            "XYZ": {
+              "symbol": "XYZ",
+              "price": 72.5,
+              "previousClose": 72.5,
+              "currency": "GBP",
+              "asOf": "2026-10-14T17:46:40.000Z",
+              "source": "twelvedata"
+            }
+          },
+          "failed": {}
+        },
+        {
+          "quotes": {},
+          "failed": {
+            "NOCLOSE": {
+              "kind": "not-found",
+              "retryable": false
+            }
+          }
+        },
+        {
+          "quotes": {},
+          "failed": {
+            "NOPE": {
+              "kind": "not-found",
+              "retryable": false
+            }
+          }
+        }
+      ],
+      "urls": [
+        "https://api.twelvedata.com/quote?symbol=AAPL",
+        "https://api.twelvedata.com/quote?symbol=XYZ",
+        "https://api.twelvedata.com/quote?symbol=NOCLOSE",
+        "https://api.twelvedata.com/quote?symbol=NOPE"
+      ],
+      "headers": {
+        "accept": "application/json",
+        "authorization": "apikey k3y-should-never-leak"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "twelvedata-time-series",
+    "python": "test_providers_http.py::test_twelvedata_time_series",
+    "provider": "twelvedata",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "/time_series",
+        "responses": [
+          {
+            "meta": {
+              "symbol": "AAPL",
+              "currency": "USD"
+            },
+            "values": [
+              {
+                "datetime": "2026-10-09",
+                "close": "101.5"
+              },
+              {
+                "datetime": "2026-10-08",
+                "close": "100"
+              },
+              {
+                "datetime": "2020-01-01",
+                "close": "1"
+              },
+              {
+                "datetime": "2026-10-10",
+                "close": null
+              }
+            ],
+            "status": "ok"
+          }
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_eod_history",
+        "args": [
+          "AAPL",
+          "2026-01-01",
+          "2026-10-13"
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        [
+          {
+            "symbol": "AAPL",
+            "date": "2026-10-08",
+            "close": 100.0,
+            "currency": "USD"
+          },
+          {
+            "symbol": "AAPL",
+            "date": "2026-10-09",
+            "close": 101.5,
+            "currency": "USD"
+          }
+        ]
+      ],
+      "urls": [
+        "https://api.twelvedata.com/time_series?symbol=AAPL&interval=1day&start_date=2026-01-01&end_date=2026-10-13&outputsize=5000&order=asc"
+      ],
+      "headers": {
+        "accept": "application/json",
+        "authorization": "apikey k3y-should-never-leak"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "twelvedata-profile-reference-fallback",
+    "python": "test_providers_http.py::test_twelvedata_profile_falls_back_to_reference",
+    "provider": "twelvedata",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "/profile",
+        "responses": [
+          {
+            "code": 403,
+            "status": "error",
+            "message": "available on Grow plan"
+          }
+        ]
+      },
+      {
+        "match": "/stocks",
+        "responses": [
+          {
+            "data": []
+          },
+          {
+            "data": [
+              {
+                "name": "Apple Inc",
+                "currency": "USD",
+                "country": "United States",
+                "exchange": "NASDAQ",
+                "type": "Common Stock"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "match": "/etfs",
+        "responses": [
+          {
+            "data": [
+              {
+                "symbol": "SPY",
+                "name": "SPDR S&P 500",
+                "currency": "USD",
+                "country": "USA",
+                "exchange": "NYSE"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_profile",
+        "args": [
+          "SPY"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "AAPL"
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        {
+          "symbol": "SPY",
+          "name": "SPDR S&P 500",
+          "assetClass": "ETF",
+          "currency": "USD",
+          "country": "United States",
+          "exchange": "NYSE"
+        },
+        {
+          "symbol": "AAPL",
+          "name": "Apple Inc",
+          "assetClass": "STOCK",
+          "currency": "USD",
+          "country": "United States",
+          "exchange": "NASDAQ"
+        }
+      ],
+      "urls": [
+        "https://api.twelvedata.com/profile?symbol=SPY",
+        "https://api.twelvedata.com/stocks?symbol=SPY",
+        "https://api.twelvedata.com/etfs?symbol=SPY",
+        "https://api.twelvedata.com/stocks?symbol=AAPL"
+      ],
+      "headers": {
+        "accept": "application/json",
+        "authorization": "apikey k3y-should-never-leak"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "twelvedata-profile-endpoint",
+    "python": "test_providers_http.py::test_twelvedata_profile_endpoint + test_profile_details.py::test_twelvedata_profile_carries_the_description",
+    "provider": "twelvedata",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "/profile",
+        "responses": [
+          {
+            "symbol": "MSFT",
+            "name": "Microsoft",
+            "sector": "Technology",
+            "country": "United States",
+            "exchange": "NASDAQ",
+            "type": "Common Stock"
+          },
+          {
+            "symbol": "MSFT",
+            "name": "Microsoft",
+            "type": "Common Stock",
+            "description": "  Software   maker. "
+          }
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_profile",
+        "args": [
+          "MSFT"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "MSFT"
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        {
+          "symbol": "MSFT",
+          "name": "Microsoft",
+          "assetClass": "STOCK",
+          "currency": "USD",
+          "sector": "Technology",
+          "country": "United States",
+          "exchange": "NASDAQ"
+        },
+        {
+          "symbol": "MSFT",
+          "name": "Microsoft",
+          "assetClass": "STOCK",
+          "currency": "USD",
+          "country": "United States",
+          "description": "Software maker."
+        }
+      ],
+      "urls": [
+        "https://api.twelvedata.com/profile?symbol=MSFT",
+        "https://api.twelvedata.com/profile?symbol=MSFT"
+      ],
+      "headers": {
+        "accept": "application/json",
+        "authorization": "apikey k3y-should-never-leak"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "twelvedata-profile-unknown-and-dividends",
+    "python": "test_providers_http.py::test_twelvedata_profile_unknown + test_twelvedata_5xx_in_body",
+    "provider": "twelvedata",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "symbol=ZZZZ",
+        "responses": [
+          {
+            "code": 404,
+            "status": "error"
+          },
+          {
+            "data": []
+          },
+          {
+            "data": []
+          }
+        ]
+      },
+      {
+        "match": "symbol=BOOM",
+        "responses": [
+          {
+            "code": 500,
+            "status": "error"
+          }
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_profile",
+        "args": [
+          "ZZZZ"
+        ]
+      },
+      {
+        "method": "get_dividends",
+        "args": [
+          "AAPL",
+          "2026-01-01",
+          "2026-02-01"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "BOOM"
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        null,
+        {
+          "error": {
+            "kind": "error",
+            "retryable": false
+          }
+        },
+        {
+          "error": {
+            "kind": "retryable",
+            "retryable": true
+          }
+        }
+      ],
+      "urls": [
+        "https://api.twelvedata.com/profile?symbol=ZZZZ",
+        "https://api.twelvedata.com/stocks?symbol=ZZZZ",
+        "https://api.twelvedata.com/etfs?symbol=ZZZZ",
+        "https://api.twelvedata.com/profile?symbol=BOOM"
+      ],
+      "headers": {
+        "accept": "application/json",
+        "authorization": "apikey k3y-should-never-leak"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "eodhd-realtime-batch",
+    "python": "test_providers_http.py::test_eodhd_realtime_batch",
+    "provider": "eodhd",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "/real-time/ASML.AS",
+        "responses": [
+          [
+            {
+              "code": "ASML.AS",
+              "timestamp": 1792000000,
+              "close": 701.2,
+              "previousClose": 690
+            },
+            {
+              "code": "SAP.XETRA",
+              "timestamp": "NA",
+              "close": "NA",
+              "previousClose": "NA"
+            },
+            "garbage"
+          ]
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_quotes",
+        "args": [
+          [
+            "ASML.AS",
+            "SAP.DE"
+          ]
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        {
+          "quotes": {
+            "ASML.AS": {
+              "symbol": "ASML.AS",
+              "price": 701.2,
+              "previousClose": 690.0,
+              "currency": "EUR",
+              "asOf": "2026-10-14T17:46:40.000Z",
+              "source": "eodhd"
+            }
+          },
+          "failed": {
+            "SAP.DE": {
+              "kind": "not-found",
+              "retryable": false
+            }
+          }
+        }
+      ],
+      "urls": [
+        "https://eodhd.com/api/real-time/ASML.AS?s=SAP.XETRA&fmt=json&api_token=k3y-should-never-leak"
+      ],
+      "headers": {
+        "accept": "application/json"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "eodhd-single-quote-not-found-and-pence",
+    "python": "test_providers_http.py::test_eodhd_single_and_not_found + test_symbols_keys.py::test_minor_unit_prices_are_rescaled_to_major_currency",
+    "provider": "eodhd",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "/real-time/SAP.XETRA",
+        "responses": [
+          {
+            "code": "SAP.XETRA",
+            "close": 230,
+            "previousClose": null
+          }
+        ]
+      },
+      {
+        "match": "/real-time/NOPE.AS",
+        "responses": [
+          {
+            "status": 404
+          }
+        ]
+      },
+      {
+        "match": "/real-time/VOD.LSE",
+        "responses": [
+          {
+            "code": "VOD.LSE",
+            "close": 7250,
+            "previousClose": 7100,
+            "timestamp": 1792000000
+          }
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_quotes",
+        "args": [
+          [
+            "SAP.DE"
+          ]
+        ]
+      },
+      {
+        "method": "get_quotes",
+        "args": [
+          [
+            "NOPE.AS"
+          ]
+        ]
+      },
+      {
+        "method": "get_quotes",
+        "args": [
+          [
+            "VOD.L"
+          ]
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        {
+          "quotes": {
+            "SAP.DE": {
+              "symbol": "SAP.DE",
+              "price": 230.0,
+              "previousClose": 230.0,
+              "currency": "EUR",
+              "asOf": "2026-10-13T12:00:00.000Z",
+              "source": "eodhd"
+            }
+          },
+          "failed": {}
+        },
+        {
+          "quotes": {},
+          "failed": {
+            "NOPE.AS": {
+              "kind": "not-found",
+              "retryable": false
+            }
+          }
+        },
+        {
+          "quotes": {
+            "VOD.L": {
+              "symbol": "VOD.L",
+              "price": 72.5,
+              "previousClose": 71.0,
+              "currency": "GBP",
+              "asOf": "2026-10-14T17:46:40.000Z",
+              "source": "eodhd"
+            }
+          },
+          "failed": {}
+        }
+      ],
+      "urls": [
+        "https://eodhd.com/api/real-time/SAP.XETRA?fmt=json&api_token=k3y-should-never-leak",
+        "https://eodhd.com/api/real-time/NOPE.AS?fmt=json&api_token=k3y-should-never-leak",
+        "https://eodhd.com/api/real-time/VOD.LSE?fmt=json&api_token=k3y-should-never-leak"
+      ],
+      "headers": {
+        "accept": "application/json"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "eodhd-402-is-a-rate-limit",
+    "python": "test_providers_http.py::test_eodhd_quota_and_402",
+    "provider": "eodhd",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "/eod/",
+        "responses": [
+          {
+            "status": 402
+          }
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_eod_history",
+        "args": [
+          "ASML.AS",
+          "2026-01-01",
+          "2026-02-01"
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        {
+          "error": {
+            "kind": "rate-limited",
+            "retryable": true
+          }
+        }
+      ],
+      "urls": [
+        "https://eodhd.com/api/eod/ASML.AS?from=2026-01-01&to=2026-02-01&period=d&fmt=json&api_token=k3y-should-never-leak"
+      ],
+      "headers": {
+        "accept": "application/json"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "eodhd-eod-and-dividends",
+    "python": "test_providers_http.py::test_eodhd_eod_and_dividends",
+    "provider": "eodhd",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "/eod/SAP.XETRA",
+        "responses": [
+          [
+            {
+              "date": "2026-10-09",
+              "close": 231.5
+            },
+            {
+              "date": "2026-10-08",
+              "close": 230
+            },
+            "x",
+            {
+              "date": "2026-10-10",
+              "close": "NA"
+            }
+          ]
+        ]
+      },
+      {
+        "match": "/div/AAPL.US",
+        "responses": [
+          [
+            {
+              "date": "2026-08-11",
+              "paymentDate": "2026-08-14",
+              "value": 0.26,
+              "currency": "USD"
+            },
+            {
+              "date": "2027-11-10",
+              "value": 0.27
+            },
+            {
+              "date": "2026-11-10",
+              "value": 0.27,
+              "paymentDate": ""
+            },
+            {
+              "date": "2026-11-10",
+              "value": 0.28
+            }
+          ]
+        ]
+      },
+      {
+        "match": "/div/NOPE.US",
+        "responses": [
+          {
+            "status": 404
+          }
+        ]
+      },
+      {
+        "match": "/div/VOD.LSE",
+        "responses": [
+          [
+            {
+              "date": "2026-08-01",
+              "value": 4.5
+            }
+          ]
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_eod_history",
+        "args": [
+          "SAP.DE",
+          "2026-01-01",
+          "2026-10-13"
+        ]
+      },
+      {
+        "method": "get_dividends",
+        "args": [
+          "AAPL",
+          "2024-10-13",
+          "2027-10-13"
+        ]
+      },
+      {
+        "method": "get_dividends",
+        "args": [
+          "NOPE",
+          "2024-01-01",
+          "2027-01-01"
+        ]
+      },
+      {
+        "method": "get_dividends",
+        "args": [
+          "VOD.L",
+          "2024-01-01",
+          "2027-01-01"
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        [
+          {
+            "symbol": "SAP.DE",
+            "date": "2026-10-08",
+            "close": 230.0,
+            "currency": "EUR"
+          },
+          {
+            "symbol": "SAP.DE",
+            "date": "2026-10-09",
+            "close": 231.5,
+            "currency": "EUR"
+          }
+        ],
+        [
+          {
+            "symbol": "AAPL",
+            "exDate": "2026-08-11",
+            "amount": 0.26,
+            "currency": "USD",
+            "payDate": "2026-08-14"
+          },
+          {
+            "symbol": "AAPL",
+            "exDate": "2026-11-10",
+            "amount": 0.28,
+            "currency": "USD"
+          }
+        ],
+        [],
+        [
+          {
+            "symbol": "VOD.L",
+            "exDate": "2026-08-01",
+            "amount": 0.045,
+            "currency": "GBP"
+          }
+        ]
+      ],
+      "urls": [
+        "https://eodhd.com/api/eod/SAP.XETRA?from=2026-01-01&to=2026-10-13&period=d&fmt=json&api_token=k3y-should-never-leak",
+        "https://eodhd.com/api/div/AAPL.US?from=2024-10-13&fmt=json&api_token=k3y-should-never-leak",
+        "https://eodhd.com/api/div/NOPE.US?from=2024-01-01&fmt=json&api_token=k3y-should-never-leak",
+        "https://eodhd.com/api/div/VOD.LSE?from=2024-01-01&fmt=json&api_token=k3y-should-never-leak"
+      ],
+      "headers": {
+        "accept": "application/json"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "eodhd-profile-search",
+    "python": "test_providers_http.py::test_eodhd_profile_search + test_profile_details.py::test_eodhd_search_result_carries_a_valid_isin",
+    "provider": "eodhd",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "/search/ASML",
+        "responses": [
+          [
+            {
+              "Code": "ASML",
+              "Exchange": "US",
+              "Name": "ASML ADR",
+              "Type": "Common Stock"
+            },
+            {
+              "Code": "ASML",
+              "Exchange": "AS",
+              "Name": "ASML Holding NV",
+              "Type": "Common Stock",
+              "Country": "Netherlands",
+              "Currency": "EUR",
+              "ISIN": " nl0010273215 "
+            }
+          ],
+          [],
+          [
+            {
+              "Code": "ASML",
+              "Exchange": "AS",
+              "Name": "ASML Holding NV",
+              "Type": "ETF",
+              "ISIN": "bad",
+              "Country": "USA"
+            }
+          ]
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_profile",
+        "args": [
+          "ASML.AS"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "ASML.AS"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "ASML.AS"
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        {
+          "symbol": "ASML.AS",
+          "name": "ASML Holding NV",
+          "assetClass": "STOCK",
+          "currency": "EUR",
+          "country": "Netherlands",
+          "exchange": "Euronext Amsterdam",
+          "isin": "NL0010273215"
+        },
+        null,
+        {
+          "symbol": "ASML.AS",
+          "name": "ASML Holding NV",
+          "assetClass": "ETF",
+          "currency": "EUR",
+          "country": "Netherlands",
+          "exchange": "Euronext Amsterdam"
+        }
+      ],
+      "urls": [
+        "https://eodhd.com/api/search/ASML?exchange=AS&limit=10&fmt=json&api_token=k3y-should-never-leak",
+        "https://eodhd.com/api/search/ASML?exchange=AS&limit=10&fmt=json&api_token=k3y-should-never-leak",
+        "https://eodhd.com/api/search/ASML?exchange=AS&limit=10&fmt=json&api_token=k3y-should-never-leak"
+      ],
+      "headers": {
+        "accept": "application/json"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "coingecko-quotes",
+    "python": "test_providers_http.py::test_coingecko_quotes + test_coingecko_unknown_only",
+    "provider": "coingecko",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "/simple/price",
+        "responses": [
+          {
+            "bitcoin": {
+              "eur": 60600.0,
+              "eur_24h_change": 1.0,
+              "last_updated_at": 1792000000
+            },
+            "ethereum": {
+              "usd": 3000
+            },
+            "solana": {
+              "usd": 150.123456789,
+              "usd_24h_change": -100
+            },
+            "cardano": {
+              "usd": 0.5,
+              "usd_24h_change": 33.333333333
+            }
+          }
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_quotes",
+        "args": [
+          [
+            "BTC-EUR",
+            "ETH-USD",
+            "WAT-EUR",
+            "SOL-USD",
+            "ADA-USD"
+          ]
+        ]
+      },
+      {
+        "method": "get_quotes",
+        "args": [
+          [
+            "WAT-EUR"
+          ]
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        {
+          "quotes": {
+            "BTC-EUR": {
+              "symbol": "BTC-EUR",
+              "price": 60600.0,
+              "previousClose": 60000.0,
+              "currency": "EUR",
+              "asOf": "2026-10-14T17:46:40.000Z",
+              "source": "coingecko"
+            },
+            "ETH-USD": {
+              "symbol": "ETH-USD",
+              "price": 3000.0,
+              "previousClose": 3000.0,
+              "currency": "USD",
+              "asOf": "2026-10-13T12:00:00.000Z",
+              "source": "coingecko"
+            },
+            "SOL-USD": {
+              "symbol": "SOL-USD",
+              "price": 150.123456789,
+              "previousClose": 150.12345679,
+              "currency": "USD",
+              "asOf": "2026-10-13T12:00:00.000Z",
+              "source": "coingecko"
+            },
+            "ADA-USD": {
+              "symbol": "ADA-USD",
+              "price": 0.5,
+              "previousClose": 0.375,
+              "currency": "USD",
+              "asOf": "2026-10-13T12:00:00.000Z",
+              "source": "coingecko"
+            }
+          },
+          "failed": {
+            "WAT-EUR": {
+              "kind": "not-found",
+              "retryable": false
+            }
+          }
+        },
+        {
+          "quotes": {},
+          "failed": {
+            "WAT-EUR": {
+              "kind": "not-found",
+              "retryable": false
+            }
+          }
+        }
+      ],
+      "urls": [
+        "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,cardano,ethereum,solana&vs_currencies=eur,usd&include_24hr_change=true&include_last_updated_at=true"
+      ],
+      "headers": {
+        "accept": "application/json",
+        "x-cg-demo-api-key": "k3y-should-never-leak"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "coingecko-history-and-profile",
+    "python": "test_providers_http.py::test_coingecko_history_and_profile",
+    "provider": "coingecko",
+    "now": "2026-10-13T12:00:00Z",
+    "env": {
+      "COINGECKO_COIN_IDS": "WAT=wat-coin, bad"
+    },
+    "routes": [
+      {
+        "match": "/coins/bitcoin/market_chart",
+        "responses": [
+          {
+            "prices": [
+              [
+                1791676800000,
+                1.0
+              ],
+              [
+                1791763200000,
+                2.0
+              ],
+              [
+                1791849600000,
+                3.0
+              ],
+              [
+                1791853200000,
+                3.5
+              ],
+              [
+                "bad"
+              ],
+              [
+                1791849600001,
+                "NA"
+              ]
+            ]
+          }
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_eod_history",
+        "args": [
+          "BTC-EUR",
+          "2025-10-13",
+          "2026-10-13"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "BTC-EUR"
+        ]
+      },
+      {
+        "method": "get_dividends",
+        "args": [
+          "BTC-EUR",
+          "2020-01-01",
+          "2030-01-01"
+        ]
+      },
+      {
+        "method": "get_eod_history",
+        "args": [
+          "NOPE-EUR",
+          "2026-01-01",
+          "2026-02-01"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "WAT-EUR"
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        [
+          {
+            "symbol": "BTC-EUR",
+            "date": "2026-10-11",
+            "close": 1.0,
+            "currency": "EUR"
+          },
+          {
+            "symbol": "BTC-EUR",
+            "date": "2026-10-12",
+            "close": 2.0,
+            "currency": "EUR"
+          },
+          {
+            "symbol": "BTC-EUR",
+            "date": "2026-10-13",
+            "close": 3.5,
+            "currency": "EUR"
+          }
+        ],
+        {
+          "symbol": "BTC-EUR",
+          "name": "Bitcoin",
+          "assetClass": "CRYPTO",
+          "currency": "EUR"
+        },
+        [],
+        {
+          "error": {
+            "kind": "not-found",
+            "retryable": false
+          }
+        },
+        {
+          "symbol": "WAT-EUR",
+          "name": "Wat Coin",
+          "assetClass": "CRYPTO",
+          "currency": "EUR"
+        }
+      ],
+      "urls": [
+        "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=eur&days=365&interval=daily"
+      ],
+      "headers": {
+        "accept": "application/json",
+        "x-cg-demo-api-key": "k3y-should-never-leak"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "alphavantage-overview",
+    "python": "test_providers_http.py::test_alphavantage_overview + test_profile_details.py::test_alphavantage_overview_carries_company_details/ignores_placeholder_details",
+    "provider": "alphavantage",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "OVERVIEW",
+        "responses": [
+          {
+            "Symbol": "AAPL",
+            "AssetType": "Common Stock",
+            "Name": "Apple Inc",
+            "Exchange": "NASDAQ",
+            "Currency": "USD",
+            "Country": "USA",
+            "Sector": "TECHNOLOGY"
+          },
+          {},
+          {
+            "Information": "rate limit is 25 requests per day"
+          },
+          {
+            "Symbol": "AAPL",
+            "AssetType": "Common Stock",
+            "Name": "Apple Inc",
+            "Currency": "USD",
+            "Country": "USA",
+            "Description": "Designs phones.",
+            "MarketCapitalization": "3500000000000",
+            "EPS": "6.42",
+            "Beta": "1.24",
+            "PERatio": "34.9"
+          },
+          {
+            "Symbol": "XYZ",
+            "Name": "Loss Maker",
+            "Description": "None",
+            "MarketCapitalization": "0",
+            "EPS": "-1.5",
+            "Beta": "-",
+            "PERatio": "None"
+          },
+          {
+            "Symbol": "CCC",
+            "Name": "Consumer",
+            "Sector": "CONSUMER CYCLICAL",
+            "AssetType": "ETF"
+          },
+          {
+            "Symbol": "DDD",
+            "Name": "Mixed",
+            "Sector": "Real Estate & Land",
+            "AssetType": "Mutual Fund",
+            "Country": "Netherlands"
+          },
+          {
+            "Symbol": "EEE",
+            "Sector": "None",
+            "Country": ""
+          },
+          {
+            "Error Message": "Invalid API call"
+          }
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_profile",
+        "args": [
+          "AAPL"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "SPY"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "MSFT"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "AAPL"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "XYZ"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "CCC"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "DDD"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "EEE"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "ERR"
+        ]
+      },
+      {
+        "method": "get_quotes",
+        "args": [
+          [
+            "AAPL"
+          ]
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        {
+          "symbol": "AAPL",
+          "name": "Apple Inc",
+          "assetClass": "STOCK",
+          "currency": "USD",
+          "sector": "Technology",
+          "country": "United States",
+          "exchange": "NASDAQ"
+        },
+        null,
+        {
+          "error": {
+            "kind": "rate-limited",
+            "retryable": true
+          }
+        },
+        {
+          "symbol": "AAPL",
+          "name": "Apple Inc",
+          "assetClass": "STOCK",
+          "currency": "USD",
+          "country": "United States",
+          "peRatio": 34.9,
+          "fundamentalsAsOf": "2026-10-13",
+          "description": "Designs phones.",
+          "marketCap": 3500000000000.0,
+          "eps": 6.42,
+          "beta": 1.24
+        },
+        {
+          "symbol": "XYZ",
+          "name": "Loss Maker",
+          "assetClass": "OTHER",
+          "currency": "USD",
+          "eps": -1.5
+        },
+        {
+          "symbol": "CCC",
+          "name": "Consumer",
+          "assetClass": "ETF",
+          "currency": "USD",
+          "sector": "Consumer Cyclical"
+        },
+        {
+          "symbol": "DDD",
+          "name": "Mixed",
+          "assetClass": "ETF",
+          "currency": "USD",
+          "sector": "Real Estate & Land",
+          "country": "Netherlands"
+        },
+        {
+          "symbol": "EEE",
+          "name": "EEE",
+          "assetClass": "OTHER",
+          "currency": "USD"
+        },
+        null,
+        {
+          "quotes": {},
+          "failed": {
+            "AAPL": {
+              "kind": "error",
+              "retryable": false
+            }
+          }
+        }
+      ],
+      "urls": [
+        "https://www.alphavantage.co/query?function=OVERVIEW&symbol=AAPL&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=OVERVIEW&symbol=SPY&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=OVERVIEW&symbol=MSFT&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=OVERVIEW&symbol=AAPL&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=OVERVIEW&symbol=XYZ&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=OVERVIEW&symbol=CCC&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=OVERVIEW&symbol=DDD&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=OVERVIEW&symbol=EEE&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=OVERVIEW&symbol=ERR&apikey=k3y-should-never-leak"
+      ],
+      "headers": {
+        "accept": "application/json"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "alphavantage-pe-ratio",
+    "python": "test_providers_http.py::test_alphavantage_overview_pe_ratio + test_alphavantage_overview_without_pe_field",
+    "provider": "alphavantage",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "OVERVIEW",
+        "responses": [
+          {
+            "Symbol": "AAPL",
+            "AssetType": "Common Stock",
+            "Name": "Apple Inc",
+            "PERatio": "34.21"
+          },
+          {
+            "Symbol": "AAPL",
+            "AssetType": "Common Stock",
+            "Name": "Apple Inc",
+            "PERatio": "None"
+          },
+          {
+            "Symbol": "AAPL",
+            "AssetType": "Common Stock",
+            "Name": "Apple Inc",
+            "PERatio": "-"
+          },
+          {
+            "Symbol": "AAPL",
+            "AssetType": "Common Stock",
+            "Name": "Apple Inc",
+            "PERatio": "0"
+          },
+          {
+            "Symbol": "AAPL",
+            "AssetType": "Common Stock",
+            "Name": "Apple Inc",
+            "PERatio": "-12.5"
+          },
+          {
+            "Symbol": "AAPL",
+            "AssetType": "Common Stock",
+            "Name": "Apple Inc",
+            "PERatio": "abc"
+          },
+          {
+            "Symbol": "AAPL",
+            "AssetType": "Common Stock",
+            "Name": "Apple Inc",
+            "PERatio": "inf"
+          },
+          {
+            "Symbol": "AAPL",
+            "AssetType": "Common Stock",
+            "Name": "Apple Inc",
+            "PERatio": ""
+          },
+          {
+            "Symbol": "AAPL",
+            "AssetType": "Common Stock",
+            "Name": "Apple Inc",
+            "PERatio": 25
+          },
+          {
+            "Symbol": "SPY",
+            "AssetType": "ETF",
+            "Name": "SPDR"
+          }
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_profile",
+        "args": [
+          "AAPL"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "AAPL"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "AAPL"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "AAPL"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "AAPL"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "AAPL"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "AAPL"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "AAPL"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "AAPL"
+        ]
+      },
+      {
+        "method": "get_profile",
+        "args": [
+          "SPY"
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        {
+          "symbol": "AAPL",
+          "name": "Apple Inc",
+          "assetClass": "STOCK",
+          "currency": "USD",
+          "peRatio": 34.21,
+          "fundamentalsAsOf": "2026-10-13"
+        },
+        {
+          "symbol": "AAPL",
+          "name": "Apple Inc",
+          "assetClass": "STOCK",
+          "currency": "USD"
+        },
+        {
+          "symbol": "AAPL",
+          "name": "Apple Inc",
+          "assetClass": "STOCK",
+          "currency": "USD"
+        },
+        {
+          "symbol": "AAPL",
+          "name": "Apple Inc",
+          "assetClass": "STOCK",
+          "currency": "USD"
+        },
+        {
+          "symbol": "AAPL",
+          "name": "Apple Inc",
+          "assetClass": "STOCK",
+          "currency": "USD"
+        },
+        {
+          "symbol": "AAPL",
+          "name": "Apple Inc",
+          "assetClass": "STOCK",
+          "currency": "USD"
+        },
+        {
+          "symbol": "AAPL",
+          "name": "Apple Inc",
+          "assetClass": "STOCK",
+          "currency": "USD"
+        },
+        {
+          "symbol": "AAPL",
+          "name": "Apple Inc",
+          "assetClass": "STOCK",
+          "currency": "USD"
+        },
+        {
+          "symbol": "AAPL",
+          "name": "Apple Inc",
+          "assetClass": "STOCK",
+          "currency": "USD",
+          "peRatio": 25.0,
+          "fundamentalsAsOf": "2026-10-13"
+        },
+        {
+          "symbol": "SPY",
+          "name": "SPDR",
+          "assetClass": "ETF",
+          "currency": "USD"
+        }
+      ],
+      "urls": [
+        "https://www.alphavantage.co/query?function=OVERVIEW&symbol=AAPL&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=OVERVIEW&symbol=AAPL&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=OVERVIEW&symbol=AAPL&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=OVERVIEW&symbol=AAPL&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=OVERVIEW&symbol=AAPL&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=OVERVIEW&symbol=AAPL&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=OVERVIEW&symbol=AAPL&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=OVERVIEW&symbol=AAPL&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=OVERVIEW&symbol=AAPL&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=OVERVIEW&symbol=SPY&apikey=k3y-should-never-leak"
+      ],
+      "headers": {
+        "accept": "application/json"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "frankfurter-latest",
+    "python": "test_providers_http.py::test_frankfurter + test_fx_history.py::test_frankfurter_latest_records_fixing_date",
+    "provider": "frankfurter",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "frankfurter",
+        "responses": [
+          {
+            "base": "EUR",
+            "date": "2026-10-13",
+            "rates": {
+              "USD": 1.0841,
+              "JPY": 162,
+              "BAD": "x",
+              "eur": 1,
+              "NEG": -1
+            }
+          },
+          {
+            "base": "EUR",
+            "rates": {}
+          },
+          {
+            "base": "EUR",
+            "date": "2026-12-01",
+            "rates": {
+              "usd": 1.16,
+              "EUR": 1
+            }
+          },
+          {
+            "rates": {
+              "USD": 1.16
+            }
+          },
+          {
+            "status": 404
+          }
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_latest",
+        "args": [
+          "EUR"
+        ]
+      },
+      {
+        "method": "get_latest",
+        "args": [
+          "EUR"
+        ]
+      },
+      {
+        "method": "get_latest",
+        "args": [
+          "EUR"
+        ]
+      },
+      {
+        "method": "get_latest",
+        "args": [
+          "EUR"
+        ]
+      },
+      {
+        "method": "get_latest",
+        "args": [
+          "EUR"
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        {
+          "base": "EUR",
+          "asOf": "2026-10-13T14:00:00.000Z",
+          "rates": {
+            "USD": 1.0841,
+            "JPY": 162.0
+          },
+          "date": "2026-10-13"
+        },
+        {
+          "error": {
+            "kind": "error",
+            "retryable": false
+          }
+        },
+        {
+          "base": "EUR",
+          "asOf": "2026-12-01T15:00:00.000Z",
+          "rates": {
+            "USD": 1.16
+          },
+          "date": "2026-12-01"
+        },
+        {
+          "base": "EUR",
+          "asOf": "<now>",
+          "rates": {
+            "USD": 1.16
+          }
+        },
+        {
+          "error": {
+            "kind": "not-found",
+            "retryable": false,
+            "status": 404
+          }
+        }
+      ],
+      "urls": [
+        "https://api.frankfurter.dev/v1/latest?base=EUR",
+        "https://api.frankfurter.dev/v1/latest?base=EUR",
+        "https://api.frankfurter.dev/v1/latest?base=EUR",
+        "https://api.frankfurter.dev/v1/latest?base=EUR",
+        "https://api.frankfurter.dev/v1/latest?base=EUR"
+      ],
+      "headers": {
+        "accept": "application/json"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "frankfurter-history-chunks",
+    "python": "test_fx_history.py::test_frankfurter_history_chunks_requests_per_year_and_parses + skips_weekend_and_holiday_chunks",
+    "provider": "frankfurter",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "2024-12-30..2024-12-31",
+        "responses": [
+          {
+            "amount": 1.0,
+            "base": "EUR",
+            "rates": {
+              "2024-12-31": {
+                "USD": 1.0389,
+                "GBP": "0.82918",
+                "EUR": 1,
+                "BAD": "x",
+                "NEG": -1
+              },
+              "2024-12-30": {
+                "usd": 1.0444,
+                "JPY": 163.65
+              }
+            }
+          }
+        ]
+      },
+      {
+        "match": "2025-01-01..2025-12-31",
+        "responses": [
+          {
+            "base": "EUR",
+            "rates": {
+              "2024-12-31": {
+                "USD": 9.9
+              },
+              "2025-01-02": {
+                "USD": 1.0321
+              },
+              "2025-01-03": {},
+              "2025-01-06": "garbage",
+              "2025-12-31": {
+                "USD": 1.175
+              }
+            }
+          }
+        ]
+      },
+      {
+        "match": "2026-01-01..2026-01-05",
+        "responses": [
+          {
+            "base": "EUR",
+            "rates": {
+              "2026-01-02": {
+                "USD": 1.17
+              }
+            }
+          }
+        ]
+      },
+      {
+        "match": "2025-12-25..2025-12-26",
+        "responses": [
+          {
+            "status": 404
+          }
+        ]
+      },
+      {
+        "match": "2026-01-01..2026-01-01",
+        "responses": [
+          {
+            "base": "EUR"
+          }
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_history",
+        "args": [
+          "eur",
+          "2024-12-30",
+          "2026-01-05"
+        ]
+      },
+      {
+        "method": "get_history",
+        "args": [
+          "EUR",
+          "2026-10-17",
+          "2026-10-18"
+        ]
+      },
+      {
+        "method": "get_history",
+        "args": [
+          "EUR",
+          "2025-12-25",
+          "2025-12-26"
+        ]
+      },
+      {
+        "method": "get_history",
+        "args": [
+          "EUR",
+          "2026-01-01",
+          "2026-01-01"
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        [
+          {
+            "base": "EUR",
+            "date": "2024-12-30",
+            "rates": {
+              "USD": 1.0444,
+              "JPY": 163.65
+            }
+          },
+          {
+            "base": "EUR",
+            "date": "2024-12-31",
+            "rates": {
+              "USD": 1.0389,
+              "GBP": 0.82918
+            }
+          },
+          {
+            "base": "EUR",
+            "date": "2025-01-02",
+            "rates": {
+              "USD": 1.0321
+            }
+          },
+          {
+            "base": "EUR",
+            "date": "2025-12-31",
+            "rates": {
+              "USD": 1.175
+            }
+          },
+          {
+            "base": "EUR",
+            "date": "2026-01-02",
+            "rates": {
+              "USD": 1.17
+            }
+          }
+        ],
+        [],
+        [],
+        []
+      ],
+      "urls": [
+        "https://api.frankfurter.dev/v1/2024-12-30..2024-12-31?base=EUR",
+        "https://api.frankfurter.dev/v1/2025-01-01..2025-12-31?base=EUR",
+        "https://api.frankfurter.dev/v1/2026-01-01..2026-01-05?base=EUR",
+        "https://api.frankfurter.dev/v1/2025-12-25..2025-12-26?base=EUR",
+        "https://api.frankfurter.dev/v1/2026-01-01..2026-01-01?base=EUR"
+      ],
+      "headers": {
+        "accept": "application/json"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "frankfurter-history-malformed-and-errors",
+    "python": "test_fx_history.py::test_frankfurter_history_rejects_malformed_payloads + propagates_retryable_errors",
+    "provider": "frankfurter",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "2026-10-13..2026-10-13",
+        "responses": [
+          null,
+          [
+            "not",
+            "a",
+            "dict"
+          ],
+          {
+            "base": "USD",
+            "rates": {}
+          },
+          {
+            "base": "EUR",
+            "rates": [
+              "x"
+            ]
+          },
+          {
+            "status": 503
+          }
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_history",
+        "args": [
+          "EUR",
+          "2026-10-13",
+          "2026-10-13"
+        ]
+      },
+      {
+        "method": "get_history",
+        "args": [
+          "EUR",
+          "2026-10-13",
+          "2026-10-13"
+        ]
+      },
+      {
+        "method": "get_history",
+        "args": [
+          "EUR",
+          "2026-10-13",
+          "2026-10-13"
+        ]
+      },
+      {
+        "method": "get_history",
+        "args": [
+          "EUR",
+          "2026-10-13",
+          "2026-10-13"
+        ]
+      },
+      {
+        "method": "get_history",
+        "args": [
+          "EUR",
+          "2026-10-13",
+          "2026-10-13"
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        {
+          "error": {
+            "kind": "error",
+            "retryable": false
+          }
+        },
+        {
+          "error": {
+            "kind": "error",
+            "retryable": false
+          }
+        },
+        {
+          "error": {
+            "kind": "error",
+            "retryable": false
+          }
+        },
+        {
+          "error": {
+            "kind": "error",
+            "retryable": false
+          }
+        },
+        {
+          "error": {
+            "kind": "retryable",
+            "retryable": true,
+            "status": 503
+          }
+        }
+      ],
+      "urls": [
+        "https://api.frankfurter.dev/v1/2026-10-13..2026-10-13?base=EUR",
+        "https://api.frankfurter.dev/v1/2026-10-13..2026-10-13?base=EUR",
+        "https://api.frankfurter.dev/v1/2026-10-13..2026-10-13?base=EUR",
+        "https://api.frankfurter.dev/v1/2026-10-13..2026-10-13?base=EUR",
+        "https://api.frankfurter.dev/v1/2026-10-13..2026-10-13?base=EUR",
+        "https://api.frankfurter.dev/v1/2026-10-13..2026-10-13?base=EUR",
+        "https://api.frankfurter.dev/v1/2026-10-13..2026-10-13?base=EUR"
+      ],
+      "headers": {
+        "accept": "application/json"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "alphavantage-earnings-one-call",
+    "python": "test_calendar_providers.py::test_alphavantage_earnings_makes_one_call_for_all_symbols/skips_the_call_without_us_symbols/drops_dates_in_the_past",
+    "provider": "alphavantage-earnings",
+    "now": "2026-10-13T12:00:00Z",
+    "horizon": "6month",
+    "routes": [
+      {
+        "match": "EARNINGS_CALENDAR",
+        "responses": [
+          {
+            "text": "symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay\nAAPL,APPLE INC,2026-10-29,2026-09-30,1.85,USD,post-market\nMSFT,MICROSOFT CORP,2026-10-28,2026-09-30,,USD,pre-market\nBRK.B,BERKSHIRE HATHAWAY INC,2026-11-01,2026-09-30,None,usd,\nKO,COCA COLA CO,2026-10-21,2026-09-30,abc,US,during-market\nNVDA,NVIDIA CORP,not-a-date,2026-09-30,1.0,USD,pre-market\nTSLA,TESLA INC,2026-10-22,2026-09-30,0.5,USD,pre-market\nAAPL,APPLE INC,2026-10-29,2026-09-30,1.9,USD,post-market\n,,,,,,\n"
+          }
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "fetch",
+        "args": [
+          [
+            "AAPL",
+            "MSFT",
+            "BRK-B",
+            "ASML.AS",
+            "BTC-EUR"
+          ],
+          "2026-10-15"
+        ]
+      },
+      {
+        "method": "fetch",
+        "args": [
+          [
+            "ASML.AS",
+            "BTC-EUR"
+          ],
+          "2026-10-15"
+        ]
+      },
+      {
+        "method": "fetch",
+        "args": [
+          [
+            "AAPL",
+            "MSFT"
+          ],
+          "2026-10-29"
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        [
+          {
+            "symbol": "AAPL",
+            "date": "2026-10-29",
+            "name": "APPLE INC",
+            "fiscalPeriodEnd": "2026-09-30",
+            "epsEstimate": 1.9,
+            "currency": "USD",
+            "timeOfDay": "AMC",
+            "source": "alphavantage"
+          },
+          {
+            "symbol": "BRK-B",
+            "date": "2026-11-01",
+            "name": "BERKSHIRE HATHAWAY INC",
+            "fiscalPeriodEnd": "2026-09-30",
+            "currency": "USD",
+            "timeOfDay": "unknown",
+            "source": "alphavantage"
+          },
+          {
+            "symbol": "MSFT",
+            "date": "2026-10-28",
+            "name": "MICROSOFT CORP",
+            "fiscalPeriodEnd": "2026-09-30",
+            "currency": "USD",
+            "timeOfDay": "BMO",
+            "source": "alphavantage"
+          }
+        ],
+        [],
+        [
+          {
+            "symbol": "AAPL",
+            "date": "2026-10-29",
+            "name": "APPLE INC",
+            "fiscalPeriodEnd": "2026-09-30",
+            "epsEstimate": 1.9,
+            "currency": "USD",
+            "timeOfDay": "AMC",
+            "source": "alphavantage"
+          }
+        ]
+      ],
+      "urls": [
+        "https://www.alphavantage.co/query?function=EARNINGS_CALENDAR&horizon=6month&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=EARNINGS_CALENDAR&horizon=6month&apikey=k3y-should-never-leak"
+      ],
+      "headers": {
+        "accept": "text/csv, */*"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "alphavantage-earnings-http-429",
+    "python": "test_calendar_providers.py::test_alphavantage_earnings_reports_http_failures",
+    "provider": "alphavantage-earnings",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "EARNINGS_CALENDAR",
+        "responses": [
+          {
+            "status": 429
+          }
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "fetch",
+        "args": [
+          [
+            "AAPL"
+          ],
+          "2026-10-15"
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        {
+          "error": {
+            "kind": "rate-limited",
+            "retryable": true,
+            "status": 429
+          }
+        }
+      ],
+      "urls": [
+        "https://www.alphavantage.co/query?function=EARNINGS_CALENDAR&horizon=12month&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=EARNINGS_CALENDAR&horizon=12month&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=EARNINGS_CALENDAR&horizon=12month&apikey=k3y-should-never-leak"
+      ],
+      "headers": {
+        "accept": "text/csv, */*"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "alphavantage-earnings-json-and-non-csv-bodies",
+    "python": "test_calendar_providers.py::test_parse_earnings_csv_rejects_non_csv_bodies (through the HTTP client)",
+    "provider": "alphavantage-earnings",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "EARNINGS_CALENDAR",
+        "responses": [
+          {
+            "text": "{\"Information\": \"Thank you! Our standard API rate limit is 25 requests per day.\"}"
+          },
+          {
+            "text": "a,b\n1,2\n"
+          }
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "fetch",
+        "args": [
+          [
+            "AAPL"
+          ],
+          "2026-10-15"
+        ]
+      },
+      {
+        "method": "fetch",
+        "args": [
+          [
+            "AAPL"
+          ],
+          "2026-10-15"
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        {
+          "error": {
+            "kind": "rate-limited",
+            "retryable": true
+          }
+        },
+        {
+          "error": {
+            "kind": "error",
+            "retryable": false
+          }
+        }
+      ],
+      "urls": [
+        "https://www.alphavantage.co/query?function=EARNINGS_CALENDAR&horizon=12month&apikey=k3y-should-never-leak",
+        "https://www.alphavantage.co/query?function=EARNINGS_CALENDAR&horizon=12month&apikey=k3y-should-never-leak"
+      ],
+      "headers": {
+        "accept": "text/csv, */*"
+      }
+    }
+  },
+  {
+    "kind": "provider",
+    "id": "eodhd-splits-and-dividends",
+    "python": "test_calendar_providers.py::test_eodhd_splits_* + test_eodhd_dividends_go_through_the_existing_adapter",
+    "provider": "eodhd-actions",
+    "now": "2026-10-13T12:00:00Z",
+    "routes": [
+      {
+        "match": "/splits/AAPL.US",
+        "responses": [
+          [
+            {
+              "date": "2026-11-02",
+              "split": "4.000000/1.000000"
+            }
+          ],
+          {
+            "status": 402
+          },
+          {
+            "status": 403
+          }
+        ]
+      },
+      {
+        "match": "/splits/SAP.XETRA",
+        "responses": [
+          []
+        ]
+      },
+      {
+        "match": "/splits/ZZZZ.US",
+        "responses": [
+          {
+            "status": 404
+          }
+        ]
+      },
+      {
+        "match": "/div/AAPL.US",
+        "responses": [
+          [
+            {
+              "date": "2026-11-09",
+              "paymentDate": "2026-11-12",
+              "value": 0.26,
+              "currency": "USD"
+            }
+          ]
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "method": "get_splits",
+        "args": [
+          "AAPL",
+          "2026-07-17"
+        ]
+      },
+      {
+        "method": "get_splits",
+        "args": [
+          "SAP.DE",
+          "2026-07-17"
+        ]
+      },
+      {
+        "method": "get_splits",
+        "args": [
+          "ZZZZ",
+          "2026-07-17"
+        ]
+      },
+      {
+        "method": "get_splits",
+        "args": [
+          "AAPL",
+          "2026-07-17"
+        ]
+      },
+      {
+        "method": "get_splits",
+        "args": [
+          "AAPL",
+          "2026-07-17"
+        ]
+      },
+      {
+        "method": "get_dividends",
+        "args": [
+          "AAPL",
+          "2025-01-01",
+          "2027-01-01"
+        ]
+      }
+    ],
+    "expected": {
+      "results": [
+        [
+          {
+            "symbol": "AAPL",
+            "date": "2026-11-02",
+            "fromFactor": 1.0,
+            "toFactor": 4.0,
+            "source": "eodhd"
+          }
+        ],
+        [],
+        [],
+        {
+          "error": {
+            "kind": "rate-limited",
+            "retryable": true
+          }
+        },
+        {
+          "error": {
+            "kind": "error",
+            "retryable": false,
+            "status": 403
+          }
+        },
+        [
+          {
+            "symbol": "AAPL",
+            "exDate": "2026-11-09",
+            "amount": 0.26,
+            "currency": "USD",
+            "payDate": "2026-11-12"
+          }
+        ]
+      ],
+      "urls": [
+        "https://eodhd.com/api/splits/AAPL.US?from=2026-07-17&fmt=json&api_token=k3y-should-never-leak",
+        "https://eodhd.com/api/splits/SAP.XETRA?from=2026-07-17&fmt=json&api_token=k3y-should-never-leak",
+        "https://eodhd.com/api/splits/ZZZZ.US?from=2026-07-17&fmt=json&api_token=k3y-should-never-leak",
+        "https://eodhd.com/api/splits/AAPL.US?from=2026-07-17&fmt=json&api_token=k3y-should-never-leak",
+        "https://eodhd.com/api/splits/AAPL.US?from=2026-07-17&fmt=json&api_token=k3y-should-never-leak",
+        "https://eodhd.com/api/div/AAPL.US?from=2025-01-01&fmt=json&api_token=k3y-should-never-leak"
+      ],
+      "headers": {
+        "accept": "application/json"
+      }
+    }
+  },
+  {
+    "kind": "pure",
+    "id": "as-float",
+    "python": "providers/base.py::as_float",
+    "fn": "as_float",
+    "args": [
+      "12.5",
+      " 7 ",
+      "1e3",
+      ".5",
+      "5.",
+      "",
+      "NA",
+      "None",
+      "-",
+      "abc",
+      "inf",
+      "nan",
+      "-0.25",
+      3,
+      2.5,
+      null
+    ],
+    "expected": [
+      12.5,
+      7.0,
+      1000.0,
+      0.5,
+      5.0,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      -0.25,
+      3.0,
+      2.5,
+      null
+    ]
+  },
+  {
+    "kind": "pure",
+    "id": "clean-text",
+    "python": "test_profile_details.py::test_clean_text_trims_caps_and_drops_placeholders",
+    "fn": "clean_text",
+    "args": [
+      [
+        "  Makes   chips \n and more "
+      ],
+      [
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        10
+      ],
+      [
+        null
+      ],
+      [
+        5
+      ],
+      [
+        ""
+      ],
+      [
+        "   "
+      ],
+      [
+        "None"
+      ],
+      [
+        "n/a"
+      ],
+      [
+        "-"
+      ],
+      [
+        "NA"
+      ]
+    ],
+    "expected": [
+      "Makes chips and more",
+      "xxxxxxxxx…",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "kind": "pure",
+    "id": "valid-isin",
+    "python": "test_profile_details.py::test_valid_isin_is_twelve_ascii_alphanumerics",
+    "fn": "valid_isin",
+    "args": [
+      " nl0010273215 ",
+      null,
+      12,
+      "NL001027321",
+      "NL0010273215X",
+      "NL00102732-5",
+      "ÑL0010273215"
+    ],
+    "expected": [
+      "NL0010273215",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "kind": "pure",
+    "id": "asset-class",
+    "python": "test_providers_http.py::test_asset_class_from_type",
+    "fn": "asset_class_from_type",
+    "args": [
+      "Common Stock",
+      "ETF",
+      "Mutual Fund",
+      "Bond",
+      null,
+      "Depositary Receipt",
+      "Share",
+      "Equity",
+      "REIT"
+    ],
+    "expected": [
+      "STOCK",
+      "ETF",
+      "ETF",
+      "BOND",
+      "OTHER",
+      "STOCK",
+      "STOCK",
+      "STOCK",
+      "OTHER"
+    ]
+  },
+  {
+    "kind": "pure",
+    "id": "eodhd-symbol-mapping",
+    "python": "test_providers_http.py::test_eodhd_symbol_mapping",
+    "fn": "to_provider_symbol",
+    "args": [
+      "ASML.AS",
+      "SAP.DE",
+      "AAPL",
+      "VOD.L",
+      "MC.PA",
+      "BRK-B",
+      "XYZ.TO"
+    ],
+    "expected": [
+      "ASML.AS",
+      "SAP.XETRA",
+      "AAPL.US",
+      "VOD.LSE",
+      "MC.PA",
+      "BRK-B.US",
+      "XYZ.TO"
+    ]
+  },
+  {
+    "kind": "pure",
+    "id": "year-chunks",
+    "python": "test_fx_history.py::test_year_chunks_never_cross_a_calendar_year",
+    "fn": "year_chunks",
+    "args": [
+      "2014-06-15",
+      "2016-02-10"
+    ],
+    "expected": [
+      [
+        "2014-06-15",
+        "2014-12-31"
+      ],
+      [
+        "2015-01-01",
+        "2015-12-31"
+      ],
+      [
+        "2016-01-01",
+        "2016-02-10"
+      ]
+    ]
+  },
+  {
+    "kind": "pure",
+    "id": "year-chunks-single-day",
+    "python": "test_fx_history.py::test_year_chunks_never_cross_a_calendar_year",
+    "fn": "year_chunks",
+    "args": [
+      "2026-10-13",
+      "2026-10-13"
+    ],
+    "expected": [
+      [
+        "2026-10-13",
+        "2026-10-13"
+      ]
+    ]
+  },
+  {
+    "kind": "pure",
+    "id": "year-chunks-empty",
+    "python": "test_fx_history.py::test_year_chunks_never_cross_a_calendar_year",
+    "fn": "year_chunks",
+    "args": [
+      "2026-10-14",
+      "2026-10-13"
+    ],
+    "expected": []
+  },
+  {
+    "kind": "pure",
+    "id": "has-weekday-friday",
+    "python": "test_fx_history.py::test_year_chunks_never_cross_a_calendar_year",
+    "fn": "has_weekday",
+    "args": [
+      "2026-10-16",
+      "2026-10-16"
+    ],
+    "expected": true
+  },
+  {
+    "kind": "pure",
+    "id": "has-weekday-weekend",
+    "python": "test_fx_history.py::test_year_chunks_never_cross_a_calendar_year",
+    "fn": "has_weekday",
+    "args": [
+      "2026-10-17",
+      "2026-10-18"
+    ],
+    "expected": false
+  },
+  {
+    "kind": "pure",
+    "id": "has-weekday-long-range",
+    "python": "test_fx_history.py::test_year_chunks_never_cross_a_calendar_year",
+    "fn": "has_weekday",
+    "args": [
+      "2026-10-17",
+      "2027-03-01"
+    ],
+    "expected": true
+  },
+  {
+    "kind": "pure",
+    "id": "amsterdam-hour",
+    "python": "test_handlers.py::test_amsterdam_hour",
+    "fn": "amsterdam_hour",
+    "args": [
+      "2026-10-13T16:00:00Z",
+      "2026-12-01T17:00:00Z",
+      "2026-03-29T00:59:00Z",
+      "2026-03-29T01:00:00Z",
+      "2026-10-25T00:59:00Z",
+      "2026-10-25T01:00:00Z",
+      "2026-10-25T02:30:00Z"
+    ],
+    "expected": [
+      18,
+      18,
+      1,
+      3,
+      2,
+      2,
+      3
+    ]
+  },
+  {
+    "kind": "pure",
+    "id": "symbol-classification",
+    "python": "test_symbols_keys.py::test_symbol_classification + test_symbol_helpers + test_minimal_profile",
+    "fn": "classify",
+    "args": [
+      "AAPL",
+      "BRK-B",
+      "ASML.AS",
+      "SAP.DE",
+      "MC.PA",
+      "VWRL.AS",
+      "VOD.L",
+      "BTC-EUR",
+      "ETH-USD",
+      "XYZ.AS",
+      "FOO.ZZ",
+      "A&B.DE",
+      "XYZ.TO",
+      "SPY"
+    ],
+    "expected": [
+      {
+        "symbol": "AAPL",
+        "crypto": false,
+        "suffix": null,
+        "currency": "USD",
+        "priceCurrency": "USD",
+        "base": "AAPL",
+        "exchange": null,
+        "country": "United States",
+        "minimal": {
+          "symbol": "AAPL",
+          "name": "AAPL",
+          "assetClass": "OTHER",
+          "currency": "USD",
+          "country": "United States"
+        }
+      },
+      {
+        "symbol": "BRK-B",
+        "crypto": false,
+        "suffix": null,
+        "currency": "USD",
+        "priceCurrency": "USD",
+        "base": "BRK-B",
+        "exchange": null,
+        "country": "United States",
+        "minimal": {
+          "symbol": "BRK-B",
+          "name": "BRK-B",
+          "assetClass": "OTHER",
+          "currency": "USD",
+          "country": "United States"
+        }
+      },
+      {
+        "symbol": "ASML.AS",
+        "crypto": false,
+        "suffix": "AS",
+        "currency": "EUR",
+        "priceCurrency": "EUR",
+        "base": "ASML",
+        "exchange": "Euronext Amsterdam",
+        "country": "Netherlands",
+        "minimal": {
+          "symbol": "ASML.AS",
+          "name": "ASML.AS",
+          "assetClass": "OTHER",
+          "currency": "EUR",
+          "country": "Netherlands",
+          "exchange": "Euronext Amsterdam"
+        }
+      },
+      {
+        "symbol": "SAP.DE",
+        "crypto": false,
+        "suffix": "DE",
+        "currency": "EUR",
+        "priceCurrency": "EUR",
+        "base": "SAP",
+        "exchange": "XETRA",
+        "country": "Germany",
+        "minimal": {
+          "symbol": "SAP.DE",
+          "name": "SAP.DE",
+          "assetClass": "OTHER",
+          "currency": "EUR",
+          "country": "Germany",
+          "exchange": "XETRA"
+        }
+      },
+      {
+        "symbol": "MC.PA",
+        "crypto": false,
+        "suffix": "PA",
+        "currency": "EUR",
+        "priceCurrency": "EUR",
+        "base": "MC",
+        "exchange": "Euronext Paris",
+        "country": "France",
+        "minimal": {
+          "symbol": "MC.PA",
+          "name": "MC.PA",
+          "assetClass": "OTHER",
+          "currency": "EUR",
+          "country": "France",
+          "exchange": "Euronext Paris"
+        }
+      },
+      {
+        "symbol": "VWRL.AS",
+        "crypto": false,
+        "suffix": "AS",
+        "currency": "EUR",
+        "priceCurrency": "EUR",
+        "base": "VWRL",
+        "exchange": "Euronext Amsterdam",
+        "country": "Netherlands",
+        "minimal": {
+          "symbol": "VWRL.AS",
+          "name": "VWRL.AS",
+          "assetClass": "OTHER",
+          "currency": "EUR",
+          "country": "Netherlands",
+          "exchange": "Euronext Amsterdam"
+        }
+      },
+      {
+        "symbol": "VOD.L",
+        "crypto": false,
+        "suffix": "L",
+        "currency": "GBP",
+        "priceCurrency": "GBX",
+        "base": "VOD",
+        "exchange": "London Stock Exchange",
+        "country": "United Kingdom",
+        "minimal": {
+          "symbol": "VOD.L",
+          "name": "VOD.L",
+          "assetClass": "OTHER",
+          "currency": "GBP",
+          "country": "United Kingdom",
+          "exchange": "London Stock Exchange"
+        }
+      },
+      {
+        "symbol": "BTC-EUR",
+        "crypto": true,
+        "suffix": null,
+        "currency": "EUR",
+        "priceCurrency": "EUR",
+        "base": "BTC-EUR",
+        "exchange": null,
+        "country": null,
+        "minimal": {
+          "symbol": "BTC-EUR",
+          "name": "BTC",
+          "assetClass": "CRYPTO",
+          "currency": "EUR"
+        }
+      },
+      {
+        "symbol": "ETH-USD",
+        "crypto": true,
+        "suffix": null,
+        "currency": "USD",
+        "priceCurrency": "USD",
+        "base": "ETH-USD",
+        "exchange": null,
+        "country": null,
+        "minimal": {
+          "symbol": "ETH-USD",
+          "name": "ETH",
+          "assetClass": "CRYPTO",
+          "currency": "USD"
+        }
+      },
+      {
+        "symbol": "XYZ.AS",
+        "crypto": false,
+        "suffix": "AS",
+        "currency": "EUR",
+        "priceCurrency": "EUR",
+        "base": "XYZ",
+        "exchange": "Euronext Amsterdam",
+        "country": "Netherlands",
+        "minimal": {
+          "symbol": "XYZ.AS",
+          "name": "XYZ.AS",
+          "assetClass": "OTHER",
+          "currency": "EUR",
+          "country": "Netherlands",
+          "exchange": "Euronext Amsterdam"
+        }
+      },
+      {
+        "symbol": "FOO.ZZ",
+        "crypto": false,
+        "suffix": "ZZ",
+        "currency": "EUR",
+        "priceCurrency": "EUR",
+        "base": "FOO",
+        "exchange": null,
+        "country": null,
+        "minimal": {
+          "symbol": "FOO.ZZ",
+          "name": "FOO.ZZ",
+          "assetClass": "OTHER",
+          "currency": "EUR"
+        }
+      },
+      {
+        "symbol": "A&B.DE",
+        "crypto": false,
+        "suffix": "DE",
+        "currency": "EUR",
+        "priceCurrency": "EUR",
+        "base": "A&B",
+        "exchange": "XETRA",
+        "country": "Germany",
+        "minimal": {
+          "symbol": "A&B.DE",
+          "name": "A&B.DE",
+          "assetClass": "OTHER",
+          "currency": "EUR",
+          "country": "Germany",
+          "exchange": "XETRA"
+        }
+      },
+      {
+        "symbol": "XYZ.TO",
+        "crypto": false,
+        "suffix": "TO",
+        "currency": "CAD",
+        "priceCurrency": "CAD",
+        "base": "XYZ",
+        "exchange": "Toronto",
+        "country": "Canada",
+        "minimal": {
+          "symbol": "XYZ.TO",
+          "name": "XYZ.TO",
+          "assetClass": "OTHER",
+          "currency": "CAD",
+          "country": "Canada",
+          "exchange": "Toronto"
+        }
+      },
+      {
+        "symbol": "SPY",
+        "crypto": false,
+        "suffix": null,
+        "currency": "USD",
+        "priceCurrency": "USD",
+        "base": "SPY",
+        "exchange": null,
+        "country": "United States",
+        "minimal": {
+          "symbol": "SPY",
+          "name": "SPY",
+          "assetClass": "OTHER",
+          "currency": "USD",
+          "country": "United States"
+        }
+      }
+    ]
+  },
+  {
+    "kind": "pure",
+    "id": "normalize-currency",
+    "python": "test_symbols_keys.py::test_minor_unit_prices_are_rescaled_to_major_currency",
+    "fn": "normalize_currency",
+    "args": [
+      [
+        "GBp",
+        "USD"
+      ],
+      [
+        "eur",
+        "USD"
+      ],
+      [
+        null,
+        "USD"
+      ],
+      [
+        "",
+        "EUR"
+      ],
+      [
+        "GBX",
+        "USD"
+      ],
+      [
+        "ZAc",
+        "USD"
+      ],
+      [
+        "ila",
+        "USD"
+      ]
+    ],
+    "expected": [
+      "GBp",
+      "EUR",
+      "USD",
+      "EUR",
+      "GBX",
+      "ZAc",
+      "ILA"
+    ]
+  },
+  {
+    "kind": "pure",
+    "id": "minor-units",
+    "python": "test_symbols_keys.py::test_minor_unit_prices_are_rescaled_to_major_currency",
+    "fn": "minor_units",
+    "args": [],
+    "expected": [
+      {
+        "symbol": "VOD.L",
+        "price": 72.5,
+        "previousClose": 71.0,
+        "currency": "GBP",
+        "asOf": "t",
+        "source": "x"
+      },
+      {
+        "symbol": "VOD.L",
+        "date": "2026-01-02",
+        "close": 72.5,
+        "currency": "GBP"
+      },
+      {
+        "symbol": "VOD.L",
+        "exDate": "2026-01-02",
+        "amount": 0.045,
+        "currency": "GBP"
+      },
+      {
+        "symbol": "AAPL",
+        "date": "2026-01-02",
+        "close": 10.0,
+        "currency": "USD"
+      }
+    ]
+  },
+  {
+    "kind": "pure",
+    "id": "av-symbol",
+    "python": "test_calendar_providers.py::test_av_symbol_maps_us_tickers_only",
+    "fn": "av_symbol",
+    "args": [
+      "AAPL",
+      "BRK-B",
+      "ASML.AS",
+      "SAP.DE",
+      "BTC-EUR"
+    ],
+    "expected": [
+      "AAPL",
+      "BRK.B",
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "kind": "pure",
+    "id": "parse-split-ratio",
+    "python": "test_calendar_providers.py::test_parse_split_ratio",
+    "fn": "parse_split_ratio",
+    "args": [
+      "4.000000/1.000000",
+      "1.000000/10.000000",
+      "3/2",
+      "104.000000/100.000000",
+      "1281/1000",
+      "4",
+      "4/1/2",
+      "a/b",
+      "0/1",
+      "1/0",
+      "-2/1",
+      "nan/1",
+      "inf/1",
+      null,
+      2
+    ],
+    "expected": [
+      [
+        1.0,
+        4.0
+      ],
+      [
+        10.0,
+        1.0
+      ],
+      [
+        2.0,
+        3.0
+      ],
+      [
+        100.0,
+        104.0
+      ],
+      [
+        1000.0,
+        1281.0
+      ],
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  {
+    "kind": "pure",
+    "id": "parse-splits",
+    "python": "test_calendar_providers.py::test_parse_splits_keeps_valid_rows_from_the_start_date",
+    "fn": "parse_splits",
+    "args": [
+      [
+        {
+          "date": "2024-06-10",
+          "split": "10.000000/1.000000"
+        },
+        {
+          "date": "2026-09-01",
+          "split": "104/100"
+        },
+        {
+          "date": "2026-10-20",
+          "split": "1.000000/8.000000"
+        },
+        {
+          "date": "2026-10-20",
+          "split": "1/9"
+        },
+        {
+          "date": "garbage",
+          "split": "2/1"
+        },
+        {
+          "date": "2026-11-01",
+          "split": "oops"
+        },
+        {
+          "date": "2026-11-02"
+        },
+        "row",
+        null
+      ],
+      "NVDA",
+      "2026-07-01"
+    ],
+    "expected": [
+      {
+        "symbol": "NVDA",
+        "date": "2026-09-01",
+        "fromFactor": 100.0,
+        "toFactor": 104.0,
+        "source": "eodhd"
+      },
+      {
+        "symbol": "NVDA",
+        "date": "2026-10-20",
+        "fromFactor": 9.0,
+        "toFactor": 1.0,
+        "source": "eodhd"
+      }
+    ]
+  },
+  {
+    "kind": "pure",
+    "id": "earnings-csv",
+    "python": "test_calendar_providers.py::test_parse_earnings_csv_maps_rows_and_tolerates_bad_ones",
+    "fn": "parse_earnings_csv",
+    "args": [
+      "symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay\nAAPL,APPLE INC,2026-10-29,2026-09-30,1.85,USD,post-market\nMSFT,MICROSOFT CORP,2026-10-28,2026-09-30,,USD,pre-market\nBRK.B,BERKSHIRE HATHAWAY INC,2026-11-01,2026-09-30,None,usd,\nKO,COCA COLA CO,2026-10-21,2026-09-30,abc,US,during-market\nNVDA,NVIDIA CORP,not-a-date,2026-09-30,1.0,USD,pre-market\nTSLA,TESLA INC,2026-10-22,2026-09-30,0.5,USD,pre-market\nAAPL,APPLE INC,2026-10-29,2026-09-30,1.9,USD,post-market\n,,,,,,\n",
+      {
+        "AAPL": "AAPL",
+        "MSFT": "MSFT",
+        "BRK.B": "BRK-B",
+        "KO": "KO",
+        "NVDA": "NVDA"
+      }
+    ],
+    "expected": {
+      "events": [
+        {
+          "symbol": "AAPL",
+          "date": "2026-10-29",
+          "name": "APPLE INC",
+          "fiscalPeriodEnd": "2026-09-30",
+          "epsEstimate": 1.9,
+          "currency": "USD",
+          "timeOfDay": "AMC",
+          "source": "alphavantage"
+        },
+        {
+          "symbol": "BRK-B",
+          "date": "2026-11-01",
+          "name": "BERKSHIRE HATHAWAY INC",
+          "fiscalPeriodEnd": "2026-09-30",
+          "currency": "USD",
+          "timeOfDay": "unknown",
+          "source": "alphavantage"
+        },
+        {
+          "symbol": "KO",
+          "date": "2026-10-21",
+          "name": "COCA COLA CO",
+          "fiscalPeriodEnd": "2026-09-30",
+          "timeOfDay": "unknown",
+          "source": "alphavantage"
+        },
+        {
+          "symbol": "MSFT",
+          "date": "2026-10-28",
+          "name": "MICROSOFT CORP",
+          "fiscalPeriodEnd": "2026-09-30",
+          "currency": "USD",
+          "timeOfDay": "BMO",
+          "source": "alphavantage"
+        }
+      ]
+    }
+  },
+  {
+    "kind": "pure",
+    "id": "earnings-csv-bom-blank-values",
+    "python": "test_calendar_providers.py::test_parse_earnings_csv_ignores_bom_and_blank_values",
+    "fn": "parse_earnings_csv",
+    "args": [
+      "﻿symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay\nAAPL,,2026-10-29,,,,\n",
+      {
+        "AAPL": "AAPL"
+      }
+    ],
+    "expected": {
+      "events": [
+        {
+          "symbol": "AAPL",
+          "date": "2026-10-29",
+          "timeOfDay": "unknown",
+          "source": "alphavantage"
+        }
+      ]
+    }
+  },
+  {
+    "kind": "pure",
+    "id": "earnings-csv-header-only",
+    "python": "test_calendar_providers.py::test_parse_earnings_csv_header_only_is_empty",
+    "fn": "parse_earnings_csv",
+    "args": [
+      "symbol,name,reportDate\n",
+      {
+        "AAPL": "AAPL",
+        "MSFT": "MSFT",
+        "BRK.B": "BRK-B",
+        "KO": "KO",
+        "NVDA": "NVDA"
+      }
+    ],
+    "expected": {
+      "events": []
+    }
+  },
+  {
+    "kind": "pure",
+    "id": "earnings-csv-quoted",
+    "python": "csv.DictReader behaviour (quoted fields, CRLF, blank lines)",
+    "fn": "parse_earnings_csv",
+    "args": [
+      "symbol,name,reportDate,estimate\r\nAAPL,\"Apple, \"\"the\"\" Inc\",2026-10-29,\"1.5\"\r\n\r\nMSFT,\"Micro\nsoft\",2026-10-28,2\r\n",
+      {
+        "AAPL": "AAPL",
+        "MSFT": "MSFT"
+      }
+    ],
+    "expected": {
+      "events": [
+        {
+          "symbol": "AAPL",
+          "date": "2026-10-29",
+          "name": "Apple, \"the\" Inc",
+          "epsEstimate": 1.5,
+          "timeOfDay": "unknown",
+          "source": "alphavantage"
+        },
+        {
+          "symbol": "MSFT",
+          "date": "2026-10-28",
+          "name": "Micro\nsoft",
+          "epsEstimate": 2.0,
+          "timeOfDay": "unknown",
+          "source": "alphavantage"
+        }
+      ]
+    }
+  },
+  {
+    "kind": "pure",
+    "id": "earnings-csv-rejects-0",
+    "python": "test_calendar_providers.py::test_parse_earnings_csv_rejects_non_csv_bodies",
+    "fn": "parse_earnings_csv",
+    "args": [
+      "{\"Information\": \"Thank you! Our standard API rate limit is 25 requests per day.\"}",
+      {
+        "AAPL": "AAPL",
+        "MSFT": "MSFT",
+        "BRK.B": "BRK-B",
+        "KO": "KO",
+        "NVDA": "NVDA"
+      }
+    ],
+    "expected": {
+      "error": {
+        "kind": "rate-limited",
+        "retryable": true
+      }
+    }
+  },
+  {
+    "kind": "pure",
+    "id": "earnings-csv-rejects-1",
+    "python": "test_calendar_providers.py::test_parse_earnings_csv_rejects_non_csv_bodies",
+    "fn": "parse_earnings_csv",
+    "args": [
+      "{\"Note\": \"Our standard API call frequency is 5 calls per minute.\"}",
+      {
+        "AAPL": "AAPL",
+        "MSFT": "MSFT",
+        "BRK.B": "BRK-B",
+        "KO": "KO",
+        "NVDA": "NVDA"
+      }
+    ],
+    "expected": {
+      "error": {
+        "kind": "rate-limited",
+        "retryable": true
+      }
+    }
+  },
+  {
+    "kind": "pure",
+    "id": "earnings-csv-rejects-2",
+    "python": "test_calendar_providers.py::test_parse_earnings_csv_rejects_non_csv_bodies",
+    "fn": "parse_earnings_csv",
+    "args": [
+      "{\"Error Message\": \"Invalid API call.\"}",
+      {
+        "AAPL": "AAPL",
+        "MSFT": "MSFT",
+        "BRK.B": "BRK-B",
+        "KO": "KO",
+        "NVDA": "NVDA"
+      }
+    ],
+    "expected": {
+      "error": {
+        "kind": "error",
+        "retryable": false
+      }
+    }
+  },
+  {
+    "kind": "pure",
+    "id": "earnings-csv-rejects-3",
+    "python": "test_calendar_providers.py::test_parse_earnings_csv_rejects_non_csv_bodies",
+    "fn": "parse_earnings_csv",
+    "args": [
+      "{}",
+      {
+        "AAPL": "AAPL",
+        "MSFT": "MSFT",
+        "BRK.B": "BRK-B",
+        "KO": "KO",
+        "NVDA": "NVDA"
+      }
+    ],
+    "expected": {
+      "error": {
+        "kind": "error",
+        "retryable": false
+      }
+    }
+  },
+  {
+    "kind": "pure",
+    "id": "earnings-csv-rejects-4",
+    "python": "test_calendar_providers.py::test_parse_earnings_csv_rejects_non_csv_bodies",
+    "fn": "parse_earnings_csv",
+    "args": [
+      "[]",
+      {
+        "AAPL": "AAPL",
+        "MSFT": "MSFT",
+        "BRK.B": "BRK-B",
+        "KO": "KO",
+        "NVDA": "NVDA"
+      }
+    ],
+    "expected": {
+      "error": {
+        "kind": "error",
+        "retryable": false
+      }
+    }
+  },
+  {
+    "kind": "pure",
+    "id": "earnings-csv-rejects-5",
+    "python": "test_calendar_providers.py::test_parse_earnings_csv_rejects_non_csv_bodies",
+    "fn": "parse_earnings_csv",
+    "args": [
+      "{not json",
+      {
+        "AAPL": "AAPL",
+        "MSFT": "MSFT",
+        "BRK.B": "BRK-B",
+        "KO": "KO",
+        "NVDA": "NVDA"
+      }
+    ],
+    "expected": {
+      "error": {
+        "kind": "error",
+        "retryable": false
+      }
+    }
+  },
+  {
+    "kind": "pure",
+    "id": "earnings-csv-rejects-6",
+    "python": "test_calendar_providers.py::test_parse_earnings_csv_rejects_non_csv_bodies",
+    "fn": "parse_earnings_csv",
+    "args": [
+      "",
+      {
+        "AAPL": "AAPL",
+        "MSFT": "MSFT",
+        "BRK.B": "BRK-B",
+        "KO": "KO",
+        "NVDA": "NVDA"
+      }
+    ],
+    "expected": {
+      "error": {
+        "kind": "error",
+        "retryable": false
+      }
+    }
+  },
+  {
+    "kind": "pure",
+    "id": "earnings-csv-rejects-7",
+    "python": "test_calendar_providers.py::test_parse_earnings_csv_rejects_non_csv_bodies",
+    "fn": "parse_earnings_csv",
+    "args": [
+      "<html>nope</html>",
+      {
+        "AAPL": "AAPL",
+        "MSFT": "MSFT",
+        "BRK.B": "BRK-B",
+        "KO": "KO",
+        "NVDA": "NVDA"
+      }
+    ],
+    "expected": {
+      "error": {
+        "kind": "error",
+        "retryable": false
+      }
+    }
+  },
+  {
+    "kind": "pure",
+    "id": "earnings-csv-rejects-8",
+    "python": "test_calendar_providers.py::test_parse_earnings_csv_rejects_non_csv_bodies",
+    "fn": "parse_earnings_csv",
+    "args": [
+      "a,b\n1,2\n",
+      {
+        "AAPL": "AAPL",
+        "MSFT": "MSFT",
+        "BRK.B": "BRK-B",
+        "KO": "KO",
+        "NVDA": "NVDA"
+      }
+    ],
+    "expected": {
+      "error": {
+        "kind": "error",
+        "retryable": false
+      }
+    }
+  },
+  {
+    "kind": "pure",
+    "id": "stored-item-shapes",
+    "python": "test_symbols_keys.py::test_item_shapes + test_fx_history.py::test_fx_day_item_shape + test_calendar_models.py::test_earnings_item_shape/test_split_item_shape",
+    "fn": "items",
+    "args": [
+      {
+        "item": "quote",
+        "model": {
+          "symbol": "AAPL",
+          "price": 230.12,
+          "previousClose": 228.5,
+          "currency": "USD",
+          "asOf": "2026-10-13T12:00:00.000Z",
+          "source": "mock"
+        }
+      },
+      {
+        "item": "quote",
+        "model": {
+          "symbol": "VOD.L",
+          "price": 7250.0,
+          "previousClose": 7100.0,
+          "currency": "GBp",
+          "asOf": "2026-10-13T12:00:00.000Z",
+          "source": "eodhd"
+        }
+      },
+      {
+        "item": "eod",
+        "model": {
+          "symbol": "SAP.DE",
+          "date": "2026-10-12",
+          "close": 0.30000000000000004,
+          "currency": "EUR"
+        }
+      },
+      {
+        "item": "profile",
+        "model": {
+          "symbol": "BTC-EUR",
+          "name": "Bitcoin",
+          "assetClass": "CRYPTO",
+          "currency": "EUR"
+        }
+      },
+      {
+        "item": "profile",
+        "model": {
+          "symbol": "AAPL",
+          "name": "Apple Inc.",
+          "assetClass": "STOCK",
+          "currency": "USD",
+          "sector": "Technology",
+          "country": "United States",
+          "exchange": "NASDAQ",
+          "peRatio": 34.2,
+          "fundamentalsAsOf": "2026-10-13"
+        }
+      },
+      {
+        "item": "profile",
+        "model": {
+          "symbol": "AAPL",
+          "name": "Apple",
+          "assetClass": "STOCK",
+          "currency": "USD",
+          "description": "Designs phones.",
+          "isin": "US0378331005",
+          "marketCap": 3500000000000.0,
+          "eps": 6.42,
+          "beta": 1.24,
+          "detailsAsOf": "2026-10-13"
+        }
+      },
+      {
+        "item": "dividend",
+        "model": {
+          "symbol": "AAPL",
+          "exDate": "2026-02-10",
+          "amount": 0.26,
+          "currency": "USD",
+          "payDate": "2026-02-14"
+        }
+      },
+      {
+        "item": "dividend",
+        "model": {
+          "symbol": "VOD.L",
+          "exDate": "2026-02-10",
+          "amount": 4.5,
+          "currency": "GBX"
+        }
+      },
+      {
+        "item": "fx",
+        "model": {
+          "base": "EUR",
+          "asOf": "2026-10-13T14:00:00.000Z",
+          "rates": {
+            "USD": 1.085,
+            "JPY": 162
+          },
+          "date": "2026-10-13"
+        }
+      },
+      {
+        "item": "fxDay",
+        "model": {
+          "base": "EUR",
+          "date": "2026-10-13",
+          "rates": {
+            "USD": 1.1612,
+            "JPY": 175,
+            "EUR": 1.0,
+            "GBP": 0.8693
+          }
+        }
+      },
+      {
+        "item": "tracked",
+        "model": {
+          "symbol": "AAPL",
+          "now": "2026-10-13T12:00:00.000Z"
+        }
+      },
+      {
+        "item": "earnings",
+        "model": {
+          "event": {
+            "symbol": "AAPL",
+            "date": "2026-10-29",
+            "name": "APPLE INC",
+            "fiscalPeriodEnd": "2026-09-30",
+            "epsEstimate": 1.85,
+            "currency": "USD",
+            "timeOfDay": "AMC",
+            "source": "alphavantage"
+          },
+          "updatedAt": "2026-10-15T05:30:00.000Z"
+        }
+      },
+      {
+        "item": "earnings",
+        "model": {
+          "event": {
+            "symbol": "MSFT",
+            "date": "2026-10-28",
+            "source": "alphavantage"
+          },
+          "updatedAt": "2026-10-15T05:30:00.000Z"
+        }
+      },
+      {
+        "item": "split",
+        "model": {
+          "event": {
+            "symbol": "NVDA",
+            "date": "2026-11-02",
+            "fromFactor": 1,
+            "toFactor": 4,
+            "source": "eodhd"
+          },
+          "updatedAt": "2026-10-15T05:30:00.000Z"
+        }
+      },
+      {
+        "item": "profileDetails",
+        "model": {
+          "symbol": "AAPL",
+          "name": "Apple",
+          "assetClass": "STOCK",
+          "currency": "USD",
+          "sector": "Technology",
+          "eps": 6.42,
+          "peRatio": 34.9
+        }
+      }
+    ],
+    "expected": [
+      {
+        "PK": "TICKER#AAPL",
+        "SK": "QUOTE#LATEST",
+        "entityType": "QUOTE",
+        "symbol": "AAPL",
+        "price": 230.12,
+        "previousClose": 228.5,
+        "currency": "USD",
+        "asOf": "2026-10-13T12:00:00.000Z",
+        "source": "mock"
+      },
+      {
+        "PK": "TICKER#VOD.L",
+        "SK": "QUOTE#LATEST",
+        "entityType": "QUOTE",
+        "symbol": "VOD.L",
+        "price": 72.5,
+        "previousClose": 71,
+        "currency": "GBP",
+        "asOf": "2026-10-13T12:00:00.000Z",
+        "source": "eodhd"
+      },
+      {
+        "PK": "TICKER#SAP.DE",
+        "SK": "EOD#2026-10-12",
+        "entityType": "EOD",
+        "symbol": "SAP.DE",
+        "date": "2026-10-12",
+        "close": 0.30000000000000004,
+        "currency": "EUR"
+      },
+      {
+        "PK": "TICKER#BTC-EUR",
+        "SK": "PROFILE",
+        "entityType": "PROFILE",
+        "symbol": "BTC-EUR",
+        "name": "Bitcoin",
+        "assetClass": "CRYPTO",
+        "currency": "EUR"
+      },
+      {
+        "PK": "TICKER#AAPL",
+        "SK": "PROFILE",
+        "entityType": "PROFILE",
+        "symbol": "AAPL",
+        "name": "Apple Inc.",
+        "assetClass": "STOCK",
+        "currency": "USD",
+        "sector": "Technology",
+        "country": "United States",
+        "exchange": "NASDAQ",
+        "peRatio": 34.2,
+        "fundamentalsAsOf": "2026-10-13"
+      },
+      {
+        "PK": "TICKER#AAPL",
+        "SK": "PROFILE",
+        "entityType": "PROFILE",
+        "symbol": "AAPL",
+        "name": "Apple",
+        "assetClass": "STOCK",
+        "currency": "USD",
+        "description": "Designs phones.",
+        "isin": "US0378331005",
+        "marketCap": 3500000000000,
+        "eps": 6.42,
+        "beta": 1.24,
+        "detailsAsOf": "2026-10-13"
+      },
+      {
+        "PK": "TICKER#AAPL",
+        "SK": "DIV#2026-02-10",
+        "entityType": "DIVIDEND_EVENT",
+        "symbol": "AAPL",
+        "exDate": "2026-02-10",
+        "amount": 0.26,
+        "currency": "USD",
+        "payDate": "2026-02-14"
+      },
+      {
+        "PK": "TICKER#VOD.L",
+        "SK": "DIV#2026-02-10",
+        "entityType": "DIVIDEND_EVENT",
+        "symbol": "VOD.L",
+        "exDate": "2026-02-10",
+        "amount": 0.045,
+        "currency": "GBP"
+      },
+      {
+        "PK": "FX#EUR",
+        "SK": "LATEST",
+        "entityType": "FX",
+        "base": "EUR",
+        "asOf": "2026-10-13T14:00:00.000Z",
+        "rates": {
+          "USD": 1.085,
+          "JPY": 162
+        }
+      },
+      {
+        "PK": "FX#EUR",
+        "SK": "DAY#2026-10-13",
+        "entityType": "FX_DAY",
+        "base": "EUR",
+        "date": "2026-10-13",
+        "rates": {
+          "GBP": 0.8693,
+          "JPY": 175,
+          "USD": 1.1612
+        }
+      },
+      {
+        "PK": "TRACKED",
+        "SK": "TICKER#AAPL",
+        "entityType": "TRACKED_TICKER",
+        "symbol": "AAPL",
+        "createdAt": "2026-10-13T12:00:00.000Z",
+        "updatedAt": "2026-10-13T12:00:00.000Z"
+      },
+      {
+        "PK": "TICKER#AAPL",
+        "SK": "EARN#2026-10-29",
+        "entityType": "EARNINGS_EVENT",
+        "symbol": "AAPL",
+        "date": "2026-10-29",
+        "timeOfDay": "AMC",
+        "source": "alphavantage",
+        "updatedAt": "2026-10-15T05:30:00.000Z",
+        "name": "APPLE INC",
+        "fiscalPeriodEnd": "2026-09-30",
+        "currency": "USD",
+        "epsEstimate": 1.85
+      },
+      {
+        "PK": "TICKER#MSFT",
+        "SK": "EARN#2026-10-28",
+        "entityType": "EARNINGS_EVENT",
+        "symbol": "MSFT",
+        "date": "2026-10-28",
+        "timeOfDay": "unknown",
+        "source": "alphavantage",
+        "updatedAt": "2026-10-15T05:30:00.000Z"
+      },
+      {
+        "PK": "TICKER#NVDA",
+        "SK": "SPLIT#2026-11-02",
+        "entityType": "SPLIT_EVENT",
+        "symbol": "NVDA",
+        "date": "2026-11-02",
+        "fromFactor": 1,
+        "toFactor": 4,
+        "source": "eodhd",
+        "updatedAt": "2026-10-15T05:30:00.000Z"
+      },
+      {
+        "eps": 6.42,
+        "peRatio": 34.9
+      }
+    ]
+  }
+]
