@@ -31,3 +31,4 @@ export * from './calendar-api.js';
 export * from './calendar-ics.js';
 export * from './asset-detail-api.js';
 export * from './asset-detail.js';
+export * from './usage-api.js';

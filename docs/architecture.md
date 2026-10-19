@@ -1987,3 +1987,104 @@ Changing `ownerGithubId` invalidates sessions of the previous owner (the `sub` n
 GitHub `fetch`, so there is no network and no real time. They cover tampered signature, wrong secret, expiry, structure and
 purpose confusion, state mismatch/expiry/replay, open-redirect attempts, non-owner ids, config validation, cookie attributes,
 the absence of secrets in responses and logs, the constant-time helper and the same-origin cases.
+
+## Free-plan budget guard
+
+The personal Cloudflare deployment must never pay, so it refuses work **before** a free-plan cap is reached instead of
+running into it. The guard is platform-neutral code in `packages/platform/src/budget/` (exported from
+`@portfolio/platform`); the Worker and Durable Object wiring comes with the Cloudflare adapter.
+
+### Limits it is designed against
+
+`FREE_PLAN_LIMITS` (docs of 2026-10-18: the Cloudflare "Workers limits", "Durable Objects limits" and "Durable Objects
+pricing" pages, cross-checked with the probe above). Daily counters reset at **00:00 UTC** (`utcDay(now)`).
+
+| Metric (`UsageMetric`) | Free-plan cap | Kind |
+| --- | --- | --- |
+| `workerRequests` | 100,000 / day | counter |
+| `durableObjectRequests` | 100,000 / day | counter |
+| `durableObjectGbSeconds` | 13,000 GB-s / day (128 MB object: 1 s = 0.128 GB-s, see `durableObjectGbSeconds(ms)`) | counter |
+| `rowsRead` | 5,000,000 / day | counter |
+| `rowsWritten` | 100,000 / day | counter |
+| `storageBytes` | 1 GB per object (5 GB per account; one object here, so 1 GB binds, decimal GB) | gauge |
+| subrequests | 50 per invocation | per invocation, not tracked by the guard (the job handlers already chunk to it) |
+
+### States and thresholds
+
+Each metric is `ok` below 60 % of its cap, `warn` from 60 % and `blocked` from 80 % (exact integer comparison: 60,000 of
+100,000 is `warn`, 79,999 is still `warn`, 80,000 is `blocked`). The 20 % headroom absorbs requests already in flight and
+the Worker-side counters the app cannot see. The overall state is the worst metric.
+
+### Building blocks
+
+- `UsageStore` port: `add(day, delta)` (atomic increment), `read(day)` (all counters, zeros for an empty day) and
+  `prune(beforeDay)`. `MemoryUsageStore` is the reference; any other implementation must pass
+  `runUsageStoreContract(name, factory)` from `@portfolio/platform/testing`. The storage gauge is not in the store: the
+  guard takes a `readStorageBytes()` callback (the Durable Object's `sql.databaseSize`).
+- `new BudgetGuard({ store, now?, logger?, limits?, readStorageBytes?, flushAfter?, retainDays? })`:
+  `record(delta)`, `recordRows({ read, written })`, `check('read' | 'write' | 'job')`, `snapshot()` and `flush()`.
+  `record` and `flush` never reject.
+- `withBudget(handler, guard, { allowPaths?, cost? })` wraps a `PortableHandler`; `guardJob(guard, jobName)` gates a
+  background job; `JOB_CEILINGS` is the declarative priority table.
+
+### Behaviour
+
+- **Every request is counted** (`workerRequests` + `durableObjectRequests`, also the refused ones). When the state is
+  `blocked` the middleware answers **429** with the standard error envelope
+  `{"error":{"code":"BUDGET_EXHAUSTED","message":"...","details":{"blockedMetrics":["rowsRead"]}}}`, `Cache-Control: no-store`
+  and `Retry-After` = whole seconds until the next 00:00 UTC (at least 1; 3600 when only the storage gauge is blocked,
+  since it does not reset at midnight). Paths `/health`, `/usage` and `/auth/*` always pass (dot segments and percent
+  escapes never match, so `/auth/../x` is refused) so the owner can still sign in and see why.
+- **Fail closed.** When the ledger (or the storage reader) fails, `check` reports `unavailable`: background jobs and
+  writes are refused (writes with **503** `BUDGET_UNAVAILABLE`, `Retry-After: 60`), `GET`/`HEAD` requests still run, and a
+  warning is logged once per state change (never one per request). Usage that could not be written stays buffered and is
+  written by the next flush; the counters never lose an increment.
+- **Jobs.** `guardJob` returns `{ allowed, state, reason }`. A job runs while the state is below its ceiling in
+  `JOB_CEILINGS`: price and calendar refresh only below 60 % (`ok`); the Trading 212 sync, enrichment and imports below
+  80 % (`warn` still runs); nothing runs when `blocked` or `unavailable`. Unknown job names count as non-essential.
+- **Rows of the guard itself.** The ledger costs one row written per flush. Writing through on every request would use the whole
+  100,000-row write cap on its own, so the Durable Object wiring sets `flushAfter` (for example 20) and calls `flush()` at
+  the end of each alarm; a check reads the stored day plus what is still buffered. Keep the ledger as one row per UTC day.
+  Old days are pruned (7 days kept) once per day.
+
+### Intended wiring (done with the Cloudflare adapter)
+
+1. In the Durable Object: `const guard = new BudgetGuard({ store: <SQL UsageStore>, readStorageBytes: () => ctx.storage.sql.databaseSize, flushAfter: 20 })`.
+2. Wrap the application handler: `withBudget(appHandler, guard)`, and route `GET /usage` to `guard.snapshot()` (JSON).
+3. The `onUsage` callback of the Durable Object adapters calls `guard.recordRows({ read, written })`; the duration of a request or
+   alarm is recorded with `guard.record({ durableObjectGbSeconds: durableObjectGbSeconds(elapsedMs) })`.
+4. Every alarm starts with `const run = await guardJob(guard, jobName)`; when denied it reschedules itself (not before the reset
+   for a `blocked` job) and records the alarm invocation as one `durableObjectRequests`.
+
+### In-app usage indicator contract
+
+`GET /usage` returns a `UsageSnapshot` (`packages/shared/src/usage-api.ts`, validated by `usageSnapshotSchema`, route constant
+`USAGE_ROUTES.usage`, labels in `USAGE_METRIC_LABELS`):
+
+```json
+{
+  "day": "2026-10-19",
+  "generatedAt": "2026-10-19T10:00:00.000Z",
+  "resetsAt": "2026-10-20T00:00:00.000Z",
+  "state": "warn",
+  "thresholds": { "warnPercent": 60, "blockPercent": 80 },
+  "metrics": {
+    "workerRequests": { "used": 61000, "limit": 100000, "percent": 61, "state": "warn" },
+    "durableObjectRequests": { "used": 0, "limit": 100000, "percent": 0, "state": "ok" },
+    "durableObjectGbSeconds": { "used": 0, "limit": 13000, "percent": 0, "state": "ok" },
+    "rowsRead": { "used": 0, "limit": 5000000, "percent": 0, "state": "ok" },
+    "rowsWritten": { "used": 0, "limit": 100000, "percent": 0, "state": "ok" },
+    "storageBytes": { "used": 0, "limit": 1000000000, "percent": 0, "state": "ok" }
+  }
+}
+```
+
+The indicator shows the overall `state` (hidden at `ok`, amber at `warn`, red at `blocked` with "paused until `resetsAt`",
+grey "usage unknown" at `unavailable`) and the per-metric bars from `percent`. The endpoint is always answered (allow-list), also
+while requests are refused; the web client treats a 429 or 503 with `error.code` `BUDGET_EXHAUSTED`/`BUDGET_UNAVAILABLE` as
+"paused", not as an error.
+
+### Tests
+
+`pnpm --filter @portfolio/platform test` (guard, middleware, jobs, limits, plus `runUsageStoreContract` for
+`MemoryUsageStore`) and `pnpm --filter @portfolio/shared test` (the `UsageSnapshot` validator). All clocks are pinned.

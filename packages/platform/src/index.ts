@@ -15,3 +15,5 @@ export { MemorySecretStore } from './memory/secret-store.js';
 export { MemoryJobQueue, type DeadLetter, type MemoryJobQueueOptions } from './memory/job-queue.js';
 export { MemoryFileStore } from './memory/file-store.js';
 export * from './auth/github/index.js';
+export { MemoryUsageStore } from './memory/usage-store.js';
+export * from './budget/index.js';

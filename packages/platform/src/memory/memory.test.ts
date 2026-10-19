@@ -1,13 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
-import { runFileStoreContract, runItemStoreContract, runJobQueueContract, runSecretStoreContract } from '../testing/index.js';
+import { runFileStoreContract, runItemStoreContract, runJobQueueContract, runSecretStoreContract, runUsageStoreContract } from '../testing/index.js';
 import { JOBS } from '../job.js';
 import { MemoryFileStore } from './file-store.js';
 import { MemoryItemStore } from './item-store.js';
 import { MemoryJobQueue } from './job-queue.js';
 import { MemorySecretStore } from './secret-store.js';
+import { MemoryUsageStore } from './usage-store.js';
 
 runItemStoreContract('MemoryItemStore', () => new MemoryItemStore());
 runSecretStoreContract('MemorySecretStore', () => new MemorySecretStore());
+runUsageStoreContract('MemoryUsageStore', () => new MemoryUsageStore());
 runFileStoreContract('MemoryFileStore', () => {
   const store = new MemoryFileStore();
   return { store, upload: (target, content) => Promise.resolve(store.accept(target, content)) };
@@ -117,5 +119,14 @@ describe('MemoryJobQueue', () => {
     await first;
     await queue.drain();
     expect(seen).toEqual([0, 1]);
+  });
+});
+
+describe('MemoryUsageStore', () => {
+  it('lists the days that hold data, oldest first', async () => {
+    const store = new MemoryUsageStore();
+    await store.add('2026-10-19', { rowsRead: 1 });
+    await store.add('2026-10-18', { rowsRead: 1 });
+    expect(store.days).toEqual(['2026-10-18', '2026-10-19']);
   });
 });
