@@ -1,3 +1,5 @@
+export const SESSION_EXPIRED_NOTICE = 'Your session expired. Please sign in again.';
+
 const MESSAGES: Record<string, string> = {
   NotAuthorizedException: 'Incorrect email or password.',
   UserNotFoundException: 'Incorrect email or password.',

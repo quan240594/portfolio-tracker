@@ -1,10 +1,12 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { useAuth } from './AuthContext';
 
-/** Header account menu (signed-in email + sign out). Renders nothing when auth is off. */
+/** Header account menu (signed-in email or GitHub login + sign out). Renders nothing when auth is off. */
 export function AccountMenu() {
-  const { enabled, status, email, signOut } = useAuth();
+  const { enabled, status, email, login, signOut } = useAuth();
+  const name = login ?? email;
   const [open, setOpen] = useState(false);
+  const [signOutError, setSignOutError] = useState<string>();
   const rootRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
 
@@ -23,6 +25,10 @@ export function AccountMenu() {
   }, [open]);
 
   if (!enabled || status !== 'signedIn') return null;
+  const onSignOut = () => {
+    setSignOutError(undefined);
+    signOut().catch((err: unknown) => setSignOutError(err instanceof Error ? err.message : 'Could not sign out.'));
+  };
   return (
     <div ref={rootRef} className="relative">
       <button
@@ -43,11 +49,16 @@ export function AccountMenu() {
         <div id={panelId} className="card absolute right-0 z-40 mt-2 w-64 space-y-3 p-3 shadow-lg">
           <div>
             <p className="muted text-xs">Signed in as</p>
-            <p className="truncate text-sm font-medium" title={email}>
-              {email}
+            <p className="truncate text-sm font-medium" title={name}>
+              {name}
             </p>
           </div>
-          <button type="button" className="btn-secondary w-full" onClick={() => void signOut()}>
+          {signOutError && (
+            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+              {signOutError}
+            </p>
+          )}
+          <button type="button" className="btn-secondary w-full" onClick={onSignOut}>
             Sign out
           </button>
         </div>

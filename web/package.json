@@ -16,7 +16,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "test:e2e": "playwright test && playwright test --config playwright.auth.config.ts",
+    "test:e2e": "playwright test && playwright test --config playwright.auth.config.ts && playwright test --config playwright.github.config.ts",
     "test:e2e:pages": "pnpm build:pages && playwright test --config playwright.pages.config.ts"
   },
   "dependencies": {

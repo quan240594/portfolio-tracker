@@ -9,13 +9,13 @@ export function PortfolioSwitcher() {
   const [manageOpen, setManageOpen] = useState(false);
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 items-center gap-2">
       <label htmlFor="portfolio-switcher" className="muted text-sm whitespace-nowrap">
         Scope
       </label>
       <select
         id="portfolio-switcher"
-        className="input w-auto max-w-[14rem] py-1.5"
+        className="input w-auto min-w-0 max-w-[14rem] py-1.5"
         value={scope}
         onChange={(e) => setScope(e.target.value)}
       >

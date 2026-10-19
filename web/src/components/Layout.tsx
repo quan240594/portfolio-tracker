@@ -79,7 +79,7 @@ export function Layout() {
               <Logo />
               <span>Portfolio Tracker</span>
             </NavLink>
-            <div className="ml-auto flex items-center gap-2 sm:order-last">
+            <div className="ml-auto flex min-w-0 items-center gap-2 sm:order-last">
               <PortfolioSwitcher />
               <ThemeToggle />
               <AccountMenu />

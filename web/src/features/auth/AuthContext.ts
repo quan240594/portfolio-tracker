@@ -15,6 +15,7 @@ export const DISABLED_AUTH: AuthContextValue = {
   confirmPasswordReset: unavailable,
   cancelChallenge: unavailable,
   signOut: unavailable,
+  retry: () => undefined,
 };
 
 export const AuthContext = createContext<AuthContextValue>(DISABLED_AUTH);

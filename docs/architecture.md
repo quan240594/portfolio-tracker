@@ -2088,3 +2088,47 @@ while requests are refused; the web client treats a 429 or 503 with `error.code`
 
 `pnpm --filter @portfolio/platform test` (guard, middleware, jobs, limits, plus `runUsageStoreContract` for
 `MemoryUsageStore`) and `pnpm --filter @portfolio/shared test` (the `UsageSnapshot` validator). All clocks are pinned.
+
+## Web: GitHub sign-in mode
+
+Third build-time auth mode of the SPA, `VITE_AUTH_MODE=github`, for the personal Cloudflare deployment (see "Sign-in for the personal
+deployment"). The Worker serves the SPA and `/api/*` on **one origin** and authenticates the single owner with a signed `HttpOnly` session
+cookie, so the SPA never holds a token. `readAuthConfig` (`web/src/features/auth/config.ts`) returns `{ mode: 'github' }`; it needs no other
+variable, ignores mock mode like the other modes, and **fails closed** (`invalid`, "Sign-in is not configured") when `VITE_API_BASE_URL` is an
+absolute or protocol-relative URL, because the cookie is only sent same-origin. Unknown modes are `invalid` as before. The demo banner is tied
+to `USE_MOCKS` only, and mock mode forces auth off, so the personal deployment never shows the banner or "Switch to real data".
+
+**Server contract the SPA builds on** (implemented in `packages/platform/src/auth/github`):
+
+| Call | Behaviour the SPA relies on |
+|---|---|
+| `GET /auth/session` | always 200, `Cache-Control: no-store`: `{"authenticated":true,"login":"<name>"}` or `{"authenticated":false}` |
+| browser navigation to `/auth/login?returnTo=<same-origin path>` | full-page redirect to GitHub; the callback sets the cookie and redirects to `returnTo`. A rejected account gets a neutral 403 page from the server (not an SPA state: there is deliberately no `?auth=denied` hint) |
+| `POST /auth/logout` | 204, same-origin only |
+| `/api/*` | authenticated by the cookie; the client uses `credentials: 'same-origin'` and sends **no** `Authorization` header in this mode; 401 = session expired |
+
+**Layers** (the rest of the app is unchanged; it only sees the shared `AuthContext`):
+
+- `githubSession.ts`: `githubSessionService` (`fetchSession(signal?) -> login | null`, `logout()`), `safeReturnTo`, `loginUrl`. A response that is
+  not 2xx or not the documented shape is a *failed check*, never "signed out". `safeReturnTo` only keeps plain absolute paths (no `//host`,
+  backslashes, control characters or `/auth/*`), anything else becomes `/`. A 401 on logout counts as signed out.
+- `GithubAuthProvider.tsx`: `AuthProvider` delegates to it for `mode: 'github'` (a `githubSession` prop lets tests inject a fake). It calls
+  `/auth/session` once on load (twice in the Vite dev server because of React StrictMode; the first request is aborted), exposes
+  `status` `loading | signedIn | signedOut | error`, `login`, `provider: 'github'` and `retry()`. The API client's `onUnauthorized` hook turns a
+  401 into `signedOut` with the "session expired" notice and clears the React Query cache; `signOut()` POSTs `/auth/logout`, then clears the
+  cache and shows the sign-in screen. The password/TOTP actions reject (unused in this mode).
+- `AuthGate` renders nothing of the app until the check resolves (loading text, no flash); `error` shows `SessionCheckFailed` (retry);
+  `signedOut` shows `GithubSignIn`: heading, short description, one primary link "Sign in with GitHub" (a real `<a href="/auth/login?returnTo=...">`,
+  full-page navigation; `returnTo` is the router path with query and hash, prefixed with the router basename), a neutral inline icon only
+  (no third-party logo) and a note that only the owner's account is accepted and what to do after landing on the access page.
+- `AccountMenu` shows the GitHub login ("Signed in as") and "Sign out"; a failed logout keeps the session and shows an alert in the menu.
+- Layout fix found by the 320 px check: the header controls (`PortfolioSwitcher`, theme toggle, account button) could be 5 px wider than
+  the viewport once the account button exists; `min-w-0` on the switcher, its select and the controls wrapper lets the select shrink.
+
+**Tests:** unit (`web/src/features/auth/`: `config.test.ts`, `githubSession.test.ts`, `GithubAuth.test.tsx` with `fakeGithubSession` and the
+`githubSession` option of `renderAuthApp` in `web/src/test/auth.tsx`) cover config, bootstrap loading/error/retry, the sign-in link and its
+`returnTo`, role/name/focus accessibility, sign-out incl. failure, no bearer header, `credentials`, and 401. Run
+`pnpm --filter @portfolio/web test`. E2E: `pnpm --filter @portfolio/web exec playwright test --config playwright.github.config.ts` (a
+GitHub-mode Vite server on `$E2E_GITHUB_PORT`, default 5374; `/auth/*` and `/api/*` are Playwright route mocks that simulate the cookie
+and the GitHub redirect; pinned clock; `settledCount` for the holdings rows; no horizontal overflow at 320 and 1280 px). It also runs in
+`pnpm --filter @portfolio/web test:e2e`. Not verified against the real Worker: that needs the `packages/platform` auth handlers.

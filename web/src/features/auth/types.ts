@@ -27,9 +27,12 @@ export type AuthChallenge =
   | { kind: 'totp' };
 
 export interface AuthState {
-  status: 'loading' | 'signedOut' | 'signedIn';
+  /** `error`: the session check itself failed (GitHub mode only); the user can retry. */
+  status: 'loading' | 'signedOut' | 'signedIn' | 'error';
   /** Signed-in user, or the user in the middle of a sign-in challenge. */
   email?: string;
+  /** Signed-in GitHub login (GitHub mode). */
+  login?: string;
   challenge?: AuthChallenge;
   /** Shown on the sign-in screen, e.g. after the session expired. */
   notice?: string;
@@ -50,6 +53,10 @@ export interface AuthActions {
 export interface AuthContextValue extends AuthState, AuthActions {
   /** False in mock/demo mode: no login, `status` is always `signedIn`. */
   enabled: boolean;
+  /** Which sign-in the app uses; undefined when auth is off or the configuration is unusable. */
+  provider?: 'cognito' | 'github';
   /** Set when the build-time auth configuration is unusable. */
   configError?: string;
+  /** Re-runs the session check after `status === 'error'`. */
+  retry(): void;
 }

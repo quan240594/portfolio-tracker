@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useQueryClient } from '@tanstack/react-query';
 import { AUTH_CONFIG, type AuthConfig } from './config';
 import { AuthContext, DISABLED_AUTH } from './AuthContext';
+import { SESSION_EXPIRED_NOTICE } from './errors';
+import { GithubAuthProvider } from './GithubAuthProvider';
+import type { GithubSessionService } from './githubSession';
 import { setAuthTokenHooks } from './tokenHooks';
 import type { AuthActions, AuthContextValue, AuthService, AuthState, SignInStep } from './types';
 
@@ -10,8 +13,6 @@ export type LoadAuthService = (config: CognitoConfig) => Promise<AuthService>;
 
 /** Cognito (and its SRP maths) is only downloaded when auth is on, so the mock/Pages build stays lean. */
 const defaultLoadService: LoadAuthService = async (config) => (await import('./cognitoService')).createCognitoService(config);
-
-export const SESSION_EXPIRED_NOTICE = 'Your session expired. Please sign in again.';
 
 const SIGNED_OUT: AuthState = { status: 'signedOut' };
 
@@ -31,8 +32,10 @@ function stateForStep(step: SignInStep, email: string): AuthState {
 export function AuthProvider({
   config = AUTH_CONFIG,
   loadService = defaultLoadService,
+  githubSession,
   children,
-}: Readonly<{ config?: AuthConfig; loadService?: LoadAuthService; children: ReactNode }>) {
+}: Readonly<{ config?: AuthConfig; loadService?: LoadAuthService; githubSession?: GithubSessionService; children: ReactNode }>) {
+  if (config.mode === 'github') return <GithubAuthProvider session={githubSession}>{children}</GithubAuthProvider>;
   if (config.mode === 'none') return <AuthContext.Provider value={DISABLED_AUTH}>{children}</AuthContext.Provider>;
   if (config.mode === 'invalid') return <InvalidConfigAuthProvider reason={config.reason}>{children}</InvalidConfigAuthProvider>;
   return (
@@ -120,6 +123,6 @@ function CognitoAuthProvider({
     };
   }, [withService, applyState]);
 
-  const value = useMemo<AuthContextValue>(() => ({ ...state, ...actions, enabled: true }), [state, actions]);
+  const value = useMemo<AuthContextValue>(() => ({ ...state, ...actions, enabled: true, provider: 'cognito', retry: () => undefined }), [state, actions]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

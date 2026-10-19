@@ -13,5 +13,5 @@
     "noFallthroughCasesInSwitch": true,
     "types": ["vite/client", "node", "vitest/globals", "@testing-library/jest-dom"]
   },
-  "include": ["src", "e2e", "e2e-auth", "vite.config.ts", "playwright.config.ts", "playwright.pages.config.ts", "playwright.auth.config.ts"]
+  "include": ["src", "e2e", "e2e-auth", "e2e-github", "vite.config.ts", "playwright.config.ts", "playwright.pages.config.ts", "playwright.auth.config.ts", "playwright.github.config.ts"]
 }

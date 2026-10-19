@@ -51,10 +51,11 @@ export function apiUrl(path: string, query?: Record<string, string | undefined>)
   return url.toString();
 }
 
-/** Single entry point for every API call: adds the Cognito token (when signed in) and maps transport failures. */
+/** Single entry point for every API call: adds the Cognito token (when signed in; GitHub mode relies on the session cookie) and maps transport failures. */
 async function send(path: string, query: Record<string, string | undefined> | undefined, init: RequestInit): Promise<Response> {
   try {
-    return await fetch(apiUrl(path, query), { ...init, headers: { ...init.headers, ...(await authorizationHeaders()) } });
+    // `same-origin` carries the GitHub-mode session cookie (and nothing cross-site); other modes send the bearer header.
+    return await fetch(apiUrl(path, query), { ...init, credentials: 'same-origin', headers: { ...init.headers, ...(await authorizationHeaders()) } });
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') throw err;
     throw new ApiError(0, 'NETWORK_ERROR', 'Could not reach the server. Check your connection and try again.');
