@@ -31,6 +31,9 @@ async function signIn(config = testConfig(), returnTo?: string) {
 
 const sessionCookieOf = (response: PortableResponse) => cookieValues(response).pt_session!;
 
+/** Changes the first character: the last base64url character carries padding bits that decoding ignores. */
+const flipFirst = (signature: string): string => `${signature.startsWith('A') ? 'B' : 'A'}${signature.slice(1)}`;
+
 describe('GET /auth/login', () => {
   it('redirects to GitHub with only client_id, redirect_uri, empty scope and a random state', async () => {
     const config = testConfig();
@@ -181,7 +184,7 @@ describe('GET /auth/callback', () => {
     const other = await startLogin(createAuthRoutes(testConfig({ sessionSecret: 'another-secret-another-secret-123456' })));
     const [payload, signature] = login.stateCookie.split('.') as [string, string];
     const forged = await createTokenSigner(SESSION_SECRET).sign('pt_session', { state: login.state, returnTo: '/', exp: T0 / 1000 + 600 });
-    const cookies = [`${payload}.${signature.slice(0, -1)}A`, `${payload}x.${signature}`, other.stateCookie, forged, `${payload}`];
+    const cookies = [`${payload}.${flipFirst(signature)}`, `${payload}x.${signature}`, other.stateCookie, forged, `${payload}`];
     for (const value of cookies) {
       const response = await routes(portableRequest('/auth/callback', { query: { code: 'c', state: login.state }, headers: { cookie: `pt_oauth_state=${value}` } }));
       expect(response?.status).toBe(400);
@@ -297,7 +300,7 @@ describe('session cookie validation (identity resolver)', () => {
     const [payload, signature] = sessionCookieOf(response).split('.') as [string, string];
     const forgedPayload = btoa(JSON.stringify(claims({ login: 'admin' }))).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
     expect(await resolve(`${forgedPayload}.${signature}`)).toBeUndefined();
-    expect(await resolve(`${payload}.${signature.slice(0, -1)}${signature.endsWith('A') ? 'B' : 'A'}`)).toBeUndefined();
+    expect(await resolve(`${payload}.${flipFirst(signature)}`)).toBeUndefined();
     expect(await resolve(await sign(claims(), 'a-completely-different-32-char-secret!'))).toBeUndefined();
   });
 
