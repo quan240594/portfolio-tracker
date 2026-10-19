@@ -1334,6 +1334,9 @@ table, `aria-label`, and `title` as an extra):
 
 ## Cloudflare personal deployment: feasibility spike
 
+> **Update (19 Oct 2026):** the on-account probe changed the recommendation below from the hybrid (c) to option (b), a SQLite
+> Durable Object as the compute host. See "Cloudflare limits probe: results (18 to 19 Oct 2026)".
+
 **Decision (owner).** One repository, two deployment targets of the *same features*: the AWS demo (stays deployable and
 tested in CI) and a **personal deployment on Cloudflare, strictly on the Free plan**. The owner will never pay: the design
 must always stay under the free caps, never need a paid feature or a payment method, and fail closed (reads only) instead of
@@ -1828,76 +1831,79 @@ adapter), gets a contract test when it adds or changes what a port must do, and 
 Cloudflare deployment before it is called done. A feature that needs a capability a platform lacks is redesigned until it fits
 every platform, not special-cased.
 
-## Cloudflare limits probe: results so far (18 Oct 2026, in progress)
+## Cloudflare limits probe: results (18 to 19 Oct 2026)
 
-Status of the on-account measurements that close the "unverified" list of the feasibility spike. The probe
-(`platform/cloudflare/spike/limits-probe`) is **deployed on the personal free account and must be torn down** (see
-"Still to do"). Nothing was billed: no payment method, Free plan only.
+The on-account measurements that close the "unverified" list of the feasibility spike. The probe
+(`platform/cloudflare/spike/limits-probe`) ran on the personal Free account (no payment method, nothing billed) and **has been
+torn down** (Worker, Durable Object class, Queue, D1 database, cron; the account lists none of them). **Outcome: the Durable
+Object is not capped at 10 ms, so the recommendation changes from the hybrid (c) to option (b), a SQLite Durable Object as the
+compute host.**
 
 ### Setup and environment findings
 
-- A neutral `workers.dev` subdomain was registered (the first choice was taken by another account, so a variant with a
-  different suffix was used). It is not recorded here on purpose: it is public in every URL, and the probe is unauthenticated.
-- Deployed on the account: Worker `pt-limits-probe`, SQLite Durable Object class `Probe`, Queue `pt-limits-probe` (producer
-  and consumer), D1 database `pt-limits-probe`, one Cron Trigger (`*/5 * * * *`).
-- **`*.workers.dev` is unreachable from the owner's work laptop** (TLS handshake reset, while `cloudflare.com` and
-  `blog.cloudflare.com` work), and so is `wrangler tail` (its WebSocket host is also on `workers.dev`). This is the
-  corporate network, not Cloudflare, and is not worked around. Consequences:
-  - The probe is driven from a throwaway GitHub Actions workflow (`.github/workflows/cf-probe.yml` on the branch
-    `chore/cf-probe-results`, never merged). The probe URL is the repository secret `PROBE_BASE`, so it is masked in logs.
-  - The personal app on `workers.dev` will not open on the work laptop either; use a personal device or network, or a custom
-    domain (costs money, so not planned).
-- Real CPU time is read from the GraphQL Analytics API (`workersInvocationsAdaptive`, `quantiles.cpuTime*` in microseconds,
-  per minute), which works with the `wrangler login` token. The Workers Observability telemetry API does not (authentication
-  error: missing scope). `eventType` is not a dimension, so invocation types in the same minute cannot be told apart: each
-  calibration batch gets its own minute (run 2, `marks.txt`).
+- A neutral `workers.dev` subdomain was registered (not recorded here: it is public in every URL).
+- **`*.workers.dev` is unreachable from the owner's work laptop** (TLS handshake reset; `cloudflare.com` works), and so is
+  `wrangler tail` (its WebSocket host is on `workers.dev`). This is the corporate network and is not worked around. The probe was
+  driven from a throwaway GitHub Actions workflow (never merged, deleted with its secret). The personal app on `workers.dev` will not
+  open on the work laptop either: use a personal device or network (a custom domain costs money, so it is not planned).
+- Real CPU time comes from the GraphQL Analytics API (`workersInvocationsAdaptive`, `quantiles.cpuTime*` in microseconds, per
+  minute) with the `wrangler login` token. The Workers Observability telemetry API is not authorised for that token, and
+  `eventType` is not a dimension, so each calibration batch ran in its own minute.
+- Teardown needs the queue consumer removed first (`wrangler queues consumer remove`), then the stub deploy with
+  `crons = []`, then `wrangler delete`, `queues delete`, `d1 delete` (the last one from a folder without the probe's
+  `wrangler.toml`, which lacks the database id). `wrangler.teardown.toml` now carries `crons = []`.
 
-### Run 1 (from GitHub Actions, 18:37-18:55 UTC)
+### Calibration: nominal ms against real CPU
 
-"Nominal ms" is the probe's fixed unit of work, not real CPU (see the probe README).
+"Nominal ms" is the probe's fixed unit of work. Twenty `/burn` calls per batch, read back from the analytics per minute:
 
-| Entry point | Largest surviving nominal ms | Result |
-|---|---|---|
-| Worker HTTP | 848 (849 fails) | Platform reports the killed calls at **exactly 10.0 ms CPU**: the documented **10 ms** Free cap is real. Provisional factor about 0.012 ms of real CPU per nominal ms (10 / 848), to be confirmed by the calibration batch. |
-| Durable Object request | no failure up to 4096 | **Not limited to 10 ms** (4096 nominal is about 48 ms at the provisional factor). The real cap is still unknown. |
-| Durable Object alarm | no failure up to 4096 | Same as the request. |
-| Queue consumer | 1024 (1025 fails) | Killed just above the Worker HTTP threshold, so in the 10 to 12 ms class (not the 30 s of the Queues docs). CPU figures reported for killed invocations are coarse (10, 50, 2010, 2050 ms) and must not be used. |
-| Cron Trigger | 50 tested, completed | Only far below the cap so far (5, 12, 50 nominal all completed); the cap itself is tested in run 2. |
+| Nominal ms | Calls that completed | Real CPU of the completed calls | Calls killed |
+|---|---|---|---|
+| 100 | 20 of 20 | p50 236 ms, p99 415 ms | 0 |
+| 400 | 11 of 20 | p50 948 ms, p99 1,501 ms | 9 (recorded at about 20 ms) |
+| 800 | 2 of 21 | up to about 1,990 ms | 19 (recorded at 10 ms) |
 
-| Check | Result |
+So one nominal ms is about **2.4 ms of real CPU** (the first estimate of 0.012 was wrong).
+
+### Caps by entry point
+
+| Entry point | What survived | What was killed | Reading |
+|---|---|---|---|
+| Worker HTTP | one-off calls up to about 2 s of CPU | sustained calls above about 10 to 20 ms, and anything near 2 s | Nominally **10 ms**; the platform lets occasional heavy calls through but kills repeated ones at 10 to 20 ms. **Design to 10 ms and never rely on the grace.** |
+| Queue consumer | 1,024 nominal once (about 2.4 s) | 900 nominal six times in a row (recorded at 2,050 ms) | Same class as a Worker (not the 30 s of the Queues docs). |
+| Cron Trigger | 700 nominal (about 1.7 s) | 1,500 and 6,000 nominal (recorded at 2,050 ms) | Same class as a Worker. |
+| **Durable Object request** | **16,383 nominal, about 38 s of CPU** | 16,384 (HTTP 500) | Cap of **tens of seconds** (the DO docs say 30 s; the calibration is within error of that). **Far above the 500 ms the decision rule asks for.** |
+| **Durable Object alarm** | 24,289 nominal (some retries at the top end) | 24,290 and above | At least as generous as the request. |
+
+| Other check | Result |
 |---|---|
 | Subrequests per invocation | **50 succeed, the 51st fails** ("Too many subrequests by single Worker invocation"). |
-| D1 queries through the binding | **60 separate statements all succeeded**: D1 calls do not count against the 50 subrequests. |
+| D1 queries through the binding | **60 separate statements succeeded**: D1 calls do not count against the 50 subrequests. |
 | One `db.batch()` of 120 statements | Succeeded. |
-| 2000 rows through 61 multi-row inserts | `rowsWritten` = 2000 (one per row; index maintenance would add more), `rowsRead` = 2000. |
+| 2,000 rows via 61 multi-row inserts | `rowsWritten` = 2,000, `rowsRead` = 2,000. |
 
-### What this changes in the decision
+### Decision: option (b), a SQLite Durable Object as the compute host
 
-- A Worker (HTTP, queue consumer) has about 10 ms per invocation, so the hybrid design stands: the Worker stores and serves raw
-  rows and the browser runs the shared engine.
-- The Durable Object path is **not** capped at 10 ms, which keeps option (b) (a SQLite Durable Object as compute host)
-  possible. The rule from the spike still decides: real cap of at least 500 ms (about 42,000 nominal at the provisional factor)
-  means (b), 100 to 500 ms a per-route mix, under 100 ms hybrid everywhere.
-- D1 statements do not eat the 50-subrequest budget, so a job step can issue many statements. The packed price layout still
-  keeps writes far under 100,000 rows per day.
+Rule from the spike: a Durable Object CPU cap of at least 500 ms means the heavy analytics run server-side. The measured cap is
+tens of seconds, so:
 
-### Run 2 (in progress when this was written)
+- **Compute:** one SQLite-backed Durable Object per owner (a single user here) holds the data and runs the shared pure-TypeScript
+  engine, exactly as the AWS Lambdas do. The slowest endpoints (`holdings-performance` 138 ms, `calendar` 108 ms in Node; roughly
+  2 to 3 times that on Workers) fit with a wide margin. No browser-side compute, no 1.15 MB payload, no phone CPU risk, no
+  golden-vector parity tests against a second engine, and `calendar.ics` stays a normal server response.
+- **Worker:** only static assets, GitHub sign-in (restricted to the owner's user id) and routing to the Durable Object; each
+  call stays far under 10 ms.
+- **Background jobs** (Trading 212 sync, price refresh, reminders) run as Durable Object **alarms**, with no 10 ms chunking and
+  no Queue operations. The resumable job handlers from the ports refactor still apply (a step can simply be large).
+- **Storage:** the Durable Object's SQLite database sits behind the `ItemStore` port and must pass the shared contract suites.
+  Free-plan Durable Object limits to respect: 100,000 requests/day, 13,000 GB-s/day of duration, 1 GB per object, SQLite row
+  reads/writes in the same order as D1 (5M read, 100k written per day). A 0.5 s request costs about 0.06 GB-s, so the duration
+  cap allows well over 100,000 such requests; the request cap is the one that binds.
+- **Budget guard:** a usage ledger inside the Durable Object counts requests, rows and GB-s against the caps and refuses work at
+  80 % so the account never reaches a cap (Free-plan overruns fail rather than bill, but the app still stays under every cap).
+- **Single point:** a Durable Object serves one request at a time, which is fine for one user; the AWS demo keeps its own stack.
 
-GitHub Actions run 39156535221 on `chore/cf-probe-results`, artifact `cf-probe-results-2`:
+### What the probe did not measure
 
-1. Calibration: 20 `/burn` calls each at 100, 400 and 800 nominal ms in separate minutes, then 6 queue-burn calls at 900
-   (minutes listed in `marks.txt`). Read `cpuTimeP50/P99` per minute from the GraphQL API to get real ms per nominal ms.
-2. Durable Object request and alarm searched up to 262,144 nominal ms (`results2.csv`, `summary2.txt`).
-3. Cron Trigger at 700, 1500 and 6000 nominal ms, one per 5-minute tick (`cron2.txt`): an entry without `finished` was killed.
-
-### Still to do
-
-1. Download `cf-probe-results-2` (`gh run download 39156535221 -n cf-probe-results-2`), convert nominal ms to real CPU ms with
-   the calibration minutes, and fill in the real caps of the Durable Object (request, alarm) and the cron here.
-2. Decide architecture (b) or (c) with the rule above and record it in "Cloudflare personal deployment: feasibility spike".
-3. **Tear down**, in this order, then confirm in the dashboard that nothing is left and nothing was billed:
-   `npx wrangler deploy -c wrangler.teardown.toml` (removes the Durable Object class, cron and queue consumer), then
-   `npx wrangler delete --name pt-limits-probe`, `npx wrangler queues delete pt-limits-probe`,
-   `npx wrangler d1 delete pt-limits-probe` (all from `platform/cloudflare/spike/limits-probe`).
-4. Delete the GitHub secret `PROBE_BASE` (`gh secret delete PROBE_BASE`) and the branch `chore/cf-probe-results`; do not merge
-   its workflow. Merge only this documentation (without `cf-probe.yml`).
+Cold-start CPU of the real handlers on the runtime, response compression, the OAuth flow and Durable Object alarm retry cost
+under failure. These are checked when the Cloudflare adapter is built; none changes the decision.
