@@ -16,10 +16,10 @@ export interface WithBudgetOptions {
   cost?: UsageDelta;
 }
 
-const READ_METHODS: readonly string[] = ['GET', 'HEAD'];
+const READ_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD']);
 
 export function workKindOf(request: Pick<PortableRequest, 'method'>): WorkKind {
-  return READ_METHODS.includes(request.method.toUpperCase()) ? 'read' : 'write';
+  return READ_METHODS.has(request.method.toUpperCase()) ? 'read' : 'write';
 }
 
 /** Dot segments and encoded characters never match the allow-list, so `/auth/../tokens` cannot slip through. */
