@@ -23,6 +23,7 @@ Domain types, API shapes, DynamoDB keys and event schemas live in [packages/shar
 packages/shared   domain types, zod schemas, DynamoDB keys, event contract, portfolio calculations
 packages/platform platform ports (ItemStore, SecretStore, JobQueue, FileStore, ...), in-memory fakes, contract test suites
 packages/aws      the AWS adapters of the ports (DynamoDB, Secrets Manager, EventBridge, S3, Lambda)
+packages/cloudflare the Cloudflare adapters of the ports on a SQLite Durable Object (items, encrypted secrets, files, alarm job queue)
 services/api      REST API Lambda (+ local dev server, seed script)
 services/ingest   CSV import Lambda (SQS, all-or-nothing, idempotent) (+ local SQS poller)
 services/prices   Python market-data Lambdas (scheduled refresh, enrichment of new tickers)
