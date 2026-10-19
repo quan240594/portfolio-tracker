@@ -20,18 +20,22 @@ import {
 } from '@portfolio/shared';
 import { API_BASE_URL } from '../config';
 import { authorizationHeaders, notifyUnauthorized } from '../features/auth/tokenHooks';
+import { budgetMessage, isBudgetCode, reportBudgetError, reportRequestSucceeded, resumeTimeFromRetryAfter } from '../features/usage/budgetSignal';
 
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
   readonly details?: unknown;
+  /** Epoch ms at which a budget-guard refusal (429 BUDGET_EXHAUSTED, 503 BUDGET_UNAVAILABLE) ends, from Retry-After. */
+  readonly resumesAt?: number;
 
-  constructor(status: number, code: string, message: string, details?: unknown) {
+  constructor(status: number, code: string, message: string, details?: unknown, resumesAt?: number) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
     this.details = details;
+    this.resumesAt = resumesAt;
   }
 }
 
@@ -52,7 +56,7 @@ export function apiUrl(path: string, query?: Record<string, string | undefined>)
 }
 
 /** Single entry point for every API call: adds the Cognito token (when signed in; GitHub mode relies on the session cookie) and maps transport failures. */
-async function send(path: string, query: Record<string, string | undefined> | undefined, init: RequestInit): Promise<Response> {
+export async function send(path: string, query: Record<string, string | undefined> | undefined, init: RequestInit): Promise<Response> {
   try {
     // `same-origin` carries the GitHub-mode session cookie (and nothing cross-site); other modes send the bearer header.
     return await fetch(apiUrl(path, query), { ...init, credentials: 'same-origin', headers: { ...init.headers, ...(await authorizationHeaders()) } });
@@ -67,6 +71,7 @@ export async function request<T>(
   path: string,
   opts: { query?: Record<string, string | undefined>; body?: unknown; signal?: AbortSignal } = {},
 ): Promise<T> {
+  const startedAt = Date.now();
   const res = await send(path, opts.query, {
     method,
     headers: {
@@ -82,6 +87,7 @@ export async function request<T>(
 
   if (res.status === 401) notifyUnauthorized();
   if (!res.ok) throw toApiError(res, data);
+  reportRequestSucceeded(method, startedAt);
   return data as T;
 }
 
@@ -92,10 +98,12 @@ export interface TextDownload {
 
 /** GET a non-JSON document (CSV, .ics) with the same auth header and error handling as `request`. Downloads must use this, never a bare `fetch`. */
 export async function requestText(path: string, opts: { accept: string; query?: Record<string, string | undefined>; signal?: AbortSignal }): Promise<TextDownload> {
+  const startedAt = Date.now();
   const res = await send(path, opts.query, { method: 'GET', headers: { Accept: opts.accept }, signal: opts.signal });
   const text = await res.text();
   if (res.status === 401) notifyUnauthorized();
   if (!res.ok) throw toApiError(res, safeJson(text));
+  reportRequestSucceeded('GET', startedAt);
   return { text, headers: res.headers };
 }
 
@@ -119,8 +127,13 @@ async function parseBody(res: Response): Promise<unknown> {
 }
 
 function toApiError(res: Response, data: unknown): ApiError {
-  if (isErrorBody(data)) return new ApiError(res.status, data.error.code ?? `HTTP_${res.status}`, data.error.message, data.error.details);
-  return new ApiError(res.status, `HTTP_${res.status}`, res.statusText || `Request failed with status ${res.status}`);
+  if (!isErrorBody(data)) return new ApiError(res.status, `HTTP_${res.status}`, res.statusText || `Request failed with status ${res.status}`);
+  const code = data.error.code ?? `HTTP_${res.status}`;
+  if (!isBudgetCode(code)) return new ApiError(res.status, code, data.error.message, data.error.details);
+  // The free-plan guard refused the request: remember until when, so the page can say so instead of showing a failure.
+  const resumesAt = resumeTimeFromRetryAfter(code, res.headers.get('Retry-After'));
+  reportBudgetError(code, resumesAt);
+  return new ApiError(res.status, code, budgetMessage(code, resumesAt), data.error.details, resumesAt);
 }
 
 /** `?portfolioId=` for one portfolio; omitted for the combined view. `scope` is 'all' (ALL_PORTFOLIOS) or a portfolio id. */

@@ -1,6 +1,7 @@
 import {
   BASE_CURRENCY,
   LOCALE,
+  formatCount,
   formatDate,
   formatFxRate,
   formatMoney,
@@ -15,6 +16,19 @@ import {
 /** Intl puts a no-break space between the currency symbol and the amount. */
 const nb = (s: string) => s.replace(/ /g, '\u00a0');
 const M = '\u2212';
+
+describe('formatCount', () => {
+  it('groups thousands the Dutch way and rounds to at most two decimals by default', () => {
+    expect(formatCount(1_000_000_000)).toBe('1.000.000.000');
+    expect(formatCount(12.3456)).toBe('12,35');
+    expect(formatCount(7)).toBe('7');
+  });
+
+  it('honours the maximum number of decimals', () => {
+    expect(formatCount(12.3456, 0)).toBe('12');
+    expect(formatCount(12.3456, 3)).toBe('12,346');
+  });
+});
 
 describe('locale', () => {
   it('formats Dutch (nl-NL) with EUR as the base currency', () => {

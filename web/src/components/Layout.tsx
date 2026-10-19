@@ -6,6 +6,8 @@ import { DemoBanner } from './DemoBanner';
 import { useStickyOffset } from './useStickyOffset';
 import { USE_MOCKS } from '../config';
 import { AccountMenu } from '../features/auth/AccountMenu';
+import { UsageBanner } from '../features/usage/UsageBanner';
+import { UsageIndicator } from '../features/usage/UsageIndicator';
 import { PortfolioSwitcher } from '../features/portfolios/PortfolioSwitcher';
 import { usePortfolioScope, usePortfolioScopeSync } from '../features/portfolios/usePortfolioScope';
 
@@ -83,11 +85,13 @@ export function Layout() {
               <PortfolioSwitcher />
               <ThemeToggle />
               <AccountMenu />
+              <UsageIndicator />
             </div>
             <MainNav withScope={withScope} />
           </div>
         </header>
       </div>
+      <UsageBanner />
       <main id="main" tabIndex={-1} className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 focus:outline-none sm:px-6">
         <Outlet />
       </main>
