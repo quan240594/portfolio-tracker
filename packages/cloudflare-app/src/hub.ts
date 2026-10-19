@@ -45,7 +45,7 @@ export class Hub extends DurableObject<HubEnv> {
       await this.started();
       return this.core.handle(request);
     }
-    return Promise.resolve(errorResponse(503, 'NOT_CONFIGURED', `The Hub is not configured: ${this.problems.join('; ')}`));
+    return errorResponse(503, 'NOT_CONFIGURED', `The Hub is not configured: ${this.problems.join('; ')}`);
   }
 
   async alarm(): Promise<void> {
