@@ -1,0 +1,40 @@
+{
+  "name": "@portfolio/cloudflare-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "dev": "pnpm run build:web && wrangler dev --local",
+    "build:web": "VITE_AUTH_MODE=github VITE_USE_MOCKS=false VITE_API_BASE_URL=/api VITE_BASE_PATH=/ pnpm --filter @portfolio/web exec vite build --outDir ../packages/cloudflare-app/dist/web --emptyOutDir && rm -f dist/web/mockServiceWorker.js",
+    "deploy:dry-run": "pnpm run build:web && wrangler deploy --dry-run --outdir dist/bundle",
+    "deploy:app": ": \"${ORIGIN:?set ORIGIN}\" \"${OWNER_GITHUB_ID:?set OWNER_GITHUB_ID}\" \"${GITHUB_CLIENT_ID:?set GITHUB_CLIENT_ID}\" && pnpm run build:web && wrangler deploy --var ORIGIN:$ORIGIN --var OWNER_GITHUB_ID:$OWNER_GITHUB_ID --var GITHUB_CLIENT_ID:$GITHUB_CLIENT_ID",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@portfolio/api": "workspace:*",
+    "@portfolio/broker-sync": "workspace:*",
+    "@portfolio/cloudflare": "workspace:*",
+    "@portfolio/ingest": "workspace:*",
+    "@portfolio/platform": "workspace:*",
+    "@portfolio/prices": "workspace:*",
+    "@portfolio/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^20.19.43",
+    "@types/sql.js": "^1.4.11",
+    "esbuild": "^0.28.2",
+    "eslint": "^9.39.5",
+    "miniflare": "^4.20260730.0",
+    "sql.js": "^1.15.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.71.2",
+    "vitest": "^2.1.9",
+    "wrangler": "^4.116.0"
+  }
+}

@@ -1,6 +1,6 @@
-import type { ItemStore, JobQueue, SecretStore } from '@portfolio/platform';
+import type { ItemStore, JobQueue, SecretStore, UsageStore } from '@portfolio/platform';
 import type { FileStore, JobHandler, JobPayloads } from '@portfolio/platform';
-import { runFileStoreContract, runItemStoreContract, runJobQueueContract, runSecretStoreContract } from '@portfolio/platform/testing';
+import { runFileStoreContract, runItemStoreContract, runJobQueueContract, runSecretStoreContract, runUsageStoreContract } from '@portfolio/platform/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { MAX_FILE_BYTES } from '../src/file-store.js';
 import { TEST_SECRETS_KEY, WorkerdHub } from './workerd-harness.js';
@@ -27,6 +27,8 @@ const admin = (name: string, method: string, ...args: unknown[]) => hub.call(nam
 runItemStoreContract('SqlItemStore (workerd)', () => items());
 
 runSecretStoreContract('SqlSecretStore (workerd)', () => hub.proxy<SecretStore>('secrets', 'secrets'));
+
+runUsageStoreContract('SqlUsageStore (workerd)', () => hub.proxy<UsageStore>('usage', 'usage'));
 
 runFileStoreContract('SqlFileStore (workerd)', () => ({
   store: hub.proxy<FileStore>('files', 'files'),

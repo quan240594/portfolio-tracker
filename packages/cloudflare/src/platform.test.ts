@@ -24,7 +24,7 @@ describe('createDurableObjectPlatform', () => {
     expect(await platform.secrets.get('broker')).toBe('secret value');
     expect(target.url.startsWith('https://tracker.test/api/uploads/')).toBe(true);
     const tables = storage.rows<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").map((row) => row.name);
-    expect(tables).toEqual(['files', 'items', 'jobs', 'schedules', 'secrets', 'uploads']);
+    expect(tables).toEqual(['files', 'items', 'jobs', 'schedules', 'secrets', 'uploads', 'usage']);
   });
 
   it('reports the rows every adapter reads and writes to onUsage', async () => {

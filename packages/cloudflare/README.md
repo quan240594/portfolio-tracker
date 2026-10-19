@@ -9,9 +9,10 @@ The Cloudflare adapters of the platform ports (`@portfolio/platform`), built on 
 | `SecretStore` | `SqlSecretStore` | table `secrets`, AES-256-GCM (WebCrypto), key from a Worker secret |
 | `FileStore` | `SqlFileStore` | tables `files` (blobs up to 1.5 MiB) and `uploads` (single-use tokens) |
 | `JobQueue` | `AlarmJobQueue` + `runAlarm` | tables `jobs`, `schedules`; the Durable Object alarm |
+| `UsageStore` (budget guard ledger) | `SqlUsageStore` | table `usage`, one row per UTC day, atomic `INSERT ... ON CONFLICT DO UPDATE` |
 
-`createDurableObjectPlatform({ ctx, secretsKey, now, onUsage })` builds all of them; the Hub Durable Object calls it from its
-constructor. See the "Cloudflare Durable Object adapters" section of [docs/architecture.md](../../docs/architecture.md).
+`createDurableObjectPlatform({ ctx, secretsKey, now, onUsage })` builds all of them (`platform.usage` is the ledger of the `BudgetGuard`);
+the Hub Durable Object of [`@portfolio/cloudflare-app`](../cloudflare-app/README.md) calls it from its constructor. See the "Cloudflare Durable Object adapters" section of [docs/architecture.md](../../docs/architecture.md).
 
 ## Tests
 
@@ -21,6 +22,6 @@ pnpm --filter @portfolio/cloudflare test:coverage
 ```
 
 - `src/*.test.ts` run the shared contract suites (`runItemStoreContract`, `runSecretStoreContract`, `runFileStoreContract`,
-  `runJobQueueContract`) and the unit tests against real SQLite compiled to WebAssembly (`sql.js`), where coverage is measured.
+  `runJobQueueContract`, `runUsageStoreContract`) and the unit tests against real SQLite compiled to WebAssembly (`sql.js`), where coverage is measured.
 - `test/workerd.test.ts` boots the same adapters inside a SQLite-backed Durable Object in the real workerd runtime
   (Miniflare, no network, no Cloudflare account) and runs the same contract suites through a JSON-RPC proxy.

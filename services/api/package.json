@@ -6,7 +6,8 @@
   "main": "./src/portable.ts",
   "types": "./src/portable.ts",
   "exports": {
-    ".": "./src/portable.ts"
+    ".": "./src/portable.ts",
+    "./testing": "./src/testing/scenarios.ts"
   },
   "scripts": {
     "build": "node ../../scripts/lambda/build.mjs api",

@@ -1,0 +1,15 @@
+# Copy to .dev.vars (gitignored) for `pnpm run dev`. Local development only: use a separate GitHub OAuth App whose callback is
+# http://localhost:8787/auth/callback, and never reuse the production secrets here.
+ORIGIN=http://localhost:8787
+OWNER_GITHUB_ID=
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+# At least 32 random characters, e.g. `openssl rand -base64 48`.
+SESSION_SECRET=
+# Base64 of at least 32 random bytes, e.g. `openssl rand -base64 32`.
+SECRETS_KEY=
+# Optional market-data provider keys (a missing one switches that source off; see GET /api/prices/status). Dev keys only.
+TWELVEDATA_API_KEY=
+EODHD_API_KEY=
+COINGECKO_API_KEY=
+ALPHAVANTAGE_API_KEY=
