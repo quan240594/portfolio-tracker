@@ -1,6 +1,7 @@
 import { cond, type ItemKey, type ItemStore } from '@portfolio/platform';
 import { retryAttempts } from '@portfolio/shared';
 import { RateLimitError } from './errors.js';
+import { asText } from './parse.js';
 import type { Sleep } from './http.js';
 
 /**
@@ -105,7 +106,7 @@ export class StoreQuotaLedger implements QuotaLedger {
     const tokens = sameDay && Array.isArray(current.tokens) ? (current.tokens as string[]) : [];
     if (token !== undefined && tokens.includes(token)) return true;
     if (used + calls > limit) return false;
-    const guard = current === undefined ? cond.notExists : cond.and(cond.eq('day', String(current.day)), cond.eq('used', Number(current.used)));
+    const guard = current === undefined ? cond.notExists : cond.and(cond.eq('day', asText(current.day)), cond.eq('used', Number(current.used)));
     const next = { ...key, entityType, day, used: used + calls, ...(token === undefined ? {} : { tokens: [...tokens, token] }) };
     return (await this.store.put(next, { condition: guard })) ? true : 'conflict';
   }

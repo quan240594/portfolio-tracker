@@ -1,3 +1,5 @@
+import { asText } from './parse.js';
+
 export interface ProviderErrorDetails {
   provider?: string;
   symbol?: string;
@@ -67,4 +69,4 @@ export class SubrequestBudgetError extends Error {
 
 export const errorName = (error: unknown): string => (error instanceof Error ? error.name : typeof error);
 
-export const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+export const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : (asText(error) || 'unknown error'));

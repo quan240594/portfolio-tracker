@@ -65,12 +65,11 @@ function boolFrom(raw: string | undefined, fallback: boolean): boolean {
 const keyFrom = (raw: string | undefined): string | undefined => (raw?.trim() ? raw.trim() : undefined);
 
 function hoursFrom(raw: string | undefined): number[] {
-  const hours = (raw ?? '18')
-    .split(',')
-    .map((part) => part.trim())
-    .filter((part) => /^\d{1,2}$/.test(part))
-    .map((hour) => Number(hour))
-    .filter((hour) => hour < 24);
+  const hours: number[] = [];
+  for (const part of (raw ?? '18').split(',')) {
+    const text = part.trim();
+    if (/^\d{1,2}$/.test(text) && Number(text) < 24) hours.push(Number(text));
+  }
   return hours.length > 0 ? hours : [18];
 }
 

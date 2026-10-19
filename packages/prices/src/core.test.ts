@@ -6,7 +6,7 @@ import { csvRecords, parseCsv } from './csv.js';
 import { errorMessage, errorName, ProviderError, RateLimitError, RetryableProviderError, SubrequestBudgetError, SymbolNotFoundError } from './errors.js';
 import { HttpClient, budgetedFetch, buildUrl, redactUrl, type FetchLike } from './http.js';
 import { DailyQuota, MemoryQuotaLedger, StoreQuotaLedger, TokenBucket } from './limits.js';
-import { asFloat, byText, cleanText, dayOf, definedOnly, isoDateOrNull, ownValue, positiveNumber, titleCase, validIsin } from './parse.js';
+import { asFloat, asText, byText, cleanText, dayOf, definedOnly, isoDateOrNull, ownValue, positiveNumber, titleCase, validIsin } from './parse.js';
 import { cryptoParts, minimalProfile, normalizeSymbol, routeOf } from './symbols.js';
 import { addDays, amsterdamHour, daysBetweenDays, fromEpochSeconds, hourIn, isWeekday, utcDay, weekdayOf, zonedTimeToUtc } from './time.js';
 import { FakeFetch } from './testing/fake-fetch.js';
@@ -36,6 +36,7 @@ describe('errors', () => {
     expect(errorName('boom')).toBe('string');
     expect(errorMessage(new Error('m'))).toBe('m');
     expect(errorMessage(42)).toBe('42');
+    expect(errorMessage({ a: 1 })).toBe('unknown error');
   });
 });
 
@@ -246,6 +247,8 @@ describe('parsing helpers', () => {
     expect(dayOf('2026-10-13T00:00:00')).toBe('2026-10-13');
     expect(dayOf(null)).toBe('');
     expect(dayOf(20261013)).toBe('20261013');
+    expect(asText({})).toBe('');
+    expect(asText(5)).toBe('5');
     expect(definedOnly({ a: 1, b: undefined, c: null })).toEqual({ a: 1, c: null });
     expect(ownValue({ a: 1 }, 'a')).toBe(1);
     expect(['constructor', '__proto__', 'toString', 'b'].map((key) => ownValue({ a: 1 }, key))).toEqual([undefined, undefined, undefined, undefined]);

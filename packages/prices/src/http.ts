@@ -1,5 +1,6 @@
 import { retryAttempts } from '@portfolio/shared';
 import { silentLogger, type Logger } from '@portfolio/platform';
+import { asText } from './parse.js';
 import { ProviderError, RateLimitError, RetryableProviderError, SubrequestBudgetError, SymbolNotFoundError } from './errors.js';
 
 /** The `fetch` the host injects (Workers, Node, or a test double). */
@@ -27,7 +28,7 @@ export function redactUrl(url: string): string {
   return `${url.slice(0, at)}?${query}`;
 }
 
-const encodeValue = (value: unknown): string => encodeURIComponent(String(value)).replaceAll('%2C', ',');
+const encodeValue = (value: unknown): string => encodeURIComponent(typeof value === 'boolean' ? `${value}` : asText(value)).replaceAll('%2C', ',');
 
 /** `url?k=v&...` with null/undefined values dropped; commas stay readable (`symbol=A,B`). */
 export function buildUrl(url: string, params?: Readonly<Record<string, unknown>>): string {

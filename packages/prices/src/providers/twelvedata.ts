@@ -145,8 +145,8 @@ export class TwelveDataProvider implements PriceSource {
     const data = await this.get(path, { symbol: toTwelveDataSymbol(symbol) }, 1, symbol);
     const items = (Array.isArray(data.data) ? (data.data as unknown[]) : []).filter((item) => isRecord(item));
     if (items.length === 0) return null;
-    const american = items.filter((item) => item.country === UNITED_STATES || item.country === 'USA');
-    const chosen = { ...(american[0] ?? items[0]!) };
+    const american = items.find((item) => item.country === UNITED_STATES || item.country === 'USA');
+    const chosen = { ...(american ?? items[0]!) };
     chosen.type ??= path === '/etfs' ? 'ETF' : 'Common Stock';
     return chosen;
   }

@@ -5,7 +5,7 @@ import { SymbolNotFoundError } from '../errors.js';
 import type { HttpClient } from '../http.js';
 import type { TokenBucket } from '../limits.js';
 import { makeQuote } from '../models.js';
-import { asFloat, byText, chunks, isRecord, ownValue, titleCase } from '../parse.js';
+import { asFloat, byText, chunks, isRecord, ownValue, titleCase, type JsonRecord } from '../parse.js';
 import { cryptoParts } from '../symbols.js';
 import { daysBetweenDays, fromEpochSeconds, utcDay } from '../time.js';
 import { clampRange, quotesToBatch, type PriceBatch, type PriceSource } from './base.js';
@@ -99,14 +99,20 @@ export class CoinGeckoProvider implements PriceSource {
     const out: Record<string, Quote> = {};
     for (const [symbol, { id, vs }] of wanted) {
       const entry = isRecord(data) && isRecord(data[id]) ? data[id] : {};
-      const price = asFloat(entry[vs]);
-      if (price === null) continue;
-      const change = asFloat(entry[`${vs}_24h_change`]);
-      const previous = change !== null && change > -100 ? price / (1 + change / 100) : price;
-      const updated = fromEpochSeconds(asFloat(entry.last_updated_at), this.options.now());
-      out[symbol] = makeQuote({ symbol, price, previousClose: Number(previous.toFixed(8)), currency: vs.toUpperCase(), asOf: updated.toISOString(), source: this.name });
+      const quote = this.quoteFromEntry(symbol, vs, entry);
+      if (quote !== null) out[symbol] = quote;
     }
     return out;
+  }
+
+  /** The quote of one coin entry of `/simple/price`; the previous close is derived from the 24 h change. */
+  private quoteFromEntry(symbol: string, vs: string, entry: JsonRecord): Quote | null {
+    const price = asFloat(entry[vs]);
+    if (price === null) return null;
+    const change = asFloat(entry[`${vs}_24h_change`]);
+    const previous = change !== null && change > -100 ? price / (1 + change / 100) : price;
+    const updated = fromEpochSeconds(asFloat(entry.last_updated_at), this.options.now());
+    return makeQuote({ symbol, price, previousClose: Number(previous.toFixed(8)), currency: vs.toUpperCase(), asOf: updated.toISOString(), source: this.name });
   }
 
   /** One `/simple/price` call per 50 coins. */

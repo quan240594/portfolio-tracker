@@ -1,16 +1,14 @@
 import type { FetchLike } from '../http.js';
 
 /**
- * A scripted response. A plain value is a 200 JSON body; `{status}` an HTTP error (with `Retry-After: 0`), `{text}` a raw
- * body, `{headers, body}` a body with headers, an Error a network failure.
+ * A route's scripted responses (`unknown`): a plain value is a 200 JSON body; `{status}` an HTTP error (with
+ * `Retry-After: 0`), `{text}` a raw body, an Error a network failure.
  */
-export type FakeReply = unknown;
-
 export interface FakeRoute {
   /** Substring of the URL. */
   match: string;
   /** Replies in order; the last one repeats once it is the only one left. */
-  responses: FakeReply[];
+  responses: unknown[];
 }
 
 export interface RecordedRequest {
@@ -21,7 +19,7 @@ export interface RecordedRequest {
 
 const hasOnly = (value: unknown, key: string): value is Record<string, unknown> => typeof value === 'object' && value !== null && Object.keys(value).length === 1 && key in value;
 
-function respond(reply: FakeReply): Response {
+function respond(reply: unknown): Response {
   if (hasOnly(reply, 'status')) return new Response('error', { status: Number(reply.status), headers: { 'Retry-After': '0' } });
   if (hasOnly(reply, 'text')) return new Response(String(reply.text), { status: 200 });
   return new Response(JSON.stringify(reply), { status: 200 });
@@ -37,7 +35,7 @@ export class FakeFetch {
   }
 
   /** Adds a route that takes precedence over the earlier ones. */
-  add(match: string, ...responses: FakeReply[]): this {
+  add(match: string, ...responses: unknown[]): this {
     this.routes.unshift({ match, responses });
     return this;
   }

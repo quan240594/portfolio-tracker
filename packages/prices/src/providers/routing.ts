@@ -114,11 +114,11 @@ export class RoutingProvider implements PriceSource {
     return twelvedata === undefined ? null : twelvedata.getProfile(symbol);
   }
 
-  async getDividends(symbol: string, start: string, end: string): Promise<DividendEvent[]> {
-    if (isCrypto(symbol)) return [];
+  getDividends(symbol: string, start: string, end: string): Promise<DividendEvent[]> {
+    if (isCrypto(symbol)) return Promise.resolve([]);
     if (this.sources.eodhd === undefined) {
       this.warnOnce('eodhd');
-      return [];
+      return Promise.resolve([]);
     }
     return this.sources.eodhd.getDividends(symbol, start, end);
   }

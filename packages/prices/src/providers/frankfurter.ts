@@ -1,7 +1,7 @@
 import { sequentially } from '@portfolio/shared';
 import { ProviderError, SymbolNotFoundError } from '../errors.js';
 import type { HttpClient } from '../http.js';
-import { asFloat, byText, isRecord } from '../parse.js';
+import { asFloat, asText, byText, isRecord } from '../parse.js';
 import { addDays, isWeekday, zonedTimeToUtc } from '../time.js';
 import type { FxDay } from '@portfolio/shared';
 import type { FxLatest, FxSource } from './base.js';
@@ -59,10 +59,10 @@ export class FrankfurterFx implements FxSource {
   async getLatest(base: string): Promise<FxLatest> {
     const raw = await this.options.http.getJson(`${FRANKFURTER_URL}/latest`, { base });
     const data = isRecord(raw) ? raw : {};
-    const resolved = String(data.base || base).toUpperCase();
+    const resolved = (asText(data.base) || base).toUpperCase();
     const rates = parseRates(data.rates, resolved);
     if (Object.keys(rates).length === 0) throw new ProviderError(`${this.name}: empty rates for base ${base}`, { provider: this.name });
-    const day = data.date ? String(data.date) : undefined;
+    const day = asText(data.date) || undefined;
     const asOf = day === undefined ? this.options.now() : ecbPublication(day);
     return day === undefined ? { base: resolved, rates, asOf: asOf.toISOString() } : { base: resolved, rates, asOf: asOf.toISOString(), date: day };
   }
@@ -83,7 +83,7 @@ export class FrankfurterFx implements FxSource {
 
   private parseSeries(data: unknown, currency: string, lo: string, hi: string): FxDay[] {
     if (!isRecord(data)) throw new ProviderError(`${this.name}: malformed time series ${lo}..${hi}`, { provider: this.name });
-    if (String(data.base || currency).toUpperCase() !== currency) throw new ProviderError(`${this.name}: unexpected base ${JSON.stringify(data.base)}`, { provider: this.name });
+    if ((asText(data.base) || currency).toUpperCase() !== currency) throw new ProviderError(`${this.name}: unexpected base ${JSON.stringify(data.base)}`, { provider: this.name });
     const series = data.rates ?? {};
     if (!isRecord(series)) throw new ProviderError(`${this.name}: malformed time series ${lo}..${hi}`, { provider: this.name });
     const days: FxDay[] = [];

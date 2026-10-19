@@ -3,12 +3,11 @@ import type { CorporateActionsSource, EarningsSource } from '@portfolio/platform
 import { csvRecords, parseCsv } from '../csv.js';
 import { ProviderError, RateLimitError, SymbolNotFoundError } from '../errors.js';
 import type { HttpClient } from '../http.js';
-import type { TokenBucket } from '../limits.js';
-import { asFloat, byText, definedOnly, isoDateOrNull, isRecord, ownValue } from '../parse.js';
+import type { DailyQuota, TokenBucket } from '../limits.js';
+import { asFloat, asText, byText, definedOnly, isoDateOrNull, isRecord, ownValue } from '../parse.js';
 import { hasExchangeSuffix, isCrypto } from '../symbols.js';
 import { EODHD_URL, toEodhdSymbol, type EodhdProvider } from './eodhd.js';
 import { ALPHAVANTAGE_URL } from './alphavantage.js';
-import type { DailyQuota } from '../limits.js';
 
 /**
  * Calendar data sources (free tier, researched in docs/architecture.md "Calendar"):
@@ -34,7 +33,7 @@ function raiseForJsonBody(body: string): void {
   } catch {
     return;
   }
-  const message = isRecord(payload) ? String(payload.Information || payload.Note || payload['Error Message'] || '') : '';
+  const message = isRecord(payload) ? asText(payload.Information) || asText(payload.Note) || asText(payload['Error Message']) : '';
   if (message.includes('call frequency') || message.includes('requests per day') || message.toLowerCase().includes('rate limit')) {
     throw new RateLimitError('alphavantage: rate limited', { provider: 'alphavantage' });
   }
@@ -124,7 +123,7 @@ export function parseSplits(data: unknown, symbol: string, start: string): Store
   const splits = new Map<string, StoredSplitEvent>();
   for (const row of Array.isArray(data) ? data : []) {
     if (!isRecord(row)) continue;
-    const date = isoDateOrNull(String(row.date ?? '').slice(0, 10));
+    const date = isoDateOrNull(asText(row.date).slice(0, 10));
     const ratio = parseSplitRatio(row.split);
     if (date === null || ratio === null || date < start) continue;
     splits.set(date, { symbol, date, ...ratio, source: 'eodhd' });

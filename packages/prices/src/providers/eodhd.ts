@@ -6,7 +6,7 @@ import { ProviderError, RateLimitError, SymbolNotFoundError } from '../errors.js
 import type { HttpClient } from '../http.js';
 import type { DailyQuota, TokenBucket } from '../limits.js';
 import { makeDividend, makeQuote, normalizeCurrency } from '../models.js';
-import { asFloat, byText, chunks, dayOf, definedOnly, isRecord, nonEmpty, validIsin } from '../parse.js';
+import { asFloat, asText, byText, chunks, dayOf, definedOnly, isRecord, nonEmpty, validIsin } from '../parse.js';
 import { baseTicker, countryFor, currencyFor, exchangeFor, exchangeSuffix, EXCHANGES, priceCurrencyFor } from '../symbols.js';
 import { fromEpochSeconds } from '../time.js';
 import { assetClassFromType } from './twelvedata.js';
@@ -64,7 +64,7 @@ export class EodhdProvider implements PriceSource {
   private quoteFromRaw(raw: unknown, mapping: ReadonlyMap<string, string>): Quote | null {
     const parsed = realtimeRow.safeParse(raw);
     if (!parsed.success) return null;
-    const canonical = mapping.get(String(parsed.data.code ?? ''));
+    const canonical = mapping.get(asText(parsed.data.code));
     if (canonical === undefined || parsed.data.close === null) return null;
     const asOf = fromEpochSeconds(parsed.data.timestamp, this.options.now());
     return makeQuote({ symbol: canonical, price: parsed.data.close, previousClose: parsed.data.previousClose ?? parsed.data.close, currency: priceCurrencyFor(canonical), asOf: asOf.toISOString(), source: this.name });
@@ -116,7 +116,7 @@ export class EodhdProvider implements PriceSource {
     const code = providerSymbol.slice(0, dot);
     const exchange = providerSymbol.slice(dot + 1);
     const data = await this.get(`/search/${code}`, { exchange, limit: 10 }, 1, symbol);
-    const match = (Array.isArray(data) ? (data as unknown[]) : []).find((row) => isRecord(row) && String(row.Code ?? '').toUpperCase() === code && String(row.Exchange ?? '').toUpperCase() === exchange.toUpperCase());
+    const match = (Array.isArray(data) ? (data as unknown[]) : []).find((row) => isRecord(row) && asText(row.Code).toUpperCase() === code && asText(row.Exchange).toUpperCase() === exchange.toUpperCase());
     if (!isRecord(match)) return null;
     const country = nonEmpty(match.Country);
     return definedOnly({

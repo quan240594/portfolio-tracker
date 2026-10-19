@@ -5,6 +5,7 @@ import { createRefreshPricesJob } from './jobs/refresh-prices.js';
 import type { PriceJobDeps } from './jobs/common.js';
 import { createMarketData } from './market.js';
 import { PriceRepository } from './repository.js';
+import { byText } from './parse.js';
 import { addDays } from './time.js';
 
 /** The jobs this package implements, by `JOBS` name. */
@@ -55,6 +56,6 @@ export async function backfillFxHistory(deps: PriceJobDeps, today: string, start
   const days = from <= today ? await fx.getHistory(base, from, today) : [];
   const written = days.length > 0 ? await repo.putFxDays(days) : 0;
   const newest = days.at(-1)?.date ?? null;
-  const lastDay = [stored, newest].filter((day): day is string => day !== null).toSorted().at(-1) ?? null;
+  const lastDay = [stored, newest].filter((day): day is string => day !== null).toSorted(byText).at(-1) ?? null;
   return { base, start: from, end: today, fxDaysWritten: written, lastDay };
 }

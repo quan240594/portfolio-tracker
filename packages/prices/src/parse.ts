@@ -26,17 +26,20 @@ export function asFloat(value: unknown): number | null {
 
 /** Strictly positive finite number (P/E, market cap); everything else means "no usable value". */
 export function positiveNumber(value: unknown): number | null {
-  const parsed = asFloat(typeof value === 'number' ? value : String(value));
+  const parsed = asFloat(value);
   return parsed !== null && parsed > 0 ? parsed : null;
 }
 
 /** Non-empty string or undefined. */
+/** Provider text of a field that should be a string or a number; anything else (objects, null) is ''. */
+export const asText = (value: unknown): string => (typeof value === 'string' || typeof value === 'number' ? String(value) : '');
+
 export const nonEmpty = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined);
 
 /** Provider free text: trimmed, whitespace collapsed, capped at `limit`; placeholders like "None" or "-" mean absent. */
 export function cleanText(value: unknown, limit = MAX_DESCRIPTION_CHARS): string | undefined {
   if (typeof value !== 'string') return undefined;
-  const collapsed = value.trim().split(/\s+/).join(' ');
+  const collapsed = value.trim().replaceAll(/\s+/g, ' ');
   if (collapsed === '' || PLACEHOLDERS.has(collapsed.toUpperCase())) return undefined;
   const chars = Array.from(collapsed);
   if (chars.length <= limit) return collapsed;

@@ -42,7 +42,7 @@ export interface HarnessOptions {
   store?: MemoryItemStore;
   start?: Date;
   stepSubrequests?: number;
-  marketData?: PriceJobDeps['marketData'];
+  marketData?: NonNullable<PriceJobDeps['marketData']>;
 }
 
 const NO_OPTIONS: HarnessOptions = {};
