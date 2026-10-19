@@ -52,7 +52,7 @@ export function createSessionCodec(config: ResolvedGithubAuthConfig) {
       const token = readCookie(cookieHeader, SESSION_COOKIE);
       if (!token) return undefined;
       const claims = parseClaims(await signer.verify(SESSION_PURPOSE, token));
-      if (!claims || claims.sub !== `github:${config.ownerGithubId}` || claims.exp <= nowSeconds() || claims.iat > claims.exp) return undefined;
+      if (claims?.sub !== `github:${config.ownerGithubId}` || claims.exp <= nowSeconds() || claims.iat > claims.exp) return undefined;
       return claims;
     },
 

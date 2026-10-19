@@ -18,7 +18,9 @@ export interface FakeGithub {
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-export function fakeGithub(user: { id: number; login: string } = { id: OWNER_ID, login: 'the-owner' }): FakeGithub {
+const DEFAULT_USER = { id: OWNER_ID, login: 'the-owner' };
+
+export function fakeGithub(user: { id: number; login: string } = DEFAULT_USER): FakeGithub {
   const fake: FakeGithub = {
     calls: [],
     tokenResponse: () => json({ access_token: ACCESS_TOKEN, token_type: 'bearer', scope: '' }),

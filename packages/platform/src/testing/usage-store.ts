@@ -65,7 +65,7 @@ export function runUsageStoreContract(name: string, create: Factory): void {
 
     it('prunes the days before the given day and keeps that day and later ones', async () => {
       const store = await create();
-      for (const offset of [7, 8, 9]) await store.add(day(offset), { workerRequests: 1 });
+      await Promise.all([7, 8, 9].map((offset) => store.add(day(offset), { workerRequests: 1 })));
       await store.prune(day(8));
       expect((await store.read(day(7))).workerRequests).toBe(0);
       expect((await store.read(day(8))).workerRequests).toBe(1);

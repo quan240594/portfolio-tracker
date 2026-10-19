@@ -19,7 +19,7 @@ export class MemoryUsageStore implements UsageStore {
   }
 
   prune(beforeDay: string): Promise<void> {
-    for (const day of [...this.#days.keys()]) if (day < beforeDay) this.#days.delete(day);
+    for (const day of this.#days.keys()) if (day < beforeDay) this.#days.delete(day);
     return Promise.resolve();
   }
 
