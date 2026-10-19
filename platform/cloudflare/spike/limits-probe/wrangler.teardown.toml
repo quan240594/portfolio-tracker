@@ -5,6 +5,10 @@ main = "src/teardown.ts"
 compatibility_date = "2026-04-01"
 workers_dev = true
 
+# An empty list removes the cron trigger (omitting the block leaves it in place).
+[triggers]
+crons = []
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Probe"]

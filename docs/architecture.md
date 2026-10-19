@@ -1334,6 +1334,9 @@ table, `aria-label`, and `title` as an extra):
 
 ## Cloudflare personal deployment: feasibility spike
 
+> **Update (19 Oct 2026):** the on-account probe changed the recommendation below from the hybrid (c) to option (b), a SQLite
+> Durable Object as the compute host. See "Cloudflare limits probe: results (18 to 19 Oct 2026)".
+
 **Decision (owner).** One repository, two deployment targets of the *same features*: the AWS demo (stays deployable and
 tested in CI) and a **personal deployment on Cloudflare, strictly on the Free plan**. The owner will never pay: the design
 must always stay under the free caps, never need a paid feature or a payment method, and fail closed (reads only) instead of
@@ -1827,3 +1830,80 @@ is where the AWS adapters meet the contracts.
 adapter), gets a contract test when it adds or changes what a port must do, and is verified on the AWS stack (CI) and on the
 Cloudflare deployment before it is called done. A feature that needs a capability a platform lacks is redesigned until it fits
 every platform, not special-cased.
+
+## Cloudflare limits probe: results (18 to 19 Oct 2026)
+
+The on-account measurements that close the "unverified" list of the feasibility spike. The probe
+(`platform/cloudflare/spike/limits-probe`) ran on the personal Free account (no payment method, nothing billed) and **has been
+torn down** (Worker, Durable Object class, Queue, D1 database, cron; the account lists none of them). **Outcome: the Durable
+Object is not capped at 10 ms, so the recommendation changes from the hybrid (c) to option (b), a SQLite Durable Object as the
+compute host.**
+
+### Setup and environment findings
+
+- A neutral `workers.dev` subdomain was registered (not recorded here: it is public in every URL).
+- **`*.workers.dev` is unreachable from the owner's work laptop** (TLS handshake reset; `cloudflare.com` works), and so is
+  `wrangler tail` (its WebSocket host is on `workers.dev`). This is the corporate network and is not worked around. The probe was
+  driven from a throwaway GitHub Actions workflow (never merged, deleted with its secret). The personal app on `workers.dev` will not
+  open on the work laptop either: use a personal device or network (a custom domain costs money, so it is not planned).
+- Real CPU time comes from the GraphQL Analytics API (`workersInvocationsAdaptive`, `quantiles.cpuTime*` in microseconds, per
+  minute) with the `wrangler login` token. The Workers Observability telemetry API is not authorised for that token, and
+  `eventType` is not a dimension, so each calibration batch ran in its own minute.
+- Teardown needs the queue consumer removed first (`wrangler queues consumer remove`), then the stub deploy with
+  `crons = []`, then `wrangler delete`, `queues delete`, `d1 delete` (the last one from a folder without the probe's
+  `wrangler.toml`, which lacks the database id). `wrangler.teardown.toml` now carries `crons = []`.
+
+### Calibration: nominal ms against real CPU
+
+"Nominal ms" is the probe's fixed unit of work. Twenty `/burn` calls per batch, read back from the analytics per minute:
+
+| Nominal ms | Calls that completed | Real CPU of the completed calls | Calls killed |
+|---|---|---|---|
+| 100 | 20 of 20 | p50 236 ms, p99 415 ms | 0 |
+| 400 | 11 of 20 | p50 948 ms, p99 1,501 ms | 9 (recorded at about 20 ms) |
+| 800 | 2 of 21 | up to about 1,990 ms | 19 (recorded at 10 ms) |
+
+So one nominal ms is about **2.4 ms of real CPU** (the first estimate of 0.012 was wrong).
+
+### Caps by entry point
+
+| Entry point | What survived | What was killed | Reading |
+|---|---|---|---|
+| Worker HTTP | one-off calls up to about 2 s of CPU | sustained calls above about 10 to 20 ms, and anything near 2 s | Nominally **10 ms**; the platform lets occasional heavy calls through but kills repeated ones at 10 to 20 ms. **Design to 10 ms and never rely on the grace.** |
+| Queue consumer | 1,024 nominal once (about 2.4 s) | 900 nominal six times in a row (recorded at 2,050 ms) | Same class as a Worker (not the 30 s of the Queues docs). |
+| Cron Trigger | 700 nominal (about 1.7 s) | 1,500 and 6,000 nominal (recorded at 2,050 ms) | Same class as a Worker. |
+| **Durable Object request** | **16,383 nominal, about 38 s of CPU** | 16,384 (HTTP 500) | Cap of **tens of seconds** (the DO docs say 30 s; the calibration is within error of that). **Far above the 500 ms the decision rule asks for.** |
+| **Durable Object alarm** | 24,289 nominal (some retries at the top end) | 24,290 and above | At least as generous as the request. |
+
+| Other check | Result |
+|---|---|
+| Subrequests per invocation | **50 succeed, the 51st fails** ("Too many subrequests by single Worker invocation"). |
+| D1 queries through the binding | **60 separate statements succeeded**: D1 calls do not count against the 50 subrequests. |
+| One `db.batch()` of 120 statements | Succeeded. |
+| 2,000 rows via 61 multi-row inserts | `rowsWritten` = 2,000, `rowsRead` = 2,000. |
+
+### Decision: option (b), a SQLite Durable Object as the compute host
+
+Rule from the spike: a Durable Object CPU cap of at least 500 ms means the heavy analytics run server-side. The measured cap is
+tens of seconds, so:
+
+- **Compute:** one SQLite-backed Durable Object per owner (a single user here) holds the data and runs the shared pure-TypeScript
+  engine, exactly as the AWS Lambdas do. The slowest endpoints (`holdings-performance` 138 ms, `calendar` 108 ms in Node; roughly
+  2 to 3 times that on Workers) fit with a wide margin. No browser-side compute, no 1.15 MB payload, no phone CPU risk, no
+  golden-vector parity tests against a second engine, and `calendar.ics` stays a normal server response.
+- **Worker:** only static assets, GitHub sign-in (restricted to the owner's user id) and routing to the Durable Object; each
+  call stays far under 10 ms.
+- **Background jobs** (Trading 212 sync, price refresh, reminders) run as Durable Object **alarms**, with no 10 ms chunking and
+  no Queue operations. The resumable job handlers from the ports refactor still apply (a step can simply be large).
+- **Storage:** the Durable Object's SQLite database sits behind the `ItemStore` port and must pass the shared contract suites.
+  Free-plan Durable Object limits to respect: 100,000 requests/day, 13,000 GB-s/day of duration, 1 GB per object, SQLite row
+  reads/writes in the same order as D1 (5M read, 100k written per day). A 0.5 s request costs about 0.06 GB-s, so the duration
+  cap allows well over 100,000 such requests; the request cap is the one that binds.
+- **Budget guard:** a usage ledger inside the Durable Object counts requests, rows and GB-s against the caps and refuses work at
+  80 % so the account never reaches a cap (Free-plan overruns fail rather than bill, but the app still stays under every cap).
+- **Single point:** a Durable Object serves one request at a time, which is fine for one user; the AWS demo keeps its own stack.
+
+### What the probe did not measure
+
+Cold-start CPU of the real handlers on the runtime, response compression, the OAuth flow and Durable Object alarm retry cost
+under failure. These are checked when the Cloudflare adapter is built; none changes the decision.
