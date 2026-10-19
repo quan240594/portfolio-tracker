@@ -2,7 +2,7 @@ import { build } from 'esbuild';
 import { Log, LogLevel, Miniflare, Response as MiniflareResponse } from 'miniflare';
 import { fileURLToPath } from 'node:url';
 import type { Stack } from './browser.js';
-import { FakeGithub, FakeTrading212, ORIGIN, OWNER_ID, TEST_CLIENT_ID, TEST_CLIENT_SECRET, TEST_SECRETS_KEY, TEST_SESSION_SECRET, route } from './fakes.js';
+import { FakeGithub, FakePrices, FakeTrading212, ORIGIN, OWNER_ID, TEST_CLIENT_ID, TEST_CLIENT_SECRET, TEST_SECRETS_KEY, TEST_SESSION_SECRET, route } from './fakes.js';
 import { PINNED_NOW, type SuiteStartOptions } from './suite.js';
 
 const ENTRY = fileURLToPath(new URL('./entry.ts', import.meta.url));
@@ -28,6 +28,7 @@ export function bundleWorker(): Promise<string> {
 }
 
 interface HubState {
+  schedules: string[];
   alarm: number | null;
   pendingJobs: number | null;
   failedJobs: { job: string; error: string | null }[];
@@ -40,7 +41,8 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 export async function createWorkerdStack(options: SuiteStartOptions = {}): Promise<Stack & { hubState(): Promise<HubState> }> {
   const github = new FakeGithub();
   const trading212 = new FakeTrading212();
-  const services = [github.service, trading212.service];
+  const prices = new FakePrices(() => Date.now());
+  const services = [github.service, trading212.service, prices.service];
   const mf = new Miniflare({
     modules: [{ type: 'ESModule', path: 'worker.mjs', contents: await bundleWorker() }],
     // The Hub logs one JSON line per request; the tests do not need them.
@@ -67,6 +69,7 @@ export async function createWorkerdStack(options: SuiteStartOptions = {}): Promi
       GITHUB_CLIENT_SECRET: TEST_CLIENT_SECRET,
       SESSION_SECRET: TEST_SESSION_SECRET,
       SECRETS_KEY: TEST_SECRETS_KEY,
+      ...options.prices,
       ...(options.limits ? { TEST_LIMITS: JSON.stringify(options.limits), TEST_NOW: String(PINNED_NOW) } : {}),
     },
     outboundService: (request) => {
@@ -76,8 +79,13 @@ export async function createWorkerdStack(options: SuiteStartOptions = {}): Promi
   });
   await mf.ready;
 
+  const namespace = async () =>
+    (await mf.getDurableObjectNamespace('HUB')) as unknown as {
+      idFromName(name: string): unknown;
+      get(id: unknown): { fetch(url: string, init?: { method: string; body: string }): Promise<{ json(): Promise<unknown> }> };
+    };
   const hubState = async (): Promise<HubState> => {
-    const hub = (await mf.getDurableObjectNamespace('HUB')) as unknown as { idFromName(name: string): unknown; get(id: unknown): { fetch(url: string): Promise<{ json(): Promise<unknown> }> } };
+    const hub = await namespace();
     return (await (await hub.get(hub.idFromName('hub')).fetch('http://hub.internal/__test/state')).json()) as HubState;
   };
   const drain = async (deadline = Date.now() + 20_000): Promise<void> => {
@@ -91,9 +99,16 @@ export async function createWorkerdStack(options: SuiteStartOptions = {}): Promi
     origin: ORIGIN,
     github,
     trading212,
+    prices,
     hubState,
     send: async (path, init) => (await mf.dispatchFetch(`${ORIGIN}${path}`, init as never)) as unknown as Response,
     drain,
+    enqueue: async (job, payload) => {
+      const hub = await namespace();
+      await hub.get(hub.idFromName('hub')).fetch('http://hub.internal/__test/enqueue', { method: 'POST', body: JSON.stringify({ job, payload }) });
+    },
+    failedJobs: async () => (await hubState()).failedJobs,
+    schedules: async () => (await hubState()).schedules,
     alarmAt: async () => (await hubState()).alarm,
     cron: async () => {
       const worker = (await mf.getWorker()) as unknown as { scheduled(options: { cron: string }): Promise<unknown> };

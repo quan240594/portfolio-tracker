@@ -54,11 +54,30 @@ You need a Cloudflare account on the Free plan and a GitHub account. Every comma
    `OWNER_GITHUB_ID` gets a session; any other account sees a neutral 403. Then import a CSV or connect Trading 212 as usual.
    The usage indicator (`GET /api/usage`) shows how much of the free-plan day is used.
 
+7. **Optional: market-data keys** (the price service). Without them the app works but prices keep their last stored value and only
+   exchange rates (keyless ECB source) refresh; `GET /api/prices/status` shows which source is off and which secret switches it on.
+   Each one is a Worker secret, set the same way as in step 4:
+   ```bash
+   pnpm exec wrangler secret put TWELVEDATA_API_KEY     # quotes, history, profiles of US-listed symbols
+   pnpm exec wrangler secret put EODHD_API_KEY          # exchange-suffixed symbols (.AS, .DE, ...), dividends, splits
+   pnpm exec wrangler secret put COINGECKO_API_KEY      # crypto (demo key)
+   pnpm exec wrangler secret put ALPHAVANTAGE_API_KEY   # US company profiles, earnings calendar
+   ```
+   Free-tier limits and tuning variables (`EODHD_DAILY_LIMIT`, `EU_REFRESH_HOURS`, `FX_HISTORY_START`, `CALENDAR_*`, ...) are those of
+   `@portfolio/prices` (`parsePricesConfig`); put one in `vars` of `wrangler.jsonc` only to change its default. The refreshes run
+   from the Hub alarm on the `prices-refresh` and `prices-calendar` schedules and only below 60 % of the free-plan budget.
+
 Until the variables and secrets are valid, every API and sign-in route answers 503 `NOT_CONFIGURED` naming the missing
 variable (never a value); `/health` and the static app keep working.
 
 > **Corporate laptop:** `*.workers.dev` is blocked on many managed networks and `wrangler tail` may be too. Do the
 > deploy and the first sign-in from a personal device or network (the app itself is just HTTPS afterwards).
+
+## Identity-required mode
+
+The API's `authMode` is `cognito` in this deployment. That name is historical: it means **identity required** (no identity, no
+access: the API answers 401 and never falls back to a demo user). The Hub passes the Worker-verified GitHub owner as the identity
+(`github:<id>` becomes the user id `github-<id>`), so the same fail-closed code path as behind the AWS authorizer applies.
 
 ## Local development
 
@@ -88,7 +107,8 @@ Signing in needs GitHub, so offline you can see the app shell and `/health`; the
 - `test/suite.ts` is **one suite of the whole app**: GitHub sign-in (full OAuth round trip against a fake GitHub), anonymous 401,
   forged cookie, cross-origin 403, the platform-neutral API scenarios from `@portfolio/api/testing` (the same ones that run on
   the in-memory dependencies and on LocalStack), CSV upload -> alarm -> data, Trading 212 sync through resumable alarm steps
-  (fake Trading 212), `GET /api/usage`, the 429 `BUDGET_EXHAUSTED` guard, alarm and cron re-arming. It runs twice:
+  (fake Trading 212), the price service (schedules arm the alarm, a refresh step writes prices the API serves, jobs skipped from
+  60 % of a cap, graceful degradation without provider keys; fake Twelve Data, Alpha Vantage and Frankfurter), `GET /api/usage`, the 429 `BUDGET_EXHAUSTED` guard, alarm and cron re-arming. It runs twice:
   `test/node.test.ts` (real Worker and Hub code over SQLite compiled to WebAssembly, pinned clock; **this is what coverage
   measures**) and `test/workerd.test.ts` (the same suite against the esbuild bundle in real workerd through Miniflare, with a
   SQLite-backed Durable Object, real alarms and the static assets binding).

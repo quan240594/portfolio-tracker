@@ -8,3 +8,8 @@ GITHUB_CLIENT_SECRET=
 SESSION_SECRET=
 # Base64 of at least 32 random bytes, e.g. `openssl rand -base64 32`.
 SECRETS_KEY=
+# Optional market-data provider keys (a missing one switches that source off; see GET /api/prices/status). Dev keys only.
+TWELVEDATA_API_KEY=
+EODHD_API_KEY=
+COINGECKO_API_KEY=
+ALPHAVANTAGE_API_KEY=

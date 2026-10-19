@@ -1,6 +1,11 @@
 // Free plan only: no [limits], no routes or custom domains, and no paid binding (no R2, KV, Queues or D1).
 // Nothing personal is stored here: the secrets are Worker secrets (`wrangler secret put`), the three variables below are
 // injected at deploy time (`pnpm run deploy:app`, see README.md) or come from `.dev.vars` for `pnpm run dev`.
+//
+// Optional Worker secrets of the price service (`wrangler secret put <NAME>`; none is needed to deploy, a missing one only switches
+// that market-data source off and `GET /api/prices/status` says so): TWELVEDATA_API_KEY, EODHD_API_KEY, COINGECKO_API_KEY,
+// ALPHAVANTAGE_API_KEY. Optional plain variables (defaults in packages/prices/src/config.ts): COINGECKO_COIN_IDS, EODHD_DAILY_LIMIT,
+// ALPHAVANTAGE_DAILY_LIMIT, EU_REFRESH_HOURS, FX_HISTORY_START and the CALENDAR_* settings; add them to "vars" below to change them.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "portfolio-tracker",

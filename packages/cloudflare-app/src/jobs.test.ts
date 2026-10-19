@@ -1,21 +1,24 @@
-import { BudgetGuard, MemoryUsageStore, METRIC_LIMITS, SCHEDULED_JOBS, silentLogger, type JobHandler, type JobPayloads, type UsageStore } from '@portfolio/platform';
+import { BudgetGuard, MemoryUsageStore, METRIC_LIMITS, silentLogger, type JobHandler, type JobPayloads, type UsageStore } from '@portfolio/platform';
 import type { TransactionsChangedDetail } from '@portfolio/shared';
 import { describe, expect, it, vi } from 'vitest';
 import {
-  ALL_JOB_FACTORIES,
   CORE_JOB_FACTORIES,
   DEFERRED_CURSOR,
   JOB_SUBREQUEST_RESERVE,
   PRICE_JOB_FACTORIES,
+  PRICE_SCHEDULE_NAMES,
   createJobRegistry,
   eventsFor,
   guardedJob,
   hasPriceService,
+  priceJobDeps,
   registeredJobs,
+  schedulesFor,
   type JobContext,
   type JobFactories,
 } from './jobs.js';
-import { SubrequestBudget } from './subrequests.js';
+import { DEFAULT_STEP_SUBREQUESTS } from '@portfolio/prices';
+import { SUBREQUEST_CEILING, SubrequestBudget } from './subrequests.js';
 
 const NOON = new Date(Date.UTC(2026, 0, 5, 12));
 const hour = 3_600_000;
@@ -118,16 +121,31 @@ describe('guardedJob', () => {
 describe('the job registry and the price registration point', () => {
   const context = { budget: new SubrequestBudget(), now: () => NOON } as unknown as JobContext;
 
-  it('registers the import and the Trading 212 sync, and no price job yet', () => {
-    expect(registeredJobs().toSorted((a, b) => a.localeCompare(b))).toEqual(['importUploaded', 'syncBroker']);
-    expect(Object.keys(PRICE_JOB_FACTORIES)).toEqual([]);
-    expect(hasPriceService()).toBe(false);
-    expect(Object.keys(ALL_JOB_FACTORIES)).toEqual(Object.keys(CORE_JOB_FACTORIES));
+  it('registers the import, the Trading 212 sync and the three price jobs', () => {
+    expect(registeredJobs().toSorted((a, b) => a.localeCompare(b))).toEqual(['enrichTransactions', 'importUploaded', 'refreshCalendar', 'refreshPrices', 'syncBroker']);
+    expect(Object.keys(PRICE_JOB_FACTORIES).toSorted((a, b) => a.localeCompare(b))).toEqual(['enrichTransactions', 'refreshCalendar', 'refreshPrices']);
+    expect(hasPriceService()).toBe(true);
+    expect(hasPriceService(CORE_JOB_FACTORIES)).toBe(false);
   });
 
-  it('keeps only the schedules of jobs that have a handler', () => {
-    const known = new Set(registeredJobs());
-    expect(SCHEDULED_JOBS.filter((schedule) => known.has(schedule.job)).map((schedule) => schedule.name)).toEqual(['broker-sync']);
+  it('keeps the schedules of the registered jobs, the price service schedules among them', () => {
+    expect(schedulesFor().map((schedule) => schedule.name).toSorted((a, b) => a.localeCompare(b))).toEqual(['broker-sync', 'prices-calendar', 'prices-refresh']);
+    expect(PRICE_SCHEDULE_NAMES.toSorted((a, b) => a.localeCompare(b))).toEqual(['prices-calendar', 'prices-refresh']);
+    expect(schedulesFor(CORE_JOB_FACTORIES).map((schedule) => schedule.name)).toEqual(['broker-sync']);
+  });
+
+  it('plans a price step into the subrequests of an alarm', () => {
+    for (const job of ['refreshPrices', 'enrichTransactions', 'refreshCalendar'] as const) {
+      expect(JOB_SUBREQUEST_RESERVE[job]).toBe(DEFAULT_STEP_SUBREQUESTS);
+      expect(JOB_SUBREQUEST_RESERVE[job]).toBeLessThanOrEqual(SUBREQUEST_CEILING);
+    }
+  });
+
+  it('builds the price job dependencies from the Hub ports', () => {
+    const items = {} as never;
+    const deps = priceJobDeps({ items, fetch: vi.fn(), now: () => NOON, sleep: () => Promise.resolve(), config: { prices: { baseCurrency: 'EUR' } } } as unknown as JobContext);
+    expect(deps).toMatchObject({ store: items, config: { baseCurrency: 'EUR' } });
+    expect(deps.clock()).toEqual(NOON);
   });
 
   it('builds a guarded handler for every registered factory, including a price job registered later', async () => {
@@ -146,9 +164,9 @@ describe('the job registry and the price registration point', () => {
   it('publishes events as enrichTransactions jobs only when a price service consumes them', async () => {
     const enqueue = vi.fn(() => Promise.resolve());
     const detail: TransactionsChangedDetail = { userId: 'u', portfolioId: 'p', symbols: ['SAP.DE'], reason: 'CREATED' };
-    await eventsFor({ enqueue }).transactionsChanged(detail);
+    await eventsFor({ enqueue }, CORE_JOB_FACTORIES).transactionsChanged(detail);
     expect(enqueue).not.toHaveBeenCalled();
-    await eventsFor({ enqueue }, { enrichTransactions: () => ran() as never }).transactionsChanged(detail);
+    await eventsFor({ enqueue }).transactionsChanged(detail);
     expect(enqueue).toHaveBeenCalledWith({ job: 'enrichTransactions', payload: detail });
   });
 });

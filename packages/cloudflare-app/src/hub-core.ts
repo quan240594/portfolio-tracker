@@ -1,13 +1,13 @@
 import {
   BudgetGuard,
   JOBS,
-  SCHEDULED_JOBS,
   durableObjectGbSeconds,
   fetchRequestToPortable,
   portableToFetchResponse,
   withBudget,
   type JobRegistry,
   type Logger,
+  type MarketDataService,
   type MetricLimits,
   type PortableHandler,
   type PortableRequest,
@@ -16,10 +16,12 @@ import {
 import { ItemManagementRepository, ItemRepository, createApp, type Deps } from '@portfolio/api';
 import { ItemBrokerStore, SecretCredentialStore, Trading212Client } from '@portfolio/broker-sync';
 import { MAX_FILE_BYTES, createDurableObjectPlatform, uploadTokenFromUrl, type AlarmJobQueueOptions, type DurableObjectPlatform } from '@portfolio/cloudflare';
+import { createMarketDataService } from '@portfolio/prices';
 import { parseImportObjectKey } from '@portfolio/shared';
 import { readBodyBounded } from './body.js';
 import type { HubConfig } from './config.js';
-import { ALL_JOB_FACTORIES, createJobRegistry, eventsFor, registeredJobs, type JobFactories } from './jobs.js';
+import { ALL_JOB_FACTORIES, createJobRegistry, eventsFor, priceJobDeps, schedulesFor, type JobContext, type JobFactories } from './jobs.js';
+import { pricesStatus } from './prices-status.js';
 import { ARM_PATH, REQUEST_ID_HEADER, SUBJECT_HEADER, stripApiPrefix, userIdOfSubject } from './protocol.js';
 import { errorResponse } from './responses.js';
 import type { HubState } from './runtime.js';
@@ -37,6 +39,8 @@ export interface HubOptions {
   jobFactories?: JobFactories;
   /** The `fetch` used for outbound calls (Trading 212, price providers); counted against the subrequest budget. Defaults to the global one. */
   fetch?: typeof fetch;
+  /** Pause used by the price service's HTTP client (backoff). Defaults to `setTimeout`. */
+  sleep?: (ms: number) => Promise<void>;
   /** Retry policy of the alarm queue (tests shorten the backoff). */
   queue?: Pick<AlarmJobQueueOptions, 'baseBackoffMs' | 'maxAttempts' | 'maxStepsPerRun' | 'maxRunMs'>;
 }
@@ -58,6 +62,7 @@ export class HubCore {
   private readonly factories: JobFactories;
   private readonly now: () => Date;
   private readonly fetchImpl: typeof fetch;
+  private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(
     ctx: HubState,
@@ -67,7 +72,7 @@ export class HubCore {
     this.now = options.now ?? (() => new Date());
     this.factories = options.jobFactories ?? ALL_JOB_FACTORIES;
     this.fetchImpl = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
-    const known = new Set(registeredJobs(this.factories));
+    this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     // The guard exists only after the platform (its ledger is a platform adapter): rows of the first statements are not counted.
     const guardRef: { current?: BudgetGuard } = {};
     this.platform = createDurableObjectPlatform({
@@ -76,7 +81,7 @@ export class HubCore {
       now: this.now,
       uploadBaseUrl: config.origin,
       // A schedule whose job has no handler would only fail and retry, so it is not kept.
-      schedules: SCHEDULED_JOBS.filter((schedule) => known.has(schedule.job)),
+      schedules: schedulesFor(this.factories),
       onUsage: ({ rowsRead, rowsWritten }) => {
         void guardRef.current?.recordRows({ read: rowsRead, written: rowsWritten });
       },
@@ -93,7 +98,7 @@ export class HubCore {
     guardRef.current = this.guard;
     const deps = this.buildDeps();
     const application = createApp(() => deps);
-    this.app = withBudget((request) => (request.method === 'GET' && request.path === '/usage' ? this.usage() : application(request)), this.guard);
+    this.app = withBudget((request) => (request.method === 'GET' && request.path === '/usage' ? this.usage() : this.ownRoute(request) ?? application(request)), this.guard);
     this.uploadGate = withBudget(() => Promise.resolve(UPLOAD_GATE_PASS), this.guard);
   }
 
@@ -124,9 +129,9 @@ export class HubCore {
     }
   }
 
-  private registry(budget: SubrequestBudget): JobRegistry {
+  private context(budget: SubrequestBudget): JobContext {
     const queue = this.platform.jobs;
-    const context = {
+    return {
       items: this.platform.items,
       secrets: this.platform.secrets,
       files: this.platform.files,
@@ -136,8 +141,22 @@ export class HubCore {
       config: this.config,
       budget,
       fetch: budget.wrap(this.fetchImpl),
+      sleep: this.sleep,
     };
-    return createJobRegistry(context, { guard: this.guard }, this.factories);
+  }
+
+  private registry(budget: SubrequestBudget): JobRegistry {
+    return createJobRegistry(this.context(budget), { guard: this.guard }, this.factories);
+  }
+
+  /**
+   * The platform's `MarketDataService` over the Hub's store and the price service: the jobs run to completion inside one call.
+   * Not on any request path (a full run takes far more than 45 subrequests, so the counted `fetch` fails it visibly instead of
+   * letting the runtime do it): the API reads what the alarm-driven jobs stored, which is why price-dependent endpoints work
+   * without calling it. Use it from tests and tooling.
+   */
+  marketData(): MarketDataService {
+    return createMarketDataService(priceJobDeps(this.context(new SubrequestBudget())));
   }
 
   /** Duration cost of the invocation, then the buffered ledger rows. Never throws. */
@@ -186,6 +205,12 @@ export class HubCore {
       ...(requestId ? { requestId } : {}),
     };
     return portableToFetchResponse(await this.app(forwarded));
+  }
+
+  /** Routes the Hub serves itself, next to the API: `GET /prices/status`. */
+  private ownRoute(request: PortableRequest): Promise<PortableResponse> | undefined {
+    if (request.method !== 'GET' || request.path !== '/prices/status') return undefined;
+    return Promise.resolve({ status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }, body: JSON.stringify(pricesStatus(this.config.prices)) });
   }
 
   private usage(): Promise<PortableResponse> {

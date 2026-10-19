@@ -100,3 +100,57 @@ export function route(services: readonly FakeService[], request: FakeRequest): F
   }
   throw new Error(`Unexpected outbound request to ${new URL(request.url).host}`);
 }
+
+export const TD_KEY = 'test-twelvedata-key';
+export const AV_KEY = 'test-alphavantage-key';
+export const AAPL_CLOSE = 230.12;
+
+/**
+ * The market-data sources the price jobs call: Twelve Data (quote, daily history), Alpha Vantage (company overview) and the
+ * keyless Frankfurter ECB API. `clock` is the Hub's clock, so the quotes are always "just now" and never stale.
+ */
+export class FakePrices {
+  /** `host path` of every call, in order. */
+  readonly calls: string[] = [];
+
+  constructor(private readonly clock: () => number) {}
+
+  readonly service: FakeService = (request) => {
+    const url = new URL(request.url);
+    const handler = this.handlers[url.host];
+    if (!handler) return undefined;
+    this.calls.push(`${url.host} ${url.pathname}`);
+    return handler(url, request);
+  };
+
+  callsTo(host: string): string[] {
+    return this.calls.filter((call) => call.startsWith(`${host} `));
+  }
+
+  private readonly handlers: Record<string, (url: URL, request: FakeRequest) => FakeReply> = {
+    'api.twelvedata.com': (url, request) => {
+      if (request.header('authorization') !== `apikey ${TD_KEY}`) return { status: 401, json: { code: 401, status: 'error', message: 'bad key' } };
+      switch (url.pathname) {
+        case '/quote':
+          return { status: 200, json: { symbol: 'AAPL', currency: 'USD', close: String(AAPL_CLOSE), previous_close: '228.5', timestamp: Math.floor(this.clock() / 1000) } };
+        case '/time_series':
+          return { status: 200, json: { meta: { currency: 'USD' }, values: this.history() } };
+        default:
+          return { status: 404, json: { code: 404, status: 'error', message: 'not available' } };
+      }
+    },
+    'www.alphavantage.co': () => ({
+      status: 200,
+      json: { Symbol: 'AAPL', AssetType: 'Common Stock', Name: 'Apple Inc.', Exchange: 'NASDAQ', Currency: 'USD', Country: 'USA', Sector: 'TECHNOLOGY' },
+    }),
+    'api.frankfurter.dev': (url) => {
+      const range = /\/v1\/(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})$/.exec(url.pathname);
+      if (url.pathname === '/v1/latest') return { status: 200, json: { base: 'EUR', date: new Date(this.clock()).toISOString().slice(0, 10), rates: { USD: 1.16, GBP: 0.87 } } };
+      return range ? { status: 200, json: { base: 'EUR', rates: { [range[1]!]: { USD: 1.15, GBP: 0.86 } } } } : { status: 404 };
+    },
+  };
+
+  private history(): { datetime: string; close: string }[] {
+    return Array.from({ length: 5 }, (_, i) => ({ datetime: new Date(this.clock() - (4 - i) * 86_400_000).toISOString().slice(0, 10), close: String(100 + i) }));
+  }
+}

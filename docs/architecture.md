@@ -2440,8 +2440,8 @@ the alarm. `deps` = `ItemRepository`, `ItemManagementRepository`, `platform.file
 the encrypted secret store, `platform.jobs`, `authMode: 'cognito'` (identity required; fails closed). The verified subject
 `github:<id>` becomes the user id `github-<id>` (the API only accepts `[A-Za-z0-9._-]`). Routes: `POST /internal/arm` (cron
 keep-alive; unreachable from clients because the Worker only forwards `/api/*` and `/usage`), `PUT /api/uploads/<token>` (404 unknown
-token, 410 expired, 413 too large, 204 and a `importUploaded` job enqueued from the key), `GET /usage` and `GET /api/usage` (the
-`UsageSnapshot`, always answered: allow-list), everything else the API. Every request records `workerRequests` +
+token, 410 expired, 413 too large, 204 and a `importUploaded` job enqueued from the key), `GET /api/usage` and the alias `GET /usage` (the
+`UsageSnapshot`, always answered: allow-list; the web app reads `/api/usage`), `GET /api/prices/status`, everything else the API. Every request records `workerRequests` +
 `durableObjectRequests`, then its duration (`durableObjectGbSeconds`) and `guard.flush()` at the end (one ledger row written);
 the guard answers 429 `BUDGET_EXHAUSTED` with `Retry-After` at 80 %, 503 `BUDGET_UNAVAILABLE` for writes when the ledger cannot be read.
 `alarm()` records one request, builds the job registry for this run (a fresh `SubrequestBudget` of 45 calls), runs
@@ -2452,11 +2452,30 @@ that needs more subrequests than are left is deferred by a second, so the next a
 at most 3 attempts per page). The only Trading 212 call outside the alarm is the credential check of `PUT /brokers/trading212`
 (one attempt, one subrequest).
 
-**Price service registration point.** `src/jobs.ts` exports `PRICE_JOB_FACTORIES` (empty today; the TypeScript price service is not
-merged). Adding `refreshPrices`, `refreshCalendar` and `enrichTransactions` factories there is the only change needed: the alarm
-runs them behind `guardJob`, `prices-refresh` and `prices-calendar` start being scheduled, and `transactionsChanged` starts
-enqueuing `enrichTransactions` (until then it is a no-op, and no schedule without a handler is kept). Tests register fake factories
-to prove it.
+**Price service.** `PRICE_JOB_FACTORIES` in `src/jobs.ts` registers the three jobs of `@portfolio/prices` (`createPriceJobs(priceJobDeps(context))`:
+`refreshPrices`, `enrichTransactions`, `refreshCalendar`). `priceJobDeps` hands them the Hub's `ItemStore`, the alarm's counted `fetch`, the
+Hub clock, a `setTimeout` sleep and `parsePricesConfig` of the Hub's variables (`HubConfig.prices`; only string variables are read, so
+bindings are ignored). Consequences, all through existing mechanisms:
+
+- **Schedules.** The Hub keeps the schedules of every registered job (`schedulesFor`), so `PRICE_SCHEDULES` (`prices-refresh`, Europe/Amsterdam 08, 13, 18 and 22 on
+  weekdays; `prices-calendar`, 05:30 daily) sit next to `broker-sync` in the same alarm; the Worker's daily cron keeps them armed.
+- **Events.** `transactionsChanged` (API writes, CSV import, Trading 212 sync) becomes an `enrichTransactions` job for the new symbols.
+- **Budget priorities.** `guardJob` with `JOB_CEILINGS`: `refreshPrices` and `refreshCalendar` run only below 60 % of every cap (above it they
+  complete as `skipped`, are not failed and are not retried: the next schedule tries again); `enrichTransactions` runs below 80 %
+  (above it it is deferred with its cursor like the import and the sync).
+- **Subrequests.** A price step makes at most 40 fetches (retries included, `DEFAULT_STEP_SUBREQUESTS`); the alarm plans 45, so
+  each price job reserves 40 (`JOB_SUBREQUEST_RESERVE`) and a second price step in the same alarm is deferred by one second to a fresh invocation.
+  The alarm's counted `fetch` refuses the 46th call itself. Pacing the service asks for (Twelve Data batches, 60 s) is a
+  `delayMs` of the step, so the Hub never sleeps for long inside an alarm.
+- **Missing provider keys degrade, they do not fail.** A source without a key is off: its symbols are reported as skipped by the job
+  and keep their last stored price (`priceStale`), the keyless ECB FX refresh still runs, no job ends `failed`. `GET /api/prices/status`
+  (authenticated, counted like any read) answers `{ state: 'ok' | 'partial' | 'no-keys', sources: [...], missingSecrets: [...], message }`
+  naming the Worker secret that switches each source on, never a value.
+- **`MarketDataService`.** `HubCore.marketData()` is `createMarketDataService` over the same store with a fresh counted `fetch`; it runs a
+  job to completion inside one call, so it is for tests and tooling and is on no request path. The API's price-dependent endpoints
+  (holdings, allocation, dividends, calendar, asset detail) read what the alarm-driven jobs stored through the item keys both sides share.
+- **Identity-required mode.** The Hub's API runs with `authMode: 'cognito'`, which means "identity required": an anonymous request is 401, there is no
+  demo user. The name is historical; the Worker-verified GitHub owner is the identity.
 
 ### Bindings, secrets and variables (`wrangler.jsonc`, free plan only)
 
@@ -2470,6 +2489,8 @@ to prove it.
 | `SECRETS_KEY` | secret, base64 of >= 32 bytes | encrypts the Trading 212 credentials (AES-256-GCM) |
 | `GITHUB_CLIENT_ID`, `OWNER_GITHUB_ID`, `ORIGIN` | vars (placeholders in the file, `--var` at deploy) | OAuth client id, the one allowed numeric GitHub id, the public `https` origin |
 | `BASE_CURRENCY` (default EUR), `T212_SYMBOL_OVERRIDES` (optional JSON) | vars | as on AWS |
+| `TWELVEDATA_API_KEY`, `EODHD_API_KEY`, `COINGECKO_API_KEY`, `ALPHAVANTAGE_API_KEY` | optional secrets | provider keys of the price service; a missing one switches that source off (see `GET /api/prices/status`) |
+| `COINGECKO_COIN_IDS`, `EODHD_DAILY_LIMIT`, `ALPHAVANTAGE_DAILY_LIMIT`, `EU_REFRESH_HOURS`, `FX_HISTORY_START`, `CALENDAR_EARNINGS_HORIZON`, `CALENDAR_ALPHAVANTAGE_DAILY_CALLS`, `CALENDAR_EODHD_DAILY_CALLS`, `CALENDAR_RECHECK_DAYS`, `CALENDAR_REFRESH_DIVIDENDS`, `CALENDAR_SPLIT_LOOKBACK_DAYS` | optional vars (defaults in `parsePricesConfig`) | tuning of the price service |
 
 No `[limits]`, routes, custom domains, R2, KV, Queues or D1; `compatibility_flags: ["nodejs_compat"]` (CSV parsing uses `Buffer`);
 observability enabled. The deploy bundle is about 0.6 MB (130 KB gzipped) against the 3 MB free-plan limit.
@@ -2486,6 +2507,7 @@ observability enabled. The deploy bundle is about 0.6 MB (130 KB gzipped) agains
 | CSV upload `PUT` | 1 | 1 | 0 | 3 (blob, token consumed, job) + 1 ledger | then the import alarm: 1 DO request + 1 row per transaction |
 | `PUT /brokers/trading212` | 1 | 1 | 1 | 2 + 1 | encrypted secret + state |
 | Trading 212 sync | 0 | 1 per alarm run | pages + about 3 | 1 per step, 1 per transaction | at most 45 subrequests per alarm, then deferred by 1 s |
+| price step (alarm) | 0 | 1 per alarm run | at most 40 (45 per alarm) | 2 per refreshed symbol (quote, EOD); about 260 per newly enriched symbol; about 3,100 once for the FX history | below 60 % of the budget only; enrichment below 80 % |
 | cron | 1 | 1 | 0 | 1 | once a day |
 
 At 1,000 requests a day the app uses about 1 % of the Worker and Durable Object request caps and about 1 % of the daily rows written;
@@ -2497,14 +2519,15 @@ Worker answers itself (`/auth/*`, `/health`, anonymous 401s) are invisible to th
 **Verified locally** (`pnpm --filter @portfolio/cloudflare-app test`, no network, no secrets, about 6 seconds): the shared suite
 described in the README, run in Node (coverage: 100 % statements/lines, 96 % branches of `src/`) and in real workerd through Miniflare against the same
 esbuild bundle (a SQLite-backed Hub, real alarms firing by themselves, the static assets binding with SPA fallback and
-`run_worker_first`, the daily cron, the usage indicator and the 429 guard with a pinned clock and small limits, a fake GitHub and a fake
-Trading 212 as the outbound network). `wrangler deploy --dry-run` bundles the same entry offline. The platform-neutral API scenarios
+`run_worker_first`, the daily cron, the usage indicator and the 429 guard with a pinned clock and small limits, a fake GitHub, a fake
+Trading 212 and fake Twelve Data, Alpha Vantage and Frankfurter as the outbound network; the price scenarios prove that the price schedules arm the
+alarm, a refresh step writes prices the API then serves, price jobs are skipped (not failed) from 60 % of a cap and missing provider keys degrade with a status). `wrangler deploy --dry-run` bundles the same entry offline. The platform-neutral API scenarios
 (`@portfolio/api/testing`, `defineApiScenarios`) run unchanged on the in-memory dependencies, on LocalStack and on this app; the
 CSV scenario needs an ingestion pipeline, so it runs on the Cloudflare app only (the LocalStack suite keeps its presigned-upload
 check).
 
 **Only on the real account** (not verifiable here): the real `workers.dev` origin and OAuth callback with GitHub, the real Cloudflare
 accounting of requests, GB-seconds and rows (the guard's counters are an estimate with 20 % headroom; the dashboard is the truth), that the
-deploy accepts the migration and the cron trigger, real Trading 212 responses and rate limits, Durable Object eviction and cold starts under
+deploy accepts the migration and the cron trigger, real Trading 212 and market-data provider responses, rate limits and daily quotas (the tests use fakes), Durable Object eviction and cold starts under
 real traffic (the ledger is flushed at the end of every request so an eviction loses nothing), and the CPU time of the Worker (a cookie MAC
 check and a forward, designed for well under the free plan's 10 ms).

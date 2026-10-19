@@ -21,6 +21,7 @@
     "@portfolio/cloudflare": "workspace:*",
     "@portfolio/ingest": "workspace:*",
     "@portfolio/platform": "workspace:*",
+    "@portfolio/prices": "workspace:*",
     "@portfolio/shared": "workspace:*"
   },
   "devDependencies": {

@@ -1,14 +1,21 @@
-import type { FakeGithub, FakeTrading212 } from './fakes.js';
+import type { FakeGithub, FakePrices, FakeTrading212 } from './fakes.js';
 
 /** What a test sees of the deployed app, whatever runs it (Node with an in-process Hub, or real workerd through Miniflare). */
 export interface Stack {
   readonly origin: string;
   readonly github: FakeGithub;
   readonly trading212: FakeTrading212;
+  readonly prices: FakePrices;
   /** Sends a request to the Worker exactly as a browser would reach it. */
   send(path: string, init?: RequestInit): Promise<Response>;
   /** Runs the Hub's alarm until no job is left (Node), or waits until the Hub reports no pending job (workerd). */
   drain(): Promise<void>;
+  /** Enqueues a job on the Hub as the schedule or an event would (the tests cannot wait for a real cron slot). */
+  enqueue(job: string, payload: unknown): Promise<void>;
+  /** Jobs that ran out of attempts (must stay empty: a denied or unconfigured job is skipped or deferred, not failed). */
+  failedJobs(): Promise<{ job: string; error: string | null }[]>;
+  /** Names of the cron schedules the Hub keeps. */
+  schedules(): Promise<string[]>;
   /** The Hub's armed alarm (epoch ms) or null. */
   alarmAt(): Promise<number | null>;
   /** Fires the daily cron trigger of the Worker. */

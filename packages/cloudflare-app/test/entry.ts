@@ -23,9 +23,15 @@ export class Hub extends DeployedHub {
   }
 
   override async fetch(request: Request): Promise<Response> {
-    if (new URL(request.url).pathname !== '/__test/state') return super.fetch(request);
+    const { pathname } = new URL(request.url);
     const core = this.hubCore!;
+    if (pathname === '/__test/enqueue') {
+      await core.platform.jobs.enqueue((await request.json()) as never);
+      return new Response(null, { status: 204 });
+    }
+    if (pathname !== '/__test/state') return super.fetch(request);
     return Response.json({
+      schedules: this.ctx.storage.sql.exec<{ name: string }>('SELECT name FROM schedules ORDER BY name').toArray().map((row) => row.name),
       alarm: await this.ctx.storage.getAlarm(),
       pendingJobs: core.platform.jobs.nextJobDueAt(),
       failedJobs: core.platform.jobs.failedJobs().map(({ job, error }) => ({ job, error })),

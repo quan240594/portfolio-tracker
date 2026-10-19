@@ -4,7 +4,8 @@ import { createWorker } from '../src/worker.js';
 import type { WorkerEnv } from '../src/runtime.js';
 import { SqlJsStorage, TestClock } from '@portfolio/cloudflare/testing';
 import type { MetricLimits } from '@portfolio/platform';
-import { FakeGithub, FakeTrading212, ORIGIN, OWNER_ID, TEST_CLIENT_ID, TEST_CLIENT_SECRET, TEST_SECRETS_KEY, TEST_SESSION_SECRET, route, type FakeRequest, type FakeService } from './fakes.js';
+import { parsePricesConfig } from '@portfolio/prices';
+import { FakeGithub, FakePrices, FakeTrading212, ORIGIN, OWNER_ID, TEST_CLIENT_ID, TEST_CLIENT_SECRET, TEST_SECRETS_KEY, TEST_SESSION_SECRET, route, type FakeRequest, type FakeService } from './fakes.js';
 import type { Stack } from './browser.js';
 
 export const T0 = Date.UTC(2026, 0, 5, 12);
@@ -14,6 +15,8 @@ export interface NodeStackOptions {
   jobFactories?: JobFactories;
   /** Replaces the vars of the Worker/Hub (e.g. to leave one out). */
   env?: Partial<WorkerEnv>;
+  /** Environment of the price service (provider keys, tuning): none by default, i.e. no price source is on. */
+  prices?: Record<string, string>;
   /** Extra outbound services, tried before the built-in fakes. */
   services?: FakeService[];
 }
@@ -30,18 +33,19 @@ const asFakeRequest = (input: RequestInfo | URL, init?: RequestInit): FakeReques
 export async function createNodeStack(options: NodeStackOptions = {}): Promise<Stack & { storage: SqlJsStorage; core: HubCore; clock: TestClock; worker: ReturnType<typeof createWorker>; env: WorkerEnv }> {
   const github = new FakeGithub();
   const trading212 = new FakeTrading212();
-  const services = [...(options.services ?? []), github.service, trading212.service];
+  const clock = new TestClock(T0);
+  const prices = new FakePrices(() => clock.ms);
+  const services = [...(options.services ?? []), github.service, trading212.service, prices.service];
   const outbound = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const reply = route(services, asFakeRequest(input, init));
     return Promise.resolve(Response.json(reply.json ?? null, { status: reply.status, headers: reply.headers }));
   };
   const storage = await SqlJsStorage.create();
-  const clock = new TestClock(T0);
   const vars = { ORIGIN, OWNER_GITHUB_ID: String(OWNER_ID), GITHUB_CLIENT_ID: TEST_CLIENT_ID, GITHUB_CLIENT_SECRET: TEST_CLIENT_SECRET, SESSION_SECRET: TEST_SESSION_SECRET, SECRETS_KEY: TEST_SECRETS_KEY };
   const core = new HubCore(
     { storage, blockConcurrencyWhile: (callback) => callback() },
-    { secretsKey: TEST_SECRETS_KEY, origin: ORIGIN, baseCurrency: 'EUR', brokerSecretPrefix: '/test/broker/trading212', symbolOverrides: {} },
-    { now: clock.now, limits: options.limits, jobFactories: options.jobFactories, fetch: outbound, queue: { baseBackoffMs: 1_000 } },
+    { secretsKey: TEST_SECRETS_KEY, origin: ORIGIN, baseCurrency: 'EUR', brokerSecretPrefix: '/test/broker/trading212', symbolOverrides: {}, prices: parsePricesConfig(options.prices ?? {}) },
+    { now: clock.now, limits: options.limits, jobFactories: options.jobFactories, fetch: outbound, sleep: () => Promise.resolve(), queue: { baseBackoffMs: 1_000 } },
   );
   await core.start();
   const env: WorkerEnv = {
@@ -63,6 +67,7 @@ export async function createNodeStack(options: NodeStackOptions = {}): Promise<S
     origin: ORIGIN,
     github,
     trading212,
+    prices,
     storage,
     core,
     clock,
@@ -70,6 +75,9 @@ export async function createNodeStack(options: NodeStackOptions = {}): Promise<S
     env,
     send: (path, init) => worker.fetch(new Request(`${ORIGIN}${path}`, init), env),
     drain,
+    enqueue: (job, payload) => core.platform.jobs.enqueue({ job, payload } as never),
+    failedJobs: () => Promise.resolve(core.platform.jobs.failedJobs().map(({ job, error }) => ({ job, error }))),
+    schedules: () => Promise.resolve(storage.rows<{ name: string }>('SELECT name FROM schedules ORDER BY name').map((row) => row.name)),
     alarmAt: () => Promise.resolve(storage.alarm),
     cron: () => worker.scheduled({}, env),
     advance: (ms) => clock.advance(ms),

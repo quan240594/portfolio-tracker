@@ -3,6 +3,7 @@ import {
   QueueEventPublisher,
   guardJob,
   logger,
+  SCHEDULED_JOBS,
   secondsUntilReset,
   type BudgetGuard,
   type EventPublisher,
@@ -14,10 +15,12 @@ import {
   type JobQueue,
   type JobRegistry,
   type JobStep,
+  type ScheduledJob,
   type SecretStore,
 } from '@portfolio/platform';
 import { ItemBrokerStore, SecretCredentialStore, Trading212Client, brokerSyncJob, type SyncDeps } from '@portfolio/broker-sync';
 import { ItemIngestStore, importUploadedJob } from '@portfolio/ingest';
+import { DEFAULT_STEP_SUBREQUESTS, PRICE_SCHEDULES, createPriceJobs, type PriceJobDeps } from '@portfolio/prices';
 import type { HubConfig } from './config.js';
 import { SubrequestBudget } from './subrequests.js';
 
@@ -36,6 +39,8 @@ export interface JobContext {
   budget: SubrequestBudget;
   /** The global `fetch`, counted by `budget`. Every outbound call a job makes must go through it. */
   fetch: typeof fetch;
+  /** Pauses (`setTimeout`); the price service's HTTP client backs off with it, never for long. */
+  sleep: (ms: number) => Promise<void>;
 }
 
 export type JobFactory<N extends JobName> = (context: JobContext) => JobHandler<JobPayloads[N]>;
@@ -65,30 +70,47 @@ export const CORE_JOB_FACTORIES: JobFactories = {
   },
 };
 
+/** What the price jobs need, built from the Hub's ports (`@portfolio/prices`' `PriceJobDeps`). */
+export function priceJobDeps({ items, fetch, now, sleep, config }: JobContext): PriceJobDeps {
+  // Every fetch of a price step goes through the alarm's counted `fetch`; the service's own per-step budget (40) sits below it.
+  return { store: items, fetch, clock: now, sleep, config: config.prices, logger };
+}
+
 /**
- * REGISTRATION POINT OF THE PRICE SERVICE. The TypeScript price service (`@portfolio/prices`) is not merged yet. When it is,
- * add its three job factories here and nothing else changes: the alarm runs them behind `guardJob` like every other job, the
- * scheduled refreshes (`SCHEDULED_JOBS`: `prices-refresh`, `prices-calendar`) start being scheduled, and `transactionsChanged`
- * starts enqueuing `enrichTransactions` jobs.
- *
- *   refreshPrices: (context) => refreshPricesJob(...),
- *   refreshCalendar: (context) => refreshCalendarJob(...),
- *   enrichTransactions: (context) => enrichTransactionsJob(...),
- *
- * A price job makes at most `context.budget.remaining()` calls through `context.fetch` and returns `{ done: false, next }`
- * to continue in a later invocation (add its reserve to `JOB_SUBREQUEST_RESERVE`).
+ * The price service: `refreshPrices` (the scheduled quote, FX and profile refresh), `enrichTransactions` (history, dividends and
+ * profile of newly tracked symbols) and `refreshCalendar` (earnings, splits, dividend re-checks) from `@portfolio/prices`. Each
+ * is resumable (a step makes at most 40 fetches, retries included) and runs behind `guardJob`, so the two refreshes only run
+ * below 60 % of the free-plan budget and enrichment below 80 %. Provider keys are optional Worker secrets: a missing key
+ * switches that source off (its symbols are reported as skipped) and never fails a job.
  */
-export const PRICE_JOB_FACTORIES: JobFactories = {};
+export const PRICE_JOB_FACTORIES: JobFactories = {
+  refreshPrices: (context) => createPriceJobs(priceJobDeps(context)).refreshPrices!,
+  enrichTransactions: (context) => createPriceJobs(priceJobDeps(context)).enrichTransactions!,
+  refreshCalendar: (context) => createPriceJobs(priceJobDeps(context)).refreshCalendar!,
+};
 
 /** Subrequests a step of the job needs left; the alarm defers the step to a fresh invocation when fewer remain. */
 export const JOB_SUBREQUEST_RESERVE: Readonly<Partial<Record<JobName, number>>> = {
   syncBroker: T212_PAGES_PER_STEP * T212_MAX_ATTEMPTS + 3,
+  // A price step may use DEFAULT_STEP_SUBREQUESTS (40) of the 45 an alarm plans for, so one price step fits per alarm.
+  refreshPrices: DEFAULT_STEP_SUBREQUESTS,
+  enrichTransactions: DEFAULT_STEP_SUBREQUESTS,
+  refreshCalendar: DEFAULT_STEP_SUBREQUESTS,
 };
 
 export const ALL_JOB_FACTORIES: JobFactories = { ...CORE_JOB_FACTORIES, ...PRICE_JOB_FACTORIES };
 
 /** The jobs that have a handler: schedules of other jobs are not kept (they would only fail and retry). */
 export const registeredJobs = (factories: JobFactories = ALL_JOB_FACTORIES): JobName[] => Object.keys(factories) as JobName[];
+
+/** The schedules the Hub keeps: those of the registered jobs (the price schedules among them once the price service is registered). */
+export const schedulesFor = (factories: JobFactories = ALL_JOB_FACTORIES): ScheduledJob[] => {
+  const known = new Set<string>(registeredJobs(factories));
+  return SCHEDULED_JOBS.filter((schedule) => known.has(schedule.job));
+};
+
+/** The price service's own schedules (`prices-refresh`, `prices-calendar`), for the status report. */
+export const PRICE_SCHEDULE_NAMES: readonly string[] = PRICE_SCHEDULES.map((schedule) => schedule.name);
 
 /** True when `enrichTransactions` has a handler, i.e. a price service is registered. */
 export const hasPriceService = (factories: JobFactories = ALL_JOB_FACTORIES): boolean => factories.enrichTransactions !== undefined;

@@ -136,6 +136,9 @@ importers:
       '@portfolio/platform':
         specifier: workspace:*
         version: link:../platform
+      '@portfolio/prices':
+        specifier: workspace:*
+        version: link:../prices
       '@portfolio/shared':
         specifier: workspace:*
         version: link:../shared

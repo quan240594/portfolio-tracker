@@ -3,6 +3,7 @@ import { usageSnapshotSchema } from '@portfolio/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { Browser } from '../test/browser.js';
 import { createNodeStack, type NodeStackOptions } from '../test/node-stack.js';
+import { TD_KEY } from '../test/fakes.js';
 import { CORE_JOB_FACTORIES, type JobFactories } from './jobs.js';
 
 const HUB = 'https://hub.internal';
@@ -109,14 +110,14 @@ describe('HubCore', () => {
   });
 
   it('enqueues nothing for events while no price service is registered', async () => {
-    const { stack, api } = await signedIn();
+    const { stack, api } = await signedIn({ jobFactories: CORE_JOB_FACTORIES });
     const portfolio = (await api('POST', '/portfolios', { name: 'Quiet' })).body.portfolioId as string;
     await api('POST', '/transactions', { portfolioId: portfolio, date: '2026-01-05', type: 'BUY', symbol: 'SAP.DE', quantity: 1, price: 100, currency: 'EUR' });
     expect(stack.storage.rows("SELECT id FROM jobs WHERE job = 'enrichTransactions'")).toEqual([]);
     expect(stack.storage.rows<{ name: string }>('SELECT name FROM schedules').map((row) => row.name)).toEqual(['broker-sync']);
   });
 
-  it('wires a registered price service: events become jobs, its schedules are kept, and the alarm runs it', async () => {
+  it('wires a replaced price service: events become jobs, its schedules are kept, and the alarm runs it', async () => {
     const enrich = vi.fn<JobHandler<never>>(() => Promise.resolve({ done: true as const, result: 'enriched' }));
     const jobFactories: JobFactories = { ...CORE_JOB_FACTORIES, enrichTransactions: () => enrich as never, refreshPrices: () => enrich as never, refreshCalendar: () => enrich as never };
     const { stack, api } = await signedIn({ jobFactories });
@@ -126,5 +127,37 @@ describe('HubCore', () => {
     await stack.drain();
     expect(enrich).toHaveBeenCalledWith({ payload: { userId: 'github-424242', portfolioId: portfolio, symbols: ['SAP.DE'], reason: 'CREATED' }, cursor: undefined });
     expect(JOBS.enrichTransactions).toBe('enrichTransactions');
+  });
+
+  it('fires the price schedules by itself when their slot comes, through the same guarded alarm', async () => {
+    const { stack } = await signedIn({ prices: { TWELVEDATA_API_KEY: TD_KEY, FX_HISTORY_START: '2026-01-01' } });
+    expect(stack.prices.calls).toEqual([]);
+    stack.advance!(8 * 3_600_000); // Monday 20:00 UTC, past the 13:00, 18:00 and 22:00 (Amsterdam) slots of the day
+    await stack.drain();
+    expect(stack.core.platform.jobs.failedJobs()).toEqual([]);
+    expect(stack.prices.callsTo('api.frankfurter.dev').length).toBeGreaterThan(0);
+  });
+
+  it('never makes more than 45 outbound calls in one alarm, however many a job tries', async () => {
+    const callUntilRefused = async (context: { fetch: typeof fetch }, made = 0): Promise<number> => {
+      const refused = await context.fetch('https://api.frankfurter.dev/v1/latest').then(() => false, () => true);
+      return refused || made >= 100 ? made : callUntilRefused(context, made + 1);
+    };
+    const jobFactories: JobFactories = {
+      ...CORE_JOB_FACTORIES,
+      refreshPrices: (context) => async () => ({ done: true as const, result: await callUntilRefused(context) }),
+    };
+    const { stack } = await signedIn({ jobFactories });
+    await stack.enqueue('refreshPrices', { trigger: 'scheduled' });
+    await stack.core.alarm();
+    expect(stack.prices.callsTo('api.frankfurter.dev')).toHaveLength(45);
+    expect(stack.core.platform.jobs.failedJobs()).toEqual([]);
+  });
+
+  it('offers the platform MarketDataService over the same store, with a counted fetch', async () => {
+    const { stack } = await signedIn({ prices: { TWELVEDATA_API_KEY: TD_KEY, FX_HISTORY_START: '2026-01-05' } });
+    const summary = await stack.core.marketData().refreshScheduled(new Date(stack.clock.ms));
+    expect(summary).toMatchObject({ fxUpdated: true, failed: 0 });
+    expect(stack.storage.rows("SELECT pk FROM items WHERE pk = 'FX#EUR' AND sk = 'LATEST'")).toHaveLength(1);
   });
 });

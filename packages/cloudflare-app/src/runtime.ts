@@ -36,6 +36,26 @@ export interface HubEnv {
   BASE_CURRENCY?: string;
   /** JSON object: Trading 212 ticker or ISIN -> canonical symbol. Optional. */
   T212_SYMBOL_OVERRIDES?: string;
+  /**
+   * Price service (all optional, see `parsePricesConfig`): provider keys are Worker secrets; a missing key switches that source
+   * off and the app reports it (`GET /api/prices/status`) instead of failing.
+   */
+  TWELVEDATA_API_KEY?: string;
+  EODHD_API_KEY?: string;
+  COINGECKO_API_KEY?: string;
+  ALPHAVANTAGE_API_KEY?: string;
+  /** Plain variables of the price service: `TICKER=coingecko-id` pairs, daily call budgets, EU refresh hours, FX back-fill start, calendar tuning. */
+  COINGECKO_COIN_IDS?: string;
+  EODHD_DAILY_LIMIT?: string;
+  ALPHAVANTAGE_DAILY_LIMIT?: string;
+  EU_REFRESH_HOURS?: string;
+  FX_HISTORY_START?: string;
+  CALENDAR_EARNINGS_HORIZON?: string;
+  CALENDAR_ALPHAVANTAGE_DAILY_CALLS?: string;
+  CALENDAR_EODHD_DAILY_CALLS?: string;
+  CALENDAR_RECHECK_DAYS?: string;
+  CALENDAR_REFRESH_DIVIDENDS?: string;
+  CALENDAR_SPLIT_LOOKBACK_DAYS?: string;
 }
 
 /** Everything the Worker reads on top of the Hub's variables. */

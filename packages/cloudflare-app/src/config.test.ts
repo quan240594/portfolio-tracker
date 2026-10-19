@@ -14,6 +14,11 @@ describe('readHubConfig', () => {
     });
   });
 
+  it('hands the price service its keys and tuning from the string variables only', () => {
+    const result = readHubConfig({ ...hubEnv, BASE_CURRENCY: 'usd', TWELVEDATA_API_KEY: ' td ', EU_REFRESH_HOURS: '9,12', HUB: {} } as never);
+    expect(result).toMatchObject({ ok: true, config: { prices: { baseCurrency: 'USD', keys: { twelvedata: 'td', eodhd: undefined }, euRefreshHours: [9, 12] } } });
+  });
+
   it('defaults the currency to EUR and ignores unusable overrides', () => {
     for (const overrides of [undefined, '', 'not json', '[1]', 'null']) {
       expect(readHubConfig({ ...hubEnv, T212_SYMBOL_OVERRIDES: overrides })).toMatchObject({ ok: true, config: { baseCurrency: 'EUR', symbolOverrides: {} } });

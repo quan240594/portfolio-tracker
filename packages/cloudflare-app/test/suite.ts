@@ -4,11 +4,13 @@ import { usageSnapshotSchema } from '@portfolio/shared';
 import { defineApiScenarios } from '@portfolio/api/testing';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { Browser, type Stack } from './browser.js';
-import { T212_KEY, T212_SECRET, OTHER_ID, OWNER_ID, OWNER_LOGIN } from './fakes.js';
+import { AAPL_CLOSE, AV_KEY, T212_KEY, T212_SECRET, TD_KEY, OTHER_ID, OWNER_ID, OWNER_LOGIN } from './fakes.js';
 
 export interface SuiteStartOptions {
   /** Caps the budget guard measures against (the Hub's clock is pinned at `PINNED_NOW` whenever limits are given). */
   limits?: MetricLimits;
+  /** Environment of the price service: provider keys (test values) and tuning, e.g. `{ TWELVEDATA_API_KEY: ... }`. None by default. */
+  prices?: Record<string, string>;
 }
 
 export type StartStack = (options?: SuiteStartOptions) => Promise<Stack>;
@@ -185,8 +187,12 @@ export function defineAppSuite(label: string, start: StartStack): void {
       const portfolio = (await call('POST', '/portfolios', { body: { name: `Upload ${crypto.randomUUID().slice(0, 8)}` } })).body.portfolioId as string;
       const created = (await call('POST', '/imports', { body: { fileName: 'big.csv', portfolioId: portfolio } })).body as { uploadUrl: string };
       const path = new URL(created.uploadUrl).pathname;
-      const tooBig = await anonymous.request(path, { method: 'PUT', body: new Uint8Array(MAX_FILE_BYTES + 1), headers: { 'content-type': 'text/csv' } });
-      expect(tooBig.status).toBe(413);
+      // The Worker answers 413 from the announced length without reading the body; workerd may reset the connection of a
+      // client that is still sending it, which is the same refusal seen from the socket.
+      const tooBig = await anonymous
+        .request(path, { method: 'PUT', body: new Uint8Array(MAX_FILE_BYTES + 1), headers: { 'content-type': 'text/csv' } })
+        .then((response) => response.status, () => 'connection reset');
+      expect([413, 'connection reset']).toContain(tooBig);
       const csv = 'date,type,symbol,quantity,price,fee,currency\n2026-01-02,BUY,SAP.DE,1,200,0,EUR\n';
       expect((await anonymous.request(path, { method: 'PUT', body: csv, headers: { 'content-type': 'text/csv' } })).status).toBe(204);
       // The token is single use.
@@ -271,6 +277,105 @@ export function defineAppSuite(label: string, start: StartStack): void {
       }
       expect((await new Browser(stack).request('/auth/session')).status).toBe(200);
       expect((await new Browser(stack).request('/health')).status).toBe(200);
+    });
+  });
+
+  describe(`${label}: price service`, () => {
+    const keys = { TWELVEDATA_API_KEY: TD_KEY, ALPHAVANTAGE_API_KEY: AV_KEY, FX_HISTORY_START: '2026-01-01' };
+    const buy = { date: '2026-01-05', type: 'BUY', symbol: 'AAPL', quantity: 2, price: 200, currency: 'USD' };
+
+    async function signedIn(options?: SuiteStartOptions) {
+      const stack = await start(options);
+      const owner = new Browser(stack);
+      await owner.signIn();
+      const call = async (method: string, path: string, body?: unknown) => {
+        const response = await owner.request(`/api${path}`, { method, ...(body === undefined ? {} : { body }) });
+        const text = await response.text();
+        return { status: response.status, body: text ? JSON.parse(text) : undefined };
+      };
+      const portfolio = (await call('POST', '/portfolios', { name: `Prices ${crypto.randomUUID().slice(0, 8)}` })).body.portfolioId as string;
+      return { stack, owner, call, portfolio };
+    }
+
+    it('keeps the price schedules next to the broker sync and arms the alarm for them', async () => {
+      const stack = await start({ prices: keys });
+      try {
+        expect(await stack.schedules()).toEqual(['broker-sync', 'prices-calendar', 'prices-refresh']);
+        const armed = await stack.alarmAt();
+        expect(armed).not.toBeNull();
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('enriches a new symbol, refreshes its price in an alarm step and serves it through the API', async () => {
+      const { stack, call, portfolio } = await signedIn({ prices: keys });
+      try {
+        expect((await call('POST', '/transactions', { portfolioId: portfolio, ...buy })).status).toBe(201);
+        await stack.drain(); // the enrichTransactions job published by the API
+        expect(stack.prices.callsTo('www.alphavantage.co').length).toBeGreaterThan(0);
+
+        await stack.enqueue('refreshPrices', { trigger: 'scheduled' });
+        await stack.drain();
+        expect(await stack.failedJobs()).toEqual([]);
+        expect(stack.prices.callsTo('api.frankfurter.dev').length).toBeGreaterThan(0);
+        const holdings = await call('GET', `/holdings?portfolioId=${portfolio}`);
+        expect(holdings.body.holdings).toHaveLength(1);
+        expect(holdings.body.holdings[0]).toMatchObject({ symbol: 'AAPL', quantity: 2, priceLocal: AAPL_CLOSE, priceStale: false, name: 'Apple Inc.' });
+        const summary = await call('GET', `/portfolio?portfolioId=${portfolio}`);
+        expect(summary.body.totalValue).toBeGreaterThan(0);
+        // No Twelve Data call in this test may carry the key anywhere but the Authorization header (the fake rejects it otherwise).
+        expect(stack.prices.callsTo('api.twelvedata.com').length).toBeGreaterThan(0);
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('skips the price jobs (completed, never failed) from 60 % of a cap, and keeps the essential ones', async () => {
+      const limits: MetricLimits = { ...METRIC_LIMITS, workerRequests: 40 };
+      const { stack, owner } = await signedIn({ limits, prices: keys });
+      try {
+        const state = async () => usageSnapshotSchema.parse(await (await owner.request('/api/usage')).json()).state;
+        for (let request = 0; request < 30 && (await state()) === 'ok'; request++) await owner.request('/api/portfolios');
+        expect(await state()).toBe('warn');
+
+        await stack.enqueue('refreshPrices', { trigger: 'scheduled' });
+        await stack.enqueue('refreshCalendar', { trigger: 'scheduled' });
+        await stack.drain();
+        expect(await stack.failedJobs()).toEqual([]);
+        expect(stack.prices.callsTo('api.twelvedata.com')).toEqual([]);
+        expect(stack.prices.callsTo('api.frankfurter.dev')).toEqual([]);
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('degrades gracefully without provider keys: a clear status, jobs complete, the API keeps serving', async () => {
+      const { stack, owner, call, portfolio } = await signedIn();
+      try {
+        const status = await call('GET', '/prices/status');
+        expect(status.status).toBe(200);
+        expect(status.body).toMatchObject({ state: 'no-keys', missingSecrets: ['TWELVEDATA_API_KEY', 'EODHD_API_KEY', 'COINGECKO_API_KEY', 'ALPHAVANTAGE_API_KEY'] });
+        expect(status.body.message).toContain('No market-data API key is set');
+        expect(JSON.stringify(status.body)).not.toContain(TD_KEY);
+        expect((await new Browser(stack).request('/api/prices/status')).status).toBe(401);
+
+        expect((await call('POST', '/transactions', { portfolioId: portfolio, ...buy })).status).toBe(201);
+        await stack.drain();
+        await stack.enqueue('refreshPrices', { trigger: 'scheduled' });
+        await stack.enqueue('refreshCalendar', { trigger: 'scheduled' });
+        await stack.drain();
+
+        expect(await stack.failedJobs()).toEqual([]);
+        expect(stack.prices.callsTo('api.twelvedata.com')).toEqual([]);
+        expect(stack.prices.callsTo('www.alphavantage.co')).toEqual([]);
+        const holdings = await call('GET', `/holdings?portfolioId=${portfolio}`);
+        expect(holdings.status).toBe(200);
+        expect(holdings.body.holdings[0]).toMatchObject({ symbol: 'AAPL', quantity: 2, priceStale: true });
+        expect((await owner.request('/api/usage')).status).toBe(200);
+      } finally {
+        await stack.dispose();
+      }
     });
   });
 }

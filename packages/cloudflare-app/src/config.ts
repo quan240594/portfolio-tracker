@@ -1,3 +1,4 @@
+import { parsePricesConfig, type PricesConfig } from '@portfolio/prices';
 import { MIN_SESSION_SECRET_LENGTH, resolveGithubAuthConfig, type GithubAuthConfig, type GithubFetch } from '@portfolio/platform';
 import type { HubEnv, WorkerEnv } from './runtime.js';
 
@@ -12,6 +13,8 @@ export interface HubConfig {
   /** Prefix of the Trading 212 credential secrets in the encrypted secret store. */
   brokerSecretPrefix: string;
   symbolOverrides: Record<string, string>;
+  /** The price service's configuration (provider keys are optional). */
+  prices: PricesConfig;
 }
 
 export const DEFAULT_BASE_CURRENCY = 'EUR';
@@ -52,6 +55,11 @@ function originOf(value: string | undefined): string | undefined {
   }
 }
 
+/** The string-valued entries of the environment (bindings such as the Durable Object namespace are objects and not configuration). */
+function stringVars(env: HubEnv): Record<string, string> {
+  return Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+}
+
 /** Validates the Hub's variables. The problems name the variable, never its value. */
 export function readHubConfig(env: HubEnv): ConfigResult<HubConfig> {
   const problems: string[] = [];
@@ -70,6 +78,7 @@ export function readHubConfig(env: HubEnv): ConfigResult<HubConfig> {
       baseCurrency: currency.toUpperCase(),
       brokerSecretPrefix: BROKER_SECRET_PREFIX,
       symbolOverrides: parseOverrides(env.T212_SYMBOL_OVERRIDES),
+      prices: parsePricesConfig({ ...stringVars(env), BASE_CURRENCY: currency.toUpperCase() }),
     },
   };
 }
