@@ -91,3 +91,37 @@
     transition: none;
   }
 }
+
+/* Free-plan usage bars (<meter optimum=0>): green below the warn threshold, amber from it, rose from the block threshold. */
+.usage-meter {
+  appearance: none;
+  border-radius: 9999px;
+  overflow: hidden;
+  background: var(--color-slate-200);
+}
+:root.dark .usage-meter {
+  background: var(--color-slate-700);
+}
+.usage-meter::-webkit-meter-bar {
+  background: transparent;
+  border: 0;
+  height: 100%;
+}
+.usage-meter::-webkit-meter-optimum-value {
+  background: var(--color-emerald-500);
+}
+.usage-meter::-webkit-meter-suboptimum-value {
+  background: var(--color-amber-500);
+}
+.usage-meter::-webkit-meter-even-less-good-value {
+  background: var(--color-rose-500);
+}
+.usage-meter:-moz-meter-optimum::-moz-meter-bar {
+  background: var(--color-emerald-500);
+}
+.usage-meter:-moz-meter-sub-optimum::-moz-meter-bar {
+  background: var(--color-amber-500);
+}
+.usage-meter:-moz-meter-sub-sub-optimum::-moz-meter-bar {
+  background: var(--color-rose-500);
+}

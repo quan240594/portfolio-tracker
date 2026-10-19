@@ -79,6 +79,7 @@ src/
   components/   Layout, KpiCard, Change (gain/loss with sign + arrow), Dialog, SegmentedControl, charts/…
   features/     holdings/ (sortable table) · transactions/ (form, CSV import flow, sample CSV)
                 portfolios/ (scope hook, header switcher, Manage portfolios dialog)
+                usage/ (free-plan usage chip, panel and banner; only where the backend serves GET /usage)
   pages/        Dashboard, Holdings, Dividends, Transactions
   mocks/        fixtures.ts (deterministic demo data), db.ts (in-memory backend), handlers.ts, browser.ts, server.ts
   theme/        ThemeProvider (light/dark, prefers-color-scheme, persisted in localStorage `pt-theme`)
@@ -108,7 +109,9 @@ scripts/        serve-pages.mjs — GitHub-Pages-like static server for the Page
 
 - All API payload types come from `@portfolio/shared` (`api.ts`, `types.ts`); the transaction form validates with
   `transactionInputSchema`, the import flow with `createImportSchema`.
-- Errors use the API envelope `{ error: { code, message, details? } }` and surface as `ApiError` (`status`, `code`).
+- Errors use the API envelope `{ error: { code, message, details? } }` and surface as `ApiError` (`status`, `code`). A 429
+  `BUDGET_EXHAUSTED` / 503 `BUDGET_UNAVAILABLE` of the Cloudflare free-plan guard becomes a calm "paused, resumes at ..." message (see
+  `docs/architecture.md`, "Web: usage indicator").
 - After any mutation (create/delete transaction, completed import) the portfolio, holdings, allocation, history,
   dividends and transactions queries of the affected portfolio and of the combined view are invalidated.
 - CSV import: `POST /imports` → `PUT uploadUrl` (`Content-Type: text/csv`) → poll `GET /imports/{id}` every 1.5 s

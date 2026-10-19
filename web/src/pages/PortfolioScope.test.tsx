@@ -17,8 +17,8 @@ describe('portfolio-scoped pages', () => {
     const params: string[] = [];
     server.events.on('request:start', ({ request }) => {
       const url = new URL(request.url);
-      // The watchlist is per user, not per portfolio.
-      if (url.pathname !== '/api/portfolios' && url.pathname !== '/api/watchlist') params.push(`${url.pathname}?${url.searchParams.get('portfolioId')}`);
+      // The watchlist and the free-plan usage are per user/deployment, not per portfolio.
+      if (!['/api/portfolios', '/api/watchlist', '/api/usage'].includes(url.pathname)) params.push(`${url.pathname}?${url.searchParams.get('portfolioId')}`);
     });
     renderApp('/?portfolio=trading-212');
     const top = await screen.findByRole('region', { name: 'Top holdings' });

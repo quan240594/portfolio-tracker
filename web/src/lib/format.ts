@@ -61,6 +61,11 @@ export function formatQuantity(value: number): string {
   return new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 8 }).format(value);
 }
 
+/** A plain count or measurement with thousands separators (1500 → "1.500", 12.5 → "12,5"); at most `maxDigits` decimals. */
+export function formatCount(value: number, maxDigits = 2): string {
+  return new Intl.NumberFormat(LOCALE, { maximumFractionDigits: maxDigits }).format(value);
+}
+
 /** FX rate in units of the foreign currency per 1 base unit (e.g. 1.0842 → "1,0842"). */
 export function formatFxRate(rate: number): string {
   return new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(rate);

@@ -1,6 +1,8 @@
 import { http, HttpResponse } from 'msw';
 import { server } from '../mocks/server';
 import { setAuthTokenHooks } from '../features/auth/tokenHooks';
+import { getBudgetNotice, reportBudgetError, resetBudgetNotice } from '../features/usage/budgetSignal';
+import { budgetExhausted, budgetUnavailable } from '../test/usage';
 import { ApiError, api, apiUrl, errorMessage, request, requestText, uploadCsv } from './client';
 
 afterEach(() => setAuthTokenHooks(undefined));
@@ -262,3 +264,61 @@ describe('errorMessage', () => {
   });
 });
 
+
+describe('free-plan budget guard errors', () => {
+  const NOW = Date.parse('2026-10-19T10:00:00Z');
+  const local = (ms: number) => new Intl.DateTimeFormat('nl-NL', { weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(ms));
+
+  afterEach(() => {
+    resetBudgetNotice();
+    vi.useRealTimers();
+  });
+
+  it('turns 429 BUDGET_EXHAUSTED into a calm "resumes at" message from Retry-After', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: NOW });
+    server.use(http.get('/api/holdings', () => budgetExhausted('3600')));
+    const err = await api.getHoldings('all').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 429, code: 'BUDGET_EXHAUSTED', resumesAt: NOW + 3_600_000, details: { blockedMetrics: ['rowsRead'] } });
+    expect(errorMessage(err)).toBe(`Paused to stay inside the free plan, resumes at ${local(NOW + 3_600_000)}.`);
+  });
+
+  it('falls back to a default wait when Retry-After is missing', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: NOW });
+    server.use(http.get('/api/holdings', () => budgetExhausted(null)));
+    await expect(api.getHoldings('all')).rejects.toMatchObject({ code: 'BUDGET_EXHAUSTED', resumesAt: NOW + 300_000 });
+  });
+
+  it('gives 503 BUDGET_UNAVAILABLE its own short message', async () => {
+    server.use(http.delete('/api/transactions/t1', () => budgetUnavailable()));
+    const err = await api.deleteTransaction('t1').catch((e: unknown) => e);
+    expect(err).toMatchObject({ status: 503, code: 'BUDGET_UNAVAILABLE' });
+    expect(errorMessage(err)).toBe('Usage could not be checked, so changes are paused for a moment. Try again shortly.');
+  });
+
+  it('recognises the guard in text downloads too', async () => {
+    server.use(http.get('/api/export/transactions', () => budgetExhausted('60')));
+    await expect(requestText('/export/transactions', { accept: 'text/csv' })).rejects.toMatchObject({ status: 429, code: 'BUDGET_EXHAUSTED' });
+  });
+
+  it('keeps other error codes untouched, also on a 429', async () => {
+    server.use(http.get('/api/holdings', () => HttpResponse.json({ error: { code: 'RATE_LIMITED', message: 'Slow down' } }, { status: 429, headers: { 'Retry-After': '5' } })));
+    const err = await api.getHoldings('all').catch((e: unknown) => e);
+    expect(err).toMatchObject({ status: 429, code: 'RATE_LIMITED', message: 'Slow down' });
+    expect((err as ApiError).resumesAt).toBeUndefined();
+  });
+
+  it('remembers a refusal for the page and a successful request ends it (JSON and text)', async () => {
+    server.use(http.get('/api/holdings', () => budgetExhausted('60')));
+    await api.getHoldings('all').catch(() => undefined);
+    expect(getBudgetNotice()?.code).toBe('BUDGET_EXHAUSTED');
+    server.resetHandlers();
+    await api.getHoldings('all');
+    expect(getBudgetNotice()).toBeUndefined();
+
+    reportBudgetError('BUDGET_EXHAUSTED', Date.now() + 60_000);
+    server.use(http.get('/api/export/transactions', () => new HttpResponse('a,b')));
+    await requestText('/export/transactions', { accept: 'text/csv' });
+    expect(getBudgetNotice()).toBeUndefined();
+  });
+});

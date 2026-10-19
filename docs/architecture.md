@@ -2079,10 +2079,10 @@ the Worker-side counters the app cannot see. The overall state is the worst metr
 }
 ```
 
-The indicator shows the overall `state` (hidden at `ok`, amber at `warn`, red at `blocked` with "paused until `resetsAt`",
-grey "usage unknown" at `unavailable`) and the per-metric bars from `percent`. The endpoint is always answered (allow-list), also
-while requests are refused; the web client treats a 429 or 503 with `error.code` `BUDGET_EXHAUSTED`/`BUDGET_UNAVAILABLE` as
-"paused", not as an error.
+The web client shows the overall `state` as a chip (green at `ok`, amber at `warn`, rose "Paused" at `blocked`, grey "Usage unknown" at
+`unavailable`; always icon plus text) and the per-metric bars from `percent`; see "Web: usage indicator". The endpoint is always answered
+(allow-list), also while requests are refused; the web client treats a 429 or 503 with `error.code` `BUDGET_EXHAUSTED`/`BUDGET_UNAVAILABLE`
+as "paused", not as an error.
 
 ### Tests
 
@@ -2345,3 +2345,51 @@ The package is wired like `packages/aws`: `pnpm -r` picks it up for typecheck, l
    this port is meant for the owner's personal deployment.
 6. The Cloudflare adapter must still persist the cursor between steps, honour `delayMs` (alarm time) and run the budget guard
    around the steps; this package only provides the pure handlers.
+
+## Web: usage indicator
+
+The in-app view of the free-plan budget guard for the personal Cloudflare deployment (`web/src/features/usage/`). It consumes the
+`GET /usage` contract of "Free-plan budget guard" (`usageSnapshotSchema`, `USAGE_METRIC_LABELS` from `@portfolio/shared`) and shows nothing
+where the backend has no such endpoint.
+
+**Availability (`useUsage()`).** `useUsage()` returns `{ availability, snapshot? }`, `availability` being `loading | ready | not-exposed |
+unreachable`. `fetchUsage` (`usageClient.ts`) calls `GET <API_BASE_URL>/usage` through the API client's `send` (same cookie/bearer handling) but
+**not** through `request`, so a 401 there never signs the user out. 404/405/403/401, a non-JSON body (a static host's HTML fallback) or a body
+that fails `usageSnapshotSchema` mean `not-exposed`: no UI, no error, and the query neither polls nor refetches again (`staleTime: Infinity`). The
+AWS deployment therefore shows nothing. Network errors and 5xx are `unreachable` (nothing shown, last good reading kept) and retried on the
+next poll. Polling is every 5 minutes (`USAGE_POLL_MS`; React Query does not poll in a hidden tab) and on window focus when the reading is older
+than 1 minute (`USAGE_STALE_MS`). **Demo/mock mode (`USE_MOCKS`, the GitHub Pages demo) never asks and has no `/usage` mock on purpose**: the
+demo is about portfolio data, and an invented usage figure would be misleading. Tests use a default 404 handler in `mocks/server.ts` and install
+`serveUsage(snapshot)` (`web/src/test/usage.ts`) where needed.
+
+**Indicator (`UsageIndicator`, last control of the header).** A chip with the overall state: ok "Usage OK" (green check), warn "Usage high"
+(amber triangle), blocked "Paused" (rose pause icon), unavailable "Usage unknown" (grey question mark); text and a distinct shape always, never
+colour alone. It opens a native disclosure panel (`<section>` with a heading, no ARIA roles): focus moves into the panel, `Escape` closes it and
+returns focus to the chip, so does the Close button, and clicking elsewhere or tabbing out closes it. Per metric: the `USAGE_METRIC_LABELS` label,
+the state in words with its icon, a native `<meter>` (`min 0`, `max 100`, `optimum 0`, `low`/`high` just below the thresholds so exactly 60 % and 80 %
+fall in the next region; the value is capped at 100 while the text prints the real percentage) and "used of limit (percent)" in the app locale
+(`formatCount`, `formatPercent`; GB-s has two decimals). The panel also states the policy ("Free plan caps are never exceeded: at 80 % of any cap
+the app pauses new work until the reset"), "Daily counters reset at <local weekday and time> (00:00 UTC); stored data is a level and does not
+reset" and the reading time. `unavailable` replaces the bars with a plain note. The panel is right-aligned under the chip and at most
+`100vw - 2rem` wide (no overflow at 320 px).
+
+**Banner (`UsageBanner`, between the sticky header and the page).** `warn`: dismissible for the browser session (`sessionStorage`, one key
+per UTC day); it returns on a new day and whenever the state was not `warn` in between (ok, blocked). `blocked`, or any 429
+`BUDGET_EXHAUSTED`: a persistent, non-dismissible notice "Paused to stay inside the free plan, resumes at <local time>." (from `resetsAt`, or the
+`Retry-After` of the refusal; when only `storageBytes` is blocked the text says the stored data is at its cap, since waiting does not help).
+503 `BUDGET_UNAVAILABLE`: "Usage could not be checked, so changes are paused for a moment. Try again shortly." The message is an `<output>`
+(polite live region).
+
+**API client.** `ApiError` has an optional `resumesAt` (epoch ms). `toApiError` recognises `BUDGET_EXHAUSTED`/`BUDGET_UNAVAILABLE` by `error.code`,
+reads `Retry-After` (whole seconds or an HTTP date; default 5 min / 1 min; at most 24 h), sets `resumesAt`, replaces the message by the paused
+text (so every place that prints `errorMessage(err)` says "Paused to stay inside the free plan, resumes at ..." instead of a generic failure;
+`ErrorState` also shows it in calm blue with the title "Paused for now") and publishes it to a tiny store (`budgetSignal.ts`, `useBudgetNotice()`)
+that the banner reads even when there is no `/usage`. The notice ends at its resume time, or by a successful request that started after the refusal
+(a successful write for a 503, since reads still run then). Other error codes, also on a 429, are untouched.
+
+**Tests.** Unit: `pnpm --filter @portfolio/web test` (`features/usage/*.test.ts(x)`, `api/client.test.ts`, `components/Layout.usage.test.tsx`: hook
+states ok/warn/blocked/unavailable/not-found/unreachable, polling options and focus refetch, chip, panel keyboard and focus behaviour, number and
+time formatting, banner dismissal, 429/503 handling). E2E: `pnpm --filter @portfolio/web exec playwright test --config playwright.github.config.ts
+e2e-github/usage.spec.ts` (route mocks of `/auth/*`, `/api/*` and `/api/usage`, a 429 on an API call, a fake clock fast-forwarded past the poll,
+fixed `Europe/Amsterdam` zone, no horizontal overflow at 320 and 1280 px); it also runs in `pnpm --filter @portfolio/web test:e2e`. Not verified
+against the real Worker: that needs the `/usage` route of the Cloudflare wiring.
