@@ -1783,12 +1783,12 @@ and end the job with a `FAILED` result; they are never thrown, so an asynchronou
 connected portfolio. A test interrupts a run after every step and checks that it resumes to the identical result and
 stored items.
 
-### Market data (types only)
+### Market data
 
 `MarketDataService`, `MarketDataProvider` (alias `PriceProvider`), `FxProvider`, `EarningsSource` and `CorporateActionsSource`
 in `packages/platform/src/market-data.ts` mirror the operations of the Python price service (`prices/handlers.py`,
 `calendar_handlers.py`, `providers/base.py`, `calendar_providers.py`): `refreshScheduled`, `enrichSymbols`,
-`backfillFxHistory`, `refreshCalendar`. They exist for the later TypeScript port; the Python service is unchanged.
+`backfillFxHistory`, `refreshCalendar`. `packages/prices` implements them (see "Price service in TypeScript"); the Python service is unchanged.
 
 ### Adding an adapter (checklist)
 
@@ -2177,3 +2177,171 @@ side, and job handlers called by the alarm are bridged back to Node through a se
 the real `rowsRead`/`rowsWritten` counters, UTF-8 byte ordering, the largest file, and an alarm that fires by itself. No network,
 no Cloudflare account; the workerd binary comes from the `workerd` npm package. New devDependencies: `miniflare`, `esbuild`
 (bundles the test Worker), `sql.js` and `@types/sql.js`.
+
+## Price service in TypeScript
+
+`packages/prices` (`@portfolio/prices`) is the TypeScript port of the Python price service (`services/prices`). The Python code is
+unchanged and stays deployed and tested for the AWS stack; the port exists so that the Cloudflare deployment (a SQLite Durable Object
+with alarms, see "Cloudflare limits probe: results") runs the same refresh logic on the platform ports. It uses only `fetch`
+(injected), WebCrypto, `Intl` and pure TypeScript.
+
+### What the Python service does
+
+Two Lambdas (and a third for the calendar) write the market data of the single table; nothing else writes it.
+
+| Python entry point | Trigger | Stores (`PK` / `SK`, entity) | TypeScript |
+|---|---|---|---|
+| `handlers.scheduled_refresh` | EventBridge Scheduler (`prices-refresh`, Europe/Amsterdam 08, 13, 18, 22 on weekdays) | `TICKER#{s}` / `QUOTE#LATEST` and today's `EOD#{date}` per refreshed symbol; `FX#{base}` / `LATEST`; `FX#{base}` / `DAY#{date}` (daily ECB fixings, gaps back-filled, today's fixing from `/latest`); optional company details on `PROFILE` (one symbol per run, 30 day TTL); emits `PricesUpdated` | `refreshPrices` |
+| `handlers.on_transactions_changed` | SQS enrich-queue (`TransactionsChanged`) | for symbols without a `PROFILE`: 1 year of `EOD#`, dividends `DIV#{exDate}` (2 years back, 1 year ahead), `QUOTE#LATEST`, `TRACKED` / `TICKER#{s}` (create-only), then `PROFILE` last (the "enriched" marker); emits `PricesUpdated` | `enrichTransactions` |
+| `calendar_handlers.calendar_refresh` | EventBridge Scheduler (`prices-calendar`, 05:30 daily) | `TICKER#{s}` / `EARN#{date}`, `SPLIT#{date}`, `CAL#STATE`; `DIV#` re-check; `CALENDAR` / `BUDGET#{provider}` (`{day, used}`) | `refreshCalendar` |
+
+The API reads these items through `keys` / `calendarKeys` in `packages/shared` (quotes, EOD closes, profiles, dividends, FX,
+FX days, earnings, splits); the TypeScript port writes through the same keys, so the item shapes are identical (the parity test
+compares them with what the Python code writes). The service has no runtime dependency beyond the standard library and boto3; there
+is no scraping client and no cookie/crumb flow, only keyed REST calls plus the keyless ECB API. `SCHEDULED_JOBS` already holds both
+schedules (`prices-refresh`, `prices-calendar`); the package exposes them as `PRICE_SCHEDULES`.
+
+### Data sources, terms and limits
+
+All calls are plain HTTPS `GET`s from a Worker (no cookies, no datacenter-IP blocking is documented for these keyed APIs). Keys come
+from the injected configuration (`parsePricesConfig(env)`, same variable names as the Python service); a missing key disables that
+source and its symbols are reported as skipped.
+
+| Source | Used for | Free-tier limits (as documented by the provider; the repo's "Calendar" section has the research) | Guard |
+|---|---|---|---|
+| Twelve Data | quotes, daily history, profile fallback for bare (US) tickers | Basic plan: 8 credits per minute, 800 per day (1 credit per symbol); the Basic plan's terms restrict displaying data to third parties (a personal deployment only) | batches of at most 8, per-minute pacing between batches, daily quota in the item store |
+| EODHD | quotes, history, profile (search), dividends, splits of exchange-suffixed symbols | about 20 calls per day (each ticker of a batched real-time call counts); history limited to 1 year | daily quota (`EODHD_DAILY_LIMIT`, default 20) plus the calendar's own budget (`CALENDAR_EODHD_DAILY_CALLS`, default 8); HTTP 402 is read as "limit reached" |
+| CoinGecko (demo key) | crypto quotes and history | 30 calls per minute, 10,000 per month; its terms ask for attribution where data is shown (check before any public use) | one `/simple/price` call per 50 coins |
+| Alpha Vantage | US profiles (`OVERVIEW`), earnings calendar (CSV, one call for every US company) | 25 requests per day, throttling answers HTTP 200 with a `Note`/`Information` body | daily quota; the calendar spends 1 call a day |
+| Frankfurter (ECB reference rates) | latest and daily FX | free, no key, no quota (abuse rate limiting only) | one request per calendar year of history |
+
+Not used (see "Calendar"): EODHD's calendar API, Twelve Data's splits/earnings endpoints, Finnhub. No paid source is added.
+
+### What is risky on the Cloudflare free plan, and how the port copes
+
+| Risk | Cap | Mitigation in the port |
+|---|---|---|
+| Subrequests | 50 per invocation | every step gets a `budgetedFetch` (default 40 fetches, **retries included**); a unit of work only starts when its worst case still fits; the step ends with `{done: false, next}` and the host calls again. A budget that can never be enough fails loudly ("too small for one unit of work") instead of looping |
+| CPU of a Worker or queue consumer | about 10 ms | not designed for: the jobs are meant for a Durable Object alarm (tens of seconds of CPU). The costly pieces are the Alpha Vantage earnings CSV (about 4,600 rows, parsed by a small RFC 4180 reader), a Frankfurter year of rates (about 260 days x 30 currencies) and zod row validation; none was measured on the runtime yet (open issue 1) |
+| Wall time | no per-step cap on a DO alarm, but pacing must not sleep | client-side rate limits never sleep more than 2 s inline: Twelve Data batches are spaced by the handler through `delayMs` (60 s per 8 credits), retries back off at most 8 s per attempt |
+| Provider quotas that reset daily, in a stateless runtime | 20 EODHD, 25 Alpha Vantage, 800 Twelve Data per day | counted in the item store (`USAGE` / `{provider}`, `{day, used}`) by a compare-and-set, shared by every step and every Durable Object restart; the calendar budget keeps the Python item (`CALENDAR` / `BUDGET#{provider}`) |
+| EODHD with many EU tickers | 20 per day | each EU ticker costs one call per refresh and EU quotes are refreshed once a day (hour 18): more than about 12 EU tickers exhaust the day; the remaining symbols are reported as failed (`rate-limited`) and retried by the next run. Set `EODHD_DAILY_LIMIT=12` to match the budget guard's cap |
+| Rows written | 100,000 per day, 1 GB | a refresh writes 2 rows per symbol (quote, EOD); the first FX back-fill about 3,100 rows once; enrichment about 260 rows per symbol |
+| Durable Object restart between steps | state is not in memory | the whole state is in the cursor (a JSON string); nothing is cached in memory across steps |
+
+### Contracts
+
+```ts
+// packages/prices/src/index.ts (selection)
+parsePricesConfig(env: Record<string, string | undefined>): PricesConfig
+createPriceJobs(deps: PriceJobDeps): { refreshPrices; enrichTransactions; refreshCalendar }   // JobHandler<JobPayloads[N], Result>
+createMarketDataService(deps: PriceJobDeps): MarketDataService                                  // runs the jobs to completion
+backfillFxHistory(deps, today: string, start?: string): Promise<FxBackfillSummary>
+createMarketData(deps, fetch?): { provider: PriceSource; fx: FxSource; earnings?; actions? }     // the providers of one step
+
+interface PriceJobDeps {
+  store: ItemStore; fetch: FetchLike; clock: () => Date; sleep: (ms: number) => Promise<void>; config: PricesConfig;
+  logger?: Logger; random?: () => number; timeoutMs?: number; timeoutSignal?: (ms: number) => AbortSignal;
+  stepSubrequests?: number;                         // default 40
+  marketData?: (deps, fetch) => MarketData;         // replace the live sources (offline provider, fakes)
+}
+```
+
+* **Ports implemented** (all with injected `fetch`, a per-request timeout via `AbortSignal.timeout`, retries with backoff and
+  jitter on 429/5xx/network errors honouring `Retry-After`, credentials redacted from every message): `TwelveDataProvider`,
+  `EodhdProvider`, `CoinGeckoProvider`, `AlphaVantageProvider` (profile only) as `MarketDataProvider`/`PriceSource`;
+  `RoutingProvider` (the live provider: crypto to CoinGecko, exchange-suffixed to EODHD, bare to Twelve Data, profiles Alpha
+  Vantage first); `FrankfurterFx` as `FxProvider`; `AlphaVantageEarnings` as `EarningsSource`; `EodhdCorporateActions` as
+  `CorporateActionsSource`. `PriceSource.getQuotes` returns the platform's `QuoteBatch` plus `retryable`/`kind` per failure.
+  Responses are validated with zod row schemas and defensive coercion (strings such as `"NA"`, `"None"`, `"-"` become absent).
+* **Pure and portable handlers.** A handler reads the clock only to start a run; the run's time is in the cursor, so a step
+  delivered again recomputes the same writes. Every write has a deterministic key. The handlers never throw for provider or store
+  failures of a single symbol (they are counted in the result); a thrown error means "deliver this step again".
+* **`refreshPrices`** (`JobHandler<{trigger: 'scheduled'}, ScheduledRefreshSummary>`), phases `fx` -> `history` -> `plan` ->
+  `quotes` -> `details`. The cursor holds the tracked symbols, the pending quote batches (8 US, 15 EU, 50 crypto per call), what was
+  refreshed/failed/skipped, the per-source `readyAt` and the FX plan. Twelve Data batches are spaced by `delayMs`; EU symbols
+  refresh in the hours of `EU_REFRESH_HOURS` (Europe/Amsterdam, via `Intl`) or when their stored quote is missing or older than 24 h.
+* **`enrichTransactions`** (`JobHandler<TransactionsChangedDetail, EnrichmentSummary>`): symbols without a `PROFILE`, a few per step
+  (a US symbol pauses the next US symbol by 30 s for Twelve Data's per-minute credits). Transient failures are tried again in later
+  rounds (3 attempts in all, pauses of 60 s and 120 s) instead of an SQS redelivery; what still fails is `retry` in the result.
+* **`refreshCalendar`** (`JobHandler<{trigger: 'scheduled'}, CalendarRefreshSummary>`): earnings (one call, `alphavantage` budget),
+  then the due symbols oldest first within the `eodhd` budget, 2 calls per symbol (1 without dividends). A provider rate limit
+  stops the run (`corporateActions.status` is `rate-limited`, a new member of the platform's `CalendarStatus`).
+  Budgets are spent with a token (the run's timestamp and the unit), so a step delivered again does not pay twice.
+* `SCHEDULED_JOBS` is unchanged; `PRICE_SCHEDULES` selects its two price entries.
+
+### Differences from the Python service
+
+* No `MARKET_DATA_PROVIDER=mock`: the deterministic mock is a development aid of the AWS stack and is not ported. Tests use fake
+  `fetch` responses; a host that wants an offline provider supplies `marketData`.
+* `PricesUpdated` is not emitted: the `EventPublisher` port has no such event and nothing on the portable platforms consumes it
+  (`eventPublished` is always `false`).
+* The enrichment retry is a bounded in-job retry (see above) instead of SQS `batchItemFailures`; cash and custom symbols are
+  filtered out of `enrichTransactions` (the API already does not send them).
+* The splits call also spends the provider's daily quota (Python only counted dividends and quotes there).
+* The FX history is stored one calendar year at a time as it arrives, so a failure after some years keeps them (Python wrote
+  nothing on failure); today's fixing is still only written after a complete back-fill.
+* More tolerant of provider quirks: rows that are not objects are skipped (the Python code raises on a non-object Twelve Data row).
+* The profile endpoint memo of Twelve Data (`/profile` not available on the free plan) lives per provider instance, i.e. per step.
+
+### Parity with the Python tests
+
+`packages/prices/test-fixtures/parity-cases.json` holds 55 cases: provider payloads taken from the Python tests (synthetic, no
+personal data) with the normalised results **the Python code produced** (`generate_parity_cases.py` runs the Python providers
+against the payloads). `src/parity.test.ts` feeds the same payloads to the TypeScript code and requires identical results,
+identical request URLs and identical credential headers. The remaining Python tests map to unit tests as follows.
+
+| Python test (`services/prices/tests/`) | TypeScript counterpart (`packages/prices/src/`) |
+|---|---|
+| `test_providers_http.py`: `test_twelvedata_*`, `test_asset_class_from_type` | `parity.test.ts` cases `twelvedata-*`, `asset-class`; `providers/providers.test.ts` ("Twelve Data", "quota and pacing") |
+| `test_providers_http.py`: `test_eodhd_*` | `parity.test.ts` cases `eodhd-*`, `eodhd-symbol-mapping`; quota and 402 in `providers.test.ts` |
+| `test_providers_http.py`: `test_coingecko_*`, `test_alphavantage_*`, `test_frankfurter` | `parity.test.ts` cases `coingecko-*`, `alphavantage-*`, `frankfurter-latest`; `providers.test.ts` ("CoinGecko", "Alpha Vantage") |
+| `test_httpclient.py` (redaction, retries, 429/5xx/404, network, JSON, backoff, bucket, daily quota) | `core.test.ts` ("http", "limits") |
+| `test_fx_history.py`: Frankfurter chunks, malformed payloads, latest fixing | `parity.test.ts` cases `frankfurter-*`, `year-chunks*`, `has-weekday*` |
+| `test_fx_history.py`: repository, backfill, scheduled refresh, failure isolation | `repository.test.ts`; `jobs/refresh-prices.test.ts` ("FX"); `service.test.ts` (`backfillFxHistory`) |
+| `test_fx_history.py`: mock FX, local `fx-backfill` CLI, `Settings.fx_history_start` | not ported (mock/CLI); `core.test.ts` ("configuration") |
+| `test_handlers.py::test_scheduled_refresh_*`, `test_eu_hour_gating`, `test_eu_refresh_hours_env`, `test_unavailable_provider_counts_as_skipped` | `jobs/refresh-prices.test.ts` |
+| `test_handlers.py::test_publish_failure_is_logged_not_raised`, `test_json_logging`, `test_formatter_handles_unserializable`, `test_last_sunday_rule` | not ported (no event, Logger port, `Intl` time zones); `amsterdam-hour` parity case |
+| `test_handlers.py::test_enrichment_*`, `test_existing_tracked_item_preserved`, `test_retryable_*`, `test_fallback_profile_*`, `test_unavailable_provider_acks`, `test_unexpected_error_is_retried`, `test_non_retryable_dividend_error_tolerated` | `jobs/enrich.test.ts` |
+| `test_handlers.py::test_malformed_messages_are_acked`, `test_parse_symbols_variants`, `test_profile_lookup_failure_retries_batch` | `jobs/enrich.test.ts` (`enrichmentSymbols`, empty payload, failing lookup) |
+| `test_handler_edges.py` | `jobs/refresh-prices.test.ts`, `jobs/enrich.test.ts` (`quoteFromHistory`, fallbacks, storage errors) |
+| `test_profile_details.py`: text helpers, provider details | `parity.test.ts` cases `clean-text`, `valid-isin`, `alphavantage-overview`, `eodhd-profile-search`, `twelvedata-profile-endpoint` |
+| `test_profile_details.py`: repository, lazy refresh | `repository.test.ts`; `jobs/refresh-prices.test.ts` ("profile details") |
+| `test_routing.py`: route, dispatch, fallback, missing keys, batch errors | `providers/providers.test.ts` ("routing provider"); `core.test.ts` ("symbols") |
+| `test_routing.py::test_build_*` (SSM, env) | `service.test.ts` ("createMarketData"), `core.test.ts` ("configuration"); keys are injected, no SSM |
+| `test_symbols_keys.py` (classification, helpers, minimal profile, item shapes, minor units) | `parity.test.ts` cases `symbol-classification`, `minor-units`, `normalize-currency`, `stored-item-shapes` |
+| `test_symbols_keys.py::test_to_decimal_*`, `test_quote_roundtrip`, `test_iso_datetime_matches_js` | not applicable (JSON numbers, `toISOString`); `repository.test.ts` |
+| `test_calendar_providers.py` (CSV, ratios, splits, HTTP) | `parity.test.ts` cases `earnings-csv*`, `parse-split*`, `alphavantage-earnings-*`, `eodhd-splits-and-dividends`, `av-symbol`; `core.test.ts` ("csv") |
+| `test_calendar_providers.py` (mock source, factory) | not ported (mock); `service.test.ts` ("createMarketData") |
+| `test_calendar_handlers.py` | `jobs/refresh-calendar.test.ts` |
+| `test_calendar_models.py`, `test_calendar_repository.py` | `parity.test.ts` case `stored-item-shapes`; `core.test.ts` ("limits": budgets, ledger); `repository.test.ts` (calendar items) |
+| `test_repository_events_edges.py`, `test_local.py`, `test_mock_provider.py` | store paging/retry belongs to the `ItemStore` adapters (contract suites); events, local runner and mock not ported |
+
+New tests with no Python counterpart: resumable steps (every step delivered twice gives identical writes, a tiny step budget gives
+the same result in more steps, Twelve Data pacing, budget tokens), the subrequest budget, store-backed quota ledger contention.
+
+```bash
+export PATH=/Users/quando/.nvm/versions/node/v20.19.0/bin:$PATH
+pnpm --filter @portfolio/prices test:coverage   # statements 100 %, thresholds 95 %
+pnpm --filter @portfolio/prices typecheck && pnpm --filter @portfolio/prices lint
+# regenerate the Python golden results after changing a case (needs services/prices' dev environment):
+PYTHONPATH=services/prices services/prices/.venv/bin/python packages/prices/test-fixtures/generate_parity_cases.py
+```
+
+The package is wired like `packages/aws`: `pnpm -r` picks it up for typecheck, lint, tests and `test:coverage` (CI and
+`scripts/coverage.sh`), its `lcov.info` is found by the existing Sonar globs, and `packages/prices/src` is listed in
+`sonar.sources`.
+
+### Open issues
+
+1. **CPU on the runtime is not measured.** The jobs are written for a Durable Object alarm. Whether a step also fits a 10 ms
+   Worker (earnings CSV parse, a year of FX rates) needs the probe on a real deployment; `stepSubrequests` and the batch sizes
+   are the knobs.
+2. **EODHD's 20 calls a day** bind first with more than about 12 exchange-listed tickers (see the table above); the port reports the
+   symbols it could not refresh, it does not invent another source.
+3. **`PricesUpdated`** has no portable consumer; if one appears (cache invalidation), add it to the `EventPublisher` port.
+4. **Replayed steps spend provider quota again** (conservative: never too little); only the calendar budget is idempotent per run.
+5. **Twelve Data terms** (data display restrictions of the Basic plan) and **CoinGecko attribution** apply to a public deployment;
+   this port is meant for the owner's personal deployment.
+6. The Cloudflare adapter must still persist the cursor between steps, honour `delayMs` (alarm time) and run the budget guard
+   around the steps; this package only provides the pure handlers.
