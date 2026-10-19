@@ -8,6 +8,7 @@ import { createHandler } from './lambda/handler.js';
 import { createAwsDeps } from './clients.js';
 import { loadConfig } from './config.js';
 import { apiEvent } from './testing/fakes.js';
+import { defineApiScenarios } from './testing/scenarios.js';
 import { LOCALSTACK_ENDPOINT, localAwsConfig, localStackAvailable } from './testing/localstack.js';
 import { seed } from '../scripts/seed.js';
 
@@ -33,7 +34,7 @@ describe.skipIf(!available)('api against LocalStack', () => {
   const handler = createHandler(() => createAwsDeps(config));
   const call = async (...args: Parameters<typeof apiEvent>) => {
     const res = await handler(apiEvent(...args));
-    return { status: res.statusCode, body: res.body ? JSON.parse(res.body) : undefined };
+    return { status: res.statusCode ?? 500, body: res.body ? JSON.parse(res.body) : undefined };
   };
 
   beforeAll(async () => {
@@ -94,21 +95,6 @@ describe.skipIf(!available)('api against LocalStack', () => {
     expect((await call('GET', '/portfolio', { query: { portfolioId: 'nope' } })).status).toBe(404);
   });
 
-  it('creates, renames and force-deletes a portfolio with its transactions', async () => {
-    const created = await call('POST', '/portfolios', { body: { name: 'Scratch' } });
-    expect(created.status).toBe(201);
-    const id = created.body.portfolioId as string;
-    expect((await call('POST', '/portfolios', { body: { name: 'scratch' } })).status).toBe(409);
-    const renamed = await call('PATCH', `/portfolios/${id}`, { body: { name: 'Scratch 2' } });
-    expect(renamed.body.name).toBe('Scratch 2');
-    const txn = await call('POST', '/transactions', { body: { portfolioId: id, date: '2026-01-05', type: 'BUY', symbol: 'SAP.DE', quantity: 1, price: 200, currency: 'EUR' } });
-    expect(txn.status).toBe(201);
-    expect((await call('DELETE', `/portfolios/${id}`)).body.error.code).toBe('PORTFOLIO_NOT_EMPTY');
-    expect((await call('DELETE', `/portfolios/${id}`, { query: { force: 'true' } })).status).toBe(204);
-    expect((await call('DELETE', `/transactions/${txn.body.id}`)).status).toBe(404);
-    expect((await call('GET', '/portfolios')).body.portfolios).toHaveLength(2);
-  });
-
   it('serves holdings, allocation, history and dividends from seeded data', async () => {
     const holdings = await call('GET', '/holdings');
     expect(holdings.body.holdings.every((h: { priceStale: boolean }) => !h.priceStale)).toBe(true);
@@ -121,15 +107,6 @@ describe.skipIf(!available)('api against LocalStack', () => {
     const dividends = await call('GET', '/dividends');
     expect(dividends.body.received.length).toBeGreaterThan(0);
     expect(dividends.body.upcoming.length).toBeGreaterThan(0);
-  });
-
-  it('creates and deletes a transaction', async () => {
-    const created = await call('POST', '/transactions', { body: { portfolioId: 'default', date: '2026-01-05', type: 'BUY', symbol: 'SAP.DE', quantity: 1, price: 200, currency: 'EUR' } });
-    expect(created.status).toBe(201);
-    const oversell = await call('POST', '/transactions', { body: { portfolioId: 'default', date: '2026-01-06', type: 'SELL', symbol: 'SAP.DE', quantity: 2, price: 200, currency: 'EUR' } });
-    expect(oversell.status).toBe(422);
-    expect((await call('DELETE', `/transactions/${created.body.id}`)).status).toBe(204);
-    expect((await call('DELETE', `/transactions/${created.body.id}`)).status).toBe(404);
   });
 
   it('issues a presigned URL that accepts a CSV upload', async () => {
@@ -146,4 +123,7 @@ describe.skipIf(!available)('api against LocalStack', () => {
     const status = await call('GET', `/imports/${created.body.importId}`);
     expect(status.body).toMatchObject({ status: 'PENDING', fileName: 'trades.csv', portfolioId: 'trading-212' });
   });
+
+  // Last: these scenarios create portfolios of their own, which the seeded-data tests above must not see.
+  defineApiScenarios('LocalStack (DynamoDB, S3, EventBridge)', { call });
 });

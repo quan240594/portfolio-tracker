@@ -2047,7 +2047,7 @@ the Worker-side counters the app cannot see. The overall state is the worst metr
   the end of each alarm; a check reads the stored day plus what is still buffered. Keep the ledger as one row per UTC day.
   Old days are pruned (7 days kept) once per day.
 
-### Intended wiring (done with the Cloudflare adapter)
+### Wiring (done: `packages/cloudflare` `SqlUsageStore`, `packages/cloudflare-app` Hub)
 
 1. In the Durable Object: `const guard = new BudgetGuard({ store: <SQL UsageStore>, readStorageBytes: () => ctx.storage.sql.databaseSize, flushAfter: 20 })`.
 2. Wrap the application handler: `withBudget(appHandler, guard)`, and route `GET /usage` to `guard.snapshot()` (JSON).
@@ -2154,6 +2154,7 @@ const platform = createDurableObjectPlatform({ ctx, secretsKey: env.SECRETS_KEY,
 | `SqlSecretStore` | AES-256-GCM, key = HKDF-SHA-256 of a base64 master key (>= 32 random bytes, `generateSecretsKey()`; the Worker's secret binding), random 12 byte IV per write, the secret name as AAD; stored as `v1.<iv>.<ciphertext>`. A wrong key or tampered row makes `get` reject (`could not be decrypted`); plaintext never reaches SQLite or an error message. |
 | `SqlFileStore` | Blobs in SQLite, at most 1.5 MiB (`MAX_FILE_BYTES`, below the 2 MB row cap; the web app already limits CSVs to 1 MiB). See the upload contract below. |
 | `AlarmJobQueue` | Jobs in table `jobs` (finished jobs are deleted; failed ones kept 7 days). `enqueue` inserts and sets the alarm to the earliest due time (only when it is earlier than the armed one). `runAlarm(handlers)` runs due jobs oldest first through the resumable `JobHandler` contract and persists `cursor`/`due_at` after each step; a failing step is retried with the same cursor after `min(15 min, 5 s * 2^(n-1))` and the job is marked `failed` after 5 deliveries (never loops; 10,000 steps cap). One alarm runs at most 200 steps / 20 s, then re-arms itself for "now". |
+| `SqlUsageStore` | The budget guard's ledger (`UsageStore`): table `usage`, **one row per UTC day** with one column per counter (`worker_requests`, `durable_object_requests`, `durable_object_gb_seconds` REAL, `rows_read`, `rows_written`). `add` is one `INSERT ... ON CONFLICT(day) DO UPDATE SET col = col + excluded.col`, so it is atomic and writes exactly one row; an empty delta writes nothing; `read` returns zeros for an unknown day; `prune` deletes older days. Days must look like `YYYY-MM-DD`, amounts must be finite and non-negative (`RangeError` otherwise). Exposed as `platform.usage`; it passes `runUsageStoreContract` in Node and in workerd. |
 | Cron | `SCHEDULED_JOBS` are enqueued by the same alarm: table `schedules` stores each schedule's next slot, computed by the pure `nextCronRun(cron, from, timeZone)` from `toUnixCron` on the schedule's own IANA time zone (DST-aware; classic 5-field cron). A due slot is enqueued once under the id `schedule:<name>:<slot>`; after a long absence it fires once, not once per missed slot. |
 
 **Idempotent alarms.** A second `runAlarm` while one runs joins it (same promise: no parallel duplicate step); a second one after
@@ -2393,3 +2394,117 @@ time formatting, banner dismissal, 429/503 handling). E2E: `pnpm --filter @portf
 e2e-github/usage.spec.ts` (route mocks of `/auth/*`, `/api/*` and `/api/usage`, a 429 on an API call, a fake clock fast-forwarded past the poll,
 fixed `Europe/Amsterdam` zone, no horizontal overflow at 320 and 1280 px); it also runs in `pnpm --filter @portfolio/web test:e2e`. Not verified
 against the real Worker: that needs the `/usage` route of the Cloudflare wiring.
+
+## Cloudflare personal app (Worker + Hub Durable Object)
+
+`packages/cloudflare-app` (`@portfolio/cloudflare-app`) is the deployable personal app on the **free plan**. It adds no business
+logic: it wires the ports of `packages/cloudflare`, the budget guard and GitHub sign-in of `packages/platform`, and the
+platform-neutral `PortableHandler` of `services/api`, `importUploadedJob` of `services/ingest` and `brokerSyncJob` of
+`services/broker-sync` exactly like the Lambda entry points wire them over the AWS ports. Its README has the owner's deploy steps.
+
+### Request flow
+
+```mermaid
+flowchart LR
+  B[Browser] -->|"/, /assets/*, SPA fallback"| A[Static assets: free, no Worker]
+  B -->|"/auth/*, /health"| W[Worker]
+  B -->|"PUT /api/uploads/token: public, token is the credential"| W
+  B -->|"/api/*, /usage: same-origin + session cookie"| W
+  GH[GitHub OAuth] <-->|"2 subrequests at sign-in"| W
+  W -->|"verified subject header, bounded body"| H
+  C[Cron, daily] --> W
+  W -->|"keep-alive: arm the alarm"| H
+  subgraph H["Hub Durable Object (SQLite, idFromName hub)"]
+    G[withBudget + BudgetGuard] --> R[usage, upload or API handler]
+    R --> P[SqlItemStore, SqlSecretStore, SqlFileStore, AlarmJobQueue, SqlUsageStore]
+    AL[alarm] --> J[guardedJob: import, Trading 212 sync]
+    J --> P
+  end
+  J -->|"fetch, at most 45 per invocation"| T[Trading 212]
+```
+
+**Worker** (`src/worker.ts`, no heavy work): `/health` answered directly; `/auth/*` through `createAuthFetchHandler`;
+`PUT /api/uploads/<token>` without sign-in (a `content-length` above `MAX_FILE_BYTES`, or a body that grows past it, is
+413 before anything is buffered or forwarded); `/api/*` and `/usage`: `requireSameOrigin` for every mutation (403, also for an
+anonymous caller), then `createGithubIdentityResolver` (401 with the error envelope, fail closed), a bounded body read (256 KiB, 413),
+then the request is forwarded to the Hub with a **fresh** `x-pt-subject` (the verified `github:<id>`) and `x-request-id`; the
+client's cookies, `Authorization` and `Origin` are never forwarded and a client-supplied `x-pt-subject` is dropped. Anything else is the
+static asset binding. Missing or invalid variables: 503 `NOT_CONFIGURED` naming the variable. A Hub failure: 502
+`HUB_UNAVAILABLE` without detail. `scheduled` (one daily cron, `17 3 * * *` UTC) calls the Hub's keep-alive.
+
+**Hub** (`src/hub-core.ts` over a structural `ctx`; `src/hub.ts` is the 30-line `DurableObject` shell): the constructor builds
+`createDurableObjectPlatform` (secrets key from the `SECRETS_KEY` secret, upload URLs on `ORIGIN`, only the schedules whose job has a
+handler), a `BudgetGuard` over `platform.usage` (`flushAfter` 20, `readStorageBytes` from `ctx.storage.sql.databaseSize`, SQL
+`onUsage` feeding `guard.recordRows`) and the API handler `withBudget(createApp(deps), guard)`; `ctx.blockConcurrencyWhile` arms
+the alarm. `deps` = `ItemRepository`, `ItemManagementRepository`, `platform.files`, `ItemBrokerStore` + `SecretCredentialStore` on
+the encrypted secret store, `platform.jobs`, `authMode: 'cognito'` (identity required; fails closed). The verified subject
+`github:<id>` becomes the user id `github-<id>` (the API only accepts `[A-Za-z0-9._-]`). Routes: `POST /internal/arm` (cron
+keep-alive; unreachable from clients because the Worker only forwards `/api/*` and `/usage`), `PUT /api/uploads/<token>` (404 unknown
+token, 410 expired, 413 too large, 204 and a `importUploaded` job enqueued from the key), `GET /usage` and `GET /api/usage` (the
+`UsageSnapshot`, always answered: allow-list), everything else the API. Every request records `workerRequests` +
+`durableObjectRequests`, then its duration (`durableObjectGbSeconds`) and `guard.flush()` at the end (one ledger row written);
+the guard answers 429 `BUDGET_EXHAUSTED` with `Retry-After` at 80 %, 503 `BUDGET_UNAVAILABLE` for writes when the ledger cannot be read.
+`alarm()` records one request, builds the job registry for this run (a fresh `SubrequestBudget` of 45 calls), runs
+`platform.runAlarm(registry)` and flushes. Each handler is wrapped by `guardedJob` (`guardJob` + the subrequest reserve):
+essential jobs (import, sync) that are denied are **deferred** with their cursor (until the reset, re-checked hourly; five
+minutes when the ledger is unreadable), non-essential ones (price and calendar refresh) complete as `skipped`; a Trading 212 step
+that needs more subrequests than are left is deferred by a second, so the next alarm starts with a fresh budget (5 pages per step,
+at most 3 attempts per page). The only Trading 212 call outside the alarm is the credential check of `PUT /brokers/trading212`
+(one attempt, one subrequest).
+
+**Price service registration point.** `src/jobs.ts` exports `PRICE_JOB_FACTORIES` (empty today; the TypeScript price service is not
+merged). Adding `refreshPrices`, `refreshCalendar` and `enrichTransactions` factories there is the only change needed: the alarm
+runs them behind `guardJob`, `prices-refresh` and `prices-calendar` start being scheduled, and `transactionsChanged` starts
+enqueuing `enrichTransactions` (until then it is a no-op, and no schedule without a handler is kept). Tests register fake factories
+to prove it.
+
+### Bindings, secrets and variables (`wrangler.jsonc`, free plan only)
+
+| Name | Kind | Purpose |
+|---|---|---|
+| `HUB` | Durable Object binding, class `Hub`, migration `new_sqlite_classes` | the one named instance `idFromName('hub')` |
+| `ASSETS` | static assets, `dist/web`, `single-page-application`, `run_worker_first`: `/api/*`, `/auth/*`, `/usage`, `/health` | the built web app; everything else is a free asset request |
+| cron `17 3 * * *` | trigger | keep-alive of the alarm |
+| `GITHUB_CLIENT_SECRET` | secret | OAuth App secret |
+| `SESSION_SECRET` | secret, >= 32 chars | signs `pt_session` and `pt_oauth_state` |
+| `SECRETS_KEY` | secret, base64 of >= 32 bytes | encrypts the Trading 212 credentials (AES-256-GCM) |
+| `GITHUB_CLIENT_ID`, `OWNER_GITHUB_ID`, `ORIGIN` | vars (placeholders in the file, `--var` at deploy) | OAuth client id, the one allowed numeric GitHub id, the public `https` origin |
+| `BASE_CURRENCY` (default EUR), `T212_SYMBOL_OVERRIDES` (optional JSON) | vars | as on AWS |
+
+No `[limits]`, routes, custom domains, R2, KV, Queues or D1; `compatibility_flags: ["nodejs_compat"]` (CSV parsing uses `Buffer`);
+observability enabled. The deploy bundle is about 0.6 MB (130 KB gzipped) against the 3 MB free-plan limit.
+
+### What a request costs against the free-plan caps
+
+| Call | Worker requests | DO requests | Subrequests | Rows written (typical) | Notes |
+|---|---|---|---|---|---|
+| static file, SPA route | 0 (assets are free) | 0 | 0 | 0 | |
+| `/health`, `/auth/session`, `/auth/login`, `/auth/logout` | 1 | 0 | 0 | 0 | not in the ledger |
+| `/auth/callback` | 1 | 0 | 2 (GitHub token, `GET /user`) | 0 | once per sign-in |
+| API read (`GET`) | 1 | 1 | 0 | 1 (ledger) | + 1 ledger row read, the page reads |
+| API write | 1 | 1 | 0 | 1 + 1 per stored item (transaction, portfolio, ...) | |
+| CSV upload `PUT` | 1 | 1 | 0 | 3 (blob, token consumed, job) + 1 ledger | then the import alarm: 1 DO request + 1 row per transaction |
+| `PUT /brokers/trading212` | 1 | 1 | 1 | 2 + 1 | encrypted secret + state |
+| Trading 212 sync | 0 | 1 per alarm run | pages + about 3 | 1 per step, 1 per transaction | at most 45 subrequests per alarm, then deferred by 1 s |
+| cron | 1 | 1 | 0 | 1 | once a day |
+
+At 1,000 requests a day the app uses about 1 % of the Worker and Durable Object request caps and about 1 % of the daily rows written;
+the guard stops accepting work at 80 % of any cap (60 % turns the indicator amber and defers the non-essential jobs). Requests the
+Worker answers itself (`/auth/*`, `/health`, anonymous 401s) are invisible to the Hub's ledger, which is what the 20 % headroom is for.
+
+### Verified locally and only on the real account
+
+**Verified locally** (`pnpm --filter @portfolio/cloudflare-app test`, no network, no secrets, about 6 seconds): the shared suite
+described in the README, run in Node (coverage: 100 % statements/lines, 96 % branches of `src/`) and in real workerd through Miniflare against the same
+esbuild bundle (a SQLite-backed Hub, real alarms firing by themselves, the static assets binding with SPA fallback and
+`run_worker_first`, the daily cron, the usage indicator and the 429 guard with a pinned clock and small limits, a fake GitHub and a fake
+Trading 212 as the outbound network). `wrangler deploy --dry-run` bundles the same entry offline. The platform-neutral API scenarios
+(`@portfolio/api/testing`, `defineApiScenarios`) run unchanged on the in-memory dependencies, on LocalStack and on this app; the
+CSV scenario needs an ingestion pipeline, so it runs on the Cloudflare app only (the LocalStack suite keeps its presigned-upload
+check).
+
+**Only on the real account** (not verifiable here): the real `workers.dev` origin and OAuth callback with GitHub, the real Cloudflare
+accounting of requests, GB-seconds and rows (the guard's counters are an estimate with 20 % headroom; the dashboard is the truth), that the
+deploy accepts the migration and the cron trigger, real Trading 212 responses and rate limits, Durable Object eviction and cold starts under
+real traffic (the ledger is flushed at the end of every request so an eviction loses nothing), and the CPU time of the Worker (a cookie MAC
+check and a forward, designed for well under the free plan's 10 ms).

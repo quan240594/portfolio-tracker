@@ -15,7 +15,7 @@ interface Env {
 }
 
 interface RpcCall {
-  target: 'items' | 'secrets' | 'files' | 'jobs' | 'admin';
+  target: 'items' | 'secrets' | 'files' | 'jobs' | 'usage' | 'admin';
   method: string;
   args: unknown[];
 }

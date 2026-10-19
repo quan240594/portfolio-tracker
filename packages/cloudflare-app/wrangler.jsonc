@@ -1,0 +1,32 @@
+// Free plan only: no [limits], no routes or custom domains, and no paid binding (no R2, KV, Queues or D1).
+// Nothing personal is stored here: the secrets are Worker secrets (`wrangler secret put`), the three variables below are
+// injected at deploy time (`pnpm run deploy:app`, see README.md) or come from `.dev.vars` for `pnpm run dev`.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "portfolio-tracker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-01",
+  // csv-parse (the CSV import) uses Buffer and a few Node built-ins.
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "assets": {
+    "directory": "./dist/web",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // Static files are served straight from the asset store (free, no Worker invocation); only these paths run the Worker.
+    "run_worker_first": ["/api/*", "/auth/*", "/usage", "/health"]
+  },
+  "durable_objects": { "bindings": [{ "name": "HUB", "class_name": "Hub" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Hub"] }],
+  // One daily trigger: it only re-arms the Hub's alarm (the schedules live in the Hub, see SCHEDULED_JOBS).
+  "triggers": { "crons": ["17 3 * * *"] },
+  "observability": { "enabled": true },
+  "vars": {
+    "BASE_CURRENCY": "EUR",
+    // Placeholders: the real values are passed with --var at deploy time. While they are placeholders the app answers 503 NOT_CONFIGURED.
+    "ORIGIN": "https://replace-with-your-origin.invalid",
+    "OWNER_GITHUB_ID": "replace-with-your-numeric-github-id",
+    "GITHUB_CLIENT_ID": "replace-with-your-oauth-client-id"
+  }
+}

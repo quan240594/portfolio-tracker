@@ -3,6 +3,7 @@ import { AlarmJobQueue, type AlarmJobQueueOptions, type AlarmReport } from './al
 import { SqlFileStore, type AcceptUploadResult } from './file-store.js';
 import { SqlItemStore } from './item-store.js';
 import { SqlSecretStore } from './secret-store.js';
+import { SqlUsageStore } from './usage-store.js';
 import type { AlarmStorageHost, UsageSink } from './sql.js';
 
 export interface DurableObjectPlatformOptions extends Omit<AlarmJobQueueOptions, 'onUsage' | 'now'> {
@@ -23,6 +24,8 @@ export interface DurableObjectPlatform {
   secrets: SqlSecretStore;
   files: SqlFileStore;
   jobs: AlarmJobQueue;
+  /** The budget guard's ledger (`BudgetGuard({ store: platform.usage })`): one row per UTC day. */
+  usage: SqlUsageStore;
   /** Runs the due jobs and re-arms the alarm. Call from the Durable Object's `alarm()`. */
   runAlarm(handlers: JobRegistry): Promise<AlarmReport>;
   /** Initialises the cron schedules and arms the alarm. Call from the constructor inside `blockConcurrencyWhile`. */
@@ -52,6 +55,7 @@ export function createDurableObjectPlatform({ ctx, secretsKey, now, onUsage, upl
     secrets: new SqlSecretStore(storage, secretsKey, { onUsage }),
     files,
     jobs,
+    usage: new SqlUsageStore(storage, { onUsage }),
     runAlarm: (handlers) => jobs.runAlarm(handlers),
     arm: () => jobs.arm(),
     acceptUpload: (token, body) => files.acceptUpload(token, body),

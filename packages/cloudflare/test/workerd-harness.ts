@@ -72,7 +72,7 @@ export class WorkerdHub {
   }
 
   /** A typed stand-in for the adapter `target` of hub `name`: every method call becomes an RPC. */
-  proxy<T extends object>(name: string, target: 'items' | 'secrets' | 'files' | 'jobs'): T {
+  proxy<T extends object>(name: string, target: 'items' | 'secrets' | 'files' | 'jobs' | 'usage'): T {
     return new Proxy({} as T, {
       get: (_, method) => (method === 'then' || typeof method !== 'string' ? undefined : (...args: unknown[]) => this.call(name, target, method, args)),
     });
