@@ -6,3 +6,4 @@ export * from './item-store.js';
 export * from './secret-store.js';
 export * from './job-queue.js';
 export * from './file-store.js';
+export * from './usage-store.js';
