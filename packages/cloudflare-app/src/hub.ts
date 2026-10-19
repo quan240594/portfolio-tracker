@@ -25,19 +25,31 @@ export class Hub extends DurableObject<HubEnv> {
     const config = readHubConfig(env);
     if (config.ok) {
       this.core = new HubCore(ctx, config.config, (new.target as typeof Hub).hubOptions(env));
-      void ctx.blockConcurrencyWhile(() => this.core!.start());
     } else {
       this.problems = config.problems;
     }
   }
 
-  fetch(request: Request): Promise<Response> {
-    if (this.core) return this.core.handle(request);
+  #started: Promise<void> | undefined;
+
+  /** Arms the alarm and the schedules once, before the first request or alarm is served (inputs stay blocked meanwhile). */
+  #start(core: HubCore): Promise<void> {
+    this.#started ??= this.ctx.blockConcurrencyWhile(() => core.start());
+    return this.#started;
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    if (this.core) {
+      await this.#start(this.core);
+      return this.core.handle(request);
+    }
     return Promise.resolve(errorResponse(503, 'NOT_CONFIGURED', `The Hub is not configured: ${this.problems.join('; ')}`));
   }
 
-  alarm(): Promise<void> {
-    return this.core ? this.core.alarm() : Promise.resolve();
+  async alarm(): Promise<void> {
+    if (!this.core) return;
+    await this.#start(this.core);
+    await this.core.alarm();
   }
 
   /** The core, for subclasses (tests) that add routes next to `fetch`. */

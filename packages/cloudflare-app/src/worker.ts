@@ -56,6 +56,12 @@ async function callHub(env: WorkerEnv, request: Request): Promise<Response> {
   }
 }
 
+async function upload(request: Request, env: WorkerEnv): Promise<Response> {
+  const bytes = await readBodyBounded(request, MAX_FILE_BYTES);
+  if (bytes === undefined) return new Response('The file is larger than the upload limit', { status: 413 });
+  return callHub(env, toHub(request, undefined, bytes));
+}
+
 /**
  * The Worker in front of the Hub: it serves the static app, the GitHub sign-in (`/auth/*`), the public upload route and
  * the authenticated API (`/api/*`, `/usage`), and keeps the Hub's alarm armed from the daily cron trigger. It does no heavy
@@ -75,12 +81,6 @@ export function createWorker(options: WorkerConfigOptions = {}) {
   }
 
   const notConfigured = (problems: string[]) => errorResponse(503, 'NOT_CONFIGURED', `The app is not configured: ${problems.join('; ')}`);
-
-  async function upload(request: Request, env: WorkerEnv): Promise<Response> {
-    const bytes = await readBodyBounded(request, MAX_FILE_BYTES);
-    if (bytes === undefined) return new Response('The file is larger than the upload limit', { status: 413 });
-    return callHub(env, toHub(request, undefined, bytes));
-  }
 
   async function api(request: Request, env: WorkerEnv, session: Extract<Ready, { ok: true }>): Promise<Response> {
     const crossOrigin = requireSameOrigin(request, session.origin);
