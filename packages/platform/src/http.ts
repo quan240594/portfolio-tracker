@@ -26,6 +26,8 @@ export interface PortableResponse {
   /** Lower-case header names. */
   headers: Record<string, string>;
   body: string;
+  /** `Set-Cookie` header values, one entry per cookie (a header map cannot hold several). */
+  cookies?: string[];
 }
 
 export type PortableHandler = (request: PortableRequest) => Promise<PortableResponse>;

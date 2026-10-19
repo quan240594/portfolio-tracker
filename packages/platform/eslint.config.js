@@ -8,7 +8,7 @@ export default tseslint.config(
   {
     // Ports must run on any JavaScript runtime (Node, Workers): only Web-standard globals, no Node built-ins.
     languageOptions: {
-      globals: { console: 'readonly', crypto: 'readonly', URL: 'readonly', setTimeout: 'readonly', fetch: 'readonly', TextEncoder: 'readonly', TextDecoder: 'readonly', btoa: 'readonly', atob: 'readonly', structuredClone: 'readonly' },
+      globals: { console: 'readonly', crypto: 'readonly', URL: 'readonly', setTimeout: 'readonly', fetch: 'readonly', TextEncoder: 'readonly', TextDecoder: 'readonly', btoa: 'readonly', atob: 'readonly', structuredClone: 'readonly', Request: 'readonly', Response: 'readonly', Headers: 'readonly', AbortSignal: 'readonly' },
     },
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
