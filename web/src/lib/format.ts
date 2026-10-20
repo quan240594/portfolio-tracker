@@ -1,6 +1,6 @@
 import { DEFAULT_BASE_CURRENCY } from '@portfolio/shared';
 
-/** All numbers, amounts and dates are presented the Dutch way (e.g. "€ 1.234,56", "+12,34%", "13 okt 2026"). */
+/** Numbers and amounts are presented the Dutch way (e.g. "€ 1.234,56", "+12,34%"); dates are not (see below). */
 export const LOCALE = 'nl-NL';
 export const BASE_CURRENCY = DEFAULT_BASE_CURRENCY;
 const MINUS = '\u2212';
@@ -71,17 +71,117 @@ export function formatFxRate(rate: number): string {
   return new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 6 }).format(rate);
 }
 
-const DEFAULT_DATE_OPTIONS: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' };
+/*
+ * Dates are assembled by hand from English name tables so the output is identical in every browser/ICU build:
+ * numeric dates are always dd-mm-yyyy, month and weekday names are always English.
+ */
+export const MONTH_NAMES_LONG: readonly string[] = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+/** "Jan"…"Dec", also used as the x-axis categories of the dividends month comparison. */
+export const MONTH_NAMES_SHORT: readonly string[] = MONTH_NAMES_LONG.map((name) => name.slice(0, 3));
+const WEEKDAY_NAMES_LONG: readonly string[] = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-export function formatDate(iso: string, opts: Intl.DateTimeFormatOptions = DEFAULT_DATE_OPTIONS): string {
-  // Calendar dates (YYYY-MM-DD) are rendered as-is; timestamps in the user's local time zone.
-  const dateOnly = iso.length === 10;
-  const d = new Date(dateOnly ? `${iso}T00:00:00Z` : iso);
-  return new Intl.DateTimeFormat(LOCALE, { ...(dateOnly ? { timeZone: 'UTC' } : {}), ...opts }).format(d);
+interface DateParts {
+  year: number;
+  /** 0-based. */
+  month: number;
+  day: number;
+  /** 0 = Sunday. */
+  weekday: number;
+  hour: number;
+  minute: number;
 }
 
+/** Calendar dates (YYYY-MM-DD) are read as-is (UTC, so they never shift); timestamps in the user's local time zone. */
+function partsOf(iso: string): DateParts {
+  const dateOnly = iso.length === 10;
+  const d = new Date(dateOnly ? `${iso}T00:00:00Z` : iso);
+  if (dateOnly) {
+    return { year: d.getUTCFullYear(), month: d.getUTCMonth(), day: d.getUTCDate(), weekday: d.getUTCDay(), hour: 0, minute: 0 };
+  }
+  return { year: d.getFullYear(), month: d.getMonth(), day: d.getDate(), weekday: d.getDay(), hour: d.getHours(), minute: d.getMinutes() };
+}
+
+const pad2 = (n: number): string => String(n).padStart(2, '0');
+const numericDate = (p: DateParts): string => `${pad2(p.day)}-${pad2(p.month + 1)}-${String(p.year).padStart(4, '0')}`;
+const clock = (p: DateParts): string => `${pad2(p.hour)}:${pad2(p.minute)}`;
+
+/** "20-10-2026" (dd-mm-yyyy). */
+export function formatDate(iso: string): string {
+  return numericDate(partsOf(iso));
+}
+
+/** "20-10-2026, 11:27" (24-hour, local time). */
+export function formatDateTime(iso: string): string {
+  const p = partsOf(iso);
+  return `${numericDate(p)}, ${clock(p)}`;
+}
+
+/** "11:27" (24-hour, local time). */
+export function formatTime(iso: string): string {
+  return clock(partsOf(iso));
+}
+
+/** "Friday, 02-10-2026". */
+export function formatWeekdayDate(iso: string): string {
+  const p = partsOf(iso);
+  return `${WEEKDAY_NAMES_LONG[p.weekday]}, ${numericDate(p)}`;
+}
+
+/** "Monday". */
+export function formatWeekdayLong(iso: string): string {
+  return WEEKDAY_NAMES_LONG[partsOf(iso).weekday] ?? '';
+}
+
+/** "Mon". */
+export function formatWeekdayShort(iso: string): string {
+  return formatWeekdayLong(iso).slice(0, 3);
+}
+
+/** "Mon 02:00": local weekday and time. */
+export function formatWeekdayTime(iso: string): string {
+  const p = partsOf(iso);
+  return `${WEEKDAY_NAMES_LONG[p.weekday]?.slice(0, 3)} ${clock(p)}`;
+}
+
+/** "October 2026" for a "YYYY-MM" key (or any ISO date). */
+export function formatMonthYear(yyyyMm: string): string {
+  const p = partsOf(`${yyyyMm.slice(0, 7)}-01`);
+  return `${MONTH_NAMES_LONG[p.month]} ${p.year}`;
+}
+
+/** Compact chart label "Oct 26" for a "YYYY-MM" key. */
 export function formatMonth(yyyyMm: string): string {
-  return formatDate(`${yyyyMm}-01`, { month: 'short', year: '2-digit' });
+  const p = partsOf(`${yyyyMm.slice(0, 7)}-01`);
+  return `${MONTH_NAMES_SHORT[p.month]} ${pad2(p.year % 100)}`;
+}
+
+/** "Oct": the short month name of an ISO date. */
+export function formatMonthShort(iso: string): string {
+  return MONTH_NAMES_SHORT[partsOf(iso).month] ?? '';
+}
+
+/** "2 Oct": short day + month for chart axes. */
+export function formatDayMonthShort(iso: string): string {
+  const p = partsOf(iso);
+  return `${p.day} ${MONTH_NAMES_SHORT[p.month]}`;
+}
+
+/** The day of the month without padding ("2"). */
+export function formatDayOfMonth(iso: string): string {
+  return String(partsOf(iso).day);
 }
 
 /**

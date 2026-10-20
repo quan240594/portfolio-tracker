@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from 'react';
-import { formatDate } from '../../lib/format';
+import { formatWeekdayTime } from '../../lib/format';
 
 /** Error codes of the free-plan budget guard (docs/architecture.md, "Free-plan budget guard"). */
 export const BUDGET_EXHAUSTED = 'BUDGET_EXHAUSTED';
@@ -23,10 +23,10 @@ export function resumeTimeFromRetryAfter(code: BudgetCode, header: string | null
   return now + Math.min(seconds, MAX_RETRY_SECONDS) * 1000;
 }
 
-/** "Mon 02:00": local weekday and time, formatted with the app locale. */
+/** "Mon 02:00": local weekday and time, English weekday, 24-hour time. */
 export function formatLocalTime(at: number | string): string {
   const iso = typeof at === 'number' ? new Date(at).toISOString() : at;
-  return formatDate(iso, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  return formatWeekdayTime(iso);
 }
 
 /** The plain-language message shown instead of a generic failure for a budget error. */

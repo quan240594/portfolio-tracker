@@ -51,7 +51,7 @@ describe('BenchmarkChart', () => {
   it('describes both paths', () => {
     renderWithProviders(<BenchmarkChart points={points} currency="EUR" benchmark="IWDA.AS" />);
     expect(screen.getByRole('img').getAttribute('aria-label')).toMatch(
-      /^Portfolio value from 1 jan 2026 to 1 feb 2026: .*1\.000,00 to .*1\.100,00, against IWDA\.AS replayed with the same cash flows: .*1\.050,00\.$/,
+      /^Portfolio value from 01-01-2026 to 01-02-2026: .*1\.000,00 to .*1\.100,00, against IWDA\.AS replayed with the same cash flows: .*1\.050,00\.$/,
     );
   });
 
@@ -64,9 +64,9 @@ describe('BenchmarkChart', () => {
   });
 
   it('describes only the series that are drawn', () => {
-    expect(benchmarkSummary(points, 'EUR', 'IWDA.AS', { portfolio: true, benchmark: false, invested: true })).toMatch(/^Portfolio value from 1 jan 2026 to 1 feb 2026: .*1\.100,00\.$/);
+    expect(benchmarkSummary(points, 'EUR', 'IWDA.AS', { portfolio: true, benchmark: false, invested: true })).toMatch(/^Portfolio value from 01-01-2026 to 01-02-2026: .*1\.100,00\.$/);
     expect(benchmarkSummary(points, 'EUR', 'IWDA.AS', { portfolio: false, benchmark: true, invested: false })).toMatch(/^IWDA\.AS replayed with the same cash flows ended at .*1\.050,00\.$/);
-    expect(benchmarkSummary(points, 'EUR', 'IWDA.AS', { portfolio: false, benchmark: false, invested: true })).toMatch(/^Invested from 1 jan 2026 to 1 feb 2026: .*1\.000,00 to .*1\.000,00\.$/);
+    expect(benchmarkSummary(points, 'EUR', 'IWDA.AS', { portfolio: false, benchmark: false, invested: true })).toMatch(/^Invested from 01-01-2026 to 01-02-2026: .*1\.000,00 to .*1\.000,00\.$/);
     expect(benchmarkSummary(points, 'EUR', 'IWDA.AS', { portfolio: false, benchmark: false, invested: false })).toBe('');
   });
 
@@ -103,14 +103,14 @@ describe('DividendGrowthChart', () => {
     );
     expect(screen.getByRole('img').getAttribute('aria-label')).toMatch(/^Per year: 2 periods, .*250,00 in total\.$/);
     unmount();
-    renderWithProviders(<DividendGrowthChart bars={[{ label: 'jan', current: 10, previous: 5 }]} currency="EUR" title="Monthly" testId="month" />);
+    renderWithProviders(<DividendGrowthChart bars={[{ label: 'Jan', current: 10, previous: 5 }]} currency="EUR" title="Monthly" testId="month" />);
     expect(screen.getByTestId('month')).toBeInTheDocument();
   });
 
   it('describes the series that is drawn and says when it shows a selection', () => {
-    const bars = [{ label: 'jan', current: 10, previous: 5 }, { label: 'feb', current: 20, previous: 15 }];
+    const bars = [{ label: 'Jan', current: 10, previous: 5 }, { label: 'Feb', current: 20, previous: 15 }];
     expect(hasPreviousSeries(bars)).toBe(true);
-    expect(hasPreviousSeries([{ label: 'jan', current: 1 }])).toBe(false);
+    expect(hasPreviousSeries([{ label: 'Jan', current: 1 }])).toBe(false);
     const { unmount } = renderWithProviders(<DividendGrowthChart bars={bars} currency="EUR" title="Monthly" testId="m" showCurrent={false} filtered />);
     expect(screen.getByRole('img').getAttribute('aria-label')).toMatch(/^Monthly: 2 periods, .*20,00 a year earlier\. Chart shows the current selection\.$/);
     unmount();

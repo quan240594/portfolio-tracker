@@ -105,8 +105,8 @@ describe('DynamicsChart', () => {
   });
 
   it('summarises the months and series that are drawn', () => {
-    expect(dynamicsSummary(months, { portfolio: true, names: ['Portfolio'], hasHidden: false })).toBe('Monthly portfolio return over 3 months. Best month jan 26 ▲ +4,2%.');
-    expect(dynamicsSummary(months.slice(1), { portfolio: true, names: ['Portfolio'], hasHidden: true })).toBe('Monthly portfolio return over 2 months, current selection. Best month mrt 26 ■ 0,0%.');
+    expect(dynamicsSummary(months, { portfolio: true, names: ['Portfolio'], hasHidden: false })).toBe('Monthly portfolio return over 3 months. Best month Jan 26 ▲ +4,2%.');
+    expect(dynamicsSummary(months.slice(1), { portfolio: true, names: ['Portfolio'], hasHidden: true })).toBe('Monthly portfolio return over 2 months, current selection. Best month Mar 26 ■ 0,0%.');
     expect(dynamicsSummary(months, { portfolio: false, names: ['IWDA'], hasHidden: true })).toBe('Monthly returns of IWDA over 3 months, current selection.');
     expect(dynamicsSummary([], { portfolio: true, names: [], hasHidden: true })).toBe('No months selected.');
   });

@@ -73,7 +73,7 @@ describe('yearForecastModel', () => {
     expect(model.forecastYears).toEqual(['2026', '2027']);
     expect(model.bars).toEqual(['2024', '2025', '2026', '2027']);
     const [jan, , , , , , , , , oct, nov] = model.rows;
-    expect(oct).toMatchObject({ month: 'okt', '2026': 12.5, [estimatedKey('2026')]: 3 });
+    expect(oct).toMatchObject({ month: 'Oct', '2026': 12.5, [estimatedKey('2026')]: 3 });
     expect(oct![declaredKey('2026')]).toBeUndefined(); // zero amounts leave no bar
     expect(nov).toMatchObject({ [declaredKey('2026')]: 5 });
     expect(jan).toMatchObject({ [declaredKey('2027')]: 8 });
@@ -129,7 +129,7 @@ describe('yearTooltipLines', () => {
   });
 
   it('is empty for a month without any data', () => {
-    expect(yearTooltipLines({ month: 'jan' }, { bars: ['2025'] })).toEqual([]);
+    expect(yearTooltipLines({ month: 'Jan' }, { bars: ['2025'] })).toEqual([]);
   });
 });
 
@@ -187,13 +187,13 @@ describe('visiblePoints and tableRows', () => {
   it('labels forecast months "Forecast" in the period column', () => {
     const rows = tableRows(visiblePoints(TIMELINE, true), 'EUR').map((r) => r.map(sp));
     expect(TABLE_COLUMNS).toEqual(['Period', 'Received', 'Declared (announced)', 'Estimated (from history)', 'Trend']);
-    expect(rows[0]![0]).toMatch(/^okt\.? 24$/);
+    expect(rows[0]![0]).toMatch(/^Oct 24$/);
     expect(rows[0]!.slice(2, 4)).toEqual(['—', '—']); // history has no forecast
     const current = rows[TIMELINE_HISTORY_MONTHS]!;
     expect(current[0]).toMatch(/ · Forecast \(month in progress\)$/);
     expect(current.slice(1, 4)).toEqual(['€ 12,50', '€ 0,00', '€ 3,00']);
     const future = rows.at(-1)!;
-    expect(future[0]).toMatch(/^sep\.? 27 · Forecast$/);
+    expect(future[0]).toMatch(/^Sep 27 · Forecast$/);
     expect(future[1]).toBe('—');
     expect(future[3]).toBe('€ 6,00');
   });

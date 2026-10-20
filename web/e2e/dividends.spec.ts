@@ -115,7 +115,7 @@ test.describe('Dividends page (mock mode)', () => {
       await expect(stats.getByTestId('growth-stat-qoq-periods')).toHaveText('Q3 2026 vs Q2 2026');
       await expect(stats.getByTestId('growth-stat-yoy-value')).toHaveText('▲+16,7%');
       await expect(stats.getByTestId('growth-stat-yoy-change')).toHaveText(/^· \+€\s59,06$/);
-      await expect(stats.getByTestId('growth-stat-yoy-periods')).toHaveText(/^okt\.? 25 – sep\.? 26 vs okt\.? 24 – sep\.? 25$/);
+      await expect(stats.getByTestId('growth-stat-yoy-periods')).toHaveText(/^Oct 25 – Sep 26 vs Oct 24 – Sep 25$/);
       await expect(stats.getByTestId('growth-stat-cagr-value')).toHaveText('▲+92,0%');
       await expect(stats.getByTestId('growth-stat-cagr-periods')).toHaveText('2023 → 2025 · 2 years');
 
@@ -217,7 +217,7 @@ test.describe('Dividends received with future payments (mock mode)', () => {
   });
 
   for (const [granularity, label] of [
-    ['Monthly', /^[a-z]{3}\.? \d{2}( · (Current|Upcoming))?$/],
+    ['Monthly', /^[A-Z][a-z]{2} \d{2}( · (Current|Upcoming))?$/],
     ['Quarterly', /^Q[1-4] \d{2}( · (Current|Upcoming))?$/],
     ['Yearly', /^\d{4}( · (Current|Upcoming))?$/],
   ] as const) {

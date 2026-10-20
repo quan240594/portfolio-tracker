@@ -4,7 +4,7 @@ import { PageHeader } from '../components/Layout';
 import { ErrorState } from '../components/ErrorState';
 import { EmptyState } from '../components/EmptyState';
 import { Skeleton } from '../components/Skeleton';
-import { BASE_CURRENCY, formatDate, formatMoney } from '../lib/format';
+import { BASE_CURRENCY, formatDate, formatDayOfMonth, formatMonthShort, formatMoney } from '../lib/format';
 import { usePortfolioScope } from '../features/portfolios/usePortfolioScope';
 import { ConsistencyCard } from '../features/dividends/ConsistencyCard';
 import { DiversificationCard } from '../features/dividends/DiversificationCard';
@@ -51,8 +51,8 @@ function UpcomingList({ upcoming, currency }: Readonly<{ upcoming?: DividendPaym
       {upcoming.map((p, i) => (
         <li key={`${p.symbol}-${p.date}-${i}`} className="flex items-center gap-3 py-2.5 text-sm">
           <div className="flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-lg bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
-            <span className="text-[10px] leading-none uppercase">{formatDate(p.date, { month: 'short' })}</span>
-            <span className="font-semibold leading-tight">{formatDate(p.date, { day: 'numeric' })}</span>
+            <span className="text-[10px] leading-none uppercase">{formatMonthShort(p.date)}</span>
+            <span className="font-semibold leading-tight">{formatDayOfMonth(p.date)}</span>
           </div>
           <div className="flex-1">
             <div className="font-medium">{p.symbol}</div>

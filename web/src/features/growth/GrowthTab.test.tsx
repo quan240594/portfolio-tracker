@@ -47,7 +47,7 @@ describe('Growth tab', () => {
     const chart = await screen.findByTestId('growth-value-chart');
     expect(chart).toHaveAccessibleName(/^Portfolio value from .* to .*, compared with IWDA\.AS replayed with the same cash flows\.$/);
     const headline = await screen.findByText(/^Your portfolio is (ahead of|behind) IWDA\.AS by /);
-    expect(sp(headline.textContent!)).toMatch(/by € [\d.]+,\d{2} \([\d,]+ percentage points\) since \d+ \w+ \d{4}\.$/);
+    expect(sp(headline.textContent!)).toMatch(/by € [\d.]+,\d{2} \([\d,]+ percentage points\) since \d{2}-\d{2}-\d{4}\.$/);
     for (const name of ['Portfolio value', 'Portfolio performance', 'Dynamics of portfolio returns', 'Holdings performance']) expect(card(name)).toBeInTheDocument();
     expect(await screen.findByTestId('growth-performance-chart')).toBeInTheDocument();
     expect(await screen.findByTestId('growth-dynamics-chart')).toBeInTheDocument();
@@ -184,7 +184,7 @@ describe('Growth tab', () => {
     const card5 = await screen.findByRole('region', { name: 'Holdings performance' });
     await userEvent.setup().click(await within(card5).findByRole('radio', { name: 'Table' }));
     const first = within(card5).getAllByRole('row')[1]!;
-    expect(first).toHaveTextContent('2 mrt 2026 *');
+    expect(first).toHaveTextContent('02-03-2026 *');
     expect(within(card5).getByText(/bought inside the range is measured from its first purchase/)).toBeInTheDocument();
   });
 });

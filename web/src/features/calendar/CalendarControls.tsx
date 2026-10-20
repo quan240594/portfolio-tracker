@@ -1,6 +1,6 @@
 import { useId } from 'react';
 import { CALENDAR_EVENT_TYPES, CALENDAR_SCOPES, CALENDAR_STATUSES, calendarMonthOf, type CalendarEventType, type CalendarScope, type CalendarStatus } from '@portfolio/shared';
-import { formatDate } from '../../lib/format';
+import { formatMonthYear } from '../../lib/format';
 import { EVENT_META, SCOPE_LABELS, STATUS_LABELS, shiftMonth, type CalendarRange, type CalendarUiState, type CalendarView } from './calendarModel';
 import { STATUS_CHIP } from './calendarColours';
 import { EventMarker } from './EventMarker';
@@ -119,7 +119,7 @@ interface NavigatorProps {
 /** Previous / next month and "today"; with the 12-month range the month is fixed. */
 export function MonthNavigator({ month, today, range, onMonth }: Readonly<NavigatorProps>) {
   const year = range === 'year';
-  const label = year ? 'Next 12 months' : formatDate(`${month}-01`, { month: 'long', year: 'numeric' });
+  const label = year ? 'Next 12 months' : formatMonthYear(month);
   return (
     <div className="flex flex-wrap items-center gap-2">
       <div className="flex items-center gap-1">

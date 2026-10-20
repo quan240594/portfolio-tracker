@@ -7,9 +7,10 @@ import { renderWithProviders } from '../../test/utils';
 import { BLOCKED_SNAPSHOT, OK_SNAPSHOT, serveUsage, usageSnapshot, UNAVAILABLE_SNAPSHOT, WARN_SNAPSHOT } from '../../test/usage';
 import { UsageIndicator } from './UsageIndicator';
 import { USAGE_QUERY_KEY } from './useUsage';
+import { localWeekdayTime } from '../../test/localTime';
 
 const chip = (name: string | RegExp) => screen.findByRole('button', { name });
-const local = (iso: string) => new Intl.DateTimeFormat('nl-NL', { weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
+const local = localWeekdayTime;
 
 describe('UsageIndicator chip', () => {
   it.each([

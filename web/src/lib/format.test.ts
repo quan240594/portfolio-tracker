@@ -2,10 +2,22 @@ import {
   BASE_CURRENCY,
   LOCALE,
   formatCount,
+  MONTH_NAMES_LONG,
+  MONTH_NAMES_SHORT,
   formatDate,
+  formatDateTime,
+  formatDayMonthShort,
+  formatDayOfMonth,
   formatFxRate,
   formatMoney,
   formatMonth,
+  formatMonthShort,
+  formatMonthYear,
+  formatTime,
+  formatWeekdayDate,
+  formatWeekdayLong,
+  formatWeekdayShort,
+  formatWeekdayTime,
   formatPercent,
   formatQuantity,
   formatWeight,
@@ -93,9 +105,7 @@ describe('misc formatters', () => {
   it('formats quantities, dates and months', () => {
     expect(formatQuantity(0.12345)).toBe('0,12345');
     expect(formatQuantity(1500)).toBe('1.500');
-    expect(formatDate('2024-03-05')).toBe('5 mrt 2024');
-    expect(formatDate('2026-10-13')).toBe('13 okt 2026');
-    expect(formatMonth('2024-11')).toBe('nov 24');
+    expect(formatMonth('2024-11')).toBe('Nov 24');
   });
 
   it('formats FX rates with 2–6 decimals', () => {
@@ -160,9 +170,72 @@ describe('formatter edge cases', () => {
     expect(formatMoney(1, 'JPY', { maxDigits: 0 })).toBe(nb('JP¥ 1'));
     expect(formatMoney(-1500, 'USD', { compact: true })).toBe(nb(`${M}US$ 1,5K`));
   });
+});
 
-  it('formats timestamps and custom date options', () => {
-    expect(formatDate('2024-03-05T12:00:00Z', { year: 'numeric' })).toBe('2024');
-    expect(formatDate('2024-12-31', { month: 'long' })).toBe('december');
+/** Local-time timestamp, so the expectations hold in any time zone. */
+const local = (y: number, m: number, d: number, h = 0, min = 0) => new Date(y, m - 1, d, h, min).toISOString();
+
+describe('date formatters (dd-mm-yyyy, English names)', () => {
+  it('prints date-only values as zero-padded dd-mm-yyyy without any time zone shift', () => {
+    expect(formatDate('2024-03-05')).toBe('05-03-2024');
+    expect(formatDate('2026-10-20')).toBe('20-10-2026');
+    expect(formatDate('2026-01-01')).toBe('01-01-2026');
+    expect(formatDate('2026-12-31')).toBe('31-12-2026');
+    expect(formatDate('2024-02-29')).toBe('29-02-2024');
+  });
+
+  it('prints timestamps in local time, with a 24-hour clock and no locale dependence', () => {
+    expect(formatDate(local(2026, 10, 20, 11, 27))).toBe('20-10-2026');
+    expect(formatDateTime(local(2026, 10, 20, 11, 27))).toBe('20-10-2026, 11:27');
+    expect(formatDateTime(local(2026, 1, 2, 0, 5))).toBe('02-01-2026, 00:05');
+    expect(formatDateTime(local(2026, 12, 31, 23, 59))).toBe('31-12-2026, 23:59');
+    expect(formatTime(local(2026, 10, 20, 9, 7))).toBe('09:07');
+    expect(formatTime(local(2026, 10, 20, 15, 30))).toBe('15:30');
+  });
+
+  it('handles the daylight-saving switch days', () => {
+    expect(formatDateTime(local(2026, 3, 29, 3, 30))).toBe('29-03-2026, 03:30');
+    expect(formatDateTime(local(2026, 10, 25, 1, 30))).toBe('25-10-2026, 01:30');
+  });
+
+  it('prefixes the English weekday for date-only values and timestamps', () => {
+    expect(formatWeekdayDate('2026-10-02')).toBe('Friday, 02-10-2026');
+    expect(formatWeekdayDate('2026-10-04')).toBe('Sunday, 04-10-2026');
+    expect(formatWeekdayDate(local(2026, 10, 19, 16, 39))).toBe('Monday, 19-10-2026');
+    expect(formatWeekdayLong('2026-10-05')).toBe('Monday');
+    expect(formatWeekdayShort('2026-10-05')).toBe('Mon');
+    expect(formatWeekdayTime(local(2026, 10, 19, 2, 0))).toBe('Mon 02:00');
+    expect(formatWeekdayTime(local(2026, 10, 24, 23, 45))).toBe('Sat 23:45');
+  });
+
+  it('names every month and weekday in English', () => {
+    expect(MONTH_NAMES_LONG).toHaveLength(12);
+    expect(MONTH_NAMES_SHORT.join(' ')).toBe('Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec');
+    const days = ['2026-10-04', '2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09', '2026-10-10'];
+    expect(days.map((d) => formatWeekdayLong(d))).toEqual(['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
+    MONTH_NAMES_LONG.forEach((name, i) => {
+      const key = `2026-${String(i + 1).padStart(2, '0')}`;
+      expect(formatMonthYear(key)).toBe(`${name} 2026`);
+      expect(formatMonthShort(`${key}-15`)).toBe(name.slice(0, 3));
+    });
+  });
+
+  it('formats month headings and compact chart labels at year boundaries', () => {
+    expect(formatMonthYear('2026-10')).toBe('October 2026');
+    expect(formatMonthYear('2026-10-20')).toBe('October 2026');
+    expect(formatMonthYear('2027-01')).toBe('January 2027');
+    expect(formatMonth('2026-10')).toBe('Oct 26');
+    expect(formatMonth('2027-01')).toBe('Jan 27');
+    expect(formatMonth('2009-12')).toBe('Dec 09');
+    expect(formatDayMonthShort('2026-10-02')).toBe('2 Oct');
+    expect(formatDayMonthShort('2026-12-31')).toBe('31 Dec');
+    expect(formatDayMonthShort(local(2026, 1, 9, 12))).toBe('9 Jan');
+    expect(formatDayOfMonth('2026-10-02')).toBe('2');
+    expect(formatDayOfMonth('2026-10-20')).toBe('20');
+  });
+
+  it('degrades to empty names for an unparseable date instead of throwing', () => {
+    expect(formatWeekdayLong('nonsense')).toBe('');
+    expect(formatMonthShort('nonsense')).toBe('');
   });
 });

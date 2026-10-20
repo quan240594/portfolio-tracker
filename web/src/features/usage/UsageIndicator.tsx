@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { UsageSnapshot } from '@portfolio/shared';
-import { formatCount, formatDate } from '../../lib/format';
+import { formatCount, formatTime } from '../../lib/format';
 import { formatLocalTime } from './budgetSignal';
 import { StatusIcon, STATE_TONE } from './StatusIcon';
 import { useUsage } from './useUsage';
@@ -89,7 +89,7 @@ function UsagePanel({ snapshot, onClose, panelRef, id }: Readonly<PanelProps>) {
       <p className="muted mt-3 text-xs">
         Daily counters reset at {formatLocalTime(snapshot.resetsAt)} (00:00 UTC); stored data is a level and does not reset.
       </p>
-      <p className="muted mt-1 text-xs">Updated {formatDate(snapshot.generatedAt, { hour: '2-digit', minute: '2-digit' })}.</p>
+      <p className="muted mt-1 text-xs">Updated {formatTime(snapshot.generatedAt)}.</p>
     </section>
   );
 }

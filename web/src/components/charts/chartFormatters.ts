@@ -1,4 +1,4 @@
-import { formatDate, formatMoney, formatMonth } from '../../lib/format';
+import { formatDate, formatDayMonthShort, formatMoney, formatMonth } from '../../lib/format';
 
 /** Pure formatter factories for Recharts axes/tooltips/legends (kept out of JSX so they are unit-testable). */
 
@@ -9,8 +9,7 @@ export function dateTickFormatter(points: readonly { date: string }[]): (d: stri
   const first = points[0];
   const last = points.at(-1);
   const spanDays = first && last ? (Date.parse(last.date) - Date.parse(first.date)) / 86_400_000 : 0;
-  const opts: Intl.DateTimeFormatOptions = spanDays > 200 ? { month: 'short', year: '2-digit' } : { day: 'numeric', month: 'short' };
-  return (d) => formatDate(d, opts);
+  return spanDays > 200 ? (d) => formatMonth(d) : (d) => formatDayMonthShort(d);
 }
 
 export const dateLabel = (d: unknown) => formatDate(String(d));

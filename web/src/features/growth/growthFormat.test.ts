@@ -29,17 +29,17 @@ const headline = (over: Partial<GrowthHeadline> = {}): GrowthHeadline => ({
 
 describe('headlineText', () => {
   it('says ahead of with the money and the percentage points', () => {
-    expect(sp(headlineText(headline(), 'EUR'))).toBe('Your portfolio is ahead of IWDA.AS by € 1.234,50 (3,4 percentage points) since 15 okt 2025.');
+    expect(sp(headlineText(headline(), 'EUR'))).toBe('Your portfolio is ahead of IWDA.AS by € 1.234,50 (3,4 percentage points) since 15-10-2025.');
   });
 
   it('says behind with absolute numbers', () => {
-    expect(sp(headlineText(headline({ amount: -80, differencePct: -1.25 }), 'EUR'))).toBe('Your portfolio is behind IWDA.AS by € 80,00 (1,25 percentage points) since 15 okt 2025.');
+    expect(sp(headlineText(headline({ amount: -80, differencePct: -1.25 }), 'EUR'))).toBe('Your portfolio is behind IWDA.AS by € 80,00 (1,25 percentage points) since 15-10-2025.');
   });
 
   it('follows the percentage points when the money is exactly level, and says level when both are', () => {
     expect(headlineText(headline({ amount: 0, differencePct: 0.5 }), 'EUR')).toContain('ahead of');
     expect(headlineText(headline({ amount: 0, differencePct: -0.5 }), 'EUR')).toContain('behind');
-    expect(headlineText(headline({ amount: 0, differencePct: 0 }), 'EUR')).toBe('Your portfolio is level with IWDA.AS since 15 okt 2025.');
+    expect(headlineText(headline({ amount: 0, differencePct: 0 }), 'EUR')).toBe('Your portfolio is level with IWDA.AS since 15-10-2025.');
   });
 });
 

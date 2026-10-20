@@ -77,11 +77,11 @@ describe('MonthGrid', () => {
 
   it('is a table with Monday-first column headers and one cell per day', () => {
     grid([]);
-    const table = screen.getByRole('table', { name: /Calendar events in oktober 2026, Monday to Sunday/ });
+    const table = screen.getByRole('table', { name: /Calendar events in October 2026, Monday to Sunday/ });
     const headers = within(table).getAllByRole('columnheader');
     expect(headers).toHaveLength(7);
-    expect(headers[0]).toHaveAttribute('abbr', 'maandag');
-    expect(headers[6]).toHaveAttribute('abbr', 'zondag');
+    expect(headers[0]).toHaveAttribute('abbr', 'Monday');
+    expect(headers[6]).toHaveAttribute('abbr', 'Sunday');
     expect(headers.every((h) => h.getAttribute('scope') === 'col')).toBe(true);
     expect(within(table).getAllByRole('row')).toHaveLength(1 + 5);
     expect(table.querySelectorAll('td')).toHaveLength(35);
@@ -113,7 +113,7 @@ describe('MonthGrid', () => {
     const day = Array.from({ length: MAX_CHIPS_PER_DAY + 2 }, (_, i) => event({ id: `e${i}`, symbol: `S${i}`, type: 'EARNINGS', expectedAmount: undefined }));
     grid(day);
     expect(screen.getAllByRole('button', { name: /Earnings/ })).toHaveLength(MAX_CHIPS_PER_DAY);
-    const more = screen.getByRole('button', { name: '2 more on 20 oktober' });
+    const more = screen.getByRole('button', { name: '2 more on 20-10-2026' });
     expect(more).toHaveTextContent('+2 more');
     await userEvent.click(more);
     expect(onSelectDay).toHaveBeenCalledWith('2026-10-20');
@@ -146,8 +146,8 @@ describe('EventList', () => {
     const onSelect = vi.fn();
     renderWithProviders(<EventList events={events} baseCurrency="EUR" onSelect={onSelect} today="2026-10-15" />);
     const headings = screen.getAllByRole('heading', { level: 3 });
-    expect(headings.map((h) => h.textContent)).toEqual(['donderdag 15 oktober 2026Today', 'dinsdag 20 oktober 2026']);
-    const first = screen.getByRole('region', { name: /donderdag 15 oktober 2026/ });
+    expect(headings.map((h) => h.textContent)).toEqual(['Thursday, 15-10-2026Today', 'Tuesday, 20-10-2026']);
+    const first = screen.getByRole('region', { name: /Thursday, 15-10-2026/ });
     expect(within(first).getAllByRole('listitem')).toHaveLength(2);
     expect(first).toHaveTextContent('Received');
     expect(first).toHaveTextContent('Estimated');
@@ -179,10 +179,10 @@ describe('EventDialog', () => {
   it('shows the dates, per-share amount, quantity and expected amount of a dividend', () => {
     open(event());
     const dialog = screen.getByRole('dialog', { name: 'AAPL · Ex-dividend' });
-    expect(dialog).toHaveAccessibleDescription('dinsdag 20 oktober 2026');
+    expect(dialog).toHaveAccessibleDescription('Tuesday, 20-10-2026');
     const terms = within(dialog).getAllByRole('term').map((t) => t.textContent);
     expect(terms).toEqual(['Type', 'Date', 'Ex-dividend date', 'Payment date', 'Per share', 'Your shares on the ex-date', 'Expected (net)', 'Status', 'Source']);
-    expect(dialog).toHaveTextContent('5 nov 2026');
+    expect(dialog).toHaveTextContent('05-11-2026');
     expect(dialog).toHaveTextContent(sp('€ 3,74'));
     expect(dialog).toHaveTextContent('Market data provider');
     expect(dialog).toHaveTextContent('Confirmed');
@@ -210,7 +210,7 @@ describe('EventDialog', () => {
   it('shows EPS estimate, fiscal period and time of day of an earnings report and warns about estimates', () => {
     open(event({ type: 'EARNINGS', status: 'ESTIMATED', source: 'alphavantage', fiscalPeriodEnd: '2026-09-30', epsEstimate: 1.85, currency: 'USD', timeOfDay: 'AMC' }));
     const dialog = screen.getByRole('dialog', { name: 'AAPL · Earnings' });
-    expect(dialog).toHaveTextContent('30 sep 2026');
+    expect(dialog).toHaveTextContent('30-09-2026');
     expect(dialog).toHaveTextContent(sp('US$ 1,85'));
     expect(dialog).toHaveTextContent('After market close');
     expect(dialog).toHaveTextContent('Alpha Vantage');
@@ -247,7 +247,7 @@ describe('DayDialog', () => {
     const onSelect = vi.fn();
     const onClose = vi.fn();
     renderWithProviders(<DayDialog date="2026-10-20" events={[event({ id: 'a' }), event({ id: 'b', symbol: 'MSFT' })]} baseCurrency="EUR" onClose={onClose} onSelect={onSelect} />);
-    const dialog = screen.getByRole('dialog', { name: 'dinsdag 20 oktober 2026' });
+    const dialog = screen.getByRole('dialog', { name: 'Tuesday, 20-10-2026' });
     expect(dialog).toHaveAccessibleDescription('2 events');
     await userEvent.click(within(dialog).getByRole('button', { name: /^MSFT,/ }));
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ id: 'b' }));

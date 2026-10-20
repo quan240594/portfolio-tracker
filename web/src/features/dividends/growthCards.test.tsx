@@ -77,7 +77,7 @@ describe('parts', () => {
       <Themed>
         {(c) => (
           <TooltipBox
-            title="mrt"
+            title="Mar"
             ccy="EUR"
             c={c}
             colorOf={() => '#ff0000'}
@@ -90,7 +90,7 @@ describe('parts', () => {
         )}
       </Themed>,
     );
-    expect(screen.getByText('mrt')).toBeInTheDocument();
+    expect(screen.getByText('Mar')).toBeInTheDocument();
     expect(sp(screen.getByText('2026 forecast · Estimated').parentElement!.parentElement!.textContent!)).toContain('€ 7,50');
     expect(screen.getAllByRole('listitem')).toHaveLength(3);
   });

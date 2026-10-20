@@ -15,7 +15,7 @@ describe('TwrCard', () => {
     render(<TwrCard data={metricsFixture()} />);
     expect(screen.getByRole('heading', { name: 'Portfolio TWR' })).toBeInTheDocument();
     expect(screen.getByTestId('twr-value')).toHaveTextContent('+38,1%');
-    expect(screen.getByText(/Time-weighted return since 2 jun 2025 \(500 days\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Time-weighted return since 02-06-2025 \(500 days\)/)).toBeInTheDocument();
     expect(card('twr')).toHaveTextContent('IWDA.AS: +45,9%(▼ 7,8 pp)');
     expect(screen.getByText('You are 7,8 pp behind IWDA.AS over the same period.')).toBeInTheDocument();
     expect(screen.queryByText(/Less than a year/)).not.toBeInTheDocument();
@@ -41,7 +41,7 @@ describe('TwrCard', () => {
 
   it('explains when the benchmark history starts after your first purchase', () => {
     render(<TwrCard data={metricsFixture({ twr: { ...metricsFixture().twr, benchmarkFrom: '2025-09-01' } })} />);
-    expect(screen.getByText(/IWDA.AS price history only starts on 1 sep 2025/)).toBeInTheDocument();
+    expect(screen.getByText(/IWDA.AS price history only starts on 01-09-2025/)).toBeInTheDocument();
   });
 
   it('degrades when the benchmark has no data', () => {
@@ -83,7 +83,7 @@ describe('PeCard', () => {
     expect(screen.getByText('JNJ (Johnson & Johnson): no earnings data')).toBeInTheDocument();
     expect(screen.getByText('IWDA.AS has no P/E of its own, so there is no market marker.')).toBeInTheDocument();
     expect(screen.queryByTestId('gauge-dot-benchmark')).not.toBeInTheDocument();
-    expect(screen.getByText('Earnings data as of 6 okt 2026.')).toBeInTheDocument();
+    expect(screen.getByText('Earnings data as of 06-10-2026.')).toBeInTheDocument();
   });
 
   it('adds a market marker when the benchmark has a P/E', () => {

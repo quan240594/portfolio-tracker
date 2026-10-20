@@ -4,7 +4,7 @@ describe('analytics labels', () => {
   it('labels periods', () => {
     expect(periodLabel('year', '2026')).toBe('2026');
     expect(periodLabel('quarter', '2026-Q3')).toBe('Q3 2026');
-    expect(periodLabel('month', '2026-03')).toBe('mrt 26');
+    expect(periodLabel('month', '2026-03')).toBe('Mar 26');
   });
 
   it('formats percentages and ratios the Dutch way, with a dash for missing values', () => {

@@ -4,6 +4,7 @@ import { setAuthTokenHooks } from '../features/auth/tokenHooks';
 import { getBudgetNotice, reportBudgetError, resetBudgetNotice } from '../features/usage/budgetSignal';
 import { budgetExhausted, budgetUnavailable } from '../test/usage';
 import { ApiError, api, apiUrl, errorMessage, request, requestText, uploadCsv } from './client';
+import { localWeekdayTime } from '../test/localTime';
 
 afterEach(() => setAuthTokenHooks(undefined));
 
@@ -267,7 +268,7 @@ describe('errorMessage', () => {
 
 describe('free-plan budget guard errors', () => {
   const NOW = Date.parse('2026-10-19T10:00:00Z');
-  const local = (ms: number) => new Intl.DateTimeFormat('nl-NL', { weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(ms));
+  const local = localWeekdayTime;
 
   afterEach(() => {
     resetBudgetNotice();

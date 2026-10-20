@@ -99,7 +99,7 @@ describe('MonthNavigator', () => {
   it('moves between months and jumps back to today', async () => {
     const onMonth = vi.fn();
     const { rerender } = renderWithProviders(<MonthNavigator month="2026-10" today={TODAY} range="month" onMonth={onMonth} />);
-    expect(screen.getByRole('heading', { level: 2, name: 'oktober 2026' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'October 2026' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Today' })).toBeDisabled();
     await userEvent.click(screen.getByRole('button', { name: 'Previous month' }));
     expect(onMonth).toHaveBeenLastCalledWith('2026-09');

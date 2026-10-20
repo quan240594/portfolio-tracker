@@ -17,7 +17,7 @@ import { usePortfolioScope } from '../features/portfolios/usePortfolioScope';
 import { AnalyticsKpis } from '../features/analytics/AnalyticsKpis';
 import { InsightsSection } from '../features/analytics/InsightsSection';
 import { MoversSection } from '../features/analytics/MoversSection';
-import { BASE_CURRENCY, formatDate, formatMoney, formatPercent, formatWeight } from '../lib/format';
+import { BASE_CURRENCY, formatDateTime, formatMoney, formatPercent, formatWeight } from '../lib/format';
 
 type AllocationTab = Exclude<AllocationDimension, 'symbol'> | 'category';
 
@@ -226,7 +226,7 @@ function TopHoldingsCard() {
 function dashboardDescription(data: GetPortfolioResponse | undefined, scopeName: string): string | undefined {
   if (!data) return scopeName || undefined;
   const prefix = scopeName ? `${scopeName} · values` : 'Values';
-  const asOf = formatDate(data.asOf, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const asOf = formatDateTime(data.asOf);
   return `${prefix} in ${data.baseCurrency} · as of ${asOf}`;
 }
 

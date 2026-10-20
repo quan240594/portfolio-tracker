@@ -25,15 +25,15 @@ describe('chart formatters', () => {
 
   it('uses day/month ticks for short ranges and month/year ticks for long ranges', () => {
     const short = dateTickFormatter([{ date: '2024-01-01' }, { date: '2024-03-01' }]);
-    expect(short('2024-02-15')).toBe('15 feb');
+    expect(short('2024-02-15')).toBe('15 Feb');
     const long = dateTickFormatter([{ date: '2023-01-01' }, { date: '2024-03-01' }]);
-    expect(long('2024-02-15')).toBe('feb 24');
-    expect(dateTickFormatter([])('2024-02-15')).toBe('15 feb');
+    expect(long('2024-02-15')).toBe('Feb 24');
+    expect(dateTickFormatter([])('2024-02-15')).toBe('15 Feb');
   });
 
   it('formats tooltip labels', () => {
-    expect(dateLabel('2024-03-05')).toBe('5 mrt 2024');
-    expect(monthLabel('2024-11')).toBe('nov 24');
+    expect(dateLabel('2024-03-05')).toBe('05-03-2024');
+    expect(monthLabel('2024-11')).toBe('Nov 24');
   });
 
   it('maps series keys to human names', () => {
@@ -146,7 +146,7 @@ describe('ValueChart', () => {
     renderWithProviders(<ValueChart currency="EUR" points={points} />);
     expect(
       screen.getByRole('img', {
-        name: 'Portfolio value from 1 jan 2024 to 1 jun 2024: €\u00a01.000,00 to €\u00a01.200,00; invested €\u00a01.000,00.',
+        name: 'Portfolio value from 01-01-2024 to 01-06-2024: €\u00a01.000,00 to €\u00a01.200,00; invested €\u00a01.000,00.',
       }),
     ).toBeInTheDocument();
   });
@@ -157,8 +157,8 @@ describe('ValueChart', () => {
   });
 
   it('names only the series that are shown', () => {
-    expect(valueSummary(points, 'EUR', { value: true, invested: false })).toBe('Portfolio value from 1 jan 2024 to 1 jun 2024: €\u00a01.000,00 to €\u00a01.200,00.');
-    expect(valueSummary(points, 'EUR', { value: false, invested: true })).toBe('Invested from 1 jan 2024 to 1 jun 2024: €\u00a0900,00 to €\u00a01.000,00.');
+    expect(valueSummary(points, 'EUR', { value: true, invested: false })).toBe('Portfolio value from 01-01-2024 to 01-06-2024: €\u00a01.000,00 to €\u00a01.200,00.');
+    expect(valueSummary(points, 'EUR', { value: false, invested: true })).toBe('Invested from 01-01-2024 to 01-06-2024: €\u00a0900,00 to €\u00a01.000,00.');
     expect(valueSummary([], 'EUR', { value: false, invested: true })).toBe('No history available.');
   });
 

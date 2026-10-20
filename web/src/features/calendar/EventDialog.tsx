@@ -2,13 +2,11 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import type { CalendarEvent } from '@portfolio/shared';
 import { Dialog } from '../../components/Dialog';
-import { formatDate, formatMoney, formatQuantity } from '../../lib/format';
+import { formatDate, formatMoney, formatQuantity, formatWeekdayDate } from '../../lib/format';
 import { EVENT_META, STATUS_LABELS, isDividend, sourceLabel } from './calendarModel';
 import { EventMarker } from './EventMarker';
 import { EventRow } from './EventList';
 import { perShareLabel, TIME_OF_DAY_LABELS } from './eventText';
-
-const LONG_DATE: Intl.DateTimeFormatOptions = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' };
 
 function Row({ label, children }: Readonly<{ label: string; children: ReactNode }>) {
   return (
@@ -81,7 +79,7 @@ export function EventDialog({ event, baseCurrency, onClose, withScope }: Readonl
       open
       onClose={onClose}
       title={`${event.symbol} · ${meta.label}`}
-      description={formatDate(event.date, LONG_DATE)}
+      description={formatWeekdayDate(event.date)}
       footer={
         <>
           <Link to={link.to} className="btn-secondary" onClick={onClose}>
@@ -121,7 +119,7 @@ interface DayProps {
 export function DayDialog({ date, events, baseCurrency, onClose, onSelect }: Readonly<DayProps>) {
   if (!date) return null;
   return (
-    <Dialog open onClose={onClose} title={formatDate(date, LONG_DATE)} description={`${events.length} events`} footer={<button type="button" className="btn-primary" onClick={onClose}>Close</button>}>
+    <Dialog open onClose={onClose} title={formatWeekdayDate(date)} description={`${events.length} events`} footer={<button type="button" className="btn-primary" onClick={onClose}>Close</button>}>
       <ul className="space-y-1.5">
         {events.map((e) => (
           <EventRow key={e.id} event={e} baseCurrency={baseCurrency} onSelect={onSelect} />
