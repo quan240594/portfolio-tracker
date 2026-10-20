@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   SNOWBALL_CATEGORY_CLASS,
+  decodeCsvBytes,
+  detectDelimiter,
   SNOWBALL_COUNTRIES,
   SNOWBALL_SECTORS,
   isSnowballHoldingsHeader,
@@ -83,6 +85,51 @@ describe('parseSnowballHoldings', () => {
   it('reads the columns it needs by name, in any order, with a typographic apostrophe', () => {
     const csv = ['Sector,ISIN,Country,Holding,Holdings\u2019 name', 'Healthcare,US0000000002,USA,hlth,Invented Health'].join('\n');
     expect(parseSnowballHoldings(csv).rows).toEqual([{ ticker: 'HLTH', isin: 'US0000000002', name: 'Invented Health', assetClass: 'STOCK', sector: 'Healthcare', country: 'United States' }]);
+  });
+});
+
+describe('other spellings of the same export', () => {
+  const csv = file({ holding: 'acme', name: 'Acme Software, Inc', currency: 'usd', country: 'United States of America', sector: 'Information Technology', category: 'Information Technology', isin: 'US0000000002' });
+  const expected = [{ ticker: 'ACME', isin: 'US0000000002', currency: 'USD', name: 'Acme Software, Inc', assetClass: 'STOCK', sector: 'Technology', country: 'United States' }];
+
+  it('reads a semicolon- or tab-separated export, with and without quotes', () => {
+    expect(parseSnowballHoldings(csv.replaceAll('","', '";"')).rows).toEqual(expected);
+    expect(parseSnowballHoldings(csv.replaceAll('","', '"\t"')).rows).toEqual(expected);
+    const bare = ['Holding;Holdings\' name;Sector;Country;ISIN', 'acme;Acme Software, Inc;Information Technology;United States of America;US0000000002'].join('\n');
+    expect(parseSnowballHoldings(bare).rows).toEqual([{ ticker: 'ACME', isin: 'US0000000002', name: 'Acme Software, Inc', assetClass: 'STOCK', sector: 'Technology', country: 'United States' }]);
+  });
+
+  it('detects the delimiter from the first line only and ignores separators inside quotes', () => {
+    expect(detectDelimiter('a,b,c')).toBe(',');
+    expect(detectDelimiter('a;b;c')).toBe(';');
+    expect(detectDelimiter('a\tb\tc')).toBe('\t');
+    expect(detectDelimiter('"a;b;c",d')).toBe(',');
+    expect(detectDelimiter('\uFEFFa;b\n1,2,3,4')).toBe(';');
+    expect(detectDelimiter('')).toBe(',');
+  });
+
+  it('decodes UTF-8 (with or without a byte-order mark) and both UTF-16 flavours', () => {
+    const utf16 = (text: string, littleEndian: boolean): Uint8Array => {
+      const bytes = new Uint8Array(2 + text.length * 2);
+      bytes.set(littleEndian ? [0xff, 0xfe] : [0xfe, 0xff]);
+      new DataView(bytes.buffer).setUint16(0, 0xfeff, littleEndian);
+      [...text].forEach((char, index) => new DataView(bytes.buffer).setUint16(2 + index * 2, char.charCodeAt(0), littleEndian));
+      return bytes;
+    };
+    expect(decodeCsvBytes(new TextEncoder().encode('Holding;x'))).toBe('Holding;x');
+    expect(decodeCsvBytes(new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode('Holding;x')]))).toBe('Holding;x');
+    expect(decodeCsvBytes(utf16('Holding;x', true))).toBe('Holding;x');
+    expect(decodeCsvBytes(utf16('Holding;x', false))).toBe('Holding;x');
+    expect(parseSnowballHoldings(decodeCsvBytes(utf16(csv.replaceAll('","', '";"').replace('\uFEFF', ''), true))).rows).toEqual(expected);
+  });
+
+  it('names the columns it found when the file is not the holdings export', () => {
+    const [issue] = parseSnowballHoldings('\uFEFFName;Symbol;Quantity\nAcme;ACME;1').issues;
+    expect(issue?.message).toContain('Not a Snowball holdings export');
+    expect(issue?.message).toContain('The first of its 3 column(s): Name, Symbol, Quantity');
+    const many = parseSnowballHoldings(Array.from({ length: 10 }, (_, index) => `c${index}`).join(',')).issues[0]?.message;
+    expect(many).toContain('c0, c1, c2, c3, c4, c5, c6, c7, ...');
+    expect(parseSnowballHoldings('').issues[0]?.message).toContain('the file is empty');
   });
 });
 

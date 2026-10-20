@@ -83,6 +83,27 @@ const norm = (value: string): string => value.replaceAll('\u2019', "'").trim().t
 
 const COLUMNS = { ticker: 'holding', name: "holdings' name", sector: 'sector', country: 'country', category: 'category', isin: 'isin', currency: 'currency' } as const;
 
+const DELIMITERS = [',', ';', '\t'] as const;
+
+/** The column separator of a CSV (comma, semicolon or tab, as spreadsheet apps and locales write them), from its first line. */
+export function detectDelimiter(text: string): string {
+  const firstLine = text.replace(/^\uFEFF/, '').split('\n', 1)[0] ?? '';
+  let quoted = false;
+  const counts = new Map<string, number>(DELIMITERS.map((delimiter) => [delimiter, 0]));
+  for (const char of firstLine) {
+    if (char === '"') quoted = !quoted;
+    else if (!quoted && counts.has(char)) counts.set(char, (counts.get(char) ?? 0) + 1);
+  }
+  return DELIMITERS.reduce((best, delimiter) => ((counts.get(delimiter) ?? 0) > (counts.get(best) ?? 0) ? delimiter : best), ',');
+}
+
+/** Text of a CSV file's bytes: UTF-16 (the "Unicode text" of spreadsheet apps) when it has that byte-order mark, else UTF-8. */
+export function decodeCsvBytes(bytes: Uint8Array): string {
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder('utf-16le').decode(bytes);
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder('utf-16be').decode(bytes);
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
 /** Whether the header row is Snowball's holdings export. */
 export function isSnowballHoldingsHeader(header: readonly string[]): boolean {
   const names = new Set(header.map(norm));
@@ -140,11 +161,21 @@ function toRow(get: (column: keyof typeof COLUMNS) => string | undefined, line: 
   };
 }
 
+const MISSING_HEADER_HINT = 'Holding, Holdings\' name, Sector, Country and ISIN columns are expected';
+
+/** Names the columns it found (column titles carry no data) so a mismatch can be diagnosed. */
+function notSnowballMessage(header: readonly string[]): string {
+  const found = header.map((cell) => cell.replace(/^\uFEFF/, '').trim()).filter((cell) => cell !== '');
+  if (found.length === 0) return `Not a Snowball holdings export: the file is empty (${MISSING_HEADER_HINT})`;
+  const shown = found.slice(0, 8).join(', ');
+  return `Not a Snowball holdings export (${MISSING_HEADER_HINT}). The first of its ${found.length} column(s): ${shown}${found.length > 8 ? ', ...' : ''}`;
+}
+
 /** Parses the export; an empty or foreign file gives no rows and one issue. */
 export function parseSnowballHoldings(text: string): SnowballParse {
-  const table = parseCsvText(text);
+  const table = parseCsvText(text, detectDelimiter(text));
   const header = table[0] ?? [];
-  if (!isSnowballHoldingsHeader(header)) return { rows: [], issues: [{ line: 1, message: 'Not a Snowball holdings export (Holding, Holdings\' name, Sector, Country and ISIN columns are expected)' }] };
+  if (!isSnowballHoldingsHeader(header)) return { rows: [], issues: [{ line: 1, message: notSnowballMessage(header) }] };
   const names = header.map(norm);
   const index = Object.fromEntries(Object.entries(COLUMNS).map(([key, column]) => [key, names.indexOf(column)])) as Record<keyof typeof COLUMNS, number>;
   const issues: SnowballIssue[] = [];

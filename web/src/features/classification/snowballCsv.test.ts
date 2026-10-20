@@ -16,9 +16,9 @@ describe('readSnowballFile', () => {
   it('refuses a file over the API limit without reading it', async () => {
     const file = new File(['x'], 'big.csv');
     Object.defineProperty(file, 'size', { value: MAX_CLASSIFICATION_IMPORT_BYTES + 1 });
-    const text = vi.spyOn(file, 'text');
+    const bytes = vi.spyOn(file, 'arrayBuffer');
     expect(await readSnowballFile(file)).toEqual({ ok: false, message: 'The file is larger than 1 MB; the Snowball holdings export is much smaller.' });
-    expect(text).not.toHaveBeenCalled();
+    expect(bytes).not.toHaveBeenCalled();
   });
 
   it('accepts a file of exactly the limit', async () => {
@@ -29,7 +29,7 @@ describe('readSnowballFile', () => {
 
   it('says so when the file cannot be read', async () => {
     const file = new File(['x'], 'broken.csv');
-    vi.spyOn(file, 'text').mockRejectedValue(new Error('disk'));
+    vi.spyOn(file, 'arrayBuffer').mockRejectedValue(new Error('disk'));
     expect(await readSnowballFile(file)).toEqual({ ok: false, message: 'The selected file could not be read.' });
   });
 

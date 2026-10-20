@@ -1,4 +1,4 @@
-import { MAX_CLASSIFICATION_IMPORT_BYTES, MAX_CLASSIFICATION_IMPORT_ROWS, parseSnowballHoldings, type SnowballParse } from '@portfolio/shared';
+import { decodeCsvBytes, MAX_CLASSIFICATION_IMPORT_BYTES, MAX_CLASSIFICATION_IMPORT_ROWS, parseSnowballHoldings, type SnowballParse } from '@portfolio/shared';
 
 export type SnowballFileResult = ({ ok: true } & SnowballParse) | { ok: false; message: string };
 
@@ -12,7 +12,7 @@ export async function readSnowballFile(file: File): Promise<SnowballFileResult> 
   if (file.size > MAX_CLASSIFICATION_IMPORT_BYTES) return { ok: false, message: `The file is larger than ${MAX_MB} MB; the Snowball holdings export is much smaller.` };
   let text: string;
   try {
-    text = await file.text();
+    text = decodeCsvBytes(new Uint8Array(await file.arrayBuffer()));
   } catch {
     return { ok: false, message: 'The selected file could not be read.' };
   }

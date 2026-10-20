@@ -177,7 +177,7 @@ describe('ClassificationImportDialog', () => {
   it('ignores the parse result of an older file once a newer one was chosen', async () => {
     let release: () => void = () => undefined;
     const slow = new File(['x'], 'slow.csv', { type: 'text/csv' });
-    vi.spyOn(slow, 'text').mockImplementation(() => new Promise<string>((resolve) => (release = () => resolve('not a holdings export'))));
+    vi.spyOn(slow, 'arrayBuffer').mockImplementation(() => new Promise<ArrayBuffer>((resolve) => (release = () => resolve(new TextEncoder().encode('not a holdings export').buffer))));
     const { user, dialog } = open();
     await choose(user, slow);
     expect(dialog.getByText('Reading slow.csv…')).toBeInTheDocument();
