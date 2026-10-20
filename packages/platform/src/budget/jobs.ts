@@ -26,6 +26,8 @@ export const JOB_CEILINGS: Readonly<Record<JobName, JobCeiling>> = {
   enrichTransactions: 'warn',
   /** An import the owner just started. */
   importUploaded: 'warn',
+  /** A push costs one subrequest and a few rows; it runs until the budget is blocked (80 %) and is dropped, not deferred, above it: the next run sends what is due. */
+  notifyDividends: 'warn',
 };
 
 /** A job this table does not know is treated as non-essential. */

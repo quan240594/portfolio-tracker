@@ -130,7 +130,19 @@ describe('schedule', () => {
 
   it('declares one schedule per job with unique names', () => {
     expect(new Set(SCHEDULED_JOBS.map((s) => s.name)).size).toBe(SCHEDULED_JOBS.length);
-    expect(SCHEDULED_JOBS.map((s) => s.job)).toEqual(['refreshPrices', 'refreshCalendar', 'syncBroker', 'refreshT212Quotes', 'refreshT212Quotes']);
+    expect(SCHEDULED_JOBS.map((s) => s.job)).toEqual(['refreshPrices', 'refreshCalendar', 'syncBroker', 'syncBroker', 'notifyDividends', 'refreshT212Quotes', 'refreshT212Quotes']);
+  });
+
+  it('adds the intraday sync and the notification run on Cloudflare only, leaving the AWS schedules as they were', () => {
+    const intraday = SCHEDULED_JOBS.find((s) => s.name === 'broker-sync-intraday')!;
+    expect(intraday).toMatchObject({ job: 'syncBroker', payload: { all: true }, timezone: 'Europe/Amsterdam', minute: 30, hours: [12, 18, 22], weekdaysOnly: true, cloudflareOnly: true });
+    expect(toUnixCron(intraday)).toBe('30 12,18,22 * * MON-FRI');
+    const notify = SCHEDULED_JOBS.find((s) => s.name === 'notify-dividends')!;
+    expect(notify).toMatchObject({ job: 'notifyDividends', payload: { trigger: 'scheduled' }, timezone: 'Europe/Amsterdam', hours: [9], cloudflareOnly: true });
+    expect(toUnixCron(notify)).toBe('0 9 * * *');
+    const daily = SCHEDULED_JOBS.find((s) => s.name === 'broker-sync')!;
+    expect([daily.hours, daily.weekdaysOnly, daily.cloudflareOnly]).toEqual([[6], false, undefined]);
+    expect(SCHEDULED_JOBS.filter((s) => s.cloudflareOnly !== true).map((s) => s.name)).toEqual(['prices-refresh', 'prices-calendar', 'broker-sync']);
   });
 });
 

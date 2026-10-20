@@ -11,6 +11,7 @@ export const JOBS = {
   refreshPrices: 'refreshPrices',
   refreshCalendar: 'refreshCalendar',
   refreshT212Quotes: 'refreshT212Quotes',
+  notifyDividends: 'notifyDividends',
 } as const;
 
 export type JobName = (typeof JOBS)[keyof typeof JOBS];
@@ -26,6 +27,8 @@ export interface JobPayloads {
   refreshCalendar: { trigger: 'scheduled' };
   /** Refresh the quotes of the positions held at Trading 212 (`scheduled`, or `sync` right after a successful sync); `userId` limits it to one user. */
   refreshT212Quotes: { trigger: 'scheduled' | 'sync'; userId?: string };
+  /** Send the dividend push notifications that are due (`scheduled` for everyone, `sync` after a broker sync for `userId`). */
+  notifyDividends: { trigger: 'scheduled' | 'sync'; userId?: string };
 }
 
 /**

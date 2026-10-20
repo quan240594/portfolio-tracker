@@ -50,6 +50,29 @@ export const SCHEDULED_JOBS = [
     hours: [6],
     weekdaysOnly: false,
   }),
+  // Dividends are booked during the day: three more weekday syncs (12:30, 18:30, 22:30) record a payment within hours instead of the next
+  // morning. An incremental run reads one page per history, re-reads the 7-day overlap and writes only new or changed transactions.
+  scheduled({
+    name: 'broker-sync-intraday',
+    job: JOBS.syncBroker,
+    payload: { all: true },
+    timezone: 'Europe/Amsterdam',
+    minute: 30,
+    hours: [12, 18, 22],
+    weekdaysOnly: true,
+    cloudflareOnly: true,
+  }),
+  // Pushes the dividend notifications that are due (the morning run also covers what quiet hours held back overnight).
+  scheduled({
+    name: 'notify-dividends',
+    job: JOBS.notifyDividends,
+    payload: { trigger: 'scheduled' },
+    timezone: 'Europe/Amsterdam',
+    minute: 0,
+    hours: [9],
+    weekdaysOnly: false,
+    cloudflareOnly: true,
+  }),
   // Weekdays 07:00-21:45 every 15 minutes, plus one run at 22:05 (after the US close): 61 runs a day. Each costs one subrequest
   // per connected account and one batched write of about one row per held symbol, see docs/architecture.md.
   scheduled({
