@@ -11,6 +11,7 @@ import {
   resumeTimeFromRetryAfter,
   useBudgetNotice,
 } from './budgetSignal';
+import { localWeekdayTime } from '../../test/localTime';
 
 const NOW = Date.parse('2026-10-19T10:00:00Z');
 
@@ -19,8 +20,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** What the app locale prints for a local weekday and time, built without the code under test. */
-const local = (iso: string) => new Intl.DateTimeFormat('nl-NL', { weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
+/** The English weekday and 24-hour time, built without the code under test. */
+const local = localWeekdayTime;
 
 describe('isBudgetCode', () => {
   it('recognises exactly the two guard codes', () => {
@@ -53,7 +54,7 @@ describe('resumeTimeFromRetryAfter', () => {
 });
 
 describe('formatLocalTime', () => {
-  it('prints the local weekday and time in the app locale, from a timestamp or an ISO string', () => {
+  it('prints the local weekday and time in English, from a timestamp or an ISO string', () => {
     const iso = '2026-10-20T00:00:00.000Z';
     expect(formatLocalTime(iso)).toBe(local(iso));
     expect(formatLocalTime(Date.parse(iso))).toBe(local(iso));

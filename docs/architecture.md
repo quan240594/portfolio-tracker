@@ -2837,3 +2837,29 @@ Everything above runs against fakes: the real Twelve Data / EODHD / Trading 212 
 wording of the Twelve Data 429, whether the free plan counts `/stocks` and `/etfs` as credits, and the shape of the real instruments
 metadata are as documented or inferred). The Snowball mapping was checked against the vocabulary of the owner's export (category, sector and
 country labels only), not its positions. The GB-s figures are estimates.
+
+## Date format
+
+Every date the web app shows is numeric `dd-mm-yyyy` and every month or weekday name is English, whatever the browser locale. Numbers and
+amounts are unchanged (`nl-NL`, `€ 64.243,66`). The only formatter is `web/src/lib/format.ts`; no other file builds a date with `Intl`,
+`toLocale*Date*` or its own month table. It assembles the text by hand from English name tables (`MONTH_NAMES_LONG`, `MONTH_NAMES_SHORT`),
+so Chrome on Android, Safari and Node print the same string. Date-only values (`YYYY-MM-DD`) are read as UTC and never shift; timestamps use
+the user's local time zone with a 24-hour clock.
+
+| Helper | Output | Used for |
+|---|---|---|
+| `formatDate(iso)` | `20-10-2026` | every plain date |
+| `formatDateTime(iso)` | `20-10-2026, 11:27` | quote times, "as of", broker sync times |
+| `formatTime(iso)` | `11:27` | "Updated" time of the usage panel |
+| `formatWeekdayDate(iso)` | `Friday, 02-10-2026` | calendar day headings, dialogs, screen-reader text |
+| `formatWeekdayTime(iso)` | `Tue 02:00` | local reset/resume time of the free-plan notice |
+| `formatWeekdayLong` / `formatWeekdayShort` | `Monday` / `Mon` | calendar column headers |
+| `formatMonthYear(yyyyMm)` | `October 2026` | calendar title, "Expected dividends in …" |
+| `formatMonth(yyyyMm)` | `Oct 26` | compact chart categories, table rows |
+| `formatDayMonthShort(iso)` | `2 Oct` | short-range chart axis |
+| `formatMonthShort(iso)`, `formatDayOfMonth(iso)` | `Oct`, `2` | the upcoming-dividend tiles |
+| `MONTH_NAMES_SHORT` | `Jan` … `Dec` | dividends month comparison bars |
+
+Not covered, by design: ISO data formats (API payloads, `.ics` `DTSTART`/description lines, error messages that quote the stored `YYYY-MM-DD`)
+and the native `<input type="date">` pickers, which the browser renders in its own locale. Tests build expectations without the code under test
+(`web/src/test/localTime.ts`) and in local time, so they hold in any time zone.

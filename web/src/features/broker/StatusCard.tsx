@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { BrokerStatusResponse, BrokerSyncStatus, Portfolio } from '@portfolio/shared';
 import { errorMessage } from '../../api/client';
 import { Dialog } from '../../components/Dialog';
-import { formatDate } from '../../lib/format';
+import { formatDateTime } from '../../lib/format';
 import { portfolioName } from '../portfolios/usePortfolioScope';
 import { useDisconnectBroker, useSyncBroker } from './useBroker';
 
@@ -32,7 +32,7 @@ const reasonLabel = (reason: string) =>
   SKIP_REASONS[reason] ??
   (reason.startsWith(UNSUPPORTED_FILL) ? `Corporate action not imported (${reason.slice(UNSUPPORTED_FILL.length).toLowerCase().replaceAll('_', ' ')})` : reason);
 
-const time = (iso: string) => formatDate(iso, { dateStyle: 'medium', timeStyle: 'short' });
+const time = (iso: string) => formatDateTime(iso);
 
 function Stat({ label, value }: Readonly<{ label: string; value: number }>) {
   return (

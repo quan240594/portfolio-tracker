@@ -80,7 +80,7 @@ describe('asset chart selection helpers', () => {
       { key: 'price', label: 'AAA', selectable: true },
       { key: 'IWDA.AS', label: 'IWDA.AS', selectable: true },
     ]);
-    expect(perf.rows[0]).toMatchObject({ header: '1 jun 2026', selectable: false });
+    expect(perf.rows[0]).toMatchObject({ header: '01-06-2026', selectable: false });
     expect(perf.rows[0]!.id).toBe(perf.rows[0]!.header);
     const price = selectableChartTable(history, 'price', 24);
     expect(price.columns.map((c) => [c.key, c.selectable])).toEqual([
@@ -90,7 +90,7 @@ describe('asset chart selection helpers', () => {
   });
 
   it('summarises the lines that are left', () => {
-    expect(chartSelectionSummary(history, 'performance', ['IWDA.AS'])).toBe('Price change of AAA from 1 jun 2026 to 2 jun 2026, current selection: IWDA.AS.');
+    expect(chartSelectionSummary(history, 'performance', ['IWDA.AS'])).toBe('Price change of AAA from 01-06-2026 to 02-06-2026, current selection: IWDA.AS.');
     expect(chartSelectionSummary(history, 'price', ['AAA'])).toMatch(/^Closing price of AAA from /);
     expect(chartSelectionSummary({ ...history, points: [] }, 'price', [])).toBe('No price history is stored for AAA in this period.');
   });

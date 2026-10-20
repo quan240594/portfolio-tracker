@@ -62,7 +62,7 @@ describe('assetChartData', () => {
     const markers = plottedMarkers(history(), rows);
     expect(markers).toHaveLength(1);
     expect(markers[0]).toMatchObject({ type: 'BUY', x: '2026-06-02', y: 90 });
-    expect(markers[0]!.label).toMatch(/^Buy 2 jun 2026$/);
+    expect(markers[0]!.label).toMatch(/^Buy 02-06-2026$/);
   });
 
   it('finds the extremes of the line', () => {
@@ -87,8 +87,8 @@ describe('assetChartData', () => {
   });
 
   it('describes the chart in words', () => {
-    expect(chartSummary(history(), 'performance')).toBe('Price change of AAA from 1 jun 2026 to 3 jun 2026: +20,00%.');
-    expect(sp(chartSummary(history(), 'price'))).toBe('Closing price of AAA from 1 jun 2026 to 3 jun 2026: US$ 100,00 to US$ 120,00 (+20,00%).');
+    expect(chartSummary(history(), 'performance')).toBe('Price change of AAA from 01-06-2026 to 03-06-2026: +20,00%.');
+    expect(sp(chartSummary(history(), 'price'))).toBe('Closing price of AAA from 01-06-2026 to 03-06-2026: US$ 100,00 to US$ 120,00 (+20,00%).');
     expect(chartSummary(history({ points: [] }), 'price')).toBe('No price history is stored for AAA in this period.');
   });
 
@@ -96,15 +96,15 @@ describe('assetChartData', () => {
     const perf = chartTableRows(history(), 'performance', 24);
     expect(perf.columns).toEqual(['Date', 'AAA', 'IWDA.AS']);
     expect(perf.rows).toEqual([
-      ['1 jun 2026', '0,00%', '0,00%'],
-      ['2 jun 2026', '−10,00%', '—'],
-      ['3 jun 2026', '+20,00%', '+10,00%'],
+      ['01-06-2026', '0,00%', '0,00%'],
+      ['02-06-2026', '−10,00%', '—'],
+      ['03-06-2026', '+20,00%', '+10,00%'],
     ]);
     const price = chartTableRows(history(), 'price', 2);
     expect(price.columns).toEqual(['Date', 'Close', 'Change']);
     expect(price.rows).toHaveLength(2);
-    expect(sp(price.rows[1]!.join('|'))).toBe('3 jun 2026|US$ 120,00|+20,00%');
+    expect(sp(price.rows[1]!.join('|'))).toBe('03-06-2026|US$ 120,00|+20,00%');
     const short = chartTableRows(history({ benchmarks: [{ symbol: 'B', available: true, points: [], comparison: null }] }), 'performance', 24);
-    expect(short.rows[2]).toEqual(['3 jun 2026', '+20,00%', '—']);
+    expect(short.rows[2]).toEqual(['03-06-2026', '+20,00%', '—']);
   });
 });

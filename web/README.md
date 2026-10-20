@@ -83,7 +83,7 @@ src/
   pages/        Dashboard, Holdings, Dividends, Transactions
   mocks/        fixtures.ts (deterministic demo data), db.ts (in-memory backend), handlers.ts, browser.ts, server.ts
   theme/        ThemeProvider (light/dark, prefers-color-scheme, persisted in localStorage `pt-theme`)
-  lib/format.ts Intl formatters (nl-NL locale, EUR default from DEFAULT_BASE_CURRENCY) + Dutch decimal-input parsing
+  lib/format.ts the single formatter: Intl number/money formatters (nl-NL, EUR default from DEFAULT_BASE_CURRENCY), hand-built dd-mm-yyyy dates with English month/weekday names, Dutch decimal-input parsing
 e2e/            Playwright specs (pages.spec.ts runs only via playwright.pages.config.ts)
 e2e-auth/       Cognito-mode specs; e2e-github/ GitHub-mode specs
 scripts/        serve-pages.mjs — GitHub-Pages-like static server for the Pages E2E
@@ -121,8 +121,10 @@ scripts/        serve-pages.mjs — GitHub-Pages-like static server for the Page
 ## Currency & formatting
 
 - The portfolio base currency is **EUR** (`DEFAULT_BASE_CURRENCY`); every amount is shown in euros first. UI copy is
-  English, but numbers and dates use the Dutch locale `nl-NL` everywhere (tables, KPIs, chart axes and tooltips):
-  `€ 1.234,56`, signed `€ +12,00` / `€ −12,00`, `+12,34%`, dates `13 okt 2026`, months `okt 26`.
+  English; numbers use the Dutch locale `nl-NL` everywhere (tables, KPIs, chart axes and tooltips):
+  `€ 1.234,56`, signed `€ +12,00` / `€ −12,00`, `+12,34%`. Dates are always numeric `dd-mm-yyyy` (`13-10-2026`, with time
+  `13-10-2026, 16:39`) and month/weekday names are English (`October 2026`, `Tuesday, 13-10-2026`, axis `Oct 26`),
+  independent of the browser locale. All of it lives in `lib/format.ts`.
 - Holdings: *Avg cost* and *Price* show `averageCostBase` / `priceBase` (EUR at purchase-date / today's FX); for
   holdings in another currency the trading-currency value (`averageCostLocal` / `priceLocal`) is a muted second line.
   Sorting on these columns uses the EUR values. The sortable *Currency effect* column (`Holding.currencyEffect`) is the

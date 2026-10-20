@@ -47,7 +47,7 @@ describe('growth selection helpers', () => {
     ];
     expect(visibleBenchmarks(bench, view(['A']))).toEqual([{ symbol: 'B', index: 1 }]);
     expect(shownLabels(series, view(['portfolio']))).toEqual(['IWDA.AS']);
-    expect(selectionSummary('Portfolio value', 'from 1 jan to 2 jan', ['Portfolio', 'B'])).toBe('Portfolio value from 1 jan to 2 jan, current selection: Portfolio, B.');
+    expect(selectionSummary('Portfolio value', 'from 01-01-2026 to 02-01-2026', ['Portfolio', 'B'])).toBe('Portfolio value from 01-01-2026 to 02-01-2026, current selection: Portfolio, B.');
   });
 
   it('keeps the colour of a benchmark by its index, whatever else is shown', () => {

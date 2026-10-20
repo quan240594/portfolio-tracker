@@ -1,5 +1,5 @@
 import type { DividendPayment, AnalyticsDividendGrowthResponse } from '@portfolio/shared';
-import { formatMonth } from '../../lib/format';
+import { formatMonth, MONTH_NAMES_SHORT } from '../../lib/format';
 
 export const PERIODS = [
   { value: 'all', label: 'All time' },
@@ -100,12 +100,10 @@ export interface YearComparison {
   rows: ({ month: string } & Record<string, number | string | undefined>)[];
 }
 
-const MONTH_NAMES = Array.from({ length: MONTHS }, (_, i) => new Intl.DateTimeFormat('nl-NL', { month: 'short', timeZone: 'UTC' }).format(new Date(Date.UTC(2000, i, 1))));
-
 /** Dividends per calendar month for the latest `maxYears` years that have any, to compare them side by side. */
 export function yearComparison(byMonth: AnalyticsDividendGrowthResponse['byMonth'], maxYears = 3): YearComparison {
   const years = [...new Set(byMonth.map((m) => m.month.slice(0, 4)))].sort((a, b) => a.localeCompare(b)).slice(-maxYears);
-  const rows = MONTH_NAMES.map((month, i) => {
+  const rows = MONTH_NAMES_SHORT.map((month, i) => {
     const row: YearComparison['rows'][number] = { month };
     for (const m of byMonth) {
       if (Number(m.month.slice(5, 7)) - 1 === i && years.includes(m.month.slice(0, 4))) row[m.month.slice(0, 4)] = m.total;

@@ -13,7 +13,7 @@ export const benchmarkColors = (theme: Theme): string[] =>
 
 const pointsFormat = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 2 });
 
-/** "Your portfolio is ahead of IWDA.AS by € 1.234,00 (3,4 percentage points) since 2 jan 2025." */
+/** "Your portfolio is ahead of IWDA.AS by € 1.234,00 (3,4 percentage points) since 02-01-2025." */
 export function headlineText(h: GrowthHeadline, currency: string): string {
   const since = `since ${formatDate(h.from)}`;
   if (h.amount === 0 && h.differencePct === 0) return `Your portfolio is level with ${h.symbol} ${since}.`;

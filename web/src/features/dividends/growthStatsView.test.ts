@@ -57,7 +57,7 @@ describe('growthTiles', () => {
     const ttm: DividendPeriodGrowth = { basis: 'TTM', current: { from: '2025-10', to: '2026-09', amount: 180 }, previous: { from: '2024-10', to: '2025-09', amount: 120 }, change: 60, pct: 50 };
     const [, yoy] = tiles(stats({ yoy: ttm }));
     expect(yoy).toMatchObject({ value: '+50,0%', change: '+€ 60,00' });
-    expect(yoy!.subtext).toMatch(/^okt\.? 25 – sep\.? 26 vs okt\.? 24 – sep\.? 25$/);
+    expect(yoy!.subtext).toMatch(/^Oct 25 – Sep 26 vs Oct 24 – Sep 25$/);
 
     const years: DividendPeriodGrowth = { basis: 'CALENDAR_YEAR', current: { from: '2025-01', to: '2025-12', amount: 96 }, previous: { from: '2024-01', to: '2024-12', amount: 50 }, change: 46, pct: 92 };
     expect(tiles(stats({ yoy: years }))[1]).toMatchObject({ subtext: '2025 vs 2024 (calendar years)', amounts: ['2025: € 96,00', '2024: € 50,00'] });

@@ -18,7 +18,7 @@ import { filterEvents, monthIncome, requestRange, type CalendarUiState } from '.
 import { useCalendarState } from '../features/calendar/useCalendarState';
 import { downloadFile } from '../features/management/form';
 import { usePortfolioScope } from '../features/portfolios/usePortfolioScope';
-import { BASE_CURRENCY, formatDate, formatMoney } from '../lib/format';
+import { BASE_CURRENCY, formatMonthYear, formatMoney } from '../lib/format';
 
 const ICS_MIME = 'text/calendar;charset=utf-8';
 
@@ -140,7 +140,7 @@ export function CalendarPage() {
           <ViewToolbar state={state} today={today} onChange={update} />
           {showMonthTotal && (
             <p className="text-sm">
-              <span className="muted">Expected dividends in {formatDate(`${state.month}-01`, { month: 'long', year: 'numeric' })}: </span>
+              <span className="muted">Expected dividends in {formatMonthYear(state.month)}: </span>
               <strong className="tabular-nums">{formatMoney(monthTotal, currency)}</strong>
             </p>
           )}

@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { isQuoteStale, type AssetDetailResponse, type AssetProfileInfo } from '@portfolio/shared';
 import { useWatchlist, useWatchlistMutations } from '../../api/management-hooks';
 import { Change } from '../../components/Change';
-import { formatDate, formatMoney, formatPercent } from '../../lib/format';
+import { formatDate, formatDateTime, formatMoney, formatPercent } from '../../lib/format';
 import { useAssetClassification } from '../classification/useAssetClassification';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
 import { DASH, formatBigMoney, formatRatio, initialsOf, monogramClass } from './assetFormat';
@@ -62,7 +62,6 @@ function WatchlistStar({ symbol }: Readonly<{ symbol: string }>) {
 
 /** Quote sources that are named next to the price, with the time of the quote (the others keep the plain date). */
 const QUOTE_SOURCE_LABELS: Readonly<Record<string, string>> = { t212: 'Trading 212' };
-const QUOTE_TIME_FORMAT: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' };
 
 function PriceBlock({ detail }: Readonly<{ detail: AssetDetailResponse }>) {
   const { quote, baseCurrency } = detail;
@@ -70,7 +69,7 @@ function PriceBlock({ detail }: Readonly<{ detail: AssetDetailResponse }>) {
   const stale = isQuoteStale(quote.asOf, new Date().toISOString().slice(0, 10));
   const inBase = quote.currency !== baseCurrency && quote.priceBase !== null ? '≈ ' + formatMoney(quote.priceBase, baseCurrency) : null;
   const sourceLabel = quote.source === 'quote' && quote.provider !== undefined ? QUOTE_SOURCE_LABELS[quote.provider] : undefined;
-  const asOf = (quote.source === 'quote' ? 'As of ' : 'Last close ') + formatDate(quote.asOf, sourceLabel === undefined ? undefined : QUOTE_TIME_FORMAT);
+  const asOf = (quote.source === 'quote' ? 'As of ' : 'Last close ') + (sourceLabel === undefined ? formatDate(quote.asOf) : formatDateTime(quote.asOf));
   return (
     <div>
       <p className="text-3xl font-semibold tracking-tight tabular-nums sm:text-4xl" data-testid="asset-price">

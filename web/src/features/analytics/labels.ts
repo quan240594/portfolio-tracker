@@ -1,7 +1,7 @@
 import type { ReturnPeriod } from '@portfolio/shared';
 import { LOCALE, formatMonth, formatPercent } from '../../lib/format';
 
-/** `2026` / `Q1 2026` / `mrt. 26` for the period keys returned by GET /analytics/returns. */
+/** `2026` / `Q1 2026` / `Mar 26` for the period keys returned by GET /analytics/returns. */
 export function periodLabel(period: ReturnPeriod, key: string): string {
   if (period === 'month') return formatMonth(key);
   if (period === 'quarter') {

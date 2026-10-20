@@ -1,5 +1,5 @@
 import { addIsoDays, calendarMonthOf, type CalendarEvent } from '@portfolio/shared';
-import { formatDate } from '../../lib/format';
+import { formatDate, formatDayOfMonth, formatMonthYear, formatWeekdayDate, formatWeekdayLong, formatWeekdayShort } from '../../lib/format';
 import { EVENT_META, eventAriaLabel, isDividend, isEstimated, monthGrid } from './calendarModel';
 import { chipClasses } from './calendarColours';
 import { EventMarker } from './EventMarker';
@@ -59,8 +59,8 @@ function DayCell({ date, month, today, events, baseCurrency, onSelectEvent, onSe
     <td className={`h-32 min-w-0 sm:h-28 border border-slate-200 p-1 align-top dark:border-slate-800 ${background} ${inMonth ? '' : 'opacity-70'}`} data-date={date}>
       <div className="mb-1 flex justify-end">
         <span aria-current={isToday ? 'date' : undefined} className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-xs font-semibold ${dayNumber}`}>
-          <span aria-hidden="true">{formatDate(date, { day: 'numeric' })}</span>
-          <span className="sr-only">{formatDate(date, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
+          <span aria-hidden="true">{formatDayOfMonth(date)}</span>
+          <span className="sr-only">{formatWeekdayDate(date)}</span>
         </span>
       </div>
       <div className="flex flex-col gap-0.5">
@@ -71,7 +71,7 @@ function DayCell({ date, month, today, events, baseCurrency, onSelectEvent, onSe
           <button
             type="button"
             onClick={() => onSelectDay(date)}
-            aria-label={`${hidden} more on ${formatDate(date, { day: 'numeric', month: 'long' })}`}
+            aria-label={`${hidden} more on ${formatDate(date)}`}
             className="rounded px-1 py-1.5 text-left text-xs font-medium text-brand-700 sm:py-0.5 hover:bg-slate-100 dark:text-brand-400 dark:hover:bg-slate-800"
           >
             +{hidden} more
@@ -96,7 +96,7 @@ export function MonthGrid({ month, today, events, baseCurrency, onSelectEvent, o
   const grid = monthGrid(month);
   const byDate = new Map<string, CalendarEvent[]>();
   for (const e of events) byDate.set(e.date, [...(byDate.get(e.date) ?? []), e]);
-  const monthLabel = formatDate(`${month}-01`, { month: 'long', year: 'numeric' });
+  const monthLabel = formatMonthYear(month);
 
   return (
     // `relative` makes the wrapper the containing block of the sr-only (absolute) texts, so they are clipped with the table instead of widening the page.
@@ -106,8 +106,8 @@ export function MonthGrid({ month, today, events, baseCurrency, onSelectEvent, o
         <thead>
           <tr>
             {WEEKDAYS.map((d) => (
-              <th key={d} scope="col" abbr={formatDate(d, { weekday: 'long' })} className="muted border border-slate-200 bg-slate-50 py-1.5 text-xs font-medium uppercase dark:border-slate-800 dark:bg-slate-900/60">
-                {formatDate(d, { weekday: 'short' })}
+              <th key={d} scope="col" abbr={formatWeekdayLong(d)} className="muted border border-slate-200 bg-slate-50 py-1.5 text-xs font-medium uppercase dark:border-slate-800 dark:bg-slate-900/60">
+                {formatWeekdayShort(d)}
               </th>
             ))}
           </tr>

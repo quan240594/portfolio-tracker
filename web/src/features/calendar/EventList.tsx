@@ -1,5 +1,5 @@
 import type { CalendarEvent } from '@portfolio/shared';
-import { formatDate } from '../../lib/format';
+import { formatWeekdayDate } from '../../lib/format';
 import { STATUS_LABELS, eventAriaLabel, groupByDate } from './calendarModel';
 import { STATUS_CHIP, chipClasses } from './calendarColours';
 import { EventMarker } from './EventMarker';
@@ -59,7 +59,7 @@ export function EventList({ events, baseCurrency, onSelect, today }: Readonly<Li
       {groups.map(({ date, events: day }) => (
         <section key={date} aria-labelledby={`day-${date}`}>
           <h3 id={`day-${date}`} className="mb-1.5 flex items-center gap-2 text-sm font-semibold">
-            {formatDate(date, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+            {formatWeekdayDate(date)}
             {date === today && <span className="rounded-full bg-brand-600 px-2 py-px text-[11px] font-medium text-white">Today</span>}
           </h3>
           <ul className="space-y-1.5">

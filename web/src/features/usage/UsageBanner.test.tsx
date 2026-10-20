@@ -9,8 +9,9 @@ import { BLOCKED_SNAPSHOT, budgetExhausted, budgetUnavailable, OK_SNAPSHOT, serv
 import { resetBudgetNotice } from './budgetSignal';
 import { UsageBanner } from './UsageBanner';
 import { USAGE_QUERY_KEY } from './useUsage';
+import { localWeekdayTime } from '../../test/localTime';
 
-const local = (iso: string) => new Intl.DateTimeFormat('nl-NL', { weekday: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
+const local = localWeekdayTime;
 const banner = () => screen.findByRole('complementary', { name: 'Free-plan usage' });
 
 /** Lets a request run (and its notice state update) inside act. */
