@@ -174,7 +174,7 @@ async function enrichSymbol(ctx: StepContext, state: State, symbol: string, now:
   }
 }
 
-async function fetchDividends(ctx: StepContext, symbol: string, now: Date): Promise<DividendEvent[]> {
+function fetchDividends(ctx: StepContext, symbol: string, now: Date): Promise<DividendEvent[]> {
   const today = utcDay(now);
   return ctx.md.provider.getDividends(symbol, addDays(today, -DIVIDEND_LOOKBACK_DAYS), addDays(today, DIVIDEND_LOOKAHEAD_DAYS));
 }

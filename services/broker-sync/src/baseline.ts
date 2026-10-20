@@ -1,8 +1,7 @@
 import { logger } from '@portfolio/platform';
 import { mergeProfile, trading212Profile, type InstrumentProfile, type SymbolMapping } from '@portfolio/shared';
 import type { ProfileStore } from './profile-store.js';
-import type { OpenPosition } from './t212/schemas.js';
-import type { TradableInstrument } from './t212/schemas.js';
+import type { OpenPosition, TradableInstrument } from './t212/schemas.js';
 
 /**
  * Baseline profiles from Trading 212: a real name, a STOCK/ETF type, the ISIN and the currency of every held symbol, with no

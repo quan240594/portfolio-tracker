@@ -29,10 +29,10 @@ function Done({ loaded }: Readonly<{ loaded: LoadedImport }>) {
   const { applied, unmatched } = loaded.response;
   return (
     <div className="space-y-3">
-      <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-100">
+      <output className="block rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-100">
         <span className="font-semibold">✓ Saved {applied} {plural(applied, 'classification', 'classifications')}.</span> Your allocation views use them now.
         {unmatched.length > 0 && ` ${unmatched.length} ${plural(unmatched.length, 'row was', 'rows were')} not matched and left out, see below.`}
-      </p>
+      </output>
       <ImportReport response={loaded.response} issues={loaded.issues} caption="Import result" />
     </div>
   );
@@ -88,7 +88,7 @@ export function ClassificationImportDialog({ onClose }: Readonly<{ onClose: () =
             className="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-brand-700 hover:file:bg-brand-100 dark:file:bg-brand-600/20 dark:file:text-brand-100"
           />
         </div>
-        {stage.kind === 'reading' && <p role="status" className="muted text-sm">Reading {stage.fileName}…</p>}
+        {stage.kind === 'reading' && <output className="muted block text-sm">Reading {stage.fileName}…</output>}
         {stage.kind === 'error' && (
           <p role="alert" className={ALERT_CLASS}>
             {stage.message}

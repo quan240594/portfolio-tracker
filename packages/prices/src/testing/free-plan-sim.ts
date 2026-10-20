@@ -112,7 +112,9 @@ export function freePlanProviders(now: () => number, universe: readonly string[]
 
   const eodhdCost = (url: string): number => {
     const { pathname } = new URL(url);
-    return pathname.startsWith('/api/real-time/') ? 1 + (queryOf(url, 's') === '' ? 0 : queryOf(url, 's').split(',').length) : 1;
+    if (!pathname.startsWith('/api/real-time/')) return 1;
+    const symbols = queryOf(url, 's');
+    return symbols === '' ? 1 : 1 + symbols.split(',').length;
   };
 
   const eodhd = (url: string): Response => {
