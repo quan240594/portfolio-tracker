@@ -114,14 +114,14 @@ describe('HubCore', () => {
     const portfolio = (await api('POST', '/portfolios', { name: 'Quiet' })).body.portfolioId as string;
     await api('POST', '/transactions', { portfolioId: portfolio, date: '2026-01-05', type: 'BUY', symbol: 'SAP.DE', quantity: 1, price: 100, currency: 'EUR' });
     expect(stack.storage.rows("SELECT id FROM jobs WHERE job = 'enrichTransactions'")).toEqual([]);
-    expect(stack.storage.rows<{ name: string }>('SELECT name FROM schedules').map((row) => row.name)).toEqual(['broker-sync', 't212-quotes', 't212-quotes-close']);
+    expect(stack.storage.rows<{ name: string }>('SELECT name FROM schedules').map((row) => row.name)).toEqual(['broker-sync', 'broker-sync-intraday', 'notify-dividends', 't212-quotes', 't212-quotes-close']);
   });
 
   it('wires a replaced price service: events become jobs, its schedules are kept, and the alarm runs it', async () => {
     const enrich = vi.fn<JobHandler<never>>(() => Promise.resolve({ done: true as const, result: 'enriched' }));
     const jobFactories: JobFactories = { ...CORE_JOB_FACTORIES, enrichTransactions: () => enrich as never, refreshPrices: () => enrich as never, refreshCalendar: () => enrich as never };
     const { stack, api } = await signedIn({ jobFactories });
-    expect(stack.storage.rows<{ name: string }>('SELECT name FROM schedules ORDER BY name').map((row) => row.name)).toEqual(['broker-sync', 'prices-calendar', 'prices-refresh', 't212-quotes', 't212-quotes-close']);
+    expect(stack.storage.rows<{ name: string }>('SELECT name FROM schedules ORDER BY name').map((row) => row.name)).toEqual(['broker-sync', 'broker-sync-intraday', 'notify-dividends', 'prices-calendar', 'prices-refresh', 't212-quotes', 't212-quotes-close']);
     const portfolio = (await api('POST', '/portfolios', { name: 'Priced' })).body.portfolioId as string;
     await api('POST', '/transactions', { portfolioId: portfolio, date: '2026-01-05', type: 'BUY', symbol: 'SAP.DE', quantity: 1, price: 100, currency: 'EUR' });
     await stack.drain();

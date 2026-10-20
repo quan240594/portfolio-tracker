@@ -1,3 +1,5 @@
+import { generateVapidKeys } from '@portfolio/platform';
+
 /**
  * Network fakes of the tests (no real network, no real accounts): GitHub's OAuth endpoints and the Trading 212 REST API.
  * They are plain functions from a minimal request to a plain reply, so the same fakes serve the Node tests (injected
@@ -9,6 +11,8 @@ export interface FakeRequest {
   url: string;
   method: string;
   header(name: string): string | null;
+  /** The request body (empty for a GET). */
+  body: Uint8Array;
 }
 
 export interface FakeReply {
@@ -22,6 +26,8 @@ export interface FakeReply {
 export type FakeService = (request: FakeRequest) => FakeReply | undefined;
 
 /** Test values only: none of these is a real id, secret or token. */
+/** A VAPID key pair generated once per test run (the Hub signs with the private half, the fake push service never needs it). */
+export const TEST_VAPID = await generateVapidKeys();
 export const OWNER_ID = 424242;
 export const OWNER_LOGIN = 'the-owner';
 export const OTHER_ID = 777;
@@ -68,6 +74,8 @@ export class FakeTrading212 {
   rejectCredentials = false;
   /** Replaces the answer of `GET positions` (a failure such as 429 or 500); the credential check still comes first. */
   positionsReply: FakeReply | undefined;
+  /** The dividend history the next sync reads (Trading 212 `history/dividends` items). */
+  dividends: unknown[] = [];
   /** The open positions: 5 shares of SAP (the 2 buys of the history) and 2 of AAPL (a manual transaction in the tests). Prices are in the instrument currency. */
   positions: unknown[] = [
     { instrument: { ticker: 'SAPd_EQ', isin: 'DE0007164600', name: 'SAP', currency: 'EUR' }, quantity: 5, currentPrice: SAP_PRICE, averagePricePaid: 200, walletImpact: { currency: 'EUR', totalCost: 1000, currentValue: 5 * SAP_PRICE } },
@@ -97,6 +105,7 @@ export class FakeTrading212 {
       case 'history/orders':
         return query.has('cursor') ? { items: [order('2', 2, '2026-01-03T10:00:00Z')] } : { items: [order('1', 3, '2026-01-02T10:00:00Z')], nextPagePath: `${T212_PREFIX}history/orders?limit=50&cursor=2` };
       case 'history/dividends':
+        return { items: this.dividends };
       case 'history/transactions':
         return { items: [] };
       case 'positions':
@@ -117,6 +126,32 @@ function order(id: string, quantity: number, filledAt: string) {
     order: { id, side: 'BUY', status: 'FILLED', ticker: 'SAPd_EQ', instrument: { ticker: 'SAPd_EQ', isin: 'DE0007164600', name: 'SAP', currency: 'EUR' } },
     fill: { id: `fill-${id}`, price: 200, quantity, filledAt, type: 'TRADE', walletImpact: { currency: 'EUR', netValue: quantity * 200, taxes: [] } },
   };
+}
+
+export interface ReceivedPush {
+  url: string;
+  authorization: string | null;
+  ttl: string | null;
+  contentEncoding: string | null;
+  body: Uint8Array;
+}
+
+/** A push service (FCM's host): records every message and answers 201, or the status set for the endpoint URL. Bodies are encrypted: tests decrypt them with the subscriber's key. */
+export class FakePush {
+  readonly received: ReceivedPush[] = [];
+  /** Status per endpoint URL; anything else is accepted (201). */
+  readonly answers = new Map<string, number>();
+
+  readonly service: FakeService = (request) => {
+    if (new URL(request.url).host !== 'fcm.googleapis.com') return undefined;
+    this.received.push({ url: request.url, authorization: request.header('authorization'), ttl: request.header('ttl'), contentEncoding: request.header('content-encoding'), body: request.body });
+    return { status: this.answers.get(request.url) ?? 201 };
+  };
+
+  /** Messages for one endpoint URL, oldest first. */
+  to(url: string): ReceivedPush[] {
+    return this.received.filter((message) => message.url === url);
+  }
 }
 
 /** The first service that answers; an unexpected outbound call is a failing test, never a real request. */

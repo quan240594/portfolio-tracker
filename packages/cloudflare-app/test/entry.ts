@@ -34,6 +34,7 @@ export class Hub extends DeployedHub {
     return Response.json({
       schedules: this.ctx.storage.sql.exec<{ name: string }>('SELECT name FROM schedules ORDER BY name').toArray().map((row) => row.name),
       alarm: await this.ctx.storage.getAlarm(),
+      jobs: this.ctx.storage.sql.exec<{ job: string; due_at: number; attempts: number; state: string; last_error: string | null }>('SELECT job, due_at, attempts, state, last_error FROM jobs ORDER BY due_at').toArray(),
       pendingJobs: core.platform.jobs.nextJobDueAt(),
       failedJobs: core.platform.jobs.failedJobs().map(({ job, error }) => ({ job, error })),
       storageBytes: this.ctx.storage.sql.databaseSize ?? 0,

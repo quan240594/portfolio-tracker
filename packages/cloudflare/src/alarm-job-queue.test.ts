@@ -336,7 +336,8 @@ describe('AlarmJobQueue.runAlarm', () => {
 
 describe('cron schedules', () => {
   // The price and broker schedules; the Trading 212 quote schedules have their own test below.
-  const SHARED = { schedules: SCHEDULED_JOBS.filter((job) => job.job !== JOBS.refreshT212Quotes) } satisfies AlarmJobQueueOptions;
+  // The schedules of the shared (AWS) set: the Cloudflare-only ones (quotes, intraday sync, notifications) have tests of their own.
+  const SHARED = { schedules: SCHEDULED_JOBS.filter((job) => job.cloudflareOnly !== true) } satisfies AlarmJobQueueOptions;
   // The clock starts Monday 2026-01-05 09:00 UTC = 10:00 in Amsterdam; the next prices slot is 13:00 local = 12:00 UTC.
   const SLOTS = { prices: Date.UTC(2026, 0, 5, 12), nextPrices: Date.UTC(2026, 0, 5, 17), calendar: Date.UTC(2026, 0, 6, 4, 30), broker: Date.UTC(2026, 0, 6, 5, 30) };
 
@@ -415,7 +416,7 @@ describe('cron schedules', () => {
   });
 
   it('uses the shared schedules by default', () => {
-    expect(SCHEDULED_JOBS.map((job) => job.name).sort((a, b) => a.localeCompare(b))).toEqual(['broker-sync', 'prices-calendar', 'prices-refresh', 't212-quotes', 't212-quotes-close']);
+    expect(SCHEDULED_JOBS.map((job) => job.name).sort((a, b) => a.localeCompare(b))).toEqual(['broker-sync', 'broker-sync-intraday', 'notify-dividends', 'prices-calendar', 'prices-refresh', 't212-quotes', 't212-quotes-close']);
   });
 
   it('arms the alarm for the Trading 212 quote schedules and enqueues the job per slot', async () => {

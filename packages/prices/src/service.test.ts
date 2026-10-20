@@ -13,7 +13,7 @@ describe('createPriceJobs', () => {
     expect(api.PRICE_JOB_NAMES).toEqual(['refreshPrices', 'enrichTransactions', 'refreshCalendar']);
     expect(api.PRICE_SCHEDULES.map((entry) => entry.name)).toEqual(['prices-refresh', 'prices-calendar']);
     expect(api.PRICE_SCHEDULES.every((entry) => SCHEDULED_JOBS.includes(entry))).toBe(true);
-    expect(SCHEDULED_JOBS.filter((entry) => !api.PRICE_SCHEDULES.includes(entry)).map((entry) => entry.job)).toEqual([JOBS.syncBroker, JOBS.refreshT212Quotes, JOBS.refreshT212Quotes]);
+    expect(SCHEDULED_JOBS.filter((entry) => !api.PRICE_SCHEDULES.includes(entry)).map((entry) => entry.job)).toEqual([JOBS.syncBroker, JOBS.syncBroker, JOBS.notifyDividends, JOBS.refreshT212Quotes, JOBS.refreshT212Quotes]);
   });
 
   it('runs on the in-memory job queue like on any adapter (continuations, results)', async () => {

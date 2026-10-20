@@ -1,4 +1,4 @@
-import { base64ToBytes, bytesToBase64 } from '../../encoding.js';
+import { base64ToBytes, bytesToBase64, type Bytes } from '../../encoding.js';
 
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 
@@ -10,7 +10,7 @@ export function bytesToBase64Url(bytes: Uint8Array): string {
 }
 
 /** Strict decode: only the URL-safe alphabet, no padding. Returns undefined for anything else. */
-export function base64UrlToBytes(value: string): Uint8Array | undefined {
+export function base64UrlToBytes(value: string): Bytes | undefined {
   if (!BASE64URL.test(value) || value.length % 4 === 1) return undefined;
   const padded = value.replaceAll('-', '+').replaceAll('_', '/');
   return base64ToBytes(padded.padEnd(Math.ceil(padded.length / 4) * 4, '='));

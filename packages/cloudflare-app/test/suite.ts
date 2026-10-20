@@ -1,10 +1,11 @@
 import { MAX_FILE_BYTES } from '@portfolio/cloudflare';
 import { METRIC_LIMITS, type MetricLimits } from '@portfolio/platform';
+import { createTestSubscriber, verifyVapidAuthorization } from '@portfolio/platform/testing';
 import { usageSnapshotSchema } from '@portfolio/shared';
 import { defineApiScenarios } from '@portfolio/api/testing';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { Browser, type Stack } from './browser.js';
-import { AAPL_CLOSE, AAPL_T212_PRICE, AV_KEY, SAP_PRICE, T212_KEY, T212_SECRET, TD_KEY, OTHER_ID, OWNER_ID, OWNER_LOGIN } from './fakes.js';
+import { AAPL_CLOSE, AAPL_T212_PRICE, AV_KEY, SAP_PRICE, T212_KEY, T212_SECRET, TD_KEY, OTHER_ID, OWNER_ID, OWNER_LOGIN, TEST_VAPID } from './fakes.js';
 
 export interface SuiteStartOptions {
   /** Caps the budget guard measures against (the Hub's clock is pinned at `PINNED_NOW` whenever limits are given). */
@@ -13,6 +14,8 @@ export interface SuiteStartOptions {
   prices?: Record<string, string>;
   /** Variables of the logo service (`LOGO_SOURCES`, `LOGO_HOURLY_LIMIT`, `LOGO_DEV_TOKEN`...). */
   logos?: Record<string, string>;
+  /** Leaves the VAPID keys out: the notification feature is off. */
+  noVapid?: boolean;
 }
 
 export type StartStack = (options?: SuiteStartOptions) => Promise<Stack>;
@@ -302,7 +305,7 @@ export function defineAppSuite(label: string, start: StartStack): void {
     it('keeps the price schedules next to the broker sync and arms the alarm for them', async () => {
       const stack = await start({ prices: keys });
       try {
-        expect(await stack.schedules()).toEqual(['broker-sync', 'prices-calendar', 'prices-refresh', 't212-quotes', 't212-quotes-close']);
+        expect(await stack.schedules()).toEqual(['broker-sync', 'broker-sync-intraday', 'notify-dividends', 'prices-calendar', 'prices-refresh', 't212-quotes', 't212-quotes-close']);
         const armed = await stack.alarmAt();
         expect(armed).not.toBeNull();
       } finally {
@@ -491,6 +494,115 @@ export function defineAppSuite(label: string, start: StartStack): void {
         await stack.drain();
         expect(stack.trading212.positionCalls()).toBe(1);
         expect(await stack.failedJobs()).toEqual([]);
+      } finally {
+        await stack.dispose();
+      }
+    });
+  });
+
+  describe(`${label}: dividend notifications`, () => {
+    async function ownerOf(options?: SuiteStartOptions) {
+      const stack = await start(options);
+      const owner = new Browser(stack);
+      await owner.signIn();
+      const call = async (method: string, path: string, requestBody?: unknown) => {
+        const response = await owner.request(`/api${path}`, { method, ...(requestBody === undefined ? {} : { body: requestBody }) });
+        const text = await response.text();
+        return { status: response.status, body: text ? JSON.parse(text) : undefined };
+      };
+      return { stack, call };
+    }
+
+    const settle = { ignoreJobs: ['enrichTransactions'] };
+
+    const dividend = (reference: string) => ({
+      reference,
+      ticker: 'SAPd_EQ',
+      instrument: { ticker: 'SAPd_EQ', isin: 'DE0007164600', name: 'SAP', currency: 'EUR' },
+      quantity: 5,
+      amount: 6,
+      grossAmountPerShare: 1.4,
+      currency: 'EUR',
+      tickerCurrency: 'EUR',
+      paidOn: '2026-01-05T09:30:00Z',
+      type: 'ORDINARY',
+    });
+
+    it('keeps the intraday sync and the daily notification run next to the daily ones and arms the alarm for them', async () => {
+      const { stack } = await ownerOf();
+      try {
+        expect(await stack.schedules()).toEqual(expect.arrayContaining(['broker-sync', 'broker-sync-intraday', 'notify-dividends']));
+        expect(await stack.alarmAt()).not.toBeNull();
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('announces a dividend the sync booked, end-to-end encrypted to the device, once, and drops a device the push service reports gone', async () => {
+      // The pinned Hub clock is 13:00 Amsterdam time on 5 January 2026: outside quiet hours. Enrichment of the new symbol may stay pending (a frozen clock never brings a deferred job back).
+      const { stack, call } = await ownerOf({ limits: METRIC_LIMITS });
+      try {
+        const portfolio = (await call('POST', '/portfolios', { name: `Notify ${crypto.randomUUID().slice(0, 8)}` })).body.portfolioId as string;
+        expect((await call('PUT', '/brokers/trading212', { portfolioId: portfolio, apiKey: T212_KEY, apiSecret: T212_SECRET, environment: 'demo' })).status).toBe(204);
+        const sync = async () => {
+          expect((await call('POST', '/brokers/trading212/sync', { portfolioId: portfolio })).status).toBe(202);
+          await stack.drain(settle);
+        };
+        await sync();
+
+        // Enabling on this device: nothing that already exists is announced.
+        const device = await createTestSubscriber(`https://fcm.googleapis.com/fcm/send/device-${crypto.randomUUID()}`);
+        const { endpoint } = device.subscription;
+        expect((await call('POST', '/notifications/subscriptions', { ...device.subscription, label: 'Test phone' })).status).toBe(201);
+        await stack.enqueue('notifyDividends', { trigger: 'scheduled' });
+        await stack.drain(settle);
+        expect(stack.push.to(endpoint)).toEqual([]);
+
+        // A dividend is booked by the next sync and announced right away.
+        stack.trading212.dividends = [dividend('div-1')];
+        await sync();
+        const messages = stack.push.to(endpoint);
+        expect(messages).toHaveLength(1);
+        const [message] = messages;
+        const { claims, publicKey } = await verifyVapidAuthorization(message!.authorization ?? '');
+        expect([claims.aud, claims.sub, publicKey]).toEqual(['https://fcm.googleapis.com', stack.origin, TEST_VAPID.publicKey]);
+        expect(message!.contentEncoding).toBe('aes128gcm');
+        const payload = await device.decrypt(message!.body);
+        expect(payload).toMatchObject({ type: 'received', symbol: 'SAP.DE', url: '/assets/SAP.DE' });
+        expect(String(payload.title)).toMatch(/dividend received: EUR 6\.00$/);
+        expect(payload.body).toBe('€1.40 per share');
+        expect(JSON.stringify(payload)).not.toContain('fcm.googleapis.com');
+
+        // The same sync again, and a scheduled run, announce nothing twice.
+        await sync();
+        await stack.enqueue('notifyDividends', { trigger: 'scheduled' });
+        await stack.drain(settle);
+        expect(stack.push.to(endpoint)).toHaveLength(1);
+
+        // The push service forgets the device: the next announcement removes it.
+        stack.push.answers.set(endpoint, 410);
+        stack.trading212.dividends = [dividend('div-1'), dividend('div-2')];
+        await sync();
+        expect(stack.push.to(endpoint)).toHaveLength(2);
+        expect((await call('GET', '/notifications')).body.devices).toEqual([]);
+        expect(await stack.failedJobs()).toEqual([]);
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('is switched off, not broken, without VAPID keys: the API says so, a notification run completes and nothing is sent', async () => {
+      const { stack, call } = await ownerOf({ noVapid: true });
+      try {
+        const state = await call('GET', '/notifications');
+        expect(state.body).toMatchObject({ available: true, configured: false });
+        expect(state.body.publicKey).toBeUndefined();
+        const device = await createTestSubscriber();
+        expect((await call('POST', '/notifications/subscriptions', device.subscription)).body.error.code).toBe('PUSH_NOT_CONFIGURED');
+        await stack.enqueue('notifyDividends', { trigger: 'scheduled' });
+        await stack.drain(settle);
+        expect(await stack.failedJobs()).toEqual([]);
+        expect(stack.push.received).toEqual([]);
       } finally {
         await stack.dispose();
       }

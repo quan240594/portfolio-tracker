@@ -19,10 +19,12 @@ import {
   type ScheduledJob,
   type SecretStore,
 } from '@portfolio/platform';
-import { ItemBrokerStore, ItemProfileStore, ItemQuoteStore, SecretCredentialStore, Trading212Client, brokerSyncJob, refreshQuotesAfterSync, refreshQuotesJob, type QuoteDeps, type SyncDeps } from '@portfolio/broker-sync';
+import { ItemNotificationRepository, ItemRepository, MAX_PUSHES_PER_USER_STEP, notifyDividendsJob } from '@portfolio/api';
+import { ItemBrokerStore, ItemProfileStore, ItemQuoteStore, SecretCredentialStore, Trading212Client, brokerSyncJob, refreshQuotesAfterSync, refreshQuotesJob, type HandlerResult, type QuoteDeps, type SyncDeps } from '@portfolio/broker-sync';
 import { ItemIngestStore, importUploadedJob } from '@portfolio/ingest';
 import { DEFAULT_STEP_SUBREQUESTS, PRICE_SCHEDULES, createPriceJobs, type PriceJobDeps } from '@portfolio/prices';
 import type { HubConfig } from './config.js';
+import { pushConfig } from './push.js';
 import { SubrequestBudget } from './subrequests.js';
 
 /** Everything a job handler may need, built by the Hub for one alarm run. */
@@ -56,6 +58,27 @@ const T212_QUOTE_TIMEOUT_MS = 15_000;
 
 const noEvents: EventPublisher = { transactionsChanged: () => Promise.resolve() };
 
+/**
+ * Announces what a sync recorded: after a successful sync that wrote transactions, `notifyDividends` runs for that user (`trigger: 'sync'`),
+ * so a booked dividend is notified within the hour. A sync that changed nothing (most of the intraday ones) enqueues nothing, and a
+ * failure to enqueue never fails the sync.
+ */
+export function notifyAfterSync<P>(handler: JobHandler<P, HandlerResult>, queue: JobQueue): JobHandler<P, HandlerResult> {
+  return async (invocation) => {
+    const step = await handler(invocation);
+    if (step.done) {
+      const changed = step.result.results.filter((result) => result.status === 'SUCCEEDED' && !result.dryRun && (result.counts?.written ?? 0) > 0);
+      const users = [...new Set(changed.map((result) => result.userId))];
+      await Promise.all(
+        users.map((userId) =>
+          queue.enqueue({ job: JOBS.notifyDividends, payload: { trigger: 'sync', userId } }).catch(() => logger.warn('Could not enqueue the dividend notifications after a sync')),
+        ),
+      );
+    }
+    return step;
+  };
+}
+
 /** Jobs that run on the Hub today: the CSV import, the Trading 212 sync and its quote refresh (all platform-neutral, from `services/*`). */
 export const CORE_JOB_FACTORIES: JobFactories = {
   importUploaded: ({ items, files, events, now }) => importUploadedJob({ store: new ItemIngestStore(items), files, events, now }),
@@ -70,8 +93,8 @@ export const CORE_JOB_FACTORIES: JobFactories = {
       now,
       limits: { pagesPerStep: T212_PAGES_PER_STEP },
     };
-    // A successful sync prices its positions right away: the quote refresh is enqueued as a job of its own.
-    return refreshQuotesAfterSync(brokerSyncJob(() => deps), context.queue);
+    // A successful sync prices its positions right away and announces the dividends it recorded: both are jobs of their own.
+    return refreshQuotesAfterSync(notifyAfterSync(brokerSyncJob(() => deps), context.queue), context.queue);
   },
   refreshT212Quotes: ({ items, secrets, now, config, fetch }) => {
     const deps: QuoteDeps = {
@@ -87,6 +110,13 @@ export const CORE_JOB_FACTORIES: JobFactories = {
     };
     return refreshQuotesJob(() => deps);
   },
+  // Web Push for the dividend events of the held securities. Every push goes through the alarm's counted `fetch` (one subrequest each).
+  notifyDividends: ({ items, now, config, fetch }) =>
+    notifyDividendsJob(() => {
+      const push = pushConfig(config, fetch);
+      if (!push.configured) return undefined;
+      return { repo: new ItemRepository(items), notifications: new ItemNotificationRepository(items), send: push.send, baseCurrency: config.baseCurrency, now };
+    }),
 };
 
 /** What the price jobs need, built from the Hub's ports (`@portfolio/prices`' `PriceJobDeps`). */
@@ -125,6 +155,8 @@ export const JOB_SUBREQUEST_RESERVE: Readonly<Partial<Record<JobName, number>>> 
   enrichTransactions: DEFAULT_STEP_SUBREQUESTS,
   refreshCalendar: DEFAULT_STEP_SUBREQUESTS,
   refreshT212Quotes: T212_QUOTE_SUBREQUESTS,
+  // One user's step: at most 3 notifications to 10 devices, one subrequest per push.
+  notifyDividends: MAX_PUSHES_PER_USER_STEP,
 };
 
 export const ALL_JOB_FACTORIES: JobFactories = { ...CORE_JOB_FACTORIES, ...PRICE_JOB_FACTORIES };
@@ -150,9 +182,10 @@ export const eventsFor = (queue: JobQueue, factories: JobFactories = ALL_JOB_FAC
 
 /**
  * Jobs that are dropped, not deferred, when the guard denies them: the non-essential ones (`ok` ceiling) and the Trading 212 quote
- * refresh. Its next scheduled slot comes within 15 minutes, so a deferral would only pile up hourly retries behind it.
+ * refresh. Its next scheduled slot comes within 15 minutes, so a deferral would only pile up hourly retries behind it. The notification
+ * run is dropped too: what is due stays un-ledgered, and the next run (the 09:00 one, or the next sync that books something) sends it.
  */
-const dropsWhenDenied = (name: JobName): boolean => JOB_CEILINGS[name] === 'ok' || name === 'refreshT212Quotes';
+const dropsWhenDenied = (name: JobName): boolean => JOB_CEILINGS[name] === 'ok' || name === 'refreshT212Quotes' || name === 'notifyDividends';
 
 /** A deferred job that has not started yet has no cursor of its own, but a step must return a string. */
 export const DEFERRED_CURSOR = 'deferred:not-started';

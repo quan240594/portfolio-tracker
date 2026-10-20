@@ -1,8 +1,8 @@
 import { createApp } from './app.js';
-import { fakeDeps } from './testing/fakes.js';
+import { fakeDeps, fakeNotifyDeps } from './testing/fakes.js';
 import { defineApiScenarios } from './testing/scenarios.js';
 
-const { deps } = fakeDeps();
+const { deps } = fakeDeps({ notify: fakeNotifyDeps().notify });
 const app = createApp(() => deps);
 
 // The platform-neutral scenarios on the in-memory dependencies; the same suite runs on LocalStack (api.int.test.ts) and on

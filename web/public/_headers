@@ -1,0 +1,5 @@
+# Cloudflare Workers static assets (the personal deployment): the service worker is never served from a stale cache, so a new version
+# is picked up on the next visit. Its content type comes from the .js extension.
+/sw.js
+  Cache-Control: no-cache
+  Service-Worker-Allowed: /

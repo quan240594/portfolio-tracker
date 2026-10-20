@@ -11,9 +11,11 @@ import type {
   StoredSplitEvent,
   Transaction,
 } from '@portfolio/shared';
-import { MemoryFileStore, RecordingEventPublisher } from '@portfolio/platform';
+import { MemoryFileStore, MemoryItemStore, RecordingEventPublisher, type PushResult, type PushSender, type PushSubscriptionData } from '@portfolio/platform';
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
 import type { Deps } from '../deps.js';
+import type { NotifyDeps } from '../notifications/deps.js';
+import { ItemNotificationRepository } from '../notifications/repository.js';
 import type { Repository } from '../repository.js';
 import { InMemoryManagementRepository } from './management-fakes.js';
 
@@ -188,3 +190,26 @@ export const portfolio = (p: Partial<Portfolio> & Pick<Portfolio, 'portfolioId' 
   updatedAt: '2025-01-01T00:00:00.000Z',
   ...p,
 });
+
+export interface RecordedPush {
+  subscription: PushSubscriptionData;
+  payload: object;
+}
+
+/**
+ * The notification dependencies over an in-memory item store and a recording push sender that answers `result` (default accepted).
+ * `configured: false` models a deployment whose VAPID keys are not set.
+ */
+export function fakeNotifyDeps(options: { configured?: boolean; result?: PushResult; store?: MemoryItemStore } = {}) {
+  const { configured = true, result = { kind: 'ok', status: 201 } } = options;
+  const store = options.store ?? new MemoryItemStore();
+  const repo = new ItemNotificationRepository(store);
+  const sent: RecordedPush[] = [];
+  const answer = { current: result };
+  const send: PushSender = (subscription, payload) => {
+    sent.push({ subscription, payload });
+    return Promise.resolve(answer.current);
+  };
+  const notify: NotifyDeps = { repo, push: configured ? { configured: true, publicKey: 'B'.repeat(87), send } : { configured: false } };
+  return { notify, repo, store, sent, answer };
+}

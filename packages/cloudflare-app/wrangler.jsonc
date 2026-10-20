@@ -9,6 +9,10 @@
 //
 // Company logos (see docs/architecture.md, "Company logos"): optional variables LOGO_SOURCES (default "logodev,google,duckduckgo", "off" = none),
 // LOGO_HOURLY_LIMIT (default 30) and LOGO_NEGATIVE_TTL_DAYS (default 7), and the optional secret LOGO_DEV_TOKEN that switches the token-based source on.
+//
+// Dividend push notifications (optional, see README.md): the Worker secret VAPID_PRIVATE_KEY (`wrangler secret put VAPID_PRIVATE_KEY`) and the
+// plain variable VAPID_PUBLIC_KEY (passed at deploy time like ORIGIN: `VAPID_PUBLIC_KEY=... pnpm run deploy:app`); both come from
+// `pnpm run vapid:generate`. Without them the feature is simply off. Optional: PUSH_ALLOWED_HOSTS (comma separated push-service hosts).
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "portfolio-tracker",

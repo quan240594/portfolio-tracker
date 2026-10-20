@@ -23,6 +23,7 @@ const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
 const GoalsPage = lazy(() => import('./pages/GoalsPage'));
 const CalendarPage = lazy(() => import('./pages/CalendarPage').then((m) => ({ default: m.CalendarPage })));
 const AssetDetailPage = lazy(() => import('./pages/AssetDetailPage'));
+const NotificationsPage = lazy(() => import('./pages/NotificationsPage'));
 
 const TITLES: Record<string, string> = {
   '/': 'Dashboard',
@@ -36,6 +37,7 @@ const TITLES: Record<string, string> = {
   '/assets': 'Assets',
   '/watchlist': 'Watchlist',
   '/brokers': 'Trading 212',
+  '/settings/notifications': 'Notifications',
 };
 
 const ASSET_DETAIL_PREFIX = '/assets/';
@@ -119,6 +121,14 @@ export const routes: RouteObject[] = [
       },
       { path: 'watchlist', element: <WatchlistPage /> },
       { path: 'brokers', element: <BrokerPage /> },
+      {
+        path: 'settings/notifications',
+        element: (
+          <Suspense fallback={<LoadingRegion label="Loading notifications"><Skeleton className="h-64 w-full" /></LoadingRegion>}>
+            <NotificationsPage />
+          </Suspense>
+        ),
+      },
       { path: '*', element: <NotFoundPage /> },
     ],
   },

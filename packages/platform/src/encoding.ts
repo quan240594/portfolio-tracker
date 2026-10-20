@@ -2,7 +2,10 @@
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-export const utf8Bytes = (text: string): Uint8Array => encoder.encode(text);
+/** Bytes backed by a plain `ArrayBuffer`: what WebCrypto's `BufferSource` parameters accept. */
+export type Bytes = Uint8Array<ArrayBuffer>;
+
+export const utf8Bytes = (text: string): Bytes => encoder.encode(text);
 export const utf8ByteLength = (text: string): number => encoder.encode(text).length;
 
 export function bytesToBase64(bytes: Uint8Array): string {
@@ -11,7 +14,7 @@ export function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-export function base64ToBytes(base64: string): Uint8Array {
+export function base64ToBytes(base64: string): Bytes {
   return Uint8Array.from(atob(base64), (char) => char.codePointAt(0)!);
 }
 

@@ -12,6 +12,7 @@ import {
   eventsFor,
   guardedJob,
   hasPriceService,
+  notifyAfterSync,
   priceJobDeps,
   registeredJobs,
   schedulesFor,
@@ -134,16 +135,16 @@ describe('the job registry and the price registration point', () => {
   const context = { budget: new SubrequestBudget(), now: () => NOON } as unknown as JobContext;
 
   it('registers the import, the Trading 212 sync and the three price jobs', () => {
-    expect(registeredJobs().toSorted((a, b) => a.localeCompare(b))).toEqual(['enrichTransactions', 'importUploaded', 'refreshCalendar', 'refreshPrices', 'refreshT212Quotes', 'syncBroker']);
+    expect(registeredJobs().toSorted((a, b) => a.localeCompare(b))).toEqual(['enrichTransactions', 'importUploaded', 'notifyDividends', 'refreshCalendar', 'refreshPrices', 'refreshT212Quotes', 'syncBroker']);
     expect(Object.keys(PRICE_JOB_FACTORIES).toSorted((a, b) => a.localeCompare(b))).toEqual(['enrichTransactions', 'refreshCalendar', 'refreshPrices']);
     expect(hasPriceService()).toBe(true);
     expect(hasPriceService(CORE_JOB_FACTORIES)).toBe(false);
   });
 
   it('keeps the schedules of the registered jobs, the price service schedules among them', () => {
-    expect(schedulesFor().map((schedule) => schedule.name).toSorted((a, b) => a.localeCompare(b))).toEqual(['broker-sync', 'prices-calendar', 'prices-refresh', 't212-quotes', 't212-quotes-close']);
+    expect(schedulesFor().map((schedule) => schedule.name).toSorted((a, b) => a.localeCompare(b))).toEqual(['broker-sync', 'broker-sync-intraday', 'notify-dividends', 'prices-calendar', 'prices-refresh', 't212-quotes', 't212-quotes-close']);
     expect(PRICE_SCHEDULE_NAMES.toSorted((a, b) => a.localeCompare(b))).toEqual(['prices-calendar', 'prices-refresh']);
-    expect(schedulesFor(CORE_JOB_FACTORIES).map((schedule) => schedule.name)).toEqual(['broker-sync', 't212-quotes', 't212-quotes-close']);
+    expect(schedulesFor(CORE_JOB_FACTORIES).map((schedule) => schedule.name)).toEqual(['broker-sync', 'broker-sync-intraday', 'notify-dividends', 't212-quotes', 't212-quotes-close']);
   });
 
   it('plans the quote refresh at 3 subrequests: one positions request and the two metadata requests', () => {
@@ -193,5 +194,64 @@ describe('the job registry and the price registration point', () => {
     expect(enqueue).not.toHaveBeenCalled();
     await eventsFor({ enqueue }).transactionsChanged(detail);
     expect(enqueue).toHaveBeenCalledWith({ job: 'enrichTransactions', payload: detail });
+  });
+});
+
+describe('notifyAfterSync', () => {
+  const result = (overrides: Record<string, unknown>) => ({ userId: 'u1', portfolioId: 'p1', status: 'SUCCEEDED', dryRun: false, counts: { written: 2 }, unmapped: [], warnings: [], symbols: {}, ...overrides });
+  const finished = (...results: Record<string, unknown>[]) => (() => Promise.resolve({ done: true as const, result: { results } })) as never;
+  const queue = () => ({ enqueue: vi.fn((_message: unknown) => Promise.resolve()) });
+
+  it('enqueues the notification run once per user whose sync wrote transactions', async () => {
+    const q = queue();
+    const handler = notifyAfterSync(finished(result({}), result({ portfolioId: 'p2' }), result({ userId: 'u2', counts: { written: 1 } })), q);
+    await handler({ payload: sync });
+    expect(q.enqueue.mock.calls.map(([message]) => message)).toEqual([
+      { job: 'notifyDividends', payload: { trigger: 'sync', userId: 'u1' } },
+      { job: 'notifyDividends', payload: { trigger: 'sync', userId: 'u2' } },
+    ]);
+  });
+
+  it.each([
+    ['a sync that wrote nothing', result({ counts: { written: 0 } })],
+    ['a sync without counts', result({ counts: undefined })],
+    ['a dry run', result({ dryRun: true })],
+    ['a failed sync', result({ status: 'FAILED' })],
+    ['a skipped sync', result({ status: 'SKIPPED' })],
+  ])('enqueues nothing for %s', async (_label, outcome) => {
+    const q = queue();
+    await notifyAfterSync(finished(outcome), q)({ payload: sync });
+    expect(q.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('waits for the last step of a resumable sync and passes steps through', async () => {
+    const q = queue();
+    const step = { done: false as const, next: 'cursor' };
+    expect(await notifyAfterSync((() => Promise.resolve(step)) as never, q)({ payload: sync })).toBe(step);
+    expect(q.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('never fails the sync when the job cannot be enqueued', async () => {
+    const q = { enqueue: vi.fn((_message: unknown) => Promise.reject(new Error('queue down'))) };
+    const handler = notifyAfterSync(finished(result({})), q);
+    await expect(handler({ payload: sync })).resolves.toMatchObject({ done: true });
+  });
+});
+
+describe('the notification job', () => {
+  it('is registered, reserves the subrequests of one user step and is dropped, not deferred, when the budget denies it', async () => {
+    expect(registeredJobs()).toContain('notifyDividends');
+    expect(JOB_SUBREQUEST_RESERVE.notifyDividends).toBe(30);
+    const { guard, options } = setup();
+    await use(guard, 80);
+    const handler = ran();
+    expect(await guardedJob('notifyDividends', handler as never, options)({ payload: { trigger: 'scheduled' } })).toEqual({ done: true, result: { skipped: 'blocked' } });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('is skipped until the keys are configured', async () => {
+    const context = { items: {}, now: () => NOON, config: { push: { allowedHosts: [] }, baseCurrency: 'EUR', origin: 'https://x.test' }, fetch } as unknown as JobContext;
+    const job = CORE_JOB_FACTORIES.notifyDividends!(context);
+    expect(await job({ payload: { trigger: 'scheduled' } })).toMatchObject({ done: true, result: { skipped: 'not-configured' } });
   });
 });

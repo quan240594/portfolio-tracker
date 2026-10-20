@@ -16,7 +16,7 @@ import {
   type PortableRequest,
   type PortableResponse,
 } from '@portfolio/platform';
-import { ItemManagementRepository, ItemRepository, createApp, type Deps } from '@portfolio/api';
+import { ItemManagementRepository, ItemNotificationRepository, ItemRepository, createApp, type Deps } from '@portfolio/api';
 import { ItemBrokerStore, ItemQuoteStore, SecretCredentialStore, Trading212Client } from '@portfolio/broker-sync';
 import { MAX_FILE_BYTES, createDurableObjectPlatform, uploadTokenFromUrl, type AlarmJobQueueOptions, type DurableObjectPlatform } from '@portfolio/cloudflare';
 import { createMarketDataService } from '@portfolio/prices';
@@ -26,6 +26,7 @@ import type { HubConfig } from './config.js';
 import { createHubLogoRoute, logoLookupGate } from './logos.js';
 import { ALL_JOB_FACTORIES, createJobRegistry, eventsFor, priceJobDeps, schedulesFor, type JobContext, type JobFactories } from './jobs.js';
 import { pricesStatus } from './prices-status.js';
+import { pushConfig } from './push.js';
 import { ARM_PATH, REQUEST_ID_HEADER, SUBJECT_HEADER, stripApiPrefix, userIdOfSubject } from './protocol.js';
 import { errorResponse } from './responses.js';
 import type { HubState } from './runtime.js';
@@ -251,6 +252,7 @@ export class HubCore {
       mgmt: new ItemManagementRepository(items),
       events: eventsFor(jobs, this.factories),
       files,
+      notify: { repo: new ItemNotificationRepository(items), push: pushConfig(this.config, this.fetchImpl) },
       broker: {
         store: new ItemBrokerStore(items),
         credentials: new SecretCredentialStore(secrets, this.config.brokerSecretPrefix),

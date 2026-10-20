@@ -13,3 +13,6 @@ TWELVEDATA_API_KEY=
 EODHD_API_KEY=
 COINGECKO_API_KEY=
 ALPHAVANTAGE_API_KEY=
+# Optional dividend push notifications (from `pnpm run vapid:generate`): both keys, or none. Dev keys only.
+VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
