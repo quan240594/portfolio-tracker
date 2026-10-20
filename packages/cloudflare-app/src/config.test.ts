@@ -45,6 +45,23 @@ describe('readHubConfig', () => {
   });
 });
 
+describe('readHubConfig: Web Push', () => {
+  it('has no keys by default: the feature is off, not an error', () => {
+    expect(readHubConfig(hubEnv)).toMatchObject({ ok: true, config: { push: { allowedHosts: ['fcm.googleapis.com', 'updates.push.services.mozilla.com', 'web.push.apple.com', '*.notify.windows.com'] } } });
+    const result = readHubConfig(hubEnv);
+    expect(result.ok && result.config.push.publicKey).toBeFalsy();
+    expect(result.ok && result.config.push.privateKey).toBeFalsy();
+  });
+
+  it('reads the keys (trimmed) and a configured host list', () => {
+    expect(readHubConfig({ ...hubEnv, VAPID_PUBLIC_KEY: ' pub ', VAPID_PRIVATE_KEY: ' priv\n', PUSH_ALLOWED_HOSTS: 'Push.Example.org, *.other.example' })).toMatchObject({
+      ok: true,
+      config: { push: { publicKey: 'pub', privateKey: 'priv', allowedHosts: ['push.example.org', '*.other.example'] } },
+    });
+    expect(readHubConfig({ ...hubEnv, VAPID_PUBLIC_KEY: '  ', VAPID_PRIVATE_KEY: '' })).toMatchObject({ ok: true, config: { push: {} } });
+  });
+});
+
 describe('readWorkerConfig', () => {
   it('builds the sign-in configuration', () => {
     const result = readWorkerConfig(workerEnv);

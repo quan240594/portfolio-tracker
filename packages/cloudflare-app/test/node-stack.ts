@@ -3,9 +3,9 @@ import { HubCore } from '../src/hub-core.js';
 import { createWorker } from '../src/worker.js';
 import type { WorkerEnv } from '../src/runtime.js';
 import { SqlJsStorage, TestClock } from '@portfolio/cloudflare/testing';
-import { parseLogosConfig, type MetricLimits } from '@portfolio/platform';
+import { parseAllowedHosts, parseLogosConfig, type MetricLimits } from '@portfolio/platform';
 import { parsePricesConfig } from '@portfolio/prices';
-import { FakeGithub, FakeLogos, FakePrices, FakeTrading212, ORIGIN, OWNER_ID, TEST_CLIENT_ID, TEST_CLIENT_SECRET, TEST_SECRETS_KEY, TEST_SESSION_SECRET, route, type FakeRequest, type FakeService } from './fakes.js';
+import { FakeGithub, FakeLogos, FakePrices, FakePush, FakeTrading212, ORIGIN, OWNER_ID, TEST_CLIENT_ID, TEST_CLIENT_SECRET, TEST_SECRETS_KEY, TEST_SESSION_SECRET, TEST_VAPID, route, type FakeRequest, type FakeService } from './fakes.js';
 import type { Stack } from './browser.js';
 
 export const T0 = Date.UTC(2026, 0, 5, 12);
@@ -21,11 +21,13 @@ export interface NodeStackOptions {
   logos?: Record<string, string>;
   /** Extra outbound services, tried before the built-in fakes. */
   services?: FakeService[];
+  /** Leaves the VAPID keys out: the notification feature is then switched off (the default has them). */
+  noVapid?: boolean;
 }
 
-const asFakeRequest = (input: RequestInfo | URL, init?: RequestInit): FakeRequest => {
+const asFakeRequest = async (input: RequestInfo | URL, init?: RequestInit): Promise<FakeRequest> => {
   const request = new Request(input, init);
-  return { url: request.url, method: request.method, header: (name) => request.headers.get(name) };
+  return { url: request.url, method: request.method, header: (name) => request.headers.get(name), body: new Uint8Array(await request.arrayBuffer()) };
 };
 
 /**
@@ -38,17 +40,27 @@ export async function createNodeStack(options: NodeStackOptions = {}): Promise<S
   const clock = new TestClock(T0);
   const prices = new FakePrices(() => clock.ms);
   const logos = new FakeLogos();
-  const services = [...(options.services ?? []), github.service, trading212.service, prices.service, logos.service];
-  const outbound = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const reply = route(services, asFakeRequest(input, init));
-    if (reply.bytes !== undefined) return Promise.resolve(new Response(reply.bytes as Uint8Array<ArrayBuffer>, { status: reply.status, headers: reply.headers }));
-    return Promise.resolve(Response.json(reply.json ?? null, { status: reply.status, headers: reply.headers }));
+  const push = new FakePush();
+  const services = [...(options.services ?? []), github.service, trading212.service, prices.service, logos.service, push.service];
+  const outbound = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const reply = route(services, await asFakeRequest(input, init));
+    if (reply.bytes !== undefined) return new Response(reply.bytes as Uint8Array<ArrayBuffer>, { status: reply.status, headers: reply.headers });
+    return Response.json(reply.json ?? null, { status: reply.status, headers: reply.headers });
   };
   const storage = await SqlJsStorage.create();
   const vars = { ORIGIN, OWNER_GITHUB_ID: String(OWNER_ID), GITHUB_CLIENT_ID: TEST_CLIENT_ID, GITHUB_CLIENT_SECRET: TEST_CLIENT_SECRET, SESSION_SECRET: TEST_SESSION_SECRET, SECRETS_KEY: TEST_SECRETS_KEY };
   const core = new HubCore(
     { storage, blockConcurrencyWhile: (callback) => callback() },
-    { secretsKey: TEST_SECRETS_KEY, origin: ORIGIN, baseCurrency: 'EUR', brokerSecretPrefix: '/test/broker/trading212', symbolOverrides: {}, prices: parsePricesConfig(options.prices ?? {}), logos: parseLogosConfig(options.logos ?? {}) },
+    {
+      secretsKey: TEST_SECRETS_KEY,
+      origin: ORIGIN,
+      baseCurrency: 'EUR',
+      brokerSecretPrefix: '/test/broker/trading212',
+      symbolOverrides: {},
+      prices: parsePricesConfig(options.prices ?? {}),
+      logos: parseLogosConfig(options.logos ?? {}),
+      push: { ...(options.noVapid ? {} : { publicKey: TEST_VAPID.publicKey, privateKey: TEST_VAPID.privateKey }), allowedHosts: parseAllowedHosts(undefined) },
+    },
     { now: clock.now, limits: options.limits, jobFactories: options.jobFactories, fetch: outbound, sleep: () => Promise.resolve(), queue: { baseBackoffMs: 1_000 } },
   );
   await core.start();
@@ -73,13 +85,14 @@ export async function createNodeStack(options: NodeStackOptions = {}): Promise<S
     trading212,
     prices,
     logos,
+    push,
     storage,
     core,
     clock,
     worker,
     env,
     send: (path, init) => worker.fetch(new Request(`${ORIGIN}${path}`, init), env),
-    drain,
+    drain: () => drain(),
     enqueue: (job, payload) => core.platform.jobs.enqueue({ job, payload } as never),
     failedJobs: () => Promise.resolve(core.platform.jobs.failedJobs().map(({ job, error }) => ({ job, error }))),
     schedules: () => Promise.resolve(storage.rows<{ name: string }>('SELECT name FROM schedules ORDER BY name').map((row) => row.name)),

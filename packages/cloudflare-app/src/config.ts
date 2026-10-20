@@ -1,5 +1,5 @@
 import { parsePricesConfig, type PricesConfig } from '@portfolio/prices';
-import { MIN_SESSION_SECRET_LENGTH, parseLogosConfig, resolveGithubAuthConfig, type GithubAuthConfig, type GithubFetch, type LogosConfig } from '@portfolio/platform';
+import { MIN_SESSION_SECRET_LENGTH, parseAllowedHosts, parseLogosConfig, resolveGithubAuthConfig, type GithubAuthConfig, type GithubFetch, type LogosConfig } from '@portfolio/platform';
 import type { HubEnv, WorkerEnv } from './runtime.js';
 
 export type ConfigResult<T> = { ok: true; config: T } | { ok: false; problems: string[] };
@@ -17,6 +17,14 @@ export interface HubConfig {
   prices: PricesConfig;
   /** The company logo service: sources, hourly lookup cap, negative cache (see `parseLogosConfig`). */
   logos: LogosConfig;
+  /** Web Push: both keys are needed, otherwise the notification feature is off (never an error). */
+  push: PushSettings;
+}
+
+export interface PushSettings {
+  publicKey?: string;
+  privateKey?: string;
+  allowedHosts: readonly string[];
 }
 
 export const DEFAULT_BASE_CURRENCY = 'EUR';
@@ -82,6 +90,11 @@ export function readHubConfig(env: HubEnv): ConfigResult<HubConfig> {
       symbolOverrides: parseOverrides(env.T212_SYMBOL_OVERRIDES),
       prices: parsePricesConfig({ ...stringVars(env), BASE_CURRENCY: currency.toUpperCase() }),
       logos: parseLogosConfig(stringVars(env)),
+      push: {
+        ...(present(env.VAPID_PUBLIC_KEY) ? { publicKey: env.VAPID_PUBLIC_KEY.trim() } : {}),
+        ...(present(env.VAPID_PRIVATE_KEY) ? { privateKey: env.VAPID_PRIVATE_KEY.trim() } : {}),
+        allowedHosts: parseAllowedHosts(env.PUSH_ALLOWED_HOSTS),
+      },
     },
   };
 }

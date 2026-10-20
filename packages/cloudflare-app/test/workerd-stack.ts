@@ -1,8 +1,8 @@
 import { build } from 'esbuild';
 import { Log, LogLevel, Miniflare, Response as MiniflareResponse } from 'miniflare';
 import { fileURLToPath } from 'node:url';
-import type { Stack } from './browser.js';
-import { FakeGithub, FakeLogos, FakePrices, FakeTrading212, ORIGIN, OWNER_ID, TEST_CLIENT_ID, TEST_CLIENT_SECRET, TEST_SECRETS_KEY, TEST_SESSION_SECRET, route } from './fakes.js';
+import type { DrainOptions, Stack } from './browser.js';
+import { FakeGithub, FakeLogos, FakePrices, FakePush, FakeTrading212, ORIGIN, OWNER_ID, TEST_CLIENT_ID, TEST_CLIENT_SECRET, TEST_SECRETS_KEY, TEST_SESSION_SECRET, TEST_VAPID, route } from './fakes.js';
 import { PINNED_NOW, type SuiteStartOptions } from './suite.js';
 
 const ENTRY = fileURLToPath(new URL('./entry.ts', import.meta.url));
@@ -32,6 +32,8 @@ interface HubState {
   alarm: number | null;
   pendingJobs: number | null;
   failedJobs: { job: string; error: string | null }[];
+  /** Every job row (pending, running or failed): what the Hub still has to do. */
+  jobs: { job: string; due_at: number; attempts: number; state: string; last_error: string | null }[];
   storageBytes: number;
 }
 
@@ -43,7 +45,8 @@ export async function createWorkerdStack(options: SuiteStartOptions = {}): Promi
   const trading212 = new FakeTrading212();
   const prices = new FakePrices(() => Date.now());
   const logos = new FakeLogos();
-  const services = [github.service, trading212.service, prices.service, logos.service];
+  const push = new FakePush();
+  const services = [github.service, trading212.service, prices.service, logos.service, push.service];
   const mf = new Miniflare({
     modules: [{ type: 'ESModule', path: 'worker.mjs', contents: await bundleWorker() }],
     // The Hub logs one JSON line per request; the tests do not need them.
@@ -70,12 +73,14 @@ export async function createWorkerdStack(options: SuiteStartOptions = {}): Promi
       GITHUB_CLIENT_SECRET: TEST_CLIENT_SECRET,
       SESSION_SECRET: TEST_SESSION_SECRET,
       SECRETS_KEY: TEST_SECRETS_KEY,
+      ...(options.noVapid ? {} : { VAPID_PUBLIC_KEY: TEST_VAPID.publicKey, VAPID_PRIVATE_KEY: TEST_VAPID.privateKey }),
       ...options.prices,
       ...options.logos,
       ...(options.limits ? { TEST_LIMITS: JSON.stringify(options.limits), TEST_NOW: String(PINNED_NOW) } : {}),
     },
-    outboundService: (request) => {
-      const reply = route(services, { url: request.url, method: request.method, header: (name) => request.headers.get(name) });
+    outboundService: async (request) => {
+      const body = new Uint8Array(await request.arrayBuffer());
+      const reply = route(services, { url: request.url, method: request.method, header: (name) => request.headers.get(name), body });
       if (reply.bytes !== undefined) return new MiniflareResponse(reply.bytes as Uint8Array<ArrayBuffer>, { status: reply.status, headers: reply.headers });
       return MiniflareResponse.json(reply.json ?? null, { status: reply.status, headers: reply.headers });
     },
@@ -91,12 +96,13 @@ export async function createWorkerdStack(options: SuiteStartOptions = {}): Promi
     const hub = await namespace();
     return (await (await hub.get(hub.idFromName('hub')).fetch('http://hub.internal/__test/state')).json()) as HubState;
   };
-  const drain = async (deadline = Date.now() + 20_000): Promise<void> => {
+  const drain = async (options: DrainOptions = {}, deadline = Date.now() + 20_000): Promise<void> => {
     const state = await hubState();
-    if (state.pendingJobs === null) return;
+    const ignored = new Set(options.ignoreJobs);
+    if (state.pendingJobs === null || state.jobs.every((job) => ignored.has(job.job))) return;
     if (Date.now() > deadline) throw new Error(`The Hub did not drain: ${JSON.stringify(state)}`);
     await sleep(50);
-    await drain(deadline);
+    await drain(options, deadline);
   };
   return {
     origin: ORIGIN,
@@ -104,9 +110,10 @@ export async function createWorkerdStack(options: SuiteStartOptions = {}): Promi
     trading212,
     prices,
     logos,
+    push,
     hubState,
     send: async (path, init) => (await mf.dispatchFetch(`${ORIGIN}${path}`, init as never)) as unknown as Response,
-    drain,
+    drain: (options) => drain(options),
     enqueue: async (job, payload) => {
       const hub = await namespace();
       await hub.get(hub.idFromName('hub')).fetch('http://hub.internal/__test/enqueue', { method: 'POST', body: JSON.stringify({ job, payload }) });

@@ -1,4 +1,12 @@
-import type { FakeGithub, FakeLogos, FakePrices, FakeTrading212 } from './fakes.js';
+import type { FakeGithub, FakeLogos, FakePrices, FakePush, FakeTrading212 } from './fakes.js';
+
+export interface DrainOptions {
+  /**
+   * Jobs that may stay pending. With a frozen Hub clock (the budget tests) a job that the alarm defers by a second never comes due, so a
+   * test that is not about it (enrichment after a sync) says so instead of waiting for it.
+   */
+  ignoreJobs?: readonly string[];
+}
 
 /** What a test sees of the deployed app, whatever runs it (Node with an in-process Hub, or real workerd through Miniflare). */
 export interface Stack {
@@ -7,10 +15,11 @@ export interface Stack {
   readonly trading212: FakeTrading212;
   readonly prices: FakePrices;
   readonly logos: FakeLogos;
+  readonly push: FakePush;
   /** Sends a request to the Worker exactly as a browser would reach it. */
   send(path: string, init?: RequestInit): Promise<Response>;
   /** Runs the Hub's alarm until no job is left (Node), or waits until the Hub reports no pending job (workerd). */
-  drain(): Promise<void>;
+  drain(options?: DrainOptions): Promise<void>;
   /** Enqueues a job on the Hub as the schedule or an event would (the tests cannot wait for a real cron slot). */
   enqueue(job: string, payload: unknown): Promise<void>;
   /** Jobs that ran out of attempts (must stay empty: a denied or unconfigured job is skipped or deferred, not failed). */

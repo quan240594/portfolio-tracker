@@ -11,7 +11,7 @@ const decoder = new TextDecoder();
  * The receiving side of RFC 8291 (what a browser does): decrypts a push request body with the user agent's private key and the
  * authentication secret. Returns the payload without the padding delimiter.
  */
-export async function decryptAes128gcm(body: Bytes, receiver: { privateKey: CryptoKey; publicKey: Bytes; authSecret: Bytes }): Promise<Bytes> {
+export async function decryptAes128gcm(body: Uint8Array, receiver: { privateKey: CryptoKey; publicKey: Bytes; authSecret: Bytes }): Promise<Bytes> {
   const salt = body.slice(0, 16);
   const idLength = body[20]!;
   const senderPublic = body.slice(21, 21 + idLength);
@@ -30,7 +30,7 @@ export async function decryptAes128gcm(body: Bytes, receiver: { privateKey: Cryp
 export interface TestSubscriber {
   subscription: PushSubscriptionData;
   /** Decrypts a request body the sender produced for this subscriber and parses the JSON payload. */
-  decrypt(body: Bytes): Promise<Record<string, unknown>>;
+  decrypt(body: Uint8Array): Promise<Record<string, unknown>>;
 }
 
 /** A subscriber with a freshly generated key pair and auth secret, subscribed at `endpoint`. */

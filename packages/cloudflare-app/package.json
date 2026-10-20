@@ -9,11 +9,12 @@
     "dev": "pnpm run build:web && wrangler dev --local",
     "build:web": "VITE_AUTH_MODE=github VITE_USE_MOCKS=false VITE_API_BASE_URL=/api VITE_BASE_PATH=/ pnpm --filter @portfolio/web exec vite build --outDir ../packages/cloudflare-app/dist/web --emptyOutDir && rm -f dist/web/mockServiceWorker.js",
     "deploy:dry-run": "pnpm run build:web && wrangler deploy --dry-run --outdir dist/bundle",
-    "deploy:app": ": \"${ORIGIN:?set ORIGIN}\" \"${OWNER_GITHUB_ID:?set OWNER_GITHUB_ID}\" \"${GITHUB_CLIENT_ID:?set GITHUB_CLIENT_ID}\" && pnpm run build:web && wrangler deploy --var ORIGIN:$ORIGIN --var OWNER_GITHUB_ID:$OWNER_GITHUB_ID --var GITHUB_CLIENT_ID:$GITHUB_CLIENT_ID",
+    "deploy:app": ": \"${ORIGIN:?set ORIGIN}\" \"${OWNER_GITHUB_ID:?set OWNER_GITHUB_ID}\" \"${GITHUB_CLIENT_ID:?set GITHUB_CLIENT_ID}\" && pnpm run build:web && wrangler deploy --var ORIGIN:$ORIGIN --var OWNER_GITHUB_ID:$OWNER_GITHUB_ID --var GITHUB_CLIENT_ID:$GITHUB_CLIENT_ID ${VAPID_PUBLIC_KEY:+--var VAPID_PUBLIC_KEY:$VAPID_PUBLIC_KEY} ${PUSH_ALLOWED_HOSTS:+--var PUSH_ALLOWED_HOSTS:$PUSH_ALLOWED_HOSTS}",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "vapid:generate": "tsx scripts/vapid-generate.ts"
   },
   "dependencies": {
     "@portfolio/api": "workspace:*",
@@ -32,6 +33,7 @@
     "eslint": "^9.39.5",
     "miniflare": "^4.20260730.0",
     "sql.js": "^1.15.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.71.2",
     "vitest": "^2.1.9",

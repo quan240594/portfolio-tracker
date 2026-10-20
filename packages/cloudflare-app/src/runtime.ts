@@ -44,6 +44,15 @@ export interface HubEnv {
   EODHD_API_KEY?: string;
   COINGECKO_API_KEY?: string;
   ALPHAVANTAGE_API_KEY?: string;
+  /**
+   * Web Push (dividend notifications): `VAPID_PUBLIC_KEY` is a plain variable (65-byte uncompressed P-256 key, base64url),
+   * `VAPID_PRIVATE_KEY` a Worker secret (PKCS #8, base64url; `pnpm --filter @portfolio/cloudflare-app run vapid:generate`). Both missing
+   * (or either) switches the feature off: the API answers `configured: false` and the web app explains it.
+   */
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_PRIVATE_KEY?: string;
+  /** Optional, comma separated: push-service hosts a subscription endpoint may use (`*.` = subdomains); defaults to the browsers' push services. */
+  PUSH_ALLOWED_HOSTS?: string;
   /** Plain variables of the price service: `TICKER=coingecko-id` pairs, daily call budgets, EU refresh hours, FX back-fill start, calendar tuning. */
   COINGECKO_COIN_IDS?: string;
   EODHD_DAILY_LIMIT?: string;

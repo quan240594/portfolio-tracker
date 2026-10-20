@@ -11,5 +11,5 @@ export { ItemManagementRepository, type ManagementRepository } from './managemen
 export { ItemRepository, type Repository } from './repository.js';
 export type { ConfiguredPush, NotifyDeps, PushConfig } from './notifications/deps.js';
 export { ItemNotificationRepository, type NotificationRepository } from './notifications/repository.js';
-export { backedOff, notifyDividendsJob, planNotifications, type NotifyJobDeps, type NotifyPayload, type NotifyResult } from './notifications/job.js';
+export { MAX_PUSHES_PER_USER_STEP, backedOff, notifyDividendsJob, planNotifications, type NotifyJobDeps, type NotifyPayload, type NotifyResult } from './notifications/job.js';
 export { baselineUser } from './notifications/data.js';
