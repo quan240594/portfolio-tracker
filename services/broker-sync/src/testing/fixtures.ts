@@ -1,5 +1,5 @@
 /** Builders for Trading 212 API records, shaped after the public OpenAPI spec (synthetic data only). */
-import type { CashTransaction, HistoricalOrder, HistoryDividend } from '../t212/schemas.js';
+import type { CashTransaction, HistoricalOrder, HistoryDividend, OpenPosition } from '../t212/schemas.js';
 
 export interface OrderOptions {
   id?: number | string;
@@ -91,3 +91,29 @@ export const cash = (type: string, dateTime = '2024-01-02T09:00:00Z'): CashTrans
   currency: 'EUR',
   dateTime,
 });
+
+export interface PositionOptions {
+  ticker?: string;
+  isin?: string;
+  currency?: string;
+  quantity?: number;
+  currentPrice?: number;
+  averagePricePaid?: number;
+  /** Account-currency value of the position (`walletImpact.currentValue`) and its currency. */
+  currentValue?: number;
+  walletCurrency?: string;
+  noPrice?: boolean;
+}
+
+/** An open position as `GET /api/v0/equity/positions` reports it (synthetic data only). */
+export function position(o: PositionOptions = {}): OpenPosition {
+  const quantity = o.quantity ?? 2;
+  const currentPrice = o.currentPrice ?? 210;
+  return {
+    instrument: { ticker: o.ticker ?? 'AAPL_US_EQ', isin: o.isin ?? 'US0378331005', name: 'Example Corp', currency: o.currency ?? 'USD' },
+    quantity,
+    ...(o.noPrice ? {} : { currentPrice }),
+    averagePricePaid: o.averagePricePaid ?? 150,
+    ...(o.currentValue === undefined ? {} : { walletImpact: { currency: o.walletCurrency ?? 'EUR', currentValue: o.currentValue } }),
+  };
+}

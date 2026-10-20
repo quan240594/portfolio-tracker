@@ -290,3 +290,38 @@ describe('resetAt', () => {
     expect(resetAt(header, NOW)).toBe(expected);
   });
 });
+
+describe('open positions (price fields)', () => {
+  const instrument = { ticker: 'VUSAl_EQ', isin: 'IE00B3XXRP09', name: 'Example ETF', currency: 'GBX' };
+
+  it('reads the price fields of the public API', async () => {
+    const wallet = { currency: 'EUR', totalCost: 100, currentValue: 120, unrealizedProfitLoss: 20, fxImpact: -1.5 };
+    const { client } = setup([json([{ instrument, quantity: 1.25, currentPrice: 9650, averagePricePaid: 8000, createdAt: '2025-01-01T00:00:00Z', walletImpact: wallet }])]);
+    const { items } = await client.positions();
+    expect(items).toEqual([{ instrument, quantity: 1.25, currentPrice: 9650, averagePricePaid: 8000, walletImpact: wallet }]);
+  });
+
+  it('keeps a position whose price fields are missing, null or of the wrong type (every one is optional)', async () => {
+    const { client } = setup([
+      json([
+        { instrument, quantity: 1 },
+        { instrument, quantity: 2, currentPrice: null, averagePricePaid: null, walletImpact: null },
+        { instrument, quantity: 3, currentPrice: '9650', averagePricePaid: 'x', walletImpact: 'EUR' },
+        { instrument, quantity: 4, walletImpact: { currency: 7, totalCost: 'x', currentValue: null } },
+      ]),
+    ]);
+    const { items, invalid } = await client.positions();
+    expect(invalid).toBe(0);
+    expect(items.map((p) => [p.quantity, p.currentPrice, p.averagePricePaid, p.walletImpact])).toEqual([
+      [1, undefined, undefined, undefined],
+      [2, undefined, undefined, undefined],
+      [3, undefined, undefined, undefined],
+      [4, undefined, undefined, { currency: undefined, totalCost: undefined, currentValue: undefined, unrealizedProfitLoss: undefined, fxImpact: undefined }],
+    ]);
+  });
+
+  it('still requires the instrument and the quantity', async () => {
+    const { client } = setup([json([{ instrument, currentPrice: 1 }, { quantity: 1, currentPrice: 1 }])]);
+    await expect(client.positions()).resolves.toMatchObject({ items: [], invalid: 2 });
+  });
+});

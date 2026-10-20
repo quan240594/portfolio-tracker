@@ -121,9 +121,16 @@ describe('schedule', () => {
     expect(toUnixCron(calendar)).toBe('30 5 * * *');
   });
 
+  it('writes minute lists into both expressions', () => {
+    const quotes = SCHEDULED_JOBS.find((s) => s.name === 't212-quotes')!;
+    expect(toUnixCron(quotes)).toBe('0,15,30,45 7,8,9,10,11,12,13,14,15,16,17,18,19,20,21 * * MON-FRI');
+    expect(toAwsCron(quotes)).toBe('cron(0,15,30,45 7,8,9,10,11,12,13,14,15,16,17,18,19,20,21 ? * MON-FRI *)');
+    expect(toUnixCron(SCHEDULED_JOBS.find((s) => s.name === 't212-quotes-close')!)).toBe('5 22 * * MON-FRI');
+  });
+
   it('declares one schedule per job with unique names', () => {
     expect(new Set(SCHEDULED_JOBS.map((s) => s.name)).size).toBe(SCHEDULED_JOBS.length);
-    expect(SCHEDULED_JOBS.map((s) => s.job)).toEqual(['refreshPrices', 'refreshCalendar', 'syncBroker']);
+    expect(SCHEDULED_JOBS.map((s) => s.job)).toEqual(['refreshPrices', 'refreshCalendar', 'syncBroker', 'refreshT212Quotes', 'refreshT212Quotes']);
   });
 });
 

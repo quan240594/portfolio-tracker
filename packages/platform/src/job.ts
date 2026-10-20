@@ -10,6 +10,7 @@ export const JOBS = {
   enrichTransactions: 'enrichTransactions',
   refreshPrices: 'refreshPrices',
   refreshCalendar: 'refreshCalendar',
+  refreshT212Quotes: 'refreshT212Quotes',
 } as const;
 
 export type JobName = (typeof JOBS)[keyof typeof JOBS];
@@ -23,6 +24,8 @@ export interface JobPayloads {
   enrichTransactions: TransactionsChangedDetail;
   refreshPrices: { trigger: 'scheduled' };
   refreshCalendar: { trigger: 'scheduled' };
+  /** Refresh the quotes of the positions held at Trading 212 (`scheduled`, or `sync` right after a successful sync); `userId` limits it to one user. */
+  refreshT212Quotes: { trigger: 'scheduled' | 'sync'; userId?: string };
 }
 
 /**

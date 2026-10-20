@@ -5,6 +5,7 @@ import {
   CORE_JOB_FACTORIES,
   DEFERRED_CURSOR,
   JOB_SUBREQUEST_RESERVE,
+  T212_QUOTE_SUBREQUESTS,
   PRICE_JOB_FACTORIES,
   PRICE_SCHEDULE_NAMES,
   createJobRegistry,
@@ -80,6 +81,17 @@ describe('guardedJob', () => {
     expect(handler).toHaveBeenCalledTimes(1); // only the call below the thresholds ran
   });
 
+  it('runs the Trading 212 quote refresh in the warning band (60-80 %) but drops it, not defers it, once blocked', async () => {
+    const { guard, options } = setup();
+    const handler = ran();
+    const job = guardedJob('refreshT212Quotes', handler as never, options);
+    await use(guard, 70);
+    expect(await job({ payload: { trigger: 'scheduled' } })).toEqual({ done: true, result: 'ran' });
+    await use(guard, 10);
+    expect(await job({ payload: { trigger: 'scheduled' } })).toEqual({ done: true, result: { skipped: 'blocked' } });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
   it('runs essential jobs in the warning band', async () => {
     const { guard, options } = setup();
     await use(guard, 70);
@@ -122,16 +134,22 @@ describe('the job registry and the price registration point', () => {
   const context = { budget: new SubrequestBudget(), now: () => NOON } as unknown as JobContext;
 
   it('registers the import, the Trading 212 sync and the three price jobs', () => {
-    expect(registeredJobs().toSorted((a, b) => a.localeCompare(b))).toEqual(['enrichTransactions', 'importUploaded', 'refreshCalendar', 'refreshPrices', 'syncBroker']);
+    expect(registeredJobs().toSorted((a, b) => a.localeCompare(b))).toEqual(['enrichTransactions', 'importUploaded', 'refreshCalendar', 'refreshPrices', 'refreshT212Quotes', 'syncBroker']);
     expect(Object.keys(PRICE_JOB_FACTORIES).toSorted((a, b) => a.localeCompare(b))).toEqual(['enrichTransactions', 'refreshCalendar', 'refreshPrices']);
     expect(hasPriceService()).toBe(true);
     expect(hasPriceService(CORE_JOB_FACTORIES)).toBe(false);
   });
 
   it('keeps the schedules of the registered jobs, the price service schedules among them', () => {
-    expect(schedulesFor().map((schedule) => schedule.name).toSorted((a, b) => a.localeCompare(b))).toEqual(['broker-sync', 'prices-calendar', 'prices-refresh']);
+    expect(schedulesFor().map((schedule) => schedule.name).toSorted((a, b) => a.localeCompare(b))).toEqual(['broker-sync', 'prices-calendar', 'prices-refresh', 't212-quotes', 't212-quotes-close']);
     expect(PRICE_SCHEDULE_NAMES.toSorted((a, b) => a.localeCompare(b))).toEqual(['prices-calendar', 'prices-refresh']);
-    expect(schedulesFor(CORE_JOB_FACTORIES).map((schedule) => schedule.name)).toEqual(['broker-sync']);
+    expect(schedulesFor(CORE_JOB_FACTORIES).map((schedule) => schedule.name)).toEqual(['broker-sync', 't212-quotes', 't212-quotes-close']);
+  });
+
+  it('plans the quote refresh at 3 subrequests: one positions request and the two metadata requests', () => {
+    expect(JOB_SUBREQUEST_RESERVE.refreshT212Quotes).toBe(T212_QUOTE_SUBREQUESTS);
+    expect(T212_QUOTE_SUBREQUESTS).toBe(3);
+    expect(CORE_JOB_FACTORIES.refreshT212Quotes).toBeDefined();
   });
 
   it('plans a price step into the subrequests of an alarm', () => {

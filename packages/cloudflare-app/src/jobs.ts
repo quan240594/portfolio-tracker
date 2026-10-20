@@ -18,7 +18,7 @@ import {
   type ScheduledJob,
   type SecretStore,
 } from '@portfolio/platform';
-import { ItemBrokerStore, SecretCredentialStore, Trading212Client, brokerSyncJob, type SyncDeps } from '@portfolio/broker-sync';
+import { ItemBrokerStore, ItemQuoteStore, SecretCredentialStore, Trading212Client, brokerSyncJob, refreshQuotesAfterSync, refreshQuotesJob, type QuoteDeps, type SyncDeps } from '@portfolio/broker-sync';
 import { ItemIngestStore, importUploadedJob } from '@portfolio/ingest';
 import { DEFAULT_STEP_SUBREQUESTS, PRICE_SCHEDULES, createPriceJobs, type PriceJobDeps } from '@portfolio/prices';
 import type { HubConfig } from './config.js';
@@ -49,10 +49,13 @@ export type JobFactories = { [N in JobName]?: JobFactory<N> };
 /** Subrequests one Trading 212 sync step can use: `T212_PAGES_PER_STEP` pages, each retried up to `T212_MAX_ATTEMPTS` times, plus the exchange list. */
 export const T212_PAGES_PER_STEP = 5;
 export const T212_MAX_ATTEMPTS = 3;
+/** The quote refresh makes one positions request, plus the two metadata requests when an instrument cannot be mapped (hourly at most). */
+export const T212_QUOTE_SUBREQUESTS = 3;
+const T212_QUOTE_TIMEOUT_MS = 15_000;
 
 const noEvents: EventPublisher = { transactionsChanged: () => Promise.resolve() };
 
-/** Jobs that run on the Hub today: the CSV import and the Trading 212 sync (both platform-neutral, from `services/*`). */
+/** Jobs that run on the Hub today: the CSV import, the Trading 212 sync and its quote refresh (all platform-neutral, from `services/*`). */
 export const CORE_JOB_FACTORIES: JobFactories = {
   importUploaded: ({ items, files, events, now }) => importUploadedJob({ store: new ItemIngestStore(items), files, events, now }),
   syncBroker: (context) => {
@@ -66,7 +69,20 @@ export const CORE_JOB_FACTORIES: JobFactories = {
       now,
       limits: { pagesPerStep: T212_PAGES_PER_STEP },
     };
-    return brokerSyncJob(() => deps);
+    // A successful sync prices its positions right away: the quote refresh is enqueued as a job of its own.
+    return refreshQuotesAfterSync(brokerSyncJob(() => deps), context.queue);
+  },
+  refreshT212Quotes: ({ items, secrets, now, config, fetch }) => {
+    const deps: QuoteDeps = {
+      store: new ItemBrokerStore(items),
+      quotes: new ItemQuoteStore(items),
+      credentials: new SecretCredentialStore(secrets, config.brokerSecretPrefix),
+      // One attempt and no waiting: a limit or an error is recorded and backed off by the job; the alarm must never sleep for it.
+      createApi: (credentials) => new Trading212Client({ credentials, fetchFn: fetch, maxAttempts: 1, timeoutMs: T212_QUOTE_TIMEOUT_MS, maxWaitMs: 0 }),
+      symbolOverrides: config.symbolOverrides,
+      now,
+    };
+    return refreshQuotesJob(() => deps);
   },
 };
 
@@ -96,6 +112,7 @@ export const JOB_SUBREQUEST_RESERVE: Readonly<Partial<Record<JobName, number>>> 
   refreshPrices: DEFAULT_STEP_SUBREQUESTS,
   enrichTransactions: DEFAULT_STEP_SUBREQUESTS,
   refreshCalendar: DEFAULT_STEP_SUBREQUESTS,
+  refreshT212Quotes: T212_QUOTE_SUBREQUESTS,
 };
 
 export const ALL_JOB_FACTORIES: JobFactories = { ...CORE_JOB_FACTORIES, ...PRICE_JOB_FACTORIES };
@@ -118,6 +135,12 @@ export const hasPriceService = (factories: JobFactories = ALL_JOB_FACTORIES): bo
 /** The `EventPublisher` of the Hub: events become jobs once there is a consumer for them. */
 export const eventsFor = (queue: JobQueue, factories: JobFactories = ALL_JOB_FACTORIES): EventPublisher =>
   hasPriceService(factories) ? new QueueEventPublisher(queue) : noEvents;
+
+/**
+ * Jobs that are dropped, not deferred, when the guard denies them: the non-essential ones (`ok` ceiling) and the Trading 212 quote
+ * refresh. Its next scheduled slot comes within 15 minutes, so a deferral would only pile up hourly retries behind it.
+ */
+const dropsWhenDenied = (name: JobName): boolean => JOB_CEILINGS[name] === 'ok' || name === 'refreshT212Quotes';
 
 /** A deferred job that has not started yet has no cursor of its own, but a step must return a string. */
 export const DEFERRED_CURSOR = 'deferred:not-started';
@@ -148,7 +171,7 @@ export function guardedJob<N extends JobName>(name: N, handler: JobHandler<JobPa
     const decision = await guardJob(guard, name);
     if (!decision.allowed) {
       logger.info('Job not run', { job: name, reason: decision.reason });
-      if (JOB_CEILINGS[name] === 'ok') return { done: true, result: { skipped: decision.reason } };
+      if (dropsWhenDenied(name)) return { done: true, result: { skipped: decision.reason } };
       const pause = decision.reason === 'store-unavailable' ? UNAVAILABLE_DEFER_MS : Math.min(secondsUntilReset(now()) * 1000 + RESET_MARGIN_MS, BLOCKED_DEFER_MAX_MS);
       return defer(pause, resume);
     }

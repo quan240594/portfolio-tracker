@@ -30,14 +30,17 @@ function jsonencoded(input: string): unknown {
   return Object.fromEntries(entries.map(([key, value]) => [key, value === 'true' ? true : value!.replaceAll('"', '')]));
 }
 
+/** The schedules the AWS adapter keeps; the Cloudflare-only ones have no EventBridge schedule. */
+const AWS_SCHEDULES = SCHEDULED_JOBS.filter((s) => s.cloudflareOnly !== true);
+
 describe('SCHEDULED_JOBS matches infra/terraform', () => {
   const resourceNames = [...terraform.matchAll(/resource "aws_scheduler_schedule" "([a-z_]+)"/g)].map((m) => m[1]!);
 
   it('declares exactly the schedules Terraform creates', () => {
-    expect(resourceNames.sort((a, b) => a.localeCompare(b))).toEqual(SCHEDULED_JOBS.map((s) => s.name.replaceAll('-', '_')).sort((a, b) => a.localeCompare(b)));
+    expect(resourceNames.sort((a, b) => a.localeCompare(b))).toEqual(AWS_SCHEDULES.map((s) => s.name.replaceAll('-', '_')).sort((a, b) => a.localeCompare(b)));
   });
 
-  it.each(SCHEDULED_JOBS.map((s) => [s.name, s] as const))('%s: name, cron, time zone and payload', (_name, job) => {
+  it.each(AWS_SCHEDULES.map((s) => [s.name, s] as const))('%s: name, cron, time zone and payload', (_name, job) => {
     const schedule = block(`resource "aws_scheduler_schedule" "${job.name.replaceAll('-', '_')}"`);
     expect(schedule).toContain(`name                         = "\${local.app}-${job.name}-\${var.env}"`);
 

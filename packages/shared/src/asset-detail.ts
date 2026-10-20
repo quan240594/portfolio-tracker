@@ -180,8 +180,8 @@ function quoteInfo(data: AssetData): AssetQuoteInfo | null {
   const closes = [...eod].sort(byDate);
   const last = closes.at(-1);
   const previous = closes.at(-2);
-  let basis: { source: 'quote' | 'eod'; price: number; previousClose: number; currency: string; asOf: string } | null = null;
-  if (quote) basis = { source: 'quote', price: quote.price, previousClose: quote.previousClose, currency: quote.currency, asOf: quote.asOf };
+  let basis: { source: 'quote' | 'eod'; price: number; previousClose: number; currency: string; asOf: string; provider?: string } | null = null;
+  if (quote) basis = { source: 'quote', price: quote.price, previousClose: quote.previousClose, currency: quote.currency, asOf: quote.asOf, ...(quote.source ? { provider: quote.source } : {}) };
   else if (last) basis = { source: 'eod', price: last.close, previousClose: (previous ?? last).close, currency: last.currency, asOf: last.date };
   if (!basis) return null;
   const change = basis.price - basis.previousClose;

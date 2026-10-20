@@ -60,12 +60,17 @@ function WatchlistStar({ symbol }: Readonly<{ symbol: string }>) {
   );
 }
 
+/** Quote sources that are named next to the price, with the time of the quote (the others keep the plain date). */
+const QUOTE_SOURCE_LABELS: Readonly<Record<string, string>> = { t212: 'Trading 212' };
+const QUOTE_TIME_FORMAT: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' };
+
 function PriceBlock({ detail }: Readonly<{ detail: AssetDetailResponse }>) {
   const { quote, baseCurrency } = detail;
   if (!quote) return <p className="muted text-sm">No price available yet.</p>;
   const stale = isQuoteStale(quote.asOf, new Date().toISOString().slice(0, 10));
   const inBase = quote.currency !== baseCurrency && quote.priceBase !== null ? '≈ ' + formatMoney(quote.priceBase, baseCurrency) : null;
-  const asOf = (quote.source === 'quote' ? 'As of ' : 'Last close ') + formatDate(quote.asOf);
+  const sourceLabel = quote.source === 'quote' && quote.provider !== undefined ? QUOTE_SOURCE_LABELS[quote.provider] : undefined;
+  const asOf = (quote.source === 'quote' ? 'As of ' : 'Last close ') + formatDate(quote.asOf, sourceLabel === undefined ? undefined : QUOTE_TIME_FORMAT);
   return (
     <div>
       <p className="text-3xl font-semibold tracking-tight tabular-nums sm:text-4xl" data-testid="asset-price">
@@ -76,7 +81,7 @@ function PriceBlock({ detail }: Readonly<{ detail: AssetDetailResponse }>) {
         <span className="muted">today</span>
       </p>
       <p className="muted mt-1 text-xs">
-        {[inBase, asOf].filter((part) => part !== null).join(' · ')}
+        {[inBase, asOf, sourceLabel ?? null].filter((part) => part !== null).join(' · ')}
         {stale && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">price may be outdated</span>}
       </p>
     </div>

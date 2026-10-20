@@ -80,6 +80,8 @@ export interface AssetQuoteInfo {
   changePct: number;
   currency: string;
   asOf: string;
+  /** `source` of the stored quote (for example `t212` for Trading 212 position prices); absent for a close derived from stored EOD rows. */
+  provider?: string;
   /** Latest price in the base currency at today's rate; null when no rate is stored. */
   priceBase: number | null;
 }

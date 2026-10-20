@@ -1,7 +1,8 @@
 import type { PricesConfig } from '@portfolio/prices';
+import type { T212QuoteState, T212QuoteStatus } from '@portfolio/shared';
 
 export interface PriceSourceStatus {
-  name: 'twelvedata' | 'eodhd' | 'coingecko' | 'alphavantage' | 'frankfurter';
+  name: 'twelvedata' | 'eodhd' | 'coingecko' | 'alphavantage' | 'frankfurter' | 't212';
   configured: boolean;
   /** The Worker secret that switches the source on (none for the keyless ECB source). */
   secret: string | null;
@@ -19,6 +20,21 @@ export interface PricesStatus {
   /** The Worker secrets still to set to switch every source on. */
   missingSecrets: string[];
   message: string;
+  /** The Trading 212 quote refresh of the signed-in user; null while no refresh has run (no connected account, or not yet). */
+  t212Quotes: T212QuotesReport | null;
+}
+
+/** What the last Trading 212 quote refresh did: the freshness of the prices of the held positions. Never contains credentials. */
+export interface T212QuotesReport {
+  state: T212QuoteState;
+  /** ISO time of the last attempt, and of the last one that stored quotes. */
+  lastAttemptAt: string;
+  lastSuccessAt: string | null;
+  /** Quotes stored by the last successful run. */
+  quoted: number | null;
+  lastError: string | null;
+  /** Scheduled runs wait until this time after a failure. */
+  nextAttemptAt: string | null;
 }
 
 const SOURCES = [
@@ -28,15 +44,35 @@ const SOURCES = [
   { name: 'alphavantage', secret: 'ALPHAVANTAGE_API_KEY', key: 'alphavantage', covers: 'US company profiles and the earnings calendar' },
 ] as const;
 
-export function pricesStatus(config: PricesConfig): PricesStatus {
+const T212_COVERS = 'live prices of the positions held at Trading 212 (no key needed; refreshed every 15 minutes on weekdays while the account is connected)';
+
+const report = (status: T212QuoteStatus): T212QuotesReport => ({
+  state: status.state,
+  lastAttemptAt: status.lastAttemptAt,
+  lastSuccessAt: status.lastSuccessAt ?? null,
+  quoted: status.quoted ?? null,
+  lastError: status.lastError ?? null,
+  nextAttemptAt: status.nextAttemptAt ?? null,
+});
+
+function summary(keyed: number, missingSecrets: readonly string[], t212: T212QuotesReport | null): string {
+  if (missingSecrets.length === 0) return 'Every market-data source is configured.';
+  const live = t212?.state === 'OK' && t212.lastSuccessAt !== null;
+  const prices = live ? 'held positions are priced from Trading 212 (last refresh ' + t212.lastSuccessAt + ')' : 'prices keep their last stored value';
+  if (keyed > 0) return 'Some market-data API keys are not set: symbols that need them are skipped; ' + prices + '. Set the secrets listed in missingSecrets to switch them on.';
+  const rates = live ? 'exchange rates are refreshed' : 'only exchange rates are refreshed';
+  return 'No market-data API key is set: ' + rates + ' and ' + prices + '; charts and history need the secrets listed in missingSecrets.';
+}
+
+/** `t212` is the stored status of the signed-in user's Trading 212 quote refresh, when there is one. */
+export function pricesStatus(config: PricesConfig, t212: T212QuoteStatus | null = null): PricesStatus {
   const sources: PriceSourceStatus[] = SOURCES.map(({ name, secret, key, covers }) => ({ name, configured: config.keys[key] !== undefined, secret, covers }));
   sources.push({ name: 'frankfurter', configured: true, secret: null, covers: 'daily foreign-exchange rates (no key needed)' });
+  const t212Report = t212 ? report(t212) : null;
+  sources.push({ name: 't212', configured: t212Report?.state === 'OK', secret: null, covers: T212_COVERS });
   const missingSecrets = sources.filter((source) => !source.configured && source.secret !== null).map((source) => source.secret!);
   const keyed = SOURCES.length - missingSecrets.length;
-  if (missingSecrets.length === 0) return { state: 'ok', sources, missingSecrets, message: 'Every market-data source is configured.' };
-  const message =
-    keyed === 0
-      ? 'No market-data API key is set: only exchange rates are refreshed and prices keep their last stored value. Set the secrets listed in missingSecrets to switch sources on.'
-      : 'Some market-data API keys are not set: symbols that need them are skipped and keep their last stored price. Set the secrets listed in missingSecrets to switch them on.';
-  return { state: keyed === 0 ? 'no-keys' : 'partial', sources, missingSecrets, message };
+  let state: PricesStatus['state'] = 'ok';
+  if (missingSecrets.length > 0) state = keyed === 0 ? 'no-keys' : 'partial';
+  return { state, sources, missingSecrets, message: summary(keyed, missingSecrets, t212Report), t212Quotes: t212Report };
 }
