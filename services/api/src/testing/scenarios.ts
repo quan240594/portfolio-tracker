@@ -162,17 +162,15 @@ export function defineApiScenarios(label: string, target: ApiScenarioTarget): vo
       expect(updated.status).toBe(200);
       expect(updated.body).toEqual({ types: { exDividend: true, declared: true, received: false }, exDividendDaysBefore: 4 });
       expect((await call('GET', '/notifications')).body.settings).toEqual(updated.body);
-      for (const bad of [{ exDividendDaysBefore: 9 }, { types: { other: true } }, { quietHours: false }]) {
-        expect((await call('PUT', '/notifications/settings', { body: bad })).status).toBe(400);
-      }
+      const invalidSettings = [{ exDividendDaysBefore: 9 }, { types: { other: true } }, { quietHours: false }];
+      expect(await Promise.all(invalidSettings.map(async (bad) => (await call('PUT', '/notifications/settings', { body: bad })).status))).toEqual([400, 400, 400]);
 
       // Devices: the endpoint must be a real push service, the keys real keys.
       const subscriber = await createTestSubscriber(`https://fcm.googleapis.com/fcm/send/scenario-${crypto.randomUUID()}`);
       const { endpoint, keys } = subscriber.subscription;
-      for (const refused of ['http://fcm.googleapis.com/fcm/send/x', 'https://example.com/x', 'https://127.0.0.1/x', 'https://fcm.googleapis.com@example.com/x']) {
-        const response = await call('POST', '/notifications/subscriptions', { body: { endpoint: refused, keys } });
-        expect(response.status).toBe(400);
-      }
+      const refusedEndpoints = ['http://fcm.googleapis.com/fcm/send/x', 'https://example.com/x', 'https://127.0.0.1/x', 'https://fcm.googleapis.com@example.com/x'];
+      const refusals = await Promise.all(refusedEndpoints.map(async (refused) => (await call('POST', '/notifications/subscriptions', { body: { endpoint: refused, keys } })).status));
+      expect(refusals).toEqual([400, 400, 400, 400]);
       expect((await call('POST', '/notifications/subscriptions', { body: { endpoint, keys: { p256dh: 'x', auth: 'y' } } })).status).toBe(400);
       const created = await call('POST', '/notifications/subscriptions', { body: { endpoint, keys, label: ' Scenario phone ' } });
       expect(created.status).toBe(201);

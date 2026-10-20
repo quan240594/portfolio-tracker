@@ -7,7 +7,8 @@ import { server } from '../mocks/server';
 import { api } from '../mocks/utils';
 import { endpointId } from '../features/notifications/push';
 import { installPushEnvironment, TEST_ENDPOINT, type PushEnvironment } from '../test/pushEnvironment';
-import { renderApp } from '../test/utils';
+import { NotificationsView } from '../features/notifications/NotificationsView';
+import { renderApp, renderWithProviders } from '../test/utils';
 
 const SETTINGS = { types: { exDividend: true, declared: true, received: true }, exDividendDaysBefore: 2 };
 const device = (overrides: Partial<PushDeviceSummary> = {}): PushDeviceSummary => ({ id: 'a'.repeat(32), label: 'Chrome on Android', service: 'fcm.googleapis.com', createdAt: '2026-10-01T08:00:00.000Z', failures: 0, ...overrides });
@@ -56,6 +57,18 @@ const openPage = async () => {
 };
 
 describe('Notifications page', () => {
+  it('is not available in the demo build and asks the server nothing', async () => {
+    let asked = false;
+    server.use(http.get(api('/notifications'), () => {
+      asked = true;
+      return HttpResponse.json(state());
+    }));
+    renderWithProviders(<NotificationsView demo />);
+    expect(await screen.findByRole('heading', { name: 'Notifications are not available' })).toBeInTheDocument();
+    expect(screen.getByText(/The demo has no server/)).toBeInTheDocument();
+    expect(asked).toBe(false);
+  });
+
   it('is not available on a deployment without a push sender', async () => {
     await openPage();
     expect(await screen.findByRole('heading', { name: 'Notifications are not available' })).toBeInTheDocument();

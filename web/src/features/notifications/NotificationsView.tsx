@@ -16,6 +16,7 @@ import { EmptyState } from '../../components/EmptyState';
 import { ErrorState } from '../../components/ErrorState';
 import { PageHeader } from '../../components/Layout';
 import { LoadingRegion, Skeleton } from '../../components/Skeleton';
+import { USE_MOCKS } from '../../config';
 import { formatDateTime } from '../../lib/format';
 import {
   PERMISSION_DENIED_MESSAGE,
@@ -296,11 +297,15 @@ function Loaded({ state }: Readonly<{ state: NotificationsResponse }>) {
   );
 }
 
-/** The Notifications page: this device, what to be notified about, the registered devices and a test button. Hidden when the server has no push support. */
-export function NotificationsView() {
-  const query = useNotifications();
+/**
+ * The Notifications page: this device, what to be notified about, the registered devices and a test button. Hidden when the server has no
+ * push support, and in the demo (mock) build, which has no server at all.
+ */
+export function NotificationsView({ demo = USE_MOCKS }: Readonly<{ demo?: boolean }>) {
+  const query = useNotifications({ enabled: !demo });
   let body: React.ReactNode;
-  if (query.isError) body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
+  if (demo) body = <EmptyState title="Notifications are not available" description="The demo has no server to send push notifications." />;
+  else if (query.isError) body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
   else if (!query.data) {
     body = (
       <LoadingRegion label="Loading notifications">
