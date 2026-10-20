@@ -1,8 +1,9 @@
 import { Link } from 'react-router-dom';
-import { isQuoteStale, type AssetDetailResponse } from '@portfolio/shared';
+import { isQuoteStale, type AssetDetailResponse, type AssetProfileInfo } from '@portfolio/shared';
 import { useWatchlist, useWatchlistMutations } from '../../api/management-hooks';
 import { Change } from '../../components/Change';
 import { formatDate, formatMoney, formatPercent } from '../../lib/format';
+import { useAssetClassification } from '../classification/useAssetClassification';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
 import { DASH, formatBigMoney, formatRatio, initialsOf, monogramClass } from './assetFormat';
 import { Figure } from './StatsSidebar';
@@ -15,9 +16,8 @@ function Monogram({ name, symbol }: Readonly<{ name: string; symbol: string }>) 
   );
 }
 
-function Breadcrumb({ detail }: Readonly<{ detail: AssetDetailResponse }>) {
+function Breadcrumb({ profile }: Readonly<{ profile: AssetProfileInfo }>) {
   const { withScope } = usePortfolioScope();
-  const { profile } = detail;
   const trail = [profile.country, profile.sector].filter((v): v is string => v !== null);
   return (
     <nav aria-label="Breadcrumb" className="muted mb-3 text-sm">
@@ -114,11 +114,11 @@ function KeyStats({ detail }: Readonly<{ detail: AssetDetailResponse }>) {
 
 /** Breadcrumb and header card: monogram, name, ticker, watchlist action, price with day change, key statistics. */
 export function AssetHeader({ detail }: Readonly<{ detail: AssetDetailResponse }>) {
-  const { profile } = detail;
+  const { profile } = useAssetClassification(detail.profile);
   const meta = [profile.symbol, profile.exchange, profile.currency].filter((v): v is string => v !== null && v !== '');
   return (
     <>
-      <Breadcrumb detail={detail} />
+      <Breadcrumb profile={profile} />
       <section aria-label={`${profile.name} overview`} className="card mb-5 p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-4">

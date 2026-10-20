@@ -97,6 +97,11 @@ export class FakeTrading212 {
         return { items: [] };
       case 'positions':
         return this.positions;
+      case 'metadata/instruments':
+        return [
+          { ticker: 'SAPd_EQ', type: 'STOCK', isin: 'DE0007164600', name: 'SAP SE', shortName: 'SAP', currencyCode: 'EUR' },
+          { ticker: 'AAPL_US_EQ', type: 'STOCK', isin: 'US0378331005', name: 'Apple Inc', shortName: 'AAPL', currencyCode: 'USD' },
+        ];
       default:
         return [];
     }

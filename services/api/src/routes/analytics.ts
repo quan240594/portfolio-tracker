@@ -22,6 +22,7 @@ import {
 } from '@portfolio/shared';
 import { ok, validate, type RouteResult } from '../lib/http.js';
 import type { RouteContext } from '../deps.js';
+import { loadProfiles } from '../lib/profiles.js';
 import type { RouteHandler } from '../router.js';
 import { heldSymbols, loadFx } from './portfolio.js';
 import { scopedTransactions } from './portfolios.js';
@@ -64,7 +65,7 @@ export async function loadAnalyticsData(ctx: RouteContext, needs: Needs): Promis
   const held = heldSymbols(transactions);
   const [quotes, profiles, events, { fx, fxHistory }, eod] = await Promise.all([
     needs.holdings && held.length ? repo.getQuotes(held) : {},
-    needs.holdings && held.length ? repo.getProfiles(held) : {},
+    needs.holdings && held.length ? loadProfiles(ctx, held) : {},
     needs.events ? Promise.all(held.map((s) => repo.getDividendEvents(s))) : [],
     loadFx(ctx.deps, transactions),
     needs.eod && transactions.length > 0 ? loadEod(ctx, transactions, needs.benchmark) : {},
@@ -114,3 +115,4 @@ export const analyticsHandlers: Record<keyof typeof ANALYTICS_ROUTES, RouteHandl
   analyticsDividendGrowth: getDividendGrowth,
   analyticsGoal: getGoal,
 };
+

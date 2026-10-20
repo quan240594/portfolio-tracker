@@ -166,6 +166,13 @@ describe('the job registry and the price registration point', () => {
     expect(deps.clock()).toEqual(NOON);
   });
 
+  it('lets the price refresh start the enrichment of symbols that never had one, as a job on the Hub queue', async () => {
+    const enqueue = vi.fn(() => Promise.resolve());
+    const deps = priceJobDeps({ ...context, queue: { enqueue }, items: {} as never, config: { prices: { baseCurrency: 'EUR' } } } as unknown as JobContext);
+    await deps.enqueueEnrichment!(['SAP.DE', 'AAPL']);
+    expect(enqueue).toHaveBeenCalledWith({ job: 'enrichTransactions', payload: { userId: '', portfolioId: '', reason: 'IMPORTED', symbols: ['SAP.DE', 'AAPL'] } });
+  });
+
   it('builds a guarded handler for every registered factory, including a price job registered later', async () => {
     const { guard } = setup();
     const refresh = ran();

@@ -19,6 +19,7 @@ import type { RouteHandler } from '../router.js';
 import { benchmarkOptions } from './growth.js';
 import { computePortfolio, loadFx } from './portfolio.js';
 import { ensurePortfolios, resolveScope } from './portfolios.js';
+import { loadProfiles } from '../lib/profiles.js';
 
 /** Days of closes behind "today" read for the public detail: enough for the last two closes across holidays. */
 const RECENT_EOD_DAYS = 14;
@@ -46,7 +47,7 @@ export async function getAssetDetail(ctx: RouteContext): Promise<RouteResult> {
   const { repo, now } = ctx.deps;
   const today = isoDay(now());
   const [profiles, quotes, eod, dividendEvents, { fx }] = await Promise.all([
-    repo.getProfiles([symbol]),
+    loadProfiles(ctx, [symbol]),
     repo.getQuotes([symbol]),
     repo.getEod(symbol, addDays(today, -RECENT_EOD_DAYS), today),
     repo.getDividendEvents(symbol),
@@ -70,7 +71,7 @@ export async function getAssetHistory(ctx: RouteContext): Promise<RouteResult> {
   // Shorter ranges only read the window they show; the longest read everything stored.
   const from = range === 'ALL' || range === '5Y' ? EPOCH : addDays(assetRangeStart(range, today), -RECENT_EOD_DAYS);
   const [profiles, quotes, eod, benchmarkEod, { fx, fxHistory }] = await Promise.all([
-    repo.getProfiles([symbol]),
+    loadProfiles(ctx, [symbol]),
     repo.getQuotes([symbol]),
     repo.getEod(symbol, from, today),
     Promise.all(benchmarks.map((b) => repo.getEod(b, from, today))),
@@ -100,7 +101,7 @@ export async function getAssetPositions(ctx: RouteContext): Promise<RouteResult>
   const scope = await resolveScope(ctx);
   const transactions = ofSymbol(await repo.listTransactions(ctx.userId, scope), symbol);
   const [profiles, quotes, { fx, fxHistory }, portfolios] = await Promise.all([
-    repo.getProfiles([symbol]),
+    loadProfiles(ctx, [symbol]),
     repo.getQuotes([symbol]),
     loadFx(ctx.deps, transactions),
     ensurePortfolios(ctx),
@@ -117,7 +118,7 @@ export async function getClosedSecurities(ctx: RouteContext): Promise<RouteResul
   const { repo } = ctx.deps;
   const transactions = await repo.listTransactions(ctx.userId, await resolveScope(ctx));
   const symbols = [...new Set(transactions.map((t) => t.symbol))];
-  const [profiles, { fx, fxHistory }] = await Promise.all([symbols.length ? repo.getProfiles(symbols) : {}, loadFx(ctx.deps, transactions)]);
+  const [profiles, { fx, fxHistory }] = await Promise.all([symbols.length ? loadProfiles(ctx, symbols) : {}, loadFx(ctx.deps, transactions)]);
   return ok(computeClosedSecurities({ transactions, profiles, fx, fxHistory }) satisfies GetClosedSecuritiesResponse);
 }
 

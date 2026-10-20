@@ -10,6 +10,7 @@ import {
 } from '@portfolio/shared';
 import { HttpError, ok, parseJsonBody, validate, type RouteResult } from '../lib/http.js';
 import type { RouteContext } from '../deps.js';
+import { loadProfiles } from '../lib/profiles.js';
 import { publishChange } from './changes.js';
 
 const round = (n: number, dp = 2) => Math.round((n + Number.EPSILON) * 10 ** dp) / 10 ** dp;
@@ -37,7 +38,7 @@ function toItem(entry: WatchlistEntry, quote?: Quote, profile?: InstrumentProfil
 async function itemsFor(ctx: RouteContext, entries: readonly WatchlistEntry[]): Promise<WatchlistItem[]> {
   const symbols = entries.map((e) => e.symbol);
   const [quotes, profiles] = symbols.length
-    ? await Promise.all([ctx.deps.repo.getQuotes(symbols), ctx.deps.repo.getProfiles(symbols)])
+    ? await Promise.all([ctx.deps.repo.getQuotes(symbols), loadProfiles(ctx, symbols)])
     : [{}, {}];
   return [...entries]
     .sort((a, b) => a.addedAt.localeCompare(b.addedAt) || a.symbol.localeCompare(b.symbol))
@@ -75,3 +76,4 @@ export async function removeWatchlist(ctx: RouteContext): Promise<RouteResult> {
   }
   return ok(undefined, 204);
 }
+

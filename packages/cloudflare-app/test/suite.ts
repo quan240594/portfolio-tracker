@@ -420,6 +420,11 @@ export function defineAppSuite(label: string, start: StartStack): void {
         const bySymbol = Object.fromEntries(holdings.map((holding) => [holding.symbol, holding]));
         expect(bySymbol['SAP.DE']).toMatchObject({ quantity: 5, priceLocal: SAP_PRICE, priceStale: false });
         expect(bySymbol.AAPL).toMatchObject({ quantity: 2, priceLocal: AAPL_T212_PRICE, priceStale: false });
+        // The same run stored a keyless baseline profile per held symbol: the broker's name, type and an ISIN-prefix country.
+        const classes = (await call('GET', '/classification')).body.instruments as { symbol: string; source: string; effective: { name: string; assetClass: string; country: string }; isin: string }[];
+        expect(classes.find((entry) => entry.symbol === 'SAP.DE')).toMatchObject({ source: 'trading212', isin: 'DE0007164600', effective: { name: 'SAP', assetClass: 'STOCK', country: 'Germany' } });
+        expect(classes.find((entry) => entry.symbol === 'AAPL')).toMatchObject({ source: 'trading212', effective: { name: 'Apple', assetClass: 'STOCK', country: 'United States' } });
+        expect(bySymbol['SAP.DE']).toMatchObject({ name: 'SAP', assetClass: 'STOCK', country: 'Germany' });
         const expected = 5 * SAP_PRICE + (2 * AAPL_T212_PRICE) / 1.16;
         const total = holdings.reduce((sum, holding) => sum + holding.marketValue, 0);
         expect(Math.abs(total - expected)).toBeLessThan(0.02);

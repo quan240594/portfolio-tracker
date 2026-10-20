@@ -4,7 +4,7 @@ import { silentLogger, type Logger } from '@portfolio/platform';
 import { z } from 'zod';
 import { ProviderError, RateLimitError, SymbolNotFoundError } from '../errors.js';
 import type { HttpClient } from '../http.js';
-import type { DailyQuota, TokenBucket } from '../limits.js';
+import { resetOf, spendCredits, type DailyQuota, type ProviderGate, type TokenBucket } from '../limits.js';
 import { makeDividend, makeQuote, normalizeCurrency } from '../models.js';
 import { asFloat, asText, byText, chunks, dayOf, definedOnly, isRecord, nonEmpty, validIsin } from '../parse.js';
 import { baseTicker, countryFor, currencyFor, exchangeFor, exchangeSuffix, EXCHANGES, priceCurrencyFor } from '../symbols.js';
@@ -38,6 +38,8 @@ export interface EodhdOptions {
   now: () => Date;
   bucket: TokenBucket;
   quota: DailyQuota;
+  /** Persisted "limit reached" blocks, so a provider that said no is not asked again before its reset. */
+  gate?: ProviderGate;
   logger?: Logger;
 }
 
@@ -51,13 +53,15 @@ export class EodhdProvider implements PriceSource {
 
   /** One authenticated GET; the daily quota is spent first. HTTP 402 is EODHD's "daily limit reached". */
   async get(path: string, params: Readonly<Record<string, unknown>> = NO_PARAMS, calls = 1, symbol?: string): Promise<unknown> {
-    await this.options.quota.consume(calls);
+    await spendCredits(this.options, calls);
     await this.options.bucket.acquire(1);
     try {
       return await this.options.http.getJson(`${EODHD_URL}${path}`, { ...params, fmt: 'json', api_token: this.options.apiKey }, undefined, symbol);
     } catch (error) {
-      if (error instanceof ProviderError && error.status === 402) throw new RateLimitError(`${this.name}: daily API limit reached`, { provider: this.name, symbol });
-      throw error;
+      if (!(error instanceof ProviderError) || error.status !== 402) throw error;
+      const resetAtMs = resetOf('day', this.options.now().getTime());
+      await this.options.gate?.block(resetAtMs, 'day', `${this.name}: daily API limit reached`);
+      throw new RateLimitError(`${this.name}: daily API limit reached`, { provider: this.name, symbol, scope: 'day', resetAtMs });
     }
   }
 

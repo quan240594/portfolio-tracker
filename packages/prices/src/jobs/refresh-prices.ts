@@ -1,27 +1,32 @@
 import type { JobHandler, JobPayloads, ScheduledRefreshSummary } from '@portfolio/platform';
 import { z } from 'zod';
-import type { InstrumentProfile, Quote } from '@portfolio/shared';
-import { errorMessage, ProviderError, SymbolNotFoundError } from '../errors.js';
+import { isMarketSymbol, sourceOf, type InstrumentProfile, type Quote } from '@portfolio/shared';
+import { errorMessage, ProviderError, RateLimitError, SymbolNotFoundError } from '../errors.js';
 import { hasWeekday, yearChunks } from '../providers/frankfurter.js';
 import { TWELVEDATA_CREDITS_PER_MINUTE, TWELVEDATA_MAX_BATCH } from '../providers/twelvedata.js';
 import { EODHD_MAX_BATCH } from '../providers/eodhd.js';
 import { COINGECKO_MAX_IDS } from '../providers/coingecko.js';
-import { hasExchangeSuffix, routeOf, type Route } from '../symbols.js';
+import { SOURCE_OF_ROUTE, hasExchangeSuffix, providerOf, routeOf, type Route } from '../symbols.js';
 import { addDays, amsterdamHour, utcDay } from '../time.js';
 import { byText, chunks } from '../parse.js';
 import { createStepContext, decodeState, pendingStep, runStep, rethrowBudget, runUnits, whileAffordable, type PriceJobDeps, type StepContext } from './common.js';
 
 /** Exchange-listed quotes older than this are refreshed outside the EU window. */
 export const STALE_AFTER_MS = 24 * 3_600_000;
+/** Inside the EU window a listed quote this fresh is kept: the Trading 212 refresh stores one every 15 minutes, and EODHD's free plan has 20 calls a day. */
+export const FRESH_LISTED_QUOTE_MS = 2 * 3_600_000;
 /** Optional company details are refreshed lazily: a few symbols per run, each at most once per TTL. */
 export const PROFILE_DETAILS_TTL_DAYS = 30;
-export const PROFILE_DETAILS_PER_RUN = 1;
+export const PROFILE_DETAILS_PER_RUN = 3;
+/** A symbol's profile lookup is tried at most this many times a UTC day after a failure that was not a rate limit. */
+export const MAX_PROFILE_TRIES_PER_DAY = 2;
+const PROFILE_PROVIDERS = Object.values(SOURCE_OF_ROUTE);
 
 /** Worst case of a profile lookup: Alpha Vantage, then Twelve Data's `/profile`, `/stocks` and `/etfs`. */
 const PROFILE_CALLS = 4;
 
 const BATCH_SIZE: Readonly<Record<Route, number>> = { us: TWELVEDATA_MAX_BATCH, listed: EODHD_MAX_BATCH, crypto: COINGECKO_MAX_IDS };
-const SOURCE_OF: Readonly<Record<Route, string>> = { us: 'twelvedata', listed: 'eodhd', crypto: 'coingecko' };
+const SOURCE_OF = SOURCE_OF_ROUTE;
 
 const latestSchema = z.object({ base: z.string(), asOf: z.string(), date: z.string().optional(), rates: z.record(z.number()) });
 const stateSchema = z.object({
@@ -139,15 +144,13 @@ async function planQuotes(ctx: StepContext, state: State, now: Date): Promise<vo
   state.euWindow = ctx.deps.config.euRefreshHours.includes(amsterdamHour(now));
   const due = symbols.filter((symbol) => !hasExchangeSuffix(symbol));
   const listed = symbols.filter((symbol) => hasExchangeSuffix(symbol));
-  if (state.euWindow) due.push(...listed);
-  else if (listed.length > 0) {
-    const latest = await ctx.repo.latestQuotes(listed);
-    for (const symbol of listed) {
-      const quote = latest.get(symbol);
-      const age = quote === undefined ? Number.NaN : now.getTime() - Date.parse(quote.asOf);
-      if (quote === undefined || Number.isNaN(age) || age > STALE_AFTER_MS) due.push(symbol);
-      else state.skipped.push(symbol);
-    }
+  const latest = listed.length > 0 ? await ctx.repo.latestQuotes(listed) : new Map<string, Quote>();
+  const keepFor = state.euWindow ? FRESH_LISTED_QUOTE_MS : STALE_AFTER_MS;
+  for (const symbol of listed) {
+    const quote = latest.get(symbol);
+    const age = quote === undefined ? Number.NaN : now.getTime() - Date.parse(quote.asOf);
+    if (Number.isNaN(age) || age > keepFor) due.push(symbol);
+    else state.skipped.push(symbol);
   }
   const byRoute = new Map<Route, string[]>();
   for (const symbol of due) {
@@ -207,8 +210,11 @@ async function runQuotes(ctx: StepContext, state: State): Promise<number | null>
 
 // --- profile details ---
 
+/** Whether the provider can add anything to the stored profile: an exchange-listed symbol with a Trading 212 baseline has all its lookup returns. */
+const worthAsking = (symbol: string, stored: InstrumentProfile): boolean => routeOf(symbol) !== 'listed' || sourceOf(stored) === 'minimal';
+
 /** The profile to store for `symbol`: null when nothing is found (marked fetched), undefined to retry in a later run. */
-async function lookupDetails(ctx: StepContext, symbol: string): Promise<InstrumentProfile | null | undefined> {
+async function lookupDetails(ctx: StepContext, symbol: string, today: string): Promise<InstrumentProfile | null | undefined> {
   try {
     return await ctx.md.provider.getProfile(symbol);
   } catch (error) {
@@ -216,17 +222,52 @@ async function lookupDetails(ctx: StepContext, symbol: string): Promise<Instrume
     if (error instanceof SymbolNotFoundError) return null;
     if (error instanceof ProviderError && !error.retryable) return null;
     ctx.logger.warn('profile details unavailable; retrying later', { symbol, error: errorMessage(error) });
+    // A provider limit is remembered by the provider's block; any other failure counts as a try of today.
+    if (!(error instanceof RateLimitError)) await countProfileTry(ctx, symbol, today, errorMessage(error));
     return undefined;
   }
 }
 
-/** Fetches the optional company details of the stalest tracked symbols (at most PROFILE_DETAILS_PER_RUN per run). */
+async function countProfileTry(ctx: StepContext, symbol: string, today: string, error: string): Promise<void> {
+  const tries = (await ctx.repo.attemptsOn('profile', [symbol], today)).get(symbol)?.count ?? 0;
+  await ctx.repo.putAttempts('profile', symbol, today, tries + 1, 'retry', error);
+}
+
+/** The stalest profiles whose provider is not limited and that were not tried too often today: one stuck symbol never blocks the others. */
+async function pickDetails(ctx: StepContext, state: State, now: Date, today: string): Promise<string[]> {
+  const stale = await ctx.repo.staleProfileDetails(state.symbols, addDays(today, -PROFILE_DETAILS_TTL_DAYS));
+  if (stale.length === 0) return [];
+  const [blocks, tries] = await Promise.all([ctx.repo.blockedProviders(PROFILE_PROVIDERS, now), ctx.repo.attemptsOn('profile', stale, today)]);
+  return stale.filter((symbol) => !blocks.has(providerOf(symbol)) && (tries.get(symbol)?.count ?? 0) < MAX_PROFILE_TRIES_PER_DAY).slice(0, PROFILE_DETAILS_PER_RUN);
+}
+
+/** At most this many symbols are handed to one enrichment job. */
+export const HEAL_MAX_SYMBOLS = 50;
+
+/** Hands the tracked symbols that were never enriched to an enrichment job, once a UTC day (it keeps the provider quota in check itself). */
+async function healEnrichment(ctx: StepContext, state: State, today: string): Promise<void> {
+  const enqueue = ctx.deps.enqueueEnrichment;
+  if (enqueue === undefined || state.symbols.length === 0) return;
+  try {
+    if (await ctx.repo.healedOn(today)) return;
+    const enriched = await ctx.repo.enrichedSymbols(state.symbols);
+    const missing = state.symbols.filter((symbol) => !enriched.has(symbol) && isMarketSymbol(symbol));
+    if (missing.length === 0) return;
+    await enqueue(missing.slice(0, HEAL_MAX_SYMBOLS));
+    await ctx.repo.markHealed(today);
+    ctx.logger.info('enrichment started for tracked symbols that have none', { symbols: missing.length });
+  } catch (error) {
+    ctx.logger.error('could not start the enrichment of tracked symbols', { error: errorMessage(error) });
+  }
+}
+
+/** Fetches the provider profile (sector, country of the company, details) of the stalest tracked symbols, at most PROFILE_DETAILS_PER_RUN per run. */
 async function runDetails(ctx: StepContext, state: State, now: Date): Promise<void> {
   const today = utcDay(now);
   if (state.detailQueue === null) {
+    await healEnrichment(ctx, state, today);
     try {
-      const stale = await ctx.repo.staleProfileDetails(state.symbols, addDays(today, -PROFILE_DETAILS_TTL_DAYS));
-      state.detailQueue = stale.slice(0, PROFILE_DETAILS_PER_RUN);
+      state.detailQueue = await pickDetails(ctx, state, now, today);
     } catch (error) {
       ctx.logger.error('profile details lookup failed', { error: errorMessage(error) });
       state.detailQueue = [];
@@ -236,7 +277,8 @@ async function runDetails(ctx: StepContext, state: State, now: Date): Promise<vo
   await runUnits(
     whileAffordable(queue, () => ctx.affords(PROFILE_CALLS)),
     async (symbol) => {
-      const profile = await lookupDetails(ctx, symbol);
+      const stored = await ctx.repo.getProfile(symbol);
+      const profile = stored === undefined || worthAsking(symbol, stored) ? await lookupDetails(ctx, symbol, today) : null;
       if (profile !== undefined) {
         try {
           await ctx.repo.putProfileDetails(symbol, profile, today);

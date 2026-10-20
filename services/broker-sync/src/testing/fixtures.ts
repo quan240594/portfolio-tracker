@@ -94,6 +94,7 @@ export const cash = (type: string, dateTime = '2024-01-02T09:00:00Z'): CashTrans
 
 export interface PositionOptions {
   ticker?: string;
+  name?: string;
   isin?: string;
   currency?: string;
   quantity?: number;
@@ -110,7 +111,7 @@ export function position(o: PositionOptions = {}): OpenPosition {
   const quantity = o.quantity ?? 2;
   const currentPrice = o.currentPrice ?? 210;
   return {
-    instrument: { ticker: o.ticker ?? 'AAPL_US_EQ', isin: o.isin ?? 'US0378331005', name: 'Example Corp', currency: o.currency ?? 'USD' },
+    instrument: { ticker: o.ticker ?? 'AAPL_US_EQ', isin: o.isin ?? 'US0378331005', name: o.name ?? 'Example Corp', currency: o.currency ?? 'USD' },
     quantity,
     ...(o.noPrice ? {} : { currentPrice }),
     averagePricePaid: o.averagePricePaid ?? 150,

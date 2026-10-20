@@ -7,7 +7,7 @@ import {
   type IdentityResolver,
 } from '@portfolio/platform';
 import { MAX_FILE_BYTES, uploadTokenFromUrl } from '@portfolio/cloudflare';
-import { MAX_API_BODY_BYTES, readBodyBounded } from './body.js';
+import { bodyLimitFor, readBodyBounded } from './body.js';
 import { readWorkerConfig, type WorkerConfigOptions } from './config.js';
 import { ARM_PATH, HUB_NAME, HUB_ORIGIN, REQUEST_ID_HEADER, SUBJECT_HEADER } from './protocol.js';
 import { errorResponse, jsonResponse } from './responses.js';
@@ -87,7 +87,7 @@ export function createWorker(options: WorkerConfigOptions = {}) {
     if (crossOrigin) return portableToFetchResponse(crossOrigin);
     const identity = await session.identify(request);
     if (!identity) return errorResponse(401, 'UNAUTHENTICATED', 'Authentication required');
-    const body = NO_BODY_METHODS.has(request.method) ? undefined : await readBodyBounded(request, MAX_API_BODY_BYTES);
+    const body = NO_BODY_METHODS.has(request.method) ? undefined : await readBodyBounded(request, bodyLimitFor(new URL(request.url).pathname));
     if (!NO_BODY_METHODS.has(request.method) && body === undefined) return errorResponse(413, 'PAYLOAD_TOO_LARGE', 'The request body is too large');
     return callHub(env, toHub(request, identity.subject, body));
   }

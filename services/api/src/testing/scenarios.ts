@@ -114,6 +114,27 @@ export function defineApiScenarios(label: string, target: ApiScenarioTarget): vo
       expect((await call('GET', '/calendar', { query: scope })).status).toBe(200);
     });
 
+    it('overrides the classification of a held symbol and previews an import of a classification file', async () => {
+      const id = await createPortfolio();
+      expect((await call('POST', '/transactions', { body: { portfolioId: id, ...BUY } })).status).toBe(201);
+      const symbol = BUY.symbol;
+      const put = await call('PUT', `/classification/${symbol}`, { body: { name: 'Scenario name', sector: 'Scenario sector' } });
+      expect(put.status).toBe(200);
+      expect(put.body).toMatchObject({ symbol, held: true, effective: { name: 'Scenario name', sector: 'Scenario sector' }, override: { name: 'Scenario name', sector: 'Scenario sector' } });
+      const holding = (await call('GET', '/holdings', { query: { portfolioId: id } })).body.holdings[0];
+      expect(holding).toMatchObject({ symbol, sector: 'Scenario sector' });
+      const list = await call('GET', '/classification');
+      expect(list.body.instruments.find((i: { symbol: string }) => i.symbol === symbol)).toMatchObject({ held: true, override: { name: 'Scenario name' } });
+      const preview = await call('POST', '/classification/import', { body: { dryRun: true, rows: [{ ticker: 'SAP', country: 'Germany' }, { ticker: 'NOPE-NOT-HELD', sector: 'x' }] } });
+      expect(preview.status).toBe(200);
+      expect(preview.body).toMatchObject({ dryRun: true, applied: 0, matched: [{ symbol }], unmatched: [{ ticker: 'NOPE-NOT-HELD', reason: 'not-held' }] });
+      expect((await call('POST', '/classification/import', { body: { rows: [] } })).status).toBe(400);
+      expect((await call('DELETE', `/classification/${symbol}`)).status).toBe(204);
+      const after = await call('GET', '/classification');
+      expect(after.body.instruments.find((i: { symbol: string }) => i.symbol === symbol)).toMatchObject({ override: null });
+      expect((await call('DELETE', `/portfolios/${id}`, { query: { force: 'true' } })).status).toBe(204);
+    });
+
     it.skipIf(target.importCsv === undefined)('imports a CSV: upload target, processing, status and transactions', async () => {
       const id = await createPortfolio();
       const created = await call('POST', '/imports', { body: { fileName: 'trades.csv', portfolioId: id } });

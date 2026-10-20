@@ -1,4 +1,4 @@
-import type { Category, CategoryAssignment, CustomAsset, GoalItem, PortfolioSettings, WatchlistEntry } from '@portfolio/shared';
+import type { Category, CategoryAssignment, ClassificationOverrideItem, CustomAsset, GoalItem, PortfolioSettings, WatchlistEntry } from '@portfolio/shared';
 import type { ManagementRepository } from '../management-repository.js';
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -11,6 +11,7 @@ export class InMemoryManagementRepository implements ManagementRepository {
   assets: CustomAsset[] = [];
   watchlist: WatchlistEntry[] = [];
   goals: GoalItem[] = [];
+  overrides: ClassificationOverrideItem[] = [];
 
   getSettings(userId: string, portfolioId: string) {
     return Promise.resolve(clone(this.settings.find((s) => s.userId === userId && s.portfolioId === portfolioId) ?? null));
@@ -83,6 +84,21 @@ export class InMemoryManagementRepository implements ManagementRepository {
   }
   deleteGoal(userId: string, scope: string) {
     this.goals = this.goals.filter((g) => !(g.userId === userId && g.portfolioId === scope));
+    return Promise.resolve();
+  }
+  getClassificationOverrides(userId: string, symbols: readonly string[]) {
+    const wanted = new Set(symbols);
+    return Promise.resolve(clone(Object.fromEntries(this.overrides.filter((o) => o.userId === userId && wanted.has(o.symbol)).map((o) => [o.symbol, o]))));
+  }
+  listClassificationOverrides(userId: string) {
+    return Promise.resolve(clone(this.overrides.filter((o) => o.userId === userId).sort((a, b) => a.symbol.localeCompare(b.symbol))));
+  }
+  putClassificationOverrides(items: readonly ClassificationOverrideItem[]) {
+    for (const item of items) this.overrides = [...this.overrides.filter((o) => !(o.userId === item.userId && o.symbol === item.symbol)), clone(item)];
+    return Promise.resolve();
+  }
+  deleteClassificationOverride(userId: string, symbol: string) {
+    this.overrides = this.overrides.filter((o) => !(o.userId === userId && o.symbol === symbol));
     return Promise.resolve();
   }
   async deletePortfolioData(userId: string, portfolioId: string) {

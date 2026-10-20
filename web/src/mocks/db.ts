@@ -31,6 +31,7 @@ import {
 } from '@portfolio/shared';
 import { BASE_CURRENCY, MOCK_USER_ID, STALE_SYMBOLS, TRADING_212_ID, TRADING_212_NAME, createSeed, type MockSeed } from './fixtures';
 import { deleteManagementData, managementScope, resetManagement } from './management-db';
+import { effectiveProfiles } from './classification-db';
 import { MockHttpError } from './utils';
 
 export { MockHttpError };
@@ -109,7 +110,7 @@ export function portfolio(scope: MockScope) {
   const result = calculatePortfolio({
     transactions,
     quotes: quotesFor(transactions),
-    profiles: state.seed.profiles,
+    profiles: effectiveProfiles(state.seed),
     fx: state.seed.fx,
     fxHistory: state.seed.fxHistory,
   });
@@ -151,7 +152,7 @@ export function getAnalyticsData(scope?: MockScope): AnalyticsData {
   return {
     transactions,
     quotes: quotesFor(transactions),
-    profiles: seed.profiles,
+    profiles: effectiveProfiles(seed),
     fx: seed.fx,
     fxHistory: seed.fxHistory,
     eod: seed.eod,

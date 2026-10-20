@@ -12,6 +12,7 @@ import {
 } from '@portfolio/shared';
 import { ok, validate, type RouteResult } from '../lib/http.js';
 import type { RouteContext } from '../deps.js';
+import { loadProfiles } from '../lib/profiles.js';
 import type { RouteHandler } from '../router.js';
 import { heldSymbols, loadFx } from './portfolio.js';
 import { resolveScope } from './portfolios.js';
@@ -41,7 +42,7 @@ async function loadCalendar(ctx: RouteContext): Promise<CalendarResponse> {
     Promise.all(symbols.map((s) => repo.getDividendEvents(s))),
     symbols.length > 0 ? repo.getCalendarEvents(symbols, window.from, window.to) : { earnings: [], splits: [] },
     held.length > 0 ? repo.getQuotes(held) : {},
-    profileSymbols.length > 0 ? repo.getProfiles(profileSymbols) : {},
+    profileSymbols.length > 0 ? loadProfiles(ctx, profileSymbols) : {},
     loadFx(ctx.deps, transactions),
   ]);
   const data: CalendarData = {
@@ -78,3 +79,4 @@ export const calendarHandlers: Record<keyof typeof CALENDAR_ROUTES, RouteHandler
   calendar: getCalendar,
   calendarIcs: getCalendarIcs,
 };
+

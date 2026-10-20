@@ -1,6 +1,14 @@
 
-export const ASSET_CLASSES = ['STOCK', 'ETF', 'CRYPTO', 'BOND', 'CASH', 'REAL_ESTATE', 'DEPOSIT', 'OTHER'] as const;
+export const ASSET_CLASSES = ['STOCK', 'ETF', 'CRYPTO', 'BOND', 'CASH', 'REAL_ESTATE', 'DEPOSIT', 'COMMODITY', 'OTHER'] as const;
 export type AssetClass = (typeof ASSET_CLASSES)[number];
+
+/**
+ * Where a stored profile comes from, lowest quality first: `minimal` (derived from the symbol only), `trading212` (the broker's
+ * instrument metadata: name, type, ISIN and an ISIN-prefix country), `provider` (a market-data provider: company country,
+ * sector). A profile without the field is a provider profile (the Python price service never wrote it).
+ */
+export const PROFILE_SOURCES = ['minimal', 'trading212', 'provider'] as const;
+export type ProfileSource = (typeof PROFILE_SOURCES)[number];
 
 export const TRANSACTION_TYPES = ['BUY', 'SELL', 'DIVIDEND', 'DEPOSIT', 'WITHDRAWAL', 'SPLIT', 'FEE', 'INTEREST'] as const;
 export type TransactionType = (typeof TRANSACTION_TYPES)[number];
@@ -69,6 +77,10 @@ export interface InstrumentProfile {
   beta?: number;
   /** YYYY-MM-DD the optional details above were last fetched; drives the lazy refresh TTL. */
   detailsAsOf?: string;
+  /** See `ProfileSource`; absent = `provider`. */
+  profileSource?: ProfileSource;
+  /** YYYY-MM-DD the enrichment job stored this symbol's history; only needed for profiles that are not from a provider. */
+  enrichedAt?: string;
 }
 
 export interface EodPrice {

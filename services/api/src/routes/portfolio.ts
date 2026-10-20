@@ -24,6 +24,7 @@ import {
 } from '@portfolio/shared';
 import { ok, validate, type RouteResult } from '../lib/http.js';
 import type { Deps, RouteContext } from '../deps.js';
+import { loadProfiles } from '../lib/profiles.js';
 import { assertCategoryScope, categoryAllocation } from './categories.js';
 import { loadManagementScope } from './management-data.js';
 import { resolveScope } from './portfolios.js';
@@ -85,7 +86,7 @@ export async function computePortfolio(ctx: RouteContext) {
   const symbols = heldSymbols(transactions);
   const [quotes, profiles, { fx, fxHistory }, management] = await Promise.all([
     symbols.length ? repo.getQuotes(symbols) : {},
-    symbols.length ? repo.getProfiles(symbols) : {},
+    symbols.length ? loadProfiles(ctx, symbols) : {},
     loadFx(ctx.deps, transactions),
     loadManagementScope(ctx, scope),
   ]);
@@ -156,3 +157,4 @@ export async function getDividends(ctx: RouteContext): Promise<RouteResult> {
   const overview = calculateDividends(transactions, events.flat(), fx, isoDay(ctx.deps.now()), fxHistory);
   return ok(overview satisfies GetDividendsResponse);
 }
+

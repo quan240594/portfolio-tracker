@@ -114,9 +114,19 @@ export const accountSummarySchema = z.object({
 });
 export type AccountSummary = z.infer<typeof accountSummarySchema>;
 
+/**
+ * One instrument of the metadata list (`GET /api/v0/equity/metadata/instruments`). The fields beyond the ticker and its exchange
+ * schedule are lenient (a missing or malformed value is dropped): they only feed the baseline profile (name, type, ISIN, currency).
+ */
 export const tradableInstrumentSchema = z.object({
   ticker: z.string().min(1),
   workingScheduleId: z.number().nullish().transform((v) => v ?? undefined),
+  /** `STOCK`, `ETF`, `CRYPTOCURRENCY` ... */
+  type: lenientText,
+  isin: lenientText,
+  name: lenientText,
+  shortName: lenientText,
+  currencyCode: lenientText,
 });
 export type TradableInstrument = z.infer<typeof tradableInstrumentSchema>;
 
