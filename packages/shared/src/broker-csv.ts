@@ -26,8 +26,8 @@ const FEE_COLUMNS = [
   'Commission',
 ] as const;
 
-/** Minimal RFC 4180 parser: quoted fields, doubled quotes, CRLF/LF, blank lines skipped. */
-export function parseCsvText(input: string): string[][] {
+/** Minimal RFC 4180 parser: quoted fields, doubled quotes, CRLF/LF, blank lines skipped. `delimiter` is a single character. */
+export function parseCsvText(input: string, delimiter = ','): string[][] {
   const text = input.codePointAt(0) === 0xfeff ? input.slice(1) : input;
   const rows: string[][] = [];
   let row: string[] = [];
@@ -51,7 +51,7 @@ export function parseCsvText(input: string): string[][] {
         i++;
       } else quoted = false;
     } else if (c === '"') quoted = true;
-    else if (c === ',') endField();
+    else if (c === delimiter) endField();
     else if (c === '\n') endRow();
     else if (c !== '\r') field += c;
   }
