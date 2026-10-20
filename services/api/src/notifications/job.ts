@@ -41,7 +41,7 @@ export type NotifyResult = NotifyTotals & { skipped?: 'not-configured' | 'quiet-
 const NO_TOTALS: NotifyTotals = { users: 0, notifications: 0, pushes: 0 };
 const PUSH_TTL_SECONDS = 24 * 3600;
 const BACKOFF_BASE_MS = 15 * 60_000;
-const BACKOFF_MAX_MS = 24 * 3600_000;
+const BACKOFF_MAX_MS = 24 * 3_600_000;
 
 /**
  * Pushes one user's step makes at most: every device gets at most three notifications (more are one summary). One push is one

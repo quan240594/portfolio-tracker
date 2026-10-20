@@ -402,7 +402,9 @@ describe('notifyDividendsJob', () => {
 
   it('does not log the payload, the endpoint or the keys', async () => {
     const lines: string[] = [];
-    const record = (message: string, fields?: object) => void lines.push(JSON.stringify({ message, ...fields }));
+    const record = (message: string, fields?: object) => {
+      lines.push(JSON.stringify({ message, ...fields }));
+    };
     const logger = { debug: record, info: record, warn: record, error: record, appendKeys: () => undefined, removeKeys: () => undefined, createChild: () => logger };
     setLogger(logger);
     const h = harness();

@@ -88,11 +88,12 @@ function groupEvents(events: readonly DividendEvent[]): Map<string, DividendEven
 }
 
 function createContext(input: DetectInput): Context {
+  const { fx } = input;
   return {
     input,
     held: heldQuantities(input.transactions, input.today),
     eventsBySymbol: groupEvents(input.dividendEvents),
-    timeline: input.fx && input.fx.base === input.baseCurrency ? new FxTimeline(input.fx) : undefined,
+    timeline: fx?.base === input.baseCurrency ? new FxTimeline(fx) : undefined,
   };
 }
 
@@ -238,16 +239,20 @@ export interface BaselineInput {
  * baselined: an ex-date in the next days is exactly what the reminder is for.
  */
 export function baselineEntries(input: BaselineInput): LedgerRef[] {
+  const received = input.types.includes('received') ? receivedBaseline(input.transactions) : [];
+  const declared = input.types.includes('declared') ? declaredBaseline(input) : [];
+  return [...received, ...declared];
+}
+
+const receivedBaseline = (transactions: readonly Transaction[]): LedgerRef[] =>
+  transactions.filter((t) => t.type === 'DIVIDEND').map((t) => ({ type: 'received', symbol: t.symbol, eventKey: t.id }));
+
+function declaredBaseline({ transactions, dividendEvents, today }: BaselineInput): LedgerRef[] {
+  const held = heldQuantities(transactions, today);
   const entries: LedgerRef[] = [];
-  if (input.types.includes('received')) {
-    for (const t of input.transactions) if (t.type === 'DIVIDEND') entries.push({ type: 'received', symbol: t.symbol, eventKey: t.id });
-  }
-  if (input.types.includes('declared')) {
-    const held = heldQuantities(input.transactions, input.today);
-    for (const [symbol, events] of groupEvents(input.dividendEvents)) {
-      if (!held.has(symbol)) continue;
-      for (const event of events) if (isUpcoming(event, input.today)) entries.push({ type: 'declared', symbol, eventKey: event.exDate });
-    }
+  for (const [symbol, events] of groupEvents(dividendEvents)) {
+    if (!held.has(symbol)) continue;
+    for (const event of events) if (isUpcoming(event, today)) entries.push({ type: 'declared', symbol, eventKey: event.exDate });
   }
   return entries;
 }

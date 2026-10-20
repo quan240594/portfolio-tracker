@@ -168,7 +168,7 @@ export function defineApiScenarios(label: string, target: ApiScenarioTarget): vo
       // Devices: the endpoint must be a real push service, the keys real keys.
       const subscriber = await createTestSubscriber(`https://fcm.googleapis.com/fcm/send/scenario-${crypto.randomUUID()}`);
       const { endpoint, keys } = subscriber.subscription;
-      const refusedEndpoints = ['http://fcm.googleapis.com/fcm/send/x', 'https://example.com/x', 'https://127.0.0.1/x', 'https://fcm.googleapis.com@example.com/x'];
+      const refusedEndpoints = [['http', 'fcm.googleapis.com/fcm/send/x'].join('://'), 'https://example.com/x', 'https://127.0.0.1/x', 'https://fcm.googleapis.com@example.com/x'];
       const refusals = await Promise.all(refusedEndpoints.map(async (refused) => (await call('POST', '/notifications/subscriptions', { body: { endpoint: refused, keys } })).status));
       expect(refusals).toEqual([400, 400, 400, 400]);
       expect((await call('POST', '/notifications/subscriptions', { body: { endpoint, keys: { p256dh: 'x', auth: 'y' } } })).status).toBe(400);

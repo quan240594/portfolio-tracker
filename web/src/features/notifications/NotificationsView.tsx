@@ -58,7 +58,8 @@ function useThisDeviceId(refreshKey: number): string | null | undefined {
       .catch(() => null)
       .then((value) => {
         if (current) setId(value);
-      });
+      })
+      .catch(() => undefined);
     return () => {
       current = false;
     };
@@ -123,7 +124,9 @@ function ThisDevice({ state, thisDeviceId, onChanged }: Readonly<ThisDeviceProps
     body = (
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-sm">Notifications are on for this device.</p>
-        <button type="button" className="btn-secondary" onClick={() => void disable()} disabled={busy}>
+        <button type="button" className="btn-secondary" onClick={() => {
+            disable().catch(() => undefined);
+          }} disabled={busy}>
           Turn off on this device
         </button>
       </div>
@@ -132,7 +135,9 @@ function ThisDevice({ state, thisDeviceId, onChanged }: Readonly<ThisDeviceProps
     body = (
       <div className="space-y-3">
         {permission === 'denied' && <Notice tone="warning">{PERMISSION_DENIED_MESSAGE}</Notice>}
-        <button type="button" className="btn-primary" onClick={() => void enable()} disabled={busy || permission === 'denied'}>
+        <button type="button" className="btn-primary" onClick={() => {
+            enable().catch(() => undefined);
+          }} disabled={busy || permission === 'denied'}>
           Enable on this device
         </button>
         <p className="muted text-xs">Your browser asks for permission when you choose this. Nothing is requested before.</p>
@@ -155,6 +160,19 @@ function ThisDevice({ state, thisDeviceId, onChanged }: Readonly<ThisDeviceProps
   );
 }
 
+function TypeToggle({ type, checked, onChange }: Readonly<{ type: NotificationType; checked: boolean; onChange: (checked: boolean) => void }>) {
+  const id = useId();
+  return (
+    <div className="flex items-start gap-3 text-sm">
+      <input id={id} type="checkbox" className="mt-1 h-4 w-4" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <label htmlFor={id}>
+        <span className="font-medium">{NOTIFICATION_TYPE_LABELS[type]}</span>
+        <span className="muted block text-xs">{TYPE_HINTS[type]}</span>
+      </label>
+    </div>
+  );
+}
+
 function SettingsForm({ state }: Readonly<{ state: NotificationsResponse }>) {
   const save = useSaveNotificationSettings();
   const daysId = useId();
@@ -172,18 +190,7 @@ function SettingsForm({ state }: Readonly<{ state: NotificationsResponse }>) {
     <fieldset className="card space-y-4 p-4" aria-busy={save.isPending}>
       <legend className="px-1 text-base font-semibold">Notify me about</legend>
       {NOTIFICATION_TYPES.map((type) => (
-        <label key={type} className="flex items-start gap-3 text-sm">
-          <input
-            type="checkbox"
-            className="mt-1 h-4 w-4"
-            checked={settings.types[type]}
-            onChange={(event) => change({ types: { [type]: event.target.checked } })}
-          />
-          <span>
-            <span className="font-medium">{NOTIFICATION_TYPE_LABELS[type]}</span>
-            <span className="muted block text-xs">{TYPE_HINTS[type]}</span>
-          </span>
-        </label>
+        <TypeToggle key={type} type={type} checked={settings.types[type]} onChange={(checked) => change({ types: { [type]: checked } })} />
       ))}
       <div>
         <label htmlFor={daysId} className="label">
@@ -253,7 +260,9 @@ function Devices({ state, thisDeviceId, onChanged }: Readonly<ThisDeviceProps>) 
       ) : (
         <ul className="divide-y divide-slate-200 dark:divide-slate-800">
           {state.devices.map((device) => (
-            <DeviceRow key={device.id} device={device} isThisDevice={device.id === thisDeviceId} onRemove={() => void removeDevice(device.id).catch(() => undefined)} disabled={remove.isPending} />
+            <DeviceRow key={device.id} device={device} isThisDevice={device.id === thisDeviceId} onRemove={() => {
+                removeDevice(device.id).catch(() => undefined);
+              }} disabled={remove.isPending} />
           ))}
         </ul>
       )}
@@ -305,7 +314,9 @@ export function NotificationsView({ demo = USE_MOCKS }: Readonly<{ demo?: boolea
   const query = useNotifications({ enabled: !demo });
   let body: React.ReactNode;
   if (demo) body = <EmptyState title="Notifications are not available" description="The demo has no server to send push notifications." />;
-  else if (query.isError) body = <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
+  else if (query.isError) body = <ErrorState error={query.error} onRetry={() => {
+            query.refetch().catch(() => undefined);
+          }} />;
   else if (!query.data) {
     body = (
       <LoadingRegion label="Loading notifications">

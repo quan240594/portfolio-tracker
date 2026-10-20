@@ -120,7 +120,8 @@ export interface PushNotificationPayload {
 
 const BASE64URL_P256DH = /^[A-Za-z0-9_-]{87}$/;
 const BASE64URL_AUTH = /^[A-Za-z0-9_-]{22}$/;
-const CONTROL_CHARACTERS = new RegExp(String.raw`[\u0000-\u001f\u007f]`, 'g');
+// eslint-disable-next-line no-control-regex -- control characters are exactly what a label must not contain
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g;
 
 /** A device label from the client: control characters removed, trimmed and cut to 40 characters; empty becomes "This device". */
 export function cleanDeviceLabel(label: string | undefined): string {

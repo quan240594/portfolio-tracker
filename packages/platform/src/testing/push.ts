@@ -88,12 +88,17 @@ export interface FakePushService {
   fail(endpoint: string): void;
 }
 
+function requestUrl(input: Parameters<typeof fetch>[0]): string {
+  if (typeof input === 'string') return input;
+  return input instanceof URL ? input.toString() : input.url;
+}
+
 /** A fake push service: records every request, answers 201 unless told otherwise. No network involved. */
 export function createFakePushService(): FakePushService {
   const requests: RecordedPush[] = [];
   const answers = new Map<string, { status: number; headers: Record<string, string> } | 'fail'>();
   const fakeFetch: typeof fetch = async (input, init) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const url = requestUrl(input);
     const body = new Uint8Array(await new Response(init?.body ?? null).arrayBuffer());
     requests.push({ url, headers: Object.fromEntries(Object.entries((init?.headers ?? {}) as Record<string, string>)), body });
     const answer = answers.get(url) ?? { status: 201, headers: {} };
@@ -103,7 +108,11 @@ export function createFakePushService(): FakePushService {
   return {
     fetch: fakeFetch,
     requests,
-    respond: (endpoint, status, headers = {}) => void answers.set(endpoint, { status, headers }),
-    fail: (endpoint) => void answers.set(endpoint, 'fail'),
+    respond: (endpoint, status, headers = {}) => {
+      answers.set(endpoint, { status, headers });
+    },
+    fail: (endpoint) => {
+      answers.set(endpoint, 'fail');
+    },
   };
 }

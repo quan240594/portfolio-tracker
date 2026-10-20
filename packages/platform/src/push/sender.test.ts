@@ -146,7 +146,9 @@ describe('createPushSender', () => {
 describe('logging', () => {
   it('logs the host and the status only: no key, endpoint path, payload or token', async () => {
     const lines: string[] = [];
-    const record = (message: string, fields?: Record<string, unknown>) => void lines.push(JSON.stringify({ message, ...fields }));
+    const record = (message: string, fields?: Record<string, unknown>) => {
+      lines.push(JSON.stringify({ message, ...fields }));
+    };
     const logger = { debug: record, info: record, warn: record, error: record, appendKeys: () => undefined, removeKeys: () => undefined, createChild: () => logger } as Logger;
     setLogger(logger);
     try {

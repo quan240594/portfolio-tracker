@@ -193,7 +193,9 @@ describe('POST /notifications/subscriptions', () => {
   it('allows ten devices and answers 409 for the eleventh, but still accepts a refresh of a known one', async () => {
     const { call, subscribe } = setup();
     const all: Awaited<ReturnType<typeof subscribe>>[] = [];
-    await drain(sequentially(Array.from({ length: MAX_PUSH_DEVICES }, (_unused, index) => index), async (index) => void all.push(await subscribe(`d${index}`))));
+    await drain(sequentially(Array.from({ length: MAX_PUSH_DEVICES }, (_unused, index) => index), async (index) => {
+          all.push(await subscribe(`d${index}`));
+        }));
     expect(all.every((entry) => entry.response.status === 201)).toBe(true);
     const eleventh = await subscribe('d-extra');
     expect([eleventh.response.status, eleventh.response.body.error.code]).toEqual([409, 'TOO_MANY_DEVICES']);
