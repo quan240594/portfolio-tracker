@@ -6,7 +6,7 @@ import type { HubConfig } from './config.js';
 import { pushConfig } from './push.js';
 import { vapidInstructions } from './vapid-instructions.js';
 
-const config = (push: HubConfig['push']): HubConfig => ({ secretsKey: 'k', origin: ORIGIN, baseCurrency: 'EUR', brokerSecretPrefix: '/x', symbolOverrides: {}, prices: {} as never, push });
+const config = (push: HubConfig['push']): HubConfig => ({ secretsKey: 'k', origin: ORIGIN, baseCurrency: 'EUR', brokerSecretPrefix: '/x', symbolOverrides: {}, prices: {} as never, logos: {} as never, push });
 
 describe('pushConfig', () => {
   it('is off without both keys', async () => {
