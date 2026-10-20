@@ -101,6 +101,26 @@ You need a Cloudflare account on the Free plan and a GitHub account. Every comma
    `LOGO_NEGATIVE_TTL_DAYS` (default 7); optional secret `LOGO_DEV_TOKEN` (`pnpm exec wrangler secret put LOGO_DEV_TOKEN`) switches a token-based source on
    and puts it first. Cost: 1 row written per logo, once; terms-of-use caveat and everything else in `docs/architecture.md`, "Company logos".
 
+8. **Dividend push notifications (optional).** Your phone gets a push message when a dividend of a security you hold is declared, shortly before
+   it goes ex-dividend, and when it is paid (recorded by the Trading 212 sync), each with the change per share against the last payment and
+   against a year ago. It works from Chrome on Android in the browser (no home-screen install); an iPhone or iPad needs the app added to the
+   Home Screen first. One-time steps:
+   ```bash
+   pnpm run vapid:generate                                   # prints a public and a private key; nothing is sent anywhere
+   pnpm exec wrangler secret put VAPID_PRIVATE_KEY           # paste the PRIVATE key (a secret: never commit or share it)
+   VAPID_PUBLIC_KEY=<the public key> ORIGIN=... OWNER_GITHUB_ID=... GITHUB_CLIENT_ID=... pnpm run deploy:app
+   ```
+   Then open the app on the phone, **Account, Notifications**, and choose **Enable on this device** (the browser asks for permission only then).
+   Without both keys the feature is off and the page says so. **Send a test notification** checks the whole path. Settings: which events, and
+   1 to 5 days of ex-dividend lead time; nothing is sent between 22:00 and 08:00 Amsterdam time. If Chrome says notifications are blocked: lock
+   icon next to the address, Permissions (Site settings), Notifications, Allow, reload. Optional `PUSH_ALLOWED_HOSTS` (comma separated, `*.` for
+   subdomains) replaces the default push-service allow-list (FCM, Mozilla, Apple, Windows). The messages are encrypted to your device, the
+   details (events, rules, daily cost) are in `docs/architecture.md`, "Dividend push notifications". To switch it off: remove the devices in the
+   page, or delete the `VAPID_PRIVATE_KEY` secret (`wrangler secret delete VAPID_PRIVATE_KEY`).
+
+   The Trading 212 sync also runs three more times on weekdays (12:30, 18:30 and 22:30 Amsterdam time, next to the 06:30 daily run) so a
+   booked dividend is noticed within hours; an incremental run is a handful of subrequests (see the cost table in the same section).
+
 Until the variables and secrets are valid, every API and sign-in route answers 503 `NOT_CONFIGURED` naming the missing
 variable (never a value); `/health` and the static app keep working.
 
@@ -129,7 +149,8 @@ Signing in needs GitHub, so offline you can see the app shell and `/health`; the
 |---|---|
 | `dev` | build the web app, `wrangler dev --local` |
 | `build:web` | build `web` for this deployment into `dist/web` (`VITE_AUTH_MODE=github`, `/api` on the same origin, no mocks) |
-| `deploy:app` | `build:web` + `wrangler deploy` with the three variables from the environment (refuses to run without them) |
+| `deploy:app` | `build:web` + `wrangler deploy` with the three variables from the environment (refuses to run without them); `VAPID_PUBLIC_KEY` and `PUSH_ALLOWED_HOSTS` are passed too when set |
+| `vapid:generate` | prints a fresh VAPID key pair for the push notifications (public key: a variable; private key: the secret `VAPID_PRIVATE_KEY`) |
 | `deploy:dry-run` | `build:web` + `wrangler deploy --dry-run` |
 | `typecheck`, `lint` | as everywhere |
 | `test`, `test:coverage` | unit tests + the whole-app suite in Node and in real workerd |
@@ -145,7 +166,7 @@ Signing in needs GitHub, so offline you can see the app shell and `/health`; the
   the in-memory dependencies and on LocalStack), CSV upload -> alarm -> data, Trading 212 sync through resumable alarm steps
   (fake Trading 212), the Trading 212 position quotes (a sync followed by an immediate refresh, non-stale holdings valued in the base currency
   without any key, 401/429/500 recorded and backed off, guard at 60-80 % and 80 %), the price service (schedules arm the alarm, a refresh step writes prices the API serves, jobs skipped from
-  60 % of a cap, graceful degradation without provider keys; fake Twelve Data, Alpha Vantage and Frankfurter), `GET /api/usage`, the 429 `BUDGET_EXHAUSTED` guard, alarm and cron re-arming. It runs twice:
+  60 % of a cap, graceful degradation without provider keys; fake Twelve Data, Alpha Vantage and Frankfurter), the dividend notifications (a booked dividend becomes a push that a fake FCM receives and the test subscriber decrypts; once only; a gone device is dropped; off without VAPID keys), `GET /api/usage`, the 429 `BUDGET_EXHAUSTED` guard, alarm and cron re-arming. It runs twice:
   `test/node.test.ts` (real Worker and Hub code over SQLite compiled to WebAssembly, pinned clock; **this is what coverage
   measures**) and `test/workerd.test.ts` (the same suite against the esbuild bundle in real workerd through Miniflare, with a
   SQLite-backed Durable Object, real alarms and the static assets binding).

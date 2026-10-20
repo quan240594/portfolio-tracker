@@ -7,6 +7,7 @@ import {
   type NotificationType,
   type NotificationsResponse,
   type PushDeviceSummary,
+  type SettingsPatch,
   type TestDeviceResult,
 } from '@portfolio/shared';
 import { errorMessage } from '../../api/client';
@@ -156,7 +157,16 @@ function ThisDevice({ state, thisDeviceId, onChanged }: Readonly<ThisDeviceProps
 function SettingsForm({ state }: Readonly<{ state: NotificationsResponse }>) {
   const save = useSaveNotificationSettings();
   const daysId = useId();
-  const { settings } = state;
+  // A change shows at once and is confirmed (or taken back) when the save finishes.
+  const [pending, setPending] = useState<SettingsPatch>({});
+  useEffect(() => {
+    if (!save.isPending) setPending({});
+  }, [save.isPending]);
+  const change = (patch: SettingsPatch) => {
+    setPending((previous) => ({ ...previous, ...patch, types: { ...previous.types, ...patch.types } }));
+    save.mutate(patch);
+  };
+  const settings = { types: { ...state.settings.types, ...pending.types }, exDividendDaysBefore: pending.exDividendDaysBefore ?? state.settings.exDividendDaysBefore };
   return (
     <fieldset className="card space-y-4 p-4" aria-busy={save.isPending}>
       <legend className="px-1 text-base font-semibold">Notify me about</legend>
@@ -166,8 +176,7 @@ function SettingsForm({ state }: Readonly<{ state: NotificationsResponse }>) {
             type="checkbox"
             className="mt-1 h-4 w-4"
             checked={settings.types[type]}
-            disabled={save.isPending}
-            onChange={(event) => save.mutate({ types: { [type]: event.target.checked } })}
+            onChange={(event) => change({ types: { [type]: event.target.checked } })}
           />
           <span>
             <span className="font-medium">{NOTIFICATION_TYPE_LABELS[type]}</span>
@@ -183,8 +192,8 @@ function SettingsForm({ state }: Readonly<{ state: NotificationsResponse }>) {
           id={daysId}
           className="input sm:w-auto"
           value={settings.exDividendDaysBefore}
-          disabled={save.isPending || !settings.types.exDividend}
-          onChange={(event) => save.mutate({ exDividendDaysBefore: Number(event.target.value) })}
+          disabled={!settings.types.exDividend}
+          onChange={(event) => change({ exDividendDaysBefore: Number(event.target.value) })}
         >
           {DAY_OPTIONS.map((days) => (
             <option key={days} value={days}>

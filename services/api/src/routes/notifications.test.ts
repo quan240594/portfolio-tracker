@@ -77,6 +77,14 @@ describe('GET /notifications', () => {
   });
 });
 
+describe('devices with a damaged endpoint', () => {
+  it('are listed with an unknown service instead of failing the page', async () => {
+    const { call, notify } = setup();
+    await notify!.repo.putSubscription({ userId: USER, id: 'c'.repeat(32), endpoint: 'not a url', keys: { p256dh: 'p', auth: 'a' }, label: 'Broken', createdAt: '2026-06-15T12:00:00.000Z', failures: 0 });
+    expect((await call('GET', '/notifications')).body.devices[0]).toMatchObject({ label: 'Broken', service: 'unknown' });
+  });
+});
+
 describe('PUT /notifications/settings', () => {
   it('merges partial updates and persists them', async () => {
     const { call, notify } = setup();

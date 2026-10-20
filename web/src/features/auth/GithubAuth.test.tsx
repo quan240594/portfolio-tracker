@@ -170,6 +170,41 @@ describe('GitHub mode: account menu and sign-out', () => {
   });
 });
 
+describe('GitHub mode: Notifications entry of the account menu', () => {
+  const available = { available: true, configured: true, publicKey: 'B'.repeat(87), settings: { types: { exDividend: true, declared: true, received: true }, exDividendDaysBefore: 2 }, devices: [], maxDevices: 10 };
+
+  it('offers Notifications when the server can send them and opens the page', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(apiPath('/notifications'), () => HttpResponse.json(available)));
+    renderGithub();
+    await dashboard();
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    await user.click(await screen.findByRole('link', { name: 'Notifications' }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Notifications' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Notifications' })).not.toBeInTheDocument();
+    expect(document.title).toBe('Notifications · Portfolio Tracker');
+  });
+
+  it('hides the entry when the deployment has no push sender (the default API says unavailable)', async () => {
+    const user = userEvent.setup();
+    renderGithub();
+    await dashboard();
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    expect(await screen.findByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('link', { name: 'Notifications' })).not.toBeInTheDocument());
+  });
+
+  it('hides the entry while the state cannot be loaded', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(apiPath('/notifications'), () => errorResponse(500, 'INTERNAL', 'Boom')));
+    renderGithub();
+    await dashboard();
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    expect(await screen.findByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Notifications' })).not.toBeInTheDocument();
+  });
+});
+
 describe('GitHub mode: API calls are authenticated by the cookie alone', () => {
   it('sends same-origin credentials and no Authorization header', async () => {
     let seen: { credentials: string; authorization: string | null } | undefined;

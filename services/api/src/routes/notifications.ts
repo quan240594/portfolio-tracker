@@ -107,8 +107,7 @@ export async function subscribeNotifications(ctx: RouteContext): Promise<RouteRe
   try {
     decodeUserAgentKeys(body.keys);
   } catch (error) {
-    if (error instanceof PushCryptoError) throw new HttpError(400, 'VALIDATION_ERROR', 'Invalid push subscription', [{ path: ['keys'], message: error.message }]);
-    throw error;
+    throw new HttpError(400, 'VALIDATION_ERROR', 'Invalid push subscription', [{ path: ['keys'], message: error instanceof PushCryptoError ? error.message : 'Invalid keys' }]);
   }
   const id = await endpointId(body.endpoint);
   const devices = await notify.repo.listSubscriptions(ctx.userId);

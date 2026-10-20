@@ -46,6 +46,9 @@ export async function endpointId(endpoint: string): Promise<string> {
   return Array.from(digest.slice(0, 16), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+/** The service worker belongs to the personal (GitHub sign-in) deployment only: never the demo (mock) build or the AWS one. */
+export const shouldRegisterPushWorker = (authMode: string, useMocks: boolean): boolean => !useMocks && authMode === 'github';
+
 /** `sw.js` next to index.html (Vite's base path, so a deployment under a sub-path works too). */
 export const serviceWorkerUrl = (): string => `${import.meta.env.BASE_URL}sw.js`;
 

@@ -2975,3 +2975,152 @@ pnpm --filter @portfolio/web test:coverage && (cd web && pnpm exec playwright te
 still reachable without a key and what they answer for an unknown domain (the size check and `placeholderHashes` are there because the default icon could not be captured as a fixture;
 no hash is shipped), the exact content types and sizes they return, whether Google's redirect to its image host is followed as assumed, the logo.dev URL and the
 meaning of `fallback=404`, and every domain of the curated table against the live service (the entries were checked for format and uniqueness, not by fetching).
+
+## Dividend push notifications
+
+The owner's phone gets a Web Push message for three events of **held** securities, each already saying how the dividend per share
+changed against the previous payment and against a year ago. It works from Chrome on Android in the browser (no home-screen install). The
+sender (WebCrypto and an injected `fetch`, no Node APIs) and all rules are platform-neutral; only the Cloudflare app wires a sender and
+a schedule, so on AWS the feature is intentionally not wired: `GET /notifications` answers `available: false` and the web app hides it.
+The same sync also runs more often so that "received" is known within hours.
+
+### Flow
+
+```mermaid
+flowchart LR
+  S[Trading 212 sync: 06:30 daily, 12:30 / 18:30 / 22:30 on weekdays] -->|"wrote transactions"| N
+  C[Alarm schedule 09:00 daily] --> N[notifyDividends job]
+  subgraph Hub["Hub Durable Object (alarm step, one user per step)"]
+    N --> D[detectDueNotifications: pure rules in packages/shared]
+    D -->|"due items, grouped when more than 3"| P[sendPush: RFC 8030 + 8291 + 8292]
+    P -->|"accepted by one device at least"| L[(ledger NOTIFIED#...)]
+    P -->|"404 / 410"| X[delete the device]
+  end
+  P -->|"1 subrequest per device and message, ciphertext only"| F[Push service: FCM, Mozilla, Apple, Windows]
+  F --> M[Phone: service worker shows the notification, tap opens the app]
+  W[Web: Notifications page] -->|"subscribe, settings, test"| A[API /notifications*]
+  A --> R[(PUSHSUB#, NOTIFYSETTINGS)]
+  R --> N
+```
+
+### Events and rules
+
+| Event | When it is due | Once per | Message |
+|---|---|---|---|
+| `exDividend` | a stored dividend event of a held symbol has its ex-date in (today, today + days before], `days before` 1 to 5, default 2 | symbol + ex-date | "KMB goes ex-dividend in 2 days (06-11-2026)" |
+| `declared` | a stored (i.e. confirmed) dividend event of a held symbol whose ex-date or pay date is today or later and that is not in the ledger: a new declaration, or an estimate that became confirmed (estimates are calendar projections and are never stored or notified, so "became confirmed" is "a stored event appeared") | symbol + ex-date | "KMB declared $1.28 per share" |
+| `received` | a `DIVIDEND` transaction (the sync recorded it) that is not in the ledger; one older than 14 days is recorded silently (a back-dated CSV import must not flood the phone) | transaction id | "KMB dividend received: EUR 6.19" |
+
+*Held* means a position above zero today (all portfolios of the user). More than **3** due items at once become **one** summary
+("5 dividend updates", the first three lines with their % change, "and 2 more", a tap opens `/calendar`).
+**Quiet hours:** nothing is sent from 22:00 up to 08:00 Amsterdam time; the items stay out of the ledger and the next run sends them (the 09:00
+run covers the morning). **Baseline:** when the first device is registered (or a type is switched on again while devices exist) every existing
+`DIVIDEND` transaction and every currently declared upcoming event is written to the ledger *silently* (`silent: true`), so history is never
+announced; ex-dividend reminders are not baselined (an ex-date within the lead time is exactly what the reminder is for). **Ledger:** an entry is
+written only after at least one device's push service accepted the message; entries older than 400 days are pruned by the daily run. A device
+that answers 404 or 410 is deleted; one that fails (timeout, 5xx, 429, 4xx) backs off 15 minutes doubling to a day and nothing loops: the next
+run (09:00, or the next sync that books something) tries again. The job is idempotent: a second run, or a redelivered alarm step, sends nothing twice (and
+the notification `tag` makes a device replace, not duplicate, a repeated message).
+
+### Comparison definitions (`dividendComparison`, `packages/shared/src/dividend-comparison.ts`)
+
+Per share, in the payment's own currency. `previous` is the last payment **before** this one (no special case for special dividends: a payment
+is a payment). `year ago` is the payment closest to the same calendar day one year earlier, at most 45 days away (ties: the earlier one), so
+monthly, quarterly, semi-annual and annual payers all find theirs. `pct` is `(this / reference - 1) x 100` rounded to one decimal and printed with an
+explicit sign (`+2.4 %`, `-1.3 %`, `0.0 %`). A comparison is **omitted** when the reference is zero or missing, or in another currency (no FX is
+guessed); the first payment of a security has none. For annual payers both references are the same payment, so the text says "vs a year ago"
+once; the previous payment is called "last month" (up to 45 days), "last quarter" (up to 135), "last half year" (up to 230) or "the previous
+payment". Declared and ex-dividend messages compare against the stored dividend events of the symbol (keyed by ex-date); a received dividend against the
+dividends you received before (keyed by booking date). `packages/shared/src/dividend-growth-stats.ts` and `analytics-income.ts` work on income
+totals per month, not per share, so only their date helpers (`addIsoDays`, `daysBetween`) are reused.
+
+### Message formats (rendered by the tests)
+
+Dates are numeric `dd-mm-yyyy`, names English (see "Date format"); amounts per share use the payment's currency symbol (`$1.28`, `€0.0275`, `CAD 1.28`),
+totals a currency code (`EUR 7.74`); the company name is shortened (no "Corporation", "Inc."), the symbol is used when no name is known; titles
+are capped at 90 and bodies at 240 characters; parts that cannot be computed are left out. The payload is `{ type, symbol, title, body, url, tag }`
+(`url` = `/assets/<symbol>`, the asset detail route; `tag` = `<type>:<symbol>:<date>`), well under 3.5 KB.
+
+| Type | Title | Body |
+|---|---|---|
+| declared | `Kimberly-Clark declared $1.28 per share` | `Ex-date 06-11-2026, pay 02-12-2026 · +2.4 % vs last quarter · +5.8 % vs a year ago · about EUR 7.45 for your 6.4 shares` |
+| exDividend | `KMB goes ex-dividend in 2 days (06-11-2026)` | `$1.28 per share, +2.4 % vs last quarter, +5.8 % vs a year ago` |
+| received | `KMB dividend received: EUR 6.19` | `$1.28 per share, +2.4 % vs last quarter, +5.8 % vs a year ago` |
+| summary | `5 dividend updates` | `KMB declared $1.28 (+2.4 %) · MSFT ex-dividend tomorrow (+10.0 %) · ABBV received EUR 6.19 (-1.0 %) · and 2 more` |
+
+"About EUR 7.45 for your shares" is the declared amount times the shares held, converted at the latest rate and reduced by the withholding observed on
+the symbol's payments of the last 12 months (the calendar's rule); it is left out without a rate. The received amount is the net booked amount (the
+broker's rate when it booked one).
+
+### Storage and API (items under `PK = USER#{id}`)
+
+| Item | SK | Shape |
+|---|---|---|
+| `PUSH_SUBSCRIPTION` | `PUSHSUB#<sha-256 hex (32) of the endpoint>` | `{ userId, id, endpoint, keys: { p256dh, auth }, label, createdAt, lastSuccessAt?, failures, lastFailureAt? }` |
+| `NOTIFICATION_SETTINGS` | `NOTIFYSETTINGS` | `{ userId, types: { exDividend, declared, received }, exDividendDaysBefore (1..5, default 2), createdAt, updatedAt }`; quiet hours are fixed |
+| `NOTIFIED` | `NOTIFIED#<type>#<symbol>#<eventKey>` | `{ userId, type, symbol, eventKey (ex-date, or the transaction id), notifiedAt, silent? }` |
+
+| Route (authenticated, same-origin) | Result |
+|---|---|
+| `GET /notifications` | `{ available, configured, publicKey?, settings, devices: [{ id, label, service (host), createdAt, lastSuccessAt?, failures }], maxDevices: 10 }`: never an endpoint or a key; `available: false` without a sender (AWS) |
+| `PUT /notifications/settings` | partial `{ types?: {...}, exDividendDaysBefore? }` -> the settings; 400 for anything else |
+| `POST /notifications/subscriptions` | `{ endpoint, keys: { p256dh, auth }, label? }` -> `201 { device, created: true }`, `200` for a known endpoint (keys and label refreshed); 400 for an endpoint that fails the SSRF rules or keys that are not a P-256 point and a 16-byte secret; 409 `TOO_MANY_DEVICES` at 10; 503 `PUSH_NOT_CONFIGURED` |
+| `DELETE /notifications/subscriptions/{id}` | 204, 404 when unknown, 400 for a malformed id |
+| `POST /notifications/test` | `{ subscriptionId? }` -> `{ results: [{ id, label, result: ok \| gone \| rate-limited \| retryable \| rejected, removed }] }` (a `gone` device is deleted); 409 `NO_DEVICES`, 503 `PUSH_NOT_CONFIGURED` |
+
+The API scenarios of `@portfolio/api/testing` run the whole set on the in-memory dependencies, on LocalStack (where the feature reports `available: false`) and
+on the Cloudflare app (a fake push service answers 201).
+
+### Web Push sender (`packages/platform/src/push`) and the privacy model
+
+`createPushSender` implements RFC 8030 (POST with `TTL`, `Urgency`, `Topic`), RFC 8291 (`aes128gcm`: ECDH P-256, HKDF-SHA-256, one record of at most 4096 bytes,
+verified against the specification's Appendix A test vector and by round trips with generated subscriber keys) and RFC 8292 VAPID (an ES256 JWT with `aud` = the
+push service origin, `exp` 11 hours ahead, `sub` = the app's own https origin, sent as `Authorization: vapid t=..., k=...`). `sendPush(subscription, payload, { ttl, urgency, topic })`
+returns a typed result: `ok`, `gone` (404/410: delete the subscription), `rate-limited` (429 with `retryAfterSeconds`), `retryable` (timeout, network, 5xx) or `rejected`
+(bad endpoint, payload above 3.5 KB, 4xx, a redirect). The request has a 10 second timeout and never follows redirects. Logs carry the push service **host and the
+status only**: never a key, an endpoint path or a payload.
+
+- **Payloads are end-to-end encrypted** to the browser's key: the push service (Google, Mozilla, Apple, Microsoft) carries ciphertext and the app's
+  origin, never an amount, a name or a symbol. The service worker (`web/public/sw.js`) decrypts nothing itself: the browser does.
+- **SSRF guard.** A subscription endpoint is a URL the client chooses and the server later POSTs to, so it must be `https`, without credentials, on the
+  default port, not an IP literal, and on an allow-listed host (`fcm.googleapis.com`, `updates.push.services.mozilla.com`, `web.push.apple.com`,
+  `*.notify.windows.com`; `PUSH_ALLOWED_HOSTS` replaces the list). It is checked when stored **and** before every send (a stored endpoint that no longer passes is deleted).
+- **Keys.** `pnpm --filter @portfolio/cloudflare-app run vapid:generate` prints the public key (65-byte uncompressed point, base64url: the variable
+  `VAPID_PUBLIC_KEY`) and the private key (PKCS #8, base64url: the secret `VAPID_PRIVATE_KEY`). The sender refuses to sign when the private key does not
+  belong to the public key. With either missing the feature is off, not broken.
+- The service worker has no fetch handler and no cache; it is registered only in the GitHub sign-in build (never in the demo or the AWS build) and served with
+  `Cache-Control: no-cache` through `web/public/_headers` (Workers static assets; checked locally with `wrangler dev`). A tap focuses an open tab of the
+  app (or opens one) at the notification's same-origin path.
+
+**iOS.** Safari on an iPhone or iPad only delivers Web Push to a web app that was added to the Home Screen (Share, Add to Home Screen) and opened from there; the
+page explains this when the browser has no Push API. It is not tested on iOS.
+
+### Cost against the free plan
+
+Estimates for one user with about 50 held symbols, 1,000 transactions and one device (the design numbers; the dashboard on the real account is the truth).
+The intraday sync is incremental: it reads one history page per source (the 7-day overlap is re-read and re-written idempotently), writes only new or changed
+transactions and reads the user's existing transactions once; every run is behind `guardJob` (below 80 %). The notification run reads the ledger, the
+transactions, the dividend events of the held symbols and the profiles, and writes only ledger rows for what it sent.
+
+| Per day | DO requests | Subrequests | Rows read | Rows written |
+|---|---|---|---|---|
+| 3 intraday syncs (weekdays) | 3 | about 15 (5 per run: account, orders, dividends, cash, one more; measured on the test stack) | about 3,300 | about 63 (21 per run measured on the test stack: job step rows, the sync state and the ledger) |
+| 06:30 sync (already there) | 1 | about 5 | about 1,100 | about 21 |
+| `notifyDividends` 09:00 | 1 | 0 to 30 (1 per device and message, at most 3 messages per device) | about 3,400 | about 3 plus 2 to 4 per message sent |
+| `notifyDividends` after a sync that wrote transactions | 0 to 3 | as above | about 3,400 each | as above |
+| **Typical day** | about 5 | about 20 (50 is the per-invocation cap and every step stays below 45) | about 9,000 (0.2 % of 5,000,000) | about 100 (0.1 % of 100,000) |
+
+A step reserves 30 subrequests (3 messages x 10 devices); the guard defers or drops it above 80 % of any cap (the next run sends what is due). The
+`/api/notifications*` requests cost what any API request costs (one Worker and one DO request, one ledger row).
+
+### Tests
+
+`pnpm --filter @portfolio/platform test` (RFC 8291 vector, round trips, VAPID structure and expiry, sender result mapping with a fake `fetch`, SSRF cases, no secrets in
+logs), `@portfolio/shared` (comparison maths, message builders, due-event detection, baseline), `@portfolio/api` (repository, routes, the job: ledger, baseline, quiet hours, grouping, backoff, gone devices, double fire),
+`@portfolio/cloudflare-app` (the whole suite in Node and in real workerd: a booked dividend becomes a push that a fake FCM receives and the test subscriber decrypts, once only) and
+`@portfolio/web` (support detection, subscribe flow with a mocked service worker / Push API / Notification, permission denied, toggles, the service worker script, a Playwright run in the
+GitHub-auth config at 320 and 1280 px).
+
+**Not verified against real services:** FCM, Mozilla autopush and Apple accept the exact request (the VAPID and `aes128gcm` formats follow the RFCs and are checked
+against the RFC vector, but only a real subscription proves the push services' own acceptance and limits), Chrome's behaviour when the permission was blocked earlier, delivery
+timing, and iOS.
