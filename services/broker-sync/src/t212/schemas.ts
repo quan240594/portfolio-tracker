@@ -77,13 +77,17 @@ export const cashTransactionSchema = z.object({
 });
 export type CashTransaction = z.infer<typeof cashTransactionSchema>;
 
+/** A finite number, or undefined for anything else: a malformed value is dropped, never an error. */
+const lenientNumber = z.unknown().transform((v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined));
+const lenientText = z.unknown().transform((v) => (typeof v === 'string' && v !== '' ? v : undefined));
+
 /** Account-currency view of a position. Every field is optional and a malformed value is dropped, never an error. */
 const positionWalletSchema = z.object({
-  currency: z.string().nullish().transform((v) => v ?? undefined).catch(undefined),
-  totalCost: optionalNumber.catch(undefined),
-  currentValue: optionalNumber.catch(undefined),
-  unrealizedProfitLoss: optionalNumber.catch(undefined),
-  fxImpact: optionalNumber.catch(undefined),
+  currency: lenientText,
+  totalCost: lenientNumber,
+  currentValue: lenientNumber,
+  unrealizedProfitLoss: lenientNumber,
+  fxImpact: lenientNumber,
 });
 
 /**
@@ -95,9 +99,12 @@ export const positionSchema = z.object({
   instrument: instrumentSchema,
   quantity: z.number(),
   /** Last price in the instrument's currency (London listings: possibly pence, see `resolvePrice`). */
-  currentPrice: optionalNumber.catch(undefined),
-  averagePricePaid: optionalNumber.catch(undefined),
-  walletImpact: positionWalletSchema.nullish().transform((v) => v ?? undefined).catch(undefined),
+  currentPrice: lenientNumber,
+  averagePricePaid: lenientNumber,
+  walletImpact: z.unknown().transform((v) => {
+    const parsed = positionWalletSchema.safeParse(v);
+    return parsed.success ? parsed.data : undefined;
+  }),
 });
 export type OpenPosition = z.infer<typeof positionSchema>;
 
