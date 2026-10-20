@@ -4,7 +4,7 @@ import { usageSnapshotSchema } from '@portfolio/shared';
 import { defineApiScenarios } from '@portfolio/api/testing';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { Browser, type Stack } from './browser.js';
-import { AAPL_CLOSE, AV_KEY, T212_KEY, T212_SECRET, TD_KEY, OTHER_ID, OWNER_ID, OWNER_LOGIN } from './fakes.js';
+import { AAPL_CLOSE, AAPL_T212_PRICE, AV_KEY, SAP_PRICE, T212_KEY, T212_SECRET, TD_KEY, OTHER_ID, OWNER_ID, OWNER_LOGIN } from './fakes.js';
 
 export interface SuiteStartOptions {
   /** Caps the budget guard measures against (the Hub's clock is pinned at `PINNED_NOW` whenever limits are given). */
@@ -300,7 +300,7 @@ export function defineAppSuite(label: string, start: StartStack): void {
     it('keeps the price schedules next to the broker sync and arms the alarm for them', async () => {
       const stack = await start({ prices: keys });
       try {
-        expect(await stack.schedules()).toEqual(['broker-sync', 'prices-calendar', 'prices-refresh']);
+        expect(await stack.schedules()).toEqual(['broker-sync', 'prices-calendar', 'prices-refresh', 't212-quotes', 't212-quotes-close']);
         const armed = await stack.alarmAt();
         expect(armed).not.toBeNull();
       } finally {
@@ -357,6 +357,7 @@ export function defineAppSuite(label: string, start: StartStack): void {
         expect(status.status).toBe(200);
         expect(status.body).toMatchObject({ state: 'no-keys', missingSecrets: ['TWELVEDATA_API_KEY', 'EODHD_API_KEY', 'COINGECKO_API_KEY', 'ALPHAVANTAGE_API_KEY'] });
         expect(status.body.message).toContain('No market-data API key is set');
+        expect(status.body.t212Quotes).toBeNull();
         expect(JSON.stringify(status.body)).not.toContain(TD_KEY);
         expect((await new Browser(stack).request('/api/prices/status')).status).toBe(401);
 
@@ -373,6 +374,116 @@ export function defineAppSuite(label: string, start: StartStack): void {
         expect(holdings.status).toBe(200);
         expect(holdings.body.holdings[0]).toMatchObject({ symbol: 'AAPL', quantity: 2, priceStale: true });
         expect((await owner.request('/api/usage')).status).toBe(200);
+      } finally {
+        await stack.dispose();
+      }
+    });
+  });
+
+  describe(`${label}: Trading 212 position quotes`, () => {
+    const userId = `github-${OWNER_ID}`;
+
+    async function connected(options?: SuiteStartOptions) {
+      const stack = await start(options);
+      const owner = new Browser(stack);
+      await owner.signIn();
+      const call = async (method: string, path: string, body?: unknown) => {
+        const response = await owner.request(`/api${path}`, { method, ...(body === undefined ? {} : { body }) });
+        const text = await response.text();
+        return { status: response.status, body: text ? JSON.parse(text) : undefined };
+      };
+      const portfolio = (await call('POST', '/portfolios', { name: `Quotes ${crypto.randomUUID().slice(0, 8)}` })).body.portfolioId as string;
+      const credentials = { portfolioId: portfolio, apiKey: T212_KEY, apiSecret: T212_SECRET, environment: 'demo' };
+      expect((await call('PUT', '/brokers/trading212', credentials)).status).toBe(204);
+      return { stack, owner, call, portfolio };
+    }
+
+    it('prices the held positions right after a sync, without any market-data key, in the base currency', async () => {
+      const { stack, call, portfolio } = await connected();
+      try {
+        // The AAPL position is a manual transaction (USD): its value needs the stored ECB rate, which the keyless FX refresh provides.
+        const buy = { portfolioId: portfolio, date: '2026-01-05', type: 'BUY', symbol: 'AAPL', quantity: 2, price: 200, currency: 'USD' };
+        expect((await call('POST', '/transactions', buy)).status).toBe(201);
+        await stack.drain();
+        await stack.enqueue('refreshPrices', { trigger: 'scheduled' });
+        await stack.drain();
+        const before = (await call('GET', `/holdings?portfolioId=${portfolio}`)).body.holdings as { priceStale: boolean }[];
+        expect(before.every((holding) => holding.priceStale)).toBe(true);
+
+        const calls = stack.trading212.positionCalls();
+        expect((await call('POST', '/brokers/trading212/sync', { portfolioId: portfolio })).status).toBe(202);
+        await stack.drain();
+        expect(await stack.failedJobs()).toEqual([]);
+        expect(stack.trading212.positionCalls() - calls).toBe(1);
+
+        const holdings = (await call('GET', `/holdings?portfolioId=${portfolio}`)).body.holdings as { symbol: string; quantity: number; priceLocal: number; priceStale: boolean; marketValue: number }[];
+        const bySymbol = Object.fromEntries(holdings.map((holding) => [holding.symbol, holding]));
+        expect(bySymbol['SAP.DE']).toMatchObject({ quantity: 5, priceLocal: SAP_PRICE, priceStale: false });
+        expect(bySymbol.AAPL).toMatchObject({ quantity: 2, priceLocal: AAPL_T212_PRICE, priceStale: false });
+        const expected = 5 * SAP_PRICE + (2 * AAPL_T212_PRICE) / 1.16;
+        const total = holdings.reduce((sum, holding) => sum + holding.marketValue, 0);
+        expect(Math.abs(total - expected)).toBeLessThan(0.02);
+        const summary = (await call('GET', `/portfolio?portfolioId=${portfolio}`)).body;
+        expect(Math.abs(summary.totalValue - expected)).toBeLessThan(0.02);
+
+        const status = (await call('GET', '/prices/status')).body;
+        expect(status).toMatchObject({ state: 'no-keys', t212Quotes: { state: 'OK', quoted: 2, lastError: null } });
+        expect(status.t212Quotes.lastSuccessAt).toEqual(expect.any(String));
+        expect(status.sources.find((source: { name: string }) => source.name === 't212')).toMatchObject({ configured: true, secret: null });
+        expect(status.message).toContain('held positions are priced from Trading 212');
+        expect(JSON.stringify(status)).not.toContain(T212_SECRET);
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it.each([
+      [401, 'AUTH_REJECTED'],
+      [429, 'RATE_LIMITED'],
+      [500, 'ERROR'],
+    ])('records an answer of %i as %s, backs off, and neither fails the sync nor a job', async (status, state) => {
+      const { stack, call, portfolio } = await connected();
+      try {
+        stack.trading212.positionsReply = { status, json: { message: 'no' } };
+        expect((await call('POST', '/brokers/trading212/sync', { portfolioId: portfolio })).status).toBe(202);
+        await stack.drain();
+        expect(await stack.failedJobs()).toEqual([]);
+        expect((await call('GET', `/brokers/trading212?portfolioId=${portfolio}`)).body).toMatchObject({ connected: true, status: 'SUCCEEDED' });
+        expect(stack.trading212.positionCalls()).toBe(1);
+
+        const report = (await call('GET', '/prices/status')).body.t212Quotes;
+        expect(report).toMatchObject({ state, quoted: null });
+        expect(report.nextAttemptAt).toEqual(expect.any(String));
+        expect(report.lastError).not.toContain(T212_SECRET);
+
+        // The next scheduled run stays away until the back-off is over: no request, no failed job.
+        await stack.enqueue('refreshT212Quotes', { trigger: 'scheduled' });
+        await stack.drain();
+        expect(stack.trading212.positionCalls()).toBe(1);
+        expect(await stack.failedJobs()).toEqual([]);
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('runs in the warning band (60-80 %) with one positions request, and is skipped, never deferred or failed, once blocked', async () => {
+      const limits: MetricLimits = { ...METRIC_LIMITS, workerRequests: 40 };
+      const { stack, owner, call } = await connected({ limits });
+      try {
+        const state = async () => usageSnapshotSchema.parse(await (await owner.request('/api/usage')).json()).state;
+        for (let request = 0; request < 60 && (await state()) === 'ok'; request++) await owner.request('/api/portfolios');
+        expect(await state()).toBe('warn');
+        await stack.enqueue('refreshT212Quotes', { trigger: 'sync', userId });
+        await stack.drain();
+        expect(stack.trading212.positionCalls()).toBe(1);
+        expect((await call('GET', '/prices/status')).body.t212Quotes).toMatchObject({ state: 'OK', quoted: 2 });
+
+        for (let request = 0; request < 60 && (await state()) !== 'blocked'; request++) await owner.request('/api/portfolios');
+        expect(await state()).toBe('blocked');
+        await stack.enqueue('refreshT212Quotes', { trigger: 'sync', userId });
+        await stack.drain();
+        expect(stack.trading212.positionCalls()).toBe(1);
+        expect(await stack.failedJobs()).toEqual([]);
       } finally {
         await stack.dispose();
       }

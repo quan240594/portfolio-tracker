@@ -14,7 +14,7 @@ import {
   type PortableResponse,
 } from '@portfolio/platform';
 import { ItemManagementRepository, ItemRepository, createApp, type Deps } from '@portfolio/api';
-import { ItemBrokerStore, SecretCredentialStore, Trading212Client } from '@portfolio/broker-sync';
+import { ItemBrokerStore, ItemQuoteStore, SecretCredentialStore, Trading212Client } from '@portfolio/broker-sync';
 import { MAX_FILE_BYTES, createDurableObjectPlatform, uploadTokenFromUrl, type AlarmJobQueueOptions, type DurableObjectPlatform } from '@portfolio/cloudflare';
 import { createMarketDataService } from '@portfolio/prices';
 import { parseImportObjectKey } from '@portfolio/shared';
@@ -210,7 +210,13 @@ export class HubCore {
   /** Routes the Hub serves itself, next to the API: `GET /prices/status`. */
   private ownRoute(request: PortableRequest): Promise<PortableResponse> | undefined {
     if (request.method !== 'GET' || request.path !== '/prices/status') return undefined;
-    return Promise.resolve({ status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }, body: JSON.stringify(pricesStatus(this.config.prices)) });
+    return this.pricesStatus(request.identity?.subject);
+  }
+
+  /** The sources that are on, and how fresh the Trading 212 quotes of the signed-in user are (one read of the status item). */
+  private async pricesStatus(userId: string | undefined): Promise<PortableResponse> {
+    const t212 = userId === undefined ? null : await new ItemQuoteStore(this.platform.items).getStatus(userId);
+    return { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }, body: JSON.stringify(pricesStatus(this.config.prices, t212)) };
   }
 
   private usage(): Promise<PortableResponse> {

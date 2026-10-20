@@ -71,7 +71,7 @@ describe('createDurableObjectPlatform', () => {
   it('arms the alarm for the shared cron schedules and runs due jobs through the bound runAlarm', async () => {
     const { platform, storage, clock } = await setup();
     const next = await platform.arm();
-    expect(next).toBe(Date.UTC(2026, 0, 5, 12)); // 13:00 in Amsterdam
+    expect(next).toBe(Date.UTC(2026, 0, 5, 9, 15)); // 10:15 in Amsterdam: the first Trading 212 quote slot after the clock's 10:00
     expect(storage.alarm).toBe(next);
     await platform.jobs.enqueue({ job: JOBS.syncBroker, payload: { all: true } });
     const calls: unknown[] = [];

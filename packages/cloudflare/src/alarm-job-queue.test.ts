@@ -335,11 +335,13 @@ describe('AlarmJobQueue.runAlarm', () => {
 });
 
 describe('cron schedules', () => {
+  // The price and broker schedules; the Trading 212 quote schedules have their own test below.
+  const SHARED = { schedules: SCHEDULED_JOBS.filter((job) => job.job !== JOBS.refreshT212Quotes) } satisfies AlarmJobQueueOptions;
   // The clock starts Monday 2026-01-05 09:00 UTC = 10:00 in Amsterdam; the next prices slot is 13:00 local = 12:00 UTC.
   const SLOTS = { prices: Date.UTC(2026, 0, 5, 12), nextPrices: Date.UTC(2026, 0, 5, 17), calendar: Date.UTC(2026, 0, 6, 4, 30), broker: Date.UTC(2026, 0, 6, 5, 30) };
 
   it('arm() records the next slot of every schedule and arms the alarm for the earliest', async () => {
-    const { queue, storage } = await setup({});
+    const { queue, storage } = await setup(SHARED);
     expect(await queue.arm()).toBe(SLOTS.prices);
     expect(storage.alarm).toBe(SLOTS.prices);
     expect(storage.rows('SELECT name, next_run_at FROM schedules ORDER BY name')).toEqual(
@@ -361,7 +363,7 @@ describe('cron schedules', () => {
   });
 
   it('enqueues the due job once, runs it, and moves the alarm to the next slot', async () => {
-    const { queue, storage, clock } = await setup({});
+    const { queue, storage, clock } = await setup(SHARED);
     await queue.arm();
     const calls: unknown[] = [];
     const handlers: JobRegistry = {
@@ -380,7 +382,7 @@ describe('cron schedules', () => {
   });
 
   it('enqueues a slot only once even when the alarm fires twice before the job could run', async () => {
-    const { queue, storage, clock } = await setup({});
+    const { queue, storage, clock } = await setup(SHARED);
     await queue.arm();
     clock.ms = SLOTS.prices;
     await queue.runAlarm({}); // no handler: the job stays open (retried later)
@@ -389,7 +391,7 @@ describe('cron schedules', () => {
   });
 
   it('runs a schedule once after a long absence instead of once per missed slot', async () => {
-    const { queue, clock } = await setup({});
+    const { queue, clock } = await setup(SHARED);
     await queue.arm();
     let calls = 0;
     clock.ms = Date.UTC(2026, 0, 9, 12); // Friday: four days of missed slots
@@ -403,7 +405,7 @@ describe('cron schedules', () => {
   });
 
   it('keeps jobs and schedules in one alarm: the earlier due time wins', async () => {
-    const { queue, storage, clock } = await setup({});
+    const { queue, storage, clock } = await setup(SHARED);
     await queue.arm();
     await queue.enqueue({ job: JOBS.syncBroker, payload, delayMs: 1_000 });
     expect(storage.alarm).toBe(clock.ms + 1_000);
@@ -413,7 +415,33 @@ describe('cron schedules', () => {
   });
 
   it('uses the shared schedules by default', () => {
-    expect(SCHEDULED_JOBS.map((job) => job.name).sort((a, b) => a.localeCompare(b))).toEqual(['broker-sync', 'prices-calendar', 'prices-refresh']);
+    expect(SCHEDULED_JOBS.map((job) => job.name).sort((a, b) => a.localeCompare(b))).toEqual(['broker-sync', 'prices-calendar', 'prices-refresh', 't212-quotes', 't212-quotes-close']);
+  });
+
+  it('arms the alarm for the Trading 212 quote schedules and enqueues the job per slot', async () => {
+    const { queue, storage, clock } = await setup({});
+    // Monday 2026-01-05 09:00Z = 10:00 local: the next quote slot is 10:15 local = 09:15Z.
+    const slot = Date.UTC(2026, 0, 5, 9, 15);
+    expect(await queue.arm()).toBe(slot);
+    expect(storage.rows("SELECT next_run_at FROM schedules WHERE name = 't212-quotes'")).toEqual([{ next_run_at: slot }]);
+    clock.ms = slot;
+    const calls: unknown[] = [];
+    const report = await queue.runAlarm({
+      refreshT212Quotes: (invocation) => {
+        calls.push(invocation);
+        return ok();
+      },
+    });
+    expect(calls).toEqual([{ payload: { trigger: 'scheduled' }, cursor: undefined }]);
+    expect(report).toMatchObject({ steps: 1, completed: 1, nextAlarm: slot + 15 * 60_000 });
+  });
+
+  it('sleeps over the weekend: the next quote slot is the only wake-up', async () => {
+    const quotesOnly = { schedules: SCHEDULED_JOBS.filter((job) => job.job === JOBS.refreshT212Quotes) };
+    const { queue, storage, clock } = await setup(quotesOnly);
+    clock.ms = Date.UTC(2026, 0, 9, 21, 5); // Friday 22:05 local: the close run was the last of the week
+    expect(await queue.arm()).toBe(Date.UTC(2026, 0, 12, 6, 0)); // Monday 07:00 local
+    expect(storage.alarm).toBe(Date.UTC(2026, 0, 12, 6, 0));
   });
 });
 

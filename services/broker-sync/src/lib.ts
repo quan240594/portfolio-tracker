@@ -10,3 +10,5 @@ export * from './redact.js';
 export * from './store.js';
 export { syncAllJob, syncJob, runAll, runSync, type SyncDeps, type SyncLimits, type SyncRequest, type SyncResult } from './sync.js';
 export * from './t212/client.js';
+export { ItemQuoteStore, quoteItem, type QuoteStore } from './quote-store.js';
+export { MIN_INTERVAL_MS, refreshQuotesAfterSync, refreshQuotesJob, type QuoteDeps, type QuoteRunResult, type RefreshQuotesPayload, type UserQuoteResult } from './quotes.js';

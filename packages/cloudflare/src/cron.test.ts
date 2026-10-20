@@ -114,3 +114,45 @@ describe('nextCronRun in a time zone', () => {
     expect(iso(nextCronRun(toUnixCron(broker), from, broker.timezone))).toBe('2026-01-06T05:30:00.000Z');
   });
 });
+
+describe('the Trading 212 quote schedules on Amsterdam time', () => {
+  const quotes = SCHEDULED_JOBS.find((job) => job.name === 't212-quotes')!;
+  const close = SCHEDULED_JOBS.find((job) => job.name === 't212-quotes-close')!;
+  const nextQuote = (from: number) => iso(nextCronRun(toUnixCron(quotes), from, quotes.timezone));
+  const nextClose = (from: number) => iso(nextCronRun(toUnixCron(close), from, close.timezone));
+
+  it('fires every 15 minutes from 07:00 to 21:45 local time on weekdays (winter: UTC+1)', () => {
+    // Monday 2026-01-05 05:50Z = 06:50 local.
+    expect(nextQuote(utc(2026, 1, 5, 5, 50))).toBe('2026-01-05T06:00:00.000Z');
+    expect(nextQuote(utc(2026, 1, 5, 6, 0))).toBe('2026-01-05T06:15:00.000Z');
+    expect(nextQuote(utc(2026, 1, 5, 20, 44))).toBe('2026-01-05T20:45:00.000Z');
+    // 21:45 local is the last slot; the next one is Tuesday 07:00 local.
+    expect(nextQuote(utc(2026, 1, 5, 20, 45))).toBe('2026-01-06T06:00:00.000Z');
+  });
+
+  it('follows daylight saving time (summer: UTC+2)', () => {
+    expect(nextQuote(utc(2026, 7, 6, 4, 0))).toBe('2026-07-06T05:00:00.000Z');
+    expect(nextQuote(utc(2026, 7, 6, 19, 45))).toBe('2026-07-07T05:00:00.000Z');
+    expect(nextClose(utc(2026, 7, 6, 12, 0))).toBe('2026-07-06T20:05:00.000Z');
+    expect(nextClose(utc(2026, 1, 5, 12, 0))).toBe('2026-01-05T21:05:00.000Z');
+  });
+
+  it('skips weekends and the changeover week is still every 15 minutes', () => {
+    // Friday 2026-01-09 21:00Z is after the last slot: the next one is Monday 07:00 local = 06:00Z.
+    expect(nextQuote(utc(2026, 1, 9, 21, 0))).toBe('2026-01-12T06:00:00.000Z');
+    expect(nextClose(utc(2026, 1, 9, 21, 5))).toBe('2026-01-12T21:05:00.000Z');
+    // Sunday 2026-03-29 is the spring-forward day; Monday 07:00 local is then UTC+2.
+    expect(nextQuote(utc(2026, 3, 27, 21, 0))).toBe('2026-03-30T05:00:00.000Z');
+  });
+
+  it('runs 60 slots a day plus the close', () => {
+    let from = utc(2026, 1, 5, 0, 0);
+    let slots = 0;
+    for (;;) {
+      from = nextCronRun(toUnixCron(quotes), from, quotes.timezone);
+      if (from >= utc(2026, 1, 6, 0, 0)) break;
+      slots++;
+    }
+    expect(slots).toBe(60);
+  });
+});

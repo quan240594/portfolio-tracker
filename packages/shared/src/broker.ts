@@ -33,7 +33,13 @@ export const brokerKeys = {
     SK: `${BROKER_STATE_PREFIX}${portfolioId}`,
   }),
   statePrefix: BROKER_STATE_PREFIX,
+  /** Outcome of the last Trading 212 quote refresh of a user (one item per user: the account's positions are portfolio independent). */
+  quoteStatus: (userId: string) => ({ PK: `USER#${userId}`, SK: 'QUOTESYNC#trading212' }),
 } as const;
+
+export const T212_QUOTE_STATUS_ENTITY = 'T212_QUOTE_STATUS';
+/** `source` of the quotes the Trading 212 quote refresh stores. */
+export const T212_QUOTE_SOURCE = 't212';
 
 export const T212_ENVIRONMENTS = ['live', 'demo'] as const;
 export type T212Environment = (typeof T212_ENVIRONMENTS)[number];
@@ -141,6 +147,32 @@ export interface BrokerSyncState {
   unmapped?: UnmappedInstrument[];
   warnings?: string[];
   lastError?: string;
+}
+
+export const T212_QUOTE_STATES = ['OK', 'AUTH_REJECTED', 'RATE_LIMITED', 'ERROR', 'NO_CREDENTIALS'] as const;
+export type T212QuoteState = (typeof T212_QUOTE_STATES)[number];
+
+/** Outcome of the last Trading 212 quote refresh of a user: what `GET /prices/status` reports and what drives the back-off. */
+export interface T212QuoteStatus {
+  userId: string;
+  state: T212QuoteState;
+  /** The last time the refresh went to Trading 212 (or found no credentials). */
+  lastAttemptAt: string;
+  lastSuccessAt?: string;
+  /** Consecutive failed attempts; drives the back-off. */
+  failures: number;
+  /** Scheduled runs wait until this time after a failure. */
+  nextAttemptAt?: string;
+  /** Safe text (never credentials or response bodies). */
+  lastError?: string;
+  /** Quotes written by the last successful run. */
+  quoted?: number;
+  /** Positions of the last successful run that got no quote: unmapped instrument, no price, or a newer stored quote. */
+  skipped?: number;
+  /** Tickers that needed the exchange metadata to be mapped, with their symbol: the metadata is loaded once, not per run. */
+  tickerSymbols?: Record<string, string>;
+  /** Last time the (rate-limited, large) exchange metadata was requested. */
+  metadataTriedAt?: string;
 }
 
 /** GET /brokers/trading212 — never contains credentials. */

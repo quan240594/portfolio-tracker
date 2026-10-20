@@ -2508,6 +2508,7 @@ observability enabled. The deploy bundle is about 0.6 MB (130 KB gzipped) agains
 | `PUT /brokers/trading212` | 1 | 1 | 1 | 2 + 1 | encrypted secret + state |
 | Trading 212 sync | 0 | 1 per alarm run | pages + about 3 | 1 per step, 1 per transaction | at most 45 subrequests per alarm, then deferred by 1 s |
 | price step (alarm) | 0 | 1 per alarm run | at most 40 (45 per alarm) | 2 per refreshed symbol (quote, EOD); about 260 per newly enriched symbol; about 3,100 once for the FX history | below 60 % of the budget only; enrichment below 80 % |
+| Trading 212 quote refresh (alarm) | 0 | 1 per alarm run | 1 (up to 3 when an instrument needs the exchange metadata, hourly at most) | 6 + 1 per held symbol (quotes, status, job row, schedules, ledger) | below 80 %, see "Trading 212 position quotes" |
 | cron | 1 | 1 | 0 | 1 | once a day |
 
 At 1,000 requests a day the app uses about 1 % of the Worker and Durable Object request caps and about 1 % of the daily rows written;
@@ -2531,3 +2532,119 @@ accounting of requests, GB-seconds and rows (the guard's counters are an estimat
 deploy accepts the migration and the cron trigger, real Trading 212 and market-data provider responses, rate limits and daily quotas (the tests use fakes), Durable Object eviction and cold starts under
 real traffic (the ledger is flushed at the end of every request so an eviction loses nothing), and the CPU time of the Worker (a cookie MAC
 check and a forward, designed for well under the free plan's 10 ms).
+
+## Trading 212 position quotes
+
+Without market-data keys every holding was valued at cost (`priceStale: true`). The Trading 212 account that the sync already reads has
+a near-live price for every open position, so a keyless job turns `GET /api/v0/equity/positions` into quotes. Charts, history,
+dividends and profiles still come from the provider keys (`TWELVEDATA_API_KEY`, `EODHD_API_KEY`, optionally `COINGECKO_API_KEY` and
+`ALPHAVANTAGE_API_KEY`): the job writes only the latest quote, never `EOD#` rows, so it cannot replace a real close.
+
+### Job and schedule
+
+* **Job `refreshT212Quotes`** (`JOBS.refreshT212Quotes`, payload `{ trigger: 'scheduled' | 'sync'; userId?: string }`), implemented in
+  `services/broker-sync/src/quotes.ts` (`refreshQuotesJob(getDeps)`), platform-neutral, resumable (a step handles one user, so a
+  single-user run is one step) and idempotent. `QuoteDeps` = `{ store: BrokerStore (listUserIds, listStates, getFxRates), quotes:
+  QuoteStore, credentials: CredentialSource, createApi, symbolOverrides, now }`; the credentials come from the same `SecretStore` the
+  sync uses (`SecretCredentialStore`).
+* **Schedules** (`SCHEDULED_JOBS`, `cloudflareOnly: true`: there is no EventBridge schedule, the AWS Lambdas are unchanged): `t212-quotes`
+  = `0,15,30,45 7-21 * * MON-FRI` and `t212-quotes-close` = `5 22 * * MON-FRI`, both `Europe/Amsterdam` (`toUnixCron`, DST-aware
+  `nextCronRun`, which already parsed lists; `ScheduledJob.minute` may now be a list). That is 07:00 to 21:45 every 15 minutes plus one run
+  at 22:05, after the US close: 61 runs on a weekday, none at weekends. `ScheduledJob.minute: number | readonly number[]`.
+* **After a sync**: the Hub wraps `syncBroker` in `refreshQuotesAfterSync`; when the final step reports `SUCCEEDED` for a user it enqueues
+  `{ trigger: 'sync', userId }` (a separate job with its own guard check and step budget). A failure to enqueue never fails the sync.
+* **Guard**: `JOB_CEILINGS.refreshT212Quotes = 'warn'`: it runs while the budget is below 80 % (a quote refresh is the only live price
+  source without keys, and costs about 1 subrequest and 30 rows). Unlike an essential job a denied run is *dropped* (completed as
+  `skipped`), not deferred, because the next slot is at most 15 minutes away and deferred hourly retries would only pile up.
+  `JOB_SUBREQUEST_RESERVE.refreshT212Quotes = 3`.
+* **Short-lived Durable Object**: one run is one alarm; afterwards the alarm is re-armed to the next due schedule only (the next 15-minute
+  slot, or Monday 07:00), nothing keeps the object awake. The client is built with `maxAttempts: 1`, `maxWaitMs: 0` and a 15 s timeout, so
+  a 429 or 5xx never sleeps inside the alarm.
+
+### What one run does
+
+1. `listUserIds()` (or the payload's user), `listStates(user)`; a user without a connected portfolio is skipped (`not-connected`).
+2. Reads the user's status item and decides whether to call at all: not within 30 s of the last attempt (`too-soon`: the post-sync run
+   and a scheduled slot never double-call; Trading 212 allows 1 positions request per second), and, for `scheduled` runs, not before
+   `nextAttemptAt` (`backing-off`). A `sync` run ignores the back-off (a finished sync proved the credentials) but not the 30 s.
+3. ONE `GET positions` per user. Instruments are mapped with the importer's `resolveSymbols` / `mapT212Symbol` (same overrides). Most
+   resolve from the ticker shape or the ISIN; only when some cannot, the (rate-limited, big) exchange metadata is loaded, at most hourly,
+   and the resolved tickers are cached in the status item (`tickerSymbols`) so it is not loaded again.
+4. Per held symbol (first position of a symbol wins): `resolvePrice` -> `mergeQuote` -> one quote; all quotes and the status item go out in
+   ONE `batchWrite` (upsert by key, so rows written = quotes + 1, independent of history).
+
+### Item shapes written
+
+Quote (the same item the price service writes; the API and analytics read it unchanged through `getQuotes`; `priceStale` is `!quote`, so the
+stale flag clears with the first quote):
+
+```json
+{ "PK": "TICKER#VUSA.L", "SK": "QUOTE#LATEST", "entityType": "QUOTE", "symbol": "VUSA.L", "price": 96.5,
+  "previousClose": 96.1, "currency": "GBP", "asOf": "2026-10-20T08:15:00.000Z", "source": "t212" }
+```
+
+Status (one per user; read by `GET /api/prices/status`, never contains credentials or response bodies):
+
+```json
+{ "PK": "USER#<id>", "SK": "QUOTESYNC#trading212", "entityType": "T212_QUOTE_STATUS", "userId": "<id>",
+  "state": "OK | AUTH_REJECTED | RATE_LIMITED | ERROR | NO_CREDENTIALS", "lastAttemptAt": "...", "lastSuccessAt": "...",
+  "failures": 0, "nextAttemptAt": "...", "lastError": "T212_RATE_LIMITED: ...", "quoted": 25, "skipped": 0,
+  "tickerSymbols": { "SAP_EQ": "SAP.DE" }, "metadataTriedAt": "..." }
+```
+
+### Rules
+
+* **Price and currency.** `price` is `currentPrice` in the instrument's currency, in major units: `GBX`/`GBp` is divided by 100 and
+  relabelled `GBP` like everywhere in the app (`normalizeCurrency`). Because Trading 212 is not always consistent about pence, a `GBP`
+  price is cross-checked against `walletImpact.currentValue / quantity` (converted at the stored ECB rates): a price within a factor 2 of
+  exactly 100 times the implied one is divided by 100, one within a factor 2 of 1/100 (a `GBX` label on a price already in pounds) is
+  multiplied by 100. Without the value or the rates the label alone decides. Other currencies are never rescaled.
+* **Precedence.** A stored quote of any source with the same or a newer `asOf` is left alone; the T212 quote (`asOf` = the time of the run,
+  `source: 't212'`) only replaces an older one or fills a gap. A keyed provider refresh simply overwrites it with its own quote; the next slot
+  restores the newer T212 one, so the price is never older than 15 minutes during the sessions.
+* **Previous close (day change).** Never invented: within a UTC day the stored `previousClose` is kept; on the first quote of a new day it is
+  the last stored price (the 22:05 run of the day before is after every close); with nothing stored, or a different currency, it equals the
+  price, i.e. the day change is 0 until the second day. No `EOD` rows are written.
+* **Failures are recorded, never thrown or looped.** One attempt per run (`maxAttempts: 1`). 401/403 -> `AUTH_REJECTED`, back-off 6 h
+  doubling to 24 h; 429 -> `RATE_LIMITED`, 5 min doubling to 1 h; 5xx, network, a response that is not a list -> `ERROR`, 30 min doubling
+  to 2 h; missing or malformed credentials -> `NO_CREDENTIALS`, 6 h. A secret-store or database failure is not an API failure: the step
+  throws and the alarm retries it with its own capped backoff.
+* **Parser tolerance.** `positionSchema` keeps `instrument` and `quantity` required (the reconciliation needs them) and makes `currentPrice`,
+  `averagePricePaid` and `walletImpact` (`currency`, `totalCost`, `currentValue`, `unrealizedProfitLoss`, `fxImpact`) optional and
+  *forgiving*: a missing, null or wrongly typed value is dropped (`.catch(undefined)`), never a rejected position. A position without a
+  usable price is simply not quoted.
+
+### `GET /api/prices/status`
+
+Adds `t212Quotes: null | { state, lastAttemptAt, lastSuccessAt, quoted, lastError, nextAttemptAt }` (the signed-in user's status item) and a `t212`
+entry in `sources` (`configured` when the last run succeeded, `secret: null`). The `message` says when the held positions are priced from
+Trading 212 (with the time of the last refresh) and that charts and history still need the listed secrets. The asset page shows
+`As of <date, time> · Trading 212` for such a quote (`AssetQuoteInfo.provider` is the stored `source`).
+
+### Daily cost (Free plan)
+
+One weekday, 25 held symbols (rows written per run = 6 fixed + 1 per symbol; measured 8 for two symbols in the Node suite):
+
+| Resource | Per run | Runs/day | Per day | Cap | Share |
+|---|---|---|---|---|---|
+| Worker requests | 0 | 61 | 0 | 100,000 | 0 % |
+| Durable Object requests (alarm) | 1 | 61 | 61 | 100,000 | 0.06 % |
+| Subrequests | 1 (3 when the metadata is needed, hourly at most) | 61 | 61 (50 per invocation, 3 used) | 50 per invocation | 6 % of one invocation |
+| SQLite rows written | 31 | 61 | 1,891 | 100,000 | 1.9 % |
+| SQLite rows read | about 50 | 61 | about 3,000 | 5,000,000 | 0.06 % |
+| Durable Object GB-s (about 0.3 s at 128 MB) | 0.04 | 61 | about 2.3 | 13,000 | 0.02 % |
+
+Weekends cost nothing. Each manual sync adds one run. The quote refresh never keeps the object awake between runs.
+
+### What is verified, what is not
+
+Verified locally with fakes (no network): `pnpm --filter @portfolio/broker-sync test` (price resolution including pence, precedence,
+previous close, status, back-off for 401/403/429/5xx through the real client, metadata cache, the after-sync enqueue),
+`pnpm --filter @portfolio/platform test` and `pnpm --filter @portfolio/cloudflare test` (the schedule, list expression, DST, the alarm arming),
+`pnpm --filter @portfolio/cloudflare-app test` (Node and workerd: a sync followed by an immediate refresh, holdings served non-stale with a
+value equal to the sum of quantity x price in the base currency at the stored ECB rate, 401/429/500 recorded and backed off, the warning band
+and the blocked state, the alarm of a slot writing about 8 rows and re-arming to the next slot). **Not verified against the real API**: the
+field names and units of `GET /api/v0/equity/positions` (taken from the public documentation: `instrument.{ticker,isin,name,currency}`,
+`quantity`, `currentPrice`, `averagePricePaid`, `walletImpact.{currency,totalCost,currentValue,unrealizedProfitLoss,fxImpact}`), whether
+London prices arrive in pence under a `GBX` or a `GBP` label (both are handled), the exact rate-limit headers, and how fresh `currentPrice` is
+outside the sessions.

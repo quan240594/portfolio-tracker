@@ -51,6 +51,9 @@ export class FakeGithub {
 }
 
 const T212_PREFIX = '/api/v0/equity/';
+/** Last prices Trading 212 reports for the open positions of the tests. */
+export const SAP_PRICE = 231.4;
+export const AAPL_T212_PRICE = 212.5;
 
 /** Trading 212: one account in EUR with two history pages holding one buy of 3 shares of SAP and one of 2. */
 export class FakeTrading212 {
@@ -59,6 +62,18 @@ export class FakeTrading212 {
   /** The `authorization` header of the last call was the Basic credentials of the test key (compared, never stored). */
   authorized = false;
   rejectCredentials = false;
+  /** Replaces the answer of `GET positions` (a failure such as 429 or 500); the credential check still comes first. */
+  positionsReply: FakeReply | undefined;
+  /** The open positions: 5 shares of SAP (the 2 buys of the history) and 2 of AAPL (a manual transaction in the tests). Prices are in the instrument currency. */
+  positions: unknown[] = [
+    { instrument: { ticker: 'SAPd_EQ', isin: 'DE0007164600', name: 'SAP', currency: 'EUR' }, quantity: 5, currentPrice: SAP_PRICE, averagePricePaid: 200, walletImpact: { currency: 'EUR', totalCost: 1000, currentValue: 5 * SAP_PRICE } },
+    { instrument: { ticker: 'AAPL_US_EQ', isin: 'US0378331005', name: 'Apple', currency: 'USD' }, quantity: 2, currentPrice: AAPL_T212_PRICE, averagePricePaid: 200 },
+  ];
+
+  /** How many times `GET positions` was called. */
+  positionCalls(): number {
+    return this.calls.filter((entry) => entry === 'GET positions').length;
+  }
 
   readonly service: FakeService = (request) => {
     const url = new URL(request.url);
@@ -67,6 +82,7 @@ export class FakeTrading212 {
     this.calls.push(`${request.method} ${path}`);
     this.authorized = request.header('authorization') === `Basic ${btoa(`${T212_KEY}:${T212_SECRET}`)}`;
     if (this.rejectCredentials || !this.authorized) return { status: 401, json: { message: 'unauthorized' } };
+    if (path === 'positions' && this.positionsReply) return this.positionsReply;
     return { status: 200, json: this.body(path, url.searchParams) };
   };
 
@@ -79,6 +95,8 @@ export class FakeTrading212 {
       case 'history/dividends':
       case 'history/transactions':
         return { items: [] };
+      case 'positions':
+        return this.positions;
       default:
         return [];
     }

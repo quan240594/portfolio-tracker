@@ -219,7 +219,7 @@ describe('computeAssetDetail', () => {
     )!;
     expect(detail.baseCurrency).toBe('EUR');
     expect(detail.profile).toMatchObject({ symbol: 'AAA', name: 'Alpha Inc', sector: 'Technology', country: 'United States', exchange: 'NYSE', description: ' About ', isin: 'US0000000001' });
-    expect(detail.quote).toEqual({ source: 'quote', price: 120, previousClose: 100, change: 20, changePct: 20, currency: 'USD', asOf: quote.asOf, priceBase: 96 });
+    expect(detail.quote).toEqual({ source: 'quote', price: 120, previousClose: 100, change: 20, changePct: 20, currency: 'USD', asOf: quote.asOf, provider: 't', priceBase: 96 });
     expect(detail.stats).toMatchObject({ peRatio: 20, eps: 6, beta: 1.1, marketCap: 3e12, dividendYieldPct: 1, annualDividend: 1.2, payoutRatioPct: 20, nextEarningsDate: null });
   });
 

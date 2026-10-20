@@ -14,6 +14,12 @@ export const JOB_CEILINGS: Readonly<Record<JobName, JobCeiling>> = {
   refreshPrices: 'ok',
   /** Calendar refresh is a convenience too. */
   refreshCalendar: 'ok',
+  /**
+   * The Trading 212 quote refresh is the only live price source without market-data keys. It costs one subrequest and about
+   * one row per held symbol per run, so it may run until the budget is blocked (80 %); below that it is cheaper than the
+   * requests it saves the owner from waiting on.
+   */
+  refreshT212Quotes: 'warn',
   /** The Trading 212 sync keeps the holdings right: it runs below 80 %. */
   syncBroker: 'warn',
   /** Enrichment follows a change the owner just made. */

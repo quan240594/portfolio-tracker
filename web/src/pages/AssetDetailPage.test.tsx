@@ -95,6 +95,13 @@ describe('header', () => {
     expect(screen.getByText('No price available yet.')).toBeInTheDocument();
   });
 
+  it('shows the time and the source of a Trading 212 quote, and no source for others', async () => {
+    server.use(http.get('/api/assets/KO', () => HttpResponse.json(detailOf('KO', (d) => ({ ...d, quote: { ...d.quote!, asOf: new Date().toISOString(), provider: 't212' } })))));
+    await openAsset('/assets/KO?portfolio=all');
+    expect(screen.getByText(/ · As of .*\d{2}:\d{2} · Trading 212$/)).toBeInTheDocument();
+    expect(screen.queryByText('price may be outdated')).not.toBeInTheDocument();
+  });
+
   it('labels a price derived from the last close', async () => {
     server.use(http.get('/api/assets/KO', () => HttpResponse.json(detailOf('KO', (d) => ({ ...d, quote: { ...d.quote!, source: 'eod' as const } })))));
     await openAsset('/assets/KO?portfolio=all');

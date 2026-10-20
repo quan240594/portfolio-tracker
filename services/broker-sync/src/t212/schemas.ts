@@ -77,9 +77,34 @@ export const cashTransactionSchema = z.object({
 });
 export type CashTransaction = z.infer<typeof cashTransactionSchema>;
 
+/** A finite number, or undefined for anything else: a malformed value is dropped, never an error. */
+const lenientNumber = z.unknown().transform((v) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined));
+const lenientText = z.unknown().transform((v) => (typeof v === 'string' && v !== '' ? v : undefined));
+
+/** Account-currency view of a position. Every field is optional and a malformed value is dropped, never an error. */
+const positionWalletSchema = z.object({
+  currency: lenientText,
+  totalCost: lenientNumber,
+  currentValue: lenientNumber,
+  unrealizedProfitLoss: lenientNumber,
+  fxImpact: lenientNumber,
+});
+
+/**
+ * One open position (`GET /api/v0/equity/positions`). `quantity` and `instrument` are required (the reconciliation needs them);
+ * the price fields only feed the keyless quote refresh, so each one is optional and a wrongly typed one is ignored instead of
+ * dropping the position.
+ */
 export const positionSchema = z.object({
   instrument: instrumentSchema,
   quantity: z.number(),
+  /** Last price in the instrument's currency (London listings: possibly pence, see `resolvePrice`). */
+  currentPrice: lenientNumber,
+  averagePricePaid: lenientNumber,
+  walletImpact: z.unknown().transform((v) => {
+    const parsed = positionWalletSchema.safeParse(v);
+    return parsed.success ? parsed.data : undefined;
+  }),
 });
 export type OpenPosition = z.infer<typeof positionSchema>;
 

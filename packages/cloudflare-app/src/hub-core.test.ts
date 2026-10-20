@@ -3,7 +3,7 @@ import { usageSnapshotSchema } from '@portfolio/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { Browser } from '../test/browser.js';
 import { createNodeStack, type NodeStackOptions } from '../test/node-stack.js';
-import { TD_KEY } from '../test/fakes.js';
+import { AAPL_T212_PRICE, SAP_PRICE, T212_KEY, T212_SECRET, TD_KEY } from '../test/fakes.js';
 import { CORE_JOB_FACTORIES, type JobFactories } from './jobs.js';
 
 const HUB = 'https://hub.internal';
@@ -114,14 +114,14 @@ describe('HubCore', () => {
     const portfolio = (await api('POST', '/portfolios', { name: 'Quiet' })).body.portfolioId as string;
     await api('POST', '/transactions', { portfolioId: portfolio, date: '2026-01-05', type: 'BUY', symbol: 'SAP.DE', quantity: 1, price: 100, currency: 'EUR' });
     expect(stack.storage.rows("SELECT id FROM jobs WHERE job = 'enrichTransactions'")).toEqual([]);
-    expect(stack.storage.rows<{ name: string }>('SELECT name FROM schedules').map((row) => row.name)).toEqual(['broker-sync']);
+    expect(stack.storage.rows<{ name: string }>('SELECT name FROM schedules').map((row) => row.name)).toEqual(['broker-sync', 't212-quotes', 't212-quotes-close']);
   });
 
   it('wires a replaced price service: events become jobs, its schedules are kept, and the alarm runs it', async () => {
     const enrich = vi.fn<JobHandler<never>>(() => Promise.resolve({ done: true as const, result: 'enriched' }));
     const jobFactories: JobFactories = { ...CORE_JOB_FACTORIES, enrichTransactions: () => enrich as never, refreshPrices: () => enrich as never, refreshCalendar: () => enrich as never };
     const { stack, api } = await signedIn({ jobFactories });
-    expect(stack.storage.rows<{ name: string }>('SELECT name FROM schedules ORDER BY name').map((row) => row.name)).toEqual(['broker-sync', 'prices-calendar', 'prices-refresh']);
+    expect(stack.storage.rows<{ name: string }>('SELECT name FROM schedules ORDER BY name').map((row) => row.name)).toEqual(['broker-sync', 'prices-calendar', 'prices-refresh', 't212-quotes', 't212-quotes-close']);
     const portfolio = (await api('POST', '/portfolios', { name: 'Priced' })).body.portfolioId as string;
     await api('POST', '/transactions', { portfolioId: portfolio, date: '2026-01-05', type: 'BUY', symbol: 'SAP.DE', quantity: 1, price: 100, currency: 'EUR' });
     await stack.drain();
@@ -159,5 +159,30 @@ describe('HubCore', () => {
     const summary = await stack.core.marketData().refreshScheduled(new Date(stack.clock.ms));
     expect(summary).toMatchObject({ fxUpdated: true, failed: 0 });
     expect(stack.storage.rows("SELECT pk FROM items WHERE pk = 'FX#EUR' AND sk = 'LATEST'")).toHaveLength(1);
+  });
+
+  it('refreshes the Trading 212 quotes in the alarm of their slot with one request and a few rows, then sleeps until the next slot', async () => {
+    const { stack, api, ledger } = await signedIn();
+    const portfolio = (await api('POST', '/portfolios', { name: 'Slots' })).body.portfolioId as string;
+    expect((await api('PUT', '/brokers/trading212', { portfolioId: portfolio, apiKey: T212_KEY, apiSecret: T212_SECRET, environment: 'demo' })).status).toBe(204);
+    await api('POST', '/brokers/trading212/sync', { portfolioId: portfolio });
+    await stack.drain();
+    expect(stack.trading212.positionCalls()).toBe(1); // the refresh that follows the sync
+
+    const slot = stack.storage.rows<{ next_run_at: number }>("SELECT next_run_at FROM schedules WHERE name = 't212-quotes'")[0]!.next_run_at;
+    expect(slot).toBeGreaterThan(stack.clock.ms);
+    expect(slot - stack.clock.ms).toBeLessThanOrEqual(15 * 60_000);
+    stack.clock.ms = slot;
+    const written = ledger()[0]!.rows_written;
+    await stack.core.alarm();
+    expect(stack.trading212.positionCalls()).toBe(2);
+    expect(stack.core.platform.jobs.failedJobs()).toEqual([]);
+    expect(stack.core.platform.jobs.nextJobDueAt()).toBeNull();
+    expect(await stack.core.platform.items.get({ PK: 'TICKER#SAP.DE', SK: 'QUOTE#LATEST' })).toMatchObject({ price: SAP_PRICE, asOf: new Date(slot).toISOString(), source: 't212' });
+    expect(await stack.core.platform.items.get({ PK: 'TICKER#AAPL', SK: 'QUOTE#LATEST' })).toMatchObject({ price: AAPL_T212_PRICE, currency: 'USD' });
+    // 8 rows for two held symbols, i.e. 6 + one per symbol: the quotes, the status, the job row (insert, delete), the schedules and the ledger.
+    expect(ledger()[0]!.rows_written - written).toBeLessThanOrEqual(10);
+    // The next wake-up is the next 15-minute slot (the sync schedule or the quote schedule, whichever is first): nothing in between.
+    expect(stack.storage.alarm).toBe(slot + 15 * 60_000);
   });
 });
