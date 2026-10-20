@@ -3,9 +3,9 @@ import { HubCore } from '../src/hub-core.js';
 import { createWorker } from '../src/worker.js';
 import type { WorkerEnv } from '../src/runtime.js';
 import { SqlJsStorage, TestClock } from '@portfolio/cloudflare/testing';
-import type { MetricLimits } from '@portfolio/platform';
+import { parseLogosConfig, type MetricLimits } from '@portfolio/platform';
 import { parsePricesConfig } from '@portfolio/prices';
-import { FakeGithub, FakePrices, FakeTrading212, ORIGIN, OWNER_ID, TEST_CLIENT_ID, TEST_CLIENT_SECRET, TEST_SECRETS_KEY, TEST_SESSION_SECRET, route, type FakeRequest, type FakeService } from './fakes.js';
+import { FakeGithub, FakeLogos, FakePrices, FakeTrading212, ORIGIN, OWNER_ID, TEST_CLIENT_ID, TEST_CLIENT_SECRET, TEST_SECRETS_KEY, TEST_SESSION_SECRET, route, type FakeRequest, type FakeService } from './fakes.js';
 import type { Stack } from './browser.js';
 
 export const T0 = Date.UTC(2026, 0, 5, 12);
@@ -17,6 +17,8 @@ export interface NodeStackOptions {
   env?: Partial<WorkerEnv>;
   /** Environment of the price service (provider keys, tuning): none by default, i.e. no price source is on. */
   prices?: Record<string, string>;
+  /** Variables of the logo service (`LOGO_SOURCES`, `LOGO_HOURLY_LIMIT`, ...): the defaults when absent. */
+  logos?: Record<string, string>;
   /** Extra outbound services, tried before the built-in fakes. */
   services?: FakeService[];
 }
@@ -35,16 +37,18 @@ export async function createNodeStack(options: NodeStackOptions = {}): Promise<S
   const trading212 = new FakeTrading212();
   const clock = new TestClock(T0);
   const prices = new FakePrices(() => clock.ms);
-  const services = [...(options.services ?? []), github.service, trading212.service, prices.service];
+  const logos = new FakeLogos();
+  const services = [...(options.services ?? []), github.service, trading212.service, prices.service, logos.service];
   const outbound = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const reply = route(services, asFakeRequest(input, init));
+    if (reply.bytes !== undefined) return Promise.resolve(new Response(reply.bytes as Uint8Array<ArrayBuffer>, { status: reply.status, headers: reply.headers }));
     return Promise.resolve(Response.json(reply.json ?? null, { status: reply.status, headers: reply.headers }));
   };
   const storage = await SqlJsStorage.create();
   const vars = { ORIGIN, OWNER_GITHUB_ID: String(OWNER_ID), GITHUB_CLIENT_ID: TEST_CLIENT_ID, GITHUB_CLIENT_SECRET: TEST_CLIENT_SECRET, SESSION_SECRET: TEST_SESSION_SECRET, SECRETS_KEY: TEST_SECRETS_KEY };
   const core = new HubCore(
     { storage, blockConcurrencyWhile: (callback) => callback() },
-    { secretsKey: TEST_SECRETS_KEY, origin: ORIGIN, baseCurrency: 'EUR', brokerSecretPrefix: '/test/broker/trading212', symbolOverrides: {}, prices: parsePricesConfig(options.prices ?? {}) },
+    { secretsKey: TEST_SECRETS_KEY, origin: ORIGIN, baseCurrency: 'EUR', brokerSecretPrefix: '/test/broker/trading212', symbolOverrides: {}, prices: parsePricesConfig(options.prices ?? {}), logos: parseLogosConfig(options.logos ?? {}) },
     { now: clock.now, limits: options.limits, jobFactories: options.jobFactories, fetch: outbound, sleep: () => Promise.resolve(), queue: { baseBackoffMs: 1_000 } },
   );
   await core.start();
@@ -68,6 +72,7 @@ export async function createNodeStack(options: NodeStackOptions = {}): Promise<S
     github,
     trading212,
     prices,
+    logos,
     storage,
     core,
     clock,

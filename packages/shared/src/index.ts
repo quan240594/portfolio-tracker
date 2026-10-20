@@ -34,4 +34,6 @@ export * from './asset-detail.js';
 export * from './usage-api.js';
 export * from './classification.js';
 export * from './classification-csv.js';
+export * from './logo-domains.js';
+export * from './logo-domain-table.js';
 export * from './instrument-baseline.js';

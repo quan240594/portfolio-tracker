@@ -16,7 +16,7 @@ import type { ExecutionContextLike, HubStub, ScheduledControllerLike, WorkerEnv 
 type Identify = IdentityResolver<Request>['identify'];
 type Ready = { ok: true; auth: (request: Request) => Promise<Response | undefined>; identify: Identify; origin: string } | { ok: false; problems: string[] };
 
-const FORWARDED_HEADERS = ['content-type', 'accept'] as const;
+const FORWARDED_HEADERS = ['content-type', 'accept', 'if-none-match'] as const;
 const NO_BODY_METHODS = new Set(['GET', 'HEAD']);
 
 const isApiPath = (pathname: string): boolean => pathname === '/usage' || pathname === '/api' || pathname.startsWith('/api/');

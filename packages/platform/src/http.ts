@@ -26,6 +26,8 @@ export interface PortableResponse {
   /** Lower-case header names. */
   headers: Record<string, string>;
   body: string;
+  /** Binary body (a stored logo); when present it is sent instead of `body`. Only the Fetch adapter understands it (the AWS handlers never set it). */
+  bytes?: Uint8Array;
   /** `Set-Cookie` header values, one entry per cookie (a header map cannot hold several). */
   cookies?: string[];
 }

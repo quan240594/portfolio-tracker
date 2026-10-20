@@ -1,3 +1,5 @@
+import { normalizeDomain } from '@portfolio/shared';
+
 /** Defensive value parsing shared by the providers (mirrors `prices/providers/base.py`). */
 
 const DECIMAL = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
@@ -35,6 +37,9 @@ export function positiveNumber(value: unknown): number | null {
 export const asText = (value: unknown): string => (typeof value === 'string' || typeof value === 'number' ? String(value) : '');
 
 export const nonEmpty = (value: unknown): string | undefined => (typeof value === 'string' && value !== '' ? value : undefined);
+
+/** A provider's company website as a bare public domain (`https://www.apple.com` -> `apple.com`); anything that is not one is absent. */
+export const websiteDomain = (value: unknown): string | undefined => (typeof value === 'string' ? normalizeDomain(value) : undefined);
 
 /** Provider free text: trimmed, whitespace collapsed, capped at `limit`; placeholders like "None" or "-" mean absent. */
 export function cleanText(value: unknown, limit = MAX_DESCRIPTION_CHARS): string | undefined {

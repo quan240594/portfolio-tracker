@@ -104,6 +104,35 @@ describe('EditClassificationDialog', () => {
     expect(puts[1]!.body).toEqual({ assetClass: 'COMMODITY', country: 'Invented Land' });
   });
 
+  it('saves the website domain of the logo alone, and keeps it when another field changes', async () => {
+    const puts = recordPuts();
+    const { user, dialog, onClose } = open(AAPL);
+    expect(dialog.getByLabelText('Website domain')).toHaveValue('');
+    await user.type(dialog.getByLabelText('Website domain'), ' https://www.apple.com/mac ');
+    await user.click(dialog.getByRole('button', { name: 'Save classification' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(puts).toEqual([{ path: '/api/classification/AAPL', body: { domain: 'https://www.apple.com/mac' } }]);
+  });
+
+  it('shows the stored website domain and sends it again when another field changes', async () => {
+    const puts = recordPuts();
+    const { user, dialog } = open({ ...AAPL, override: { domain: 'apple.com' } });
+    expect(dialog.getByLabelText('Website domain')).toHaveValue('apple.com');
+    await user.type(dialog.getByLabelText('Sector'), ' x');
+    await user.click(dialog.getByRole('button', { name: 'Save classification' }));
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]!.body).toEqual({ sector: 'Technology x', domain: 'apple.com' });
+  });
+
+  it('refuses a website domain that is not one, naming the field', async () => {
+    const puts = recordPuts();
+    const { user, dialog } = open(AAPL);
+    await user.type(dialog.getByLabelText('Website domain'), 'not a domain');
+    await user.click(dialog.getByRole('button', { name: 'Save classification' }));
+    expect(dialog.getByRole('alert')).toHaveTextContent('Website domain: Enter a website domain such as apple.com');
+    expect(puts).toEqual([]);
+  });
+
   it('asks for a change instead of sending an empty override', async () => {
     const puts = recordPuts();
     const { user, dialog, onClose } = open(AAPL);

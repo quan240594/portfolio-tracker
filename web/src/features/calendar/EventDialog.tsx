@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import type { CalendarEvent } from '@portfolio/shared';
+import { CompanyLogo } from '../../components/CompanyLogo';
 import { Dialog } from '../../components/Dialog';
 import { formatDate, formatMoney, formatQuantity, formatWeekdayDate } from '../../lib/format';
 import { EVENT_META, STATUS_LABELS, isDividend, sourceLabel } from './calendarModel';
@@ -92,7 +93,7 @@ export function EventDialog({ event, baseCurrency, onClose, withScope }: Readonl
       }
     >
       <div className="mb-3 flex items-center gap-2">
-        <EventMarker type={event.type} className="h-6 w-6" />
+        <CompanyLogo symbol={event.symbol} name={event.name} size={40} decorative badge={<EventMarker type={event.type} className="h-5 w-5" />} className="mr-1" />
         <p className="font-medium">{event.name}</p>
       </div>
       <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">

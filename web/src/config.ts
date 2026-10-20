@@ -9,6 +9,14 @@ export const API_BASE_URL: string = trimTrailingSlashes(import.meta.env.VITE_API
 export const USE_MOCKS: boolean =
   import.meta.env.VITE_USE_MOCKS === 'true' || import.meta.env.MODE === 'mock';
 
+/**
+ * Whether company logos are requested from the server (`GET /api/logos/<symbol>`). Off in the demo (mock mode, the GitHub Pages
+ * build) and in unit tests, where every logo is the neutral monogram and no request is made; `VITE_LOGOS=on` turns it on in mock
+ * mode (the Playwright run that checks the image path), `VITE_LOGOS=off` turns it off everywhere.
+ */
+export const LOGOS_ENABLED: boolean =
+  import.meta.env.VITE_LOGOS === 'on' || (import.meta.env.VITE_LOGOS !== 'off' && !USE_MOCKS && import.meta.env.MODE !== 'test');
+
 /** Accepts only a credential-free https URL; anything else (http, javascript:, garbage, empty) yields undefined. */
 export function parseRealAppUrl(value: string | undefined): string | undefined {
   const trimmed = value?.trim();

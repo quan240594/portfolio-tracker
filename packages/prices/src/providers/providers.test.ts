@@ -45,6 +45,14 @@ describe('quota and pacing', () => {
   });
 });
 
+describe('Twelve Data profile website', () => {
+  it('stores the website of the profile as a bare domain', async () => {
+    const fake = new FakeFetch().add('/profile', { name: 'Aaa Inc', type: 'Common Stock', currency: 'USD', website: 'https://www.aaa.example.com/' });
+    const twelve = new TwelveDataProvider({ apiKey: 'k', http: http(fake, 'twelvedata'), bucket: bucket(), quota: quota('twelvedata', 100), now: () => NOW });
+    expect((await twelve.getProfile('AAA'))?.website).toBe('aaa.example.com');
+  });
+});
+
 describe('Twelve Data', () => {
   it('rethrows a retryable profile failure and survives an unexpected body', async () => {
     const down = new FakeFetch().add('/profile', { status: 503 });
@@ -62,6 +70,15 @@ describe('Alpha Vantage', () => {
     const av = new AlphaVantageProvider({ apiKey: 'k', http: http(new FakeFetch(), 'alphavantage'), bucket: bucket(), quota: quota('alphavantage', 25), now: () => NOW });
     await expect(av.getEodHistory('AAPL')).rejects.toBeInstanceOf(ProviderError);
     await expect(av.getDividends('AAPL')).rejects.toThrow('profiles only');
+  });
+
+  it('keeps the official site as a bare public domain and drops one that is not', async () => {
+    const overview = (site: unknown) => ({ Symbol: 'AAA', Name: 'Aaa Inc', AssetType: 'Common Stock', Currency: 'USD', OfficialSite: site });
+    const profile = async (site: unknown) =>
+      new AlphaVantageProvider({ apiKey: 'k', http: http(new FakeFetch().add('OVERVIEW', overview(site)), 'alphavantage'), bucket: bucket(), quota: quota('alphavantage', 25), now: () => NOW }).getProfile('AAA');
+    expect((await profile('https://www.aaa.example.com/investors'))?.website).toBe('aaa.example.com');
+    expect(await profile('None')).not.toHaveProperty('website');
+    expect(await profile(42)).not.toHaveProperty('website');
   });
 
   it('reads a body that is not an object as "unknown symbol"', async () => {

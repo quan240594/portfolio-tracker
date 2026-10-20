@@ -3,7 +3,7 @@ import { ProviderError, RateLimitError } from '../errors.js';
 import type { HttpClient } from '../http.js';
 import type { DailyQuota, TokenBucket } from '../limits.js';
 import { makeProfile } from '../models.js';
-import { asFloat, cleanText, isRecord, nonEmpty, ownValue, positiveNumber, titleCase, type JsonRecord } from '../parse.js';
+import { asFloat, cleanText, isRecord, nonEmpty, ownValue, positiveNumber, titleCase, websiteDomain, type JsonRecord } from '../parse.js';
 import { utcDay } from '../time.js';
 import { COUNTRY_NAMES, assetClassFromType } from './twelvedata.js';
 import { failureOf, type PriceBatch, type PriceSource } from './base.js';
@@ -57,6 +57,7 @@ export class AlphaVantageProvider implements PriceSource {
       peRatio,
       fundamentalsAsOf: peRatio === undefined ? undefined : utcDay(this.options.now()),
       description: cleanText(data.Description),
+      website: websiteDomain(data.OfficialSite),
       marketCap: positiveNumber(data.MarketCapitalization) ?? undefined,
       eps: asFloat(data.EPS) ?? undefined,
       beta: asFloat(data.Beta) ?? undefined,

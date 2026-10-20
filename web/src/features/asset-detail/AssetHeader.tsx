@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { isQuoteStale, type AssetDetailResponse, type AssetProfileInfo } from '@portfolio/shared';
 import { useWatchlist, useWatchlistMutations } from '../../api/management-hooks';
 import { Change } from '../../components/Change';
+import { CompanyLogo } from '../../components/CompanyLogo';
 import { formatDate, formatDateTime, formatMoney, formatPercent } from '../../lib/format';
 import { useAssetClassification } from '../classification/useAssetClassification';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
@@ -121,7 +122,7 @@ export function AssetHeader({ detail }: Readonly<{ detail: AssetDetailResponse }
       <section aria-label={`${profile.name} overview`} className="card mb-5 p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-4">
-            <Monogram name={profile.name} symbol={profile.symbol} />
+            <CompanyLogo symbol={profile.symbol} name={profile.name} size={56} decorative fallback={<Monogram name={profile.name} symbol={profile.symbol} />} />
             <div className="min-w-0">
               <h1 className="text-2xl font-semibold tracking-tight break-words">{profile.name}</h1>
               <p className="muted text-sm">{meta.join(' · ') || DASH}</p>

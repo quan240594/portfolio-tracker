@@ -4,11 +4,11 @@ import { errorMessage } from '../../api/client';
 import { useResetClassification, useSaveClassification } from '../../api/classificationHooks';
 import { Dialog } from '../../components/Dialog';
 import { ASSET_CLASS_LABELS } from '../assets/AssetDialog';
-import { fieldsToSend, initialForm, validateFields, type ClassificationForm } from './classificationForm';
+import { DOMAIN_LABEL, fieldsToSend, initialForm, validateFields, type ClassificationForm } from './classificationForm';
 import { BASE_LABELS, FIELD_LABELS, SOURCE_LABELS, valueLabel } from './labels';
 
 const ALERT_CLASS = 'rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200';
-const TEXT_LIMITS = { name: 120, sector: 60, country: 60 } as const;
+const TEXT_LIMITS = { name: 120, sector: 60, country: 60, domain: 300 } as const;
 
 interface FieldProps {
   field: ClassificationField;
@@ -35,6 +35,7 @@ function Field({ field, instrument, children }: Readonly<FieldProps>) {
 
 /** Edit the owner's classification of one symbol: name, asset class, sector and country, with the automatic values shown beside them. */
 export function EditClassificationDialog({ instrument, onClose }: Readonly<{ instrument: ClassificationInstrument; onClose: () => void }>) {
+  const domainId = useId();
   const save = useSaveClassification();
   const reset = useResetClassification();
   const [form, setForm] = useState<ClassificationForm>(() => initialForm(instrument));
@@ -99,6 +100,26 @@ export function EditClassificationDialog({ instrument, onClose }: Readonly<{ ins
           <Field field="country" instrument={instrument}>
             {({ id, hintId }) => <input id={id} className="input" value={form.country} maxLength={TEXT_LIMITS.country} aria-describedby={hintId} onChange={(e) => set('country', e.target.value)} />}
           </Field>
+        </div>
+        <div>
+          <label className="label" htmlFor={domainId}>
+            {DOMAIN_LABEL}
+          </label>
+          <input
+            id={domainId}
+            className="input"
+            value={form.domain}
+            maxLength={TEXT_LIMITS.domain}
+            placeholder="apple.com"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            aria-describedby={`${domainId}-hint`}
+            onChange={(e) => set('domain', e.target.value)}
+          />
+          <p id={`${domainId}-hint`} className="muted mt-1 text-xs break-words">
+            Optional. The company website the logo is looked up by, for when the logo is missing or wrong. Leave it empty to detect it automatically.
+          </p>
         </div>
         {error !== null && (
           <p role="alert" className={ALERT_CLASS}>

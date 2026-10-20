@@ -33,7 +33,7 @@ export function makeDividend(dividend: DividendEvent): DividendEvent {
 export const makeProfile = (profile: InstrumentProfile): InstrumentProfile => definedOnly(profile);
 
 /** The optional company details of a profile (the fields a lazy refresh may overwrite). */
-export const PROFILE_DETAIL_FIELDS = ['description', 'isin', 'marketCap', 'eps', 'beta', 'peRatio'] as const;
+export const PROFILE_DETAIL_FIELDS = ['description', 'website', 'isin', 'marketCap', 'eps', 'beta', 'peRatio'] as const;
 
 export function profileDetails(profile: InstrumentProfile | null): Partial<InstrumentProfile> {
   const out: Record<string, unknown> = {};

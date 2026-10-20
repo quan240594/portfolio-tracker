@@ -2863,3 +2863,115 @@ the user's local time zone with a 24-hour clock.
 Not covered, by design: ISO data formats (API payloads, `.ics` `DTSTART`/description lines, error messages that quote the stored `YYYY-MM-DD`)
 and the native `<input type="date">` pickers, which the browser renders in its own locale. Tests build expectations without the code under test
 (`web/src/test/localTime.ts`) and in local time, so they hold in any time zone.
+
+## Company logos
+
+The calendar (list, month grid and event dialog), the asset detail header, the holdings table and the dashboard's top holdings show the
+company logo of each security. **No logo file is in the repository**: logos are trademarks, fetched at runtime by the server and used only to
+identify the holding. Where there is none (the demo, no logo found, a broken image) a neutral monogram of the same shape is shown, so the screens
+never depend on a logo being there.
+
+### Flow
+
+```
+browser  GET /api/logos/SAP.DE   (same origin, session cookie, like the rest of /api)
+  Worker   sign-in + same-origin check, forwards If-None-Match
+  Hub      withBudget (counted like any request)
+           resolve the domain:  override > provider website > curated table > ETF issuer prefix   (2 rows read)
+           LogoStore.get(domain)
+             found    -> 200 bytes, ETag, Cache-Control: private, max-age=86400   (304 on If-None-Match)
+             missing  and not yet due again -> 404, Cache-Control: private, max-age=3600
+             unknown  -> hourly cap, usage guard, then ONE lookup: the sources in order, first valid image wins,
+                         stored as one row (found, or "missing" with its retry time)
+```
+
+The browser never contacts a third party: it only asks its own origin. The upstream service sees the **public company domain** (for example
+`sap.com`) and the Worker's IP, nothing else: no cookie, no referrer, no account, no symbol, and never the list of holdings (lookups are lazy, one
+domain at a time, only when the screen shows that symbol and nobody fetched the domain before; the five iShares ETFs share one row).
+
+### Domain resolution (`packages/shared/src/logo-domains.ts`, table in `logo-domain-table.ts`)
+
+Precedence: **owner override > provider website > curated table > issuer prefix**.
+
+| Level | Source | Notes |
+|---|---|---|
+| 1 | `domain` of the classification override (`PUT /classification/{symbol}`) | An optional "Website domain" input in *Edit classification*. A URL is accepted and stored as the bare domain (`https://www.Apple.com/mac` becomes `apple.com`); IP addresses, `localhost`, ports and credentials are refused. `Reset to automatic` removes it with the rest of the override. |
+| 2 | `website` of the stored provider profile | Filled from Alpha Vantage `OVERVIEW.OfficialSite` and Twelve Data `/profile.website`, normalised the same way. EODHD's search endpoint carries no website, so it adds none (follow-up: `General.WebURL` of the fundamentals call). It is in `PROFILE_DETAIL_FIELDS`, so the lazy details refresh keeps it up to date. |
+| 3 | curated table | 484 entries (233 in the US table, 251 for the other markets: US large caps plus the home markets Xetra/Frankfurt, Euronext Amsterdam and Paris, Milan, London, Madrid, SIX, Brussels and the Nordics). Only domains known for certain are listed. The key is the ticker without exchange suffix, per market, because tickers collide (`MRK` is Merck & Co, `MRK.DE` is Merck KGaA, `SAN.PA` Sanofi, `SAN.MC` Santander, `BA` Boeing, `BA.L` BAE Systems). A symbol is looked up in the table of its own suffix first, then in the US table (cross-listings: `AAPL.DE`, `ASML.AS` and `ASML` all give `asml.com`). |
+| 4 | ETF issuer prefix of the name | iShares, Invesco, VanEck, WisdomTree (the four issuers of the owner's ETFs and ETCs) plus Vanguard, SPDR, Xtrackers, Amundi, Global X, HANetf, Franklin, ProShares, First Trust, Fidelity and PIMCO, matched as a whole first word of the effective name (override name before profile name). |
+
+**Fixing a wrong or missing logo:** open the security, *Edit classification*, type the company's website in *Website domain* and save. The new
+domain is looked up once (a different domain is a different row, so nothing stale is reused). The browser keeps a logo for a day
+(`max-age=86400`), so reload the page (hard reload if it still shows the old one) to see the change at once.
+
+### Sources (`packages/platform/src/logos/sources.ts`)
+
+`LogoSource` is `{ name, fetchLogo(domain, options) }` over `fetch`; `LOGO_SOURCES` (a Worker variable, comma separated, order = priority, `off`
+= no logos) picks and orders them. Default `logodev,google,duckduckgo`:
+
+| Name | URL | Notes |
+|---|---|---|
+| `logodev` | `https://img.logo.dev/<domain>?token=…&size=128&format=png&fallback=404` | Token-based; **off unless the Worker secret `LOGO_DEV_TOKEN` is set** (`wrangler secret put LOGO_DEV_TOKEN`), then tried first. Not in the free path. |
+| `google` | `https://www.google.com/s2/favicons?domain=<domain>&sz=128` | Keyless, up to 128 px. |
+| `duckduckgo` | `https://icons.duckduckgo.com/ip3/<domain>.ico` | Keyless, usually smaller. Known to answer image data under an icon content type: PNG/JPEG/WebP data under `image/x-icon` or `image/vnd.microsoft.icon` is accepted (the bytes decide the type), a real `.ico` container is not. |
+
+Clearbit's logo API was shut down and is not used. **The terms of use of the keyless services are not guaranteed**: they are public endpoints
+meant for favicons, used here at a trickle (see the cost below) for personal identification of holdings. Nothing in the app depends on them: if
+a service disappears, changes its terms or starts answering something else, remove it from `LOGO_SOURCES` (no deploy of code needed, only the
+variable) or add a source (a class with `fetchLogo`, registered in `createLogoSources`); with no source left every logo is the monogram.
+
+Strict validation of every download (`image.ts`): the status must be 200 (404/410 = not found), the declared content type one of `image/png`,
+`image/jpeg`, `image/webp`, `image/svg+xml`, the bytes must really be that type (HTML under an image type is refused by its first bytes), at most
+`MAX_LOGO_BYTES` (40 000; the declared length and the streamed body are both checked, a stalled body ends with the 4 s deadline), nothing is rewritten or stripped. Placeholders: a picture
+with a side under 32 px is refused (the services answer a 16 px globe when they have nothing), and `placeholderHashes` (SHA-256 of the exact bytes
+of a known default icon) can list more. An SVG with `<script>`, `<foreignObject>`, `<iframe>`, `<embed>`, `<object>`, event handlers or
+`javascript:` is refused, and an SVG served as a page carries `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox`.
+
+### Storage and caching
+
+`LogoStore` (`packages/platform/src/logos/store.ts`) is a port; `ItemLogoStore` keeps one item per domain over the `ItemStore` (key
+`PK = LOGO#<domain>`, `SK = LOGO`, shared by users because a logo says nothing about the owner): `status`, `contentType`, the bytes as base64
+(about 54 KB at the cap, far below the 2 MB row limit), `size`, `etag` (SHA-256 prefix), `source`, `fetchedAt`. `putFound` refuses more than the cap
+(`LogoTooLargeError`). A domain no source had a logo for is stored as `missing` with `retryAfter` (7 days, `LOGO_NEGATIVE_TTL_DAYS`; **one hour**
+after a timeout, network error or 5xx/429, which may pass). A found logo is never fetched again.
+
+Responses: `Cache-Control: private, max-age=86400` and a strong `ETag` (a conditional request is a `304` with no body), `X-Content-Type-Options: nosniff`.
+A miss is a `404` with `private, max-age=3600`. The web remembers a failed symbol for the session (a module-level set), so a list of rows never retries per row. An
+AWS deployment has no logo route: its API answers 404 (or 403/501 from the gateway) and the screens show monograms; one request per symbol per session.
+
+### Cost and limits
+
+Per **new** logo: one request of the Hub, 2 rows read (override and profile) + 1 (logo), up to 3 outbound subrequests (one per source, a `SubrequestBudget`
+of 8 per lookup, so a lookup can never pass the 50 of the free plan) and **1 row written** (the found or missing note). A stored logo costs one
+request and 3 rows read, only when the browser's copy is older than a day (then it is a `304`, a few hundred bytes). First load of the owner's 26
+securities: at most 26 lookups, about 78 outbound calls over a few seconds and 26 rows written, once; after that the daily cost is about 26 requests and
+78 rows read per browser (of 100 000 and 5 000 000). Guards: `LOGO_HOURLY_LIMIT` (default 30 lookups per clock hour, in memory, `0` = serve stored logos only), the budget guard
+(`guardJob` with the job name `fetchLogo`: a lookup gives way from 60 % of any cap, a stored logo is served until the budget blocks), and one lookup
+per domain at a time (concurrent requests share it). Over the cap a lookup answers `429` with `Retry-After` and is not remembered as "no logo".
+
+### Web
+
+`CompanyLogo` (`web/src/components/CompanyLogo.tsx`): an `<img>` with explicit `width`/`height`, `loading="lazy"`, `decoding="async"`, `object-fit: contain`, in a rounded
+white container with a ring (dark and transparent logos stay legible in both themes); `alt=""` when the name or symbol is written next to it, else the company name; on error,
+or when logos are off, the monogram (first two letters of the symbol, drawn by CSS so copying the page never picks them up) in a box of the same size, so nothing
+shifts. **Logos are off in the demo (mock mode, the GitHub Pages build) and in unit tests** (`LOGOS_ENABLED` in `web/src/config.ts`; `VITE_LOGOS=on`/`off` overrides): no request to
+`/api/logos` is made there. In the calendar the **event type** was the letter badge; it is now a small marker (shape + letter, `EventMarker`) at the corner of the
+logo, always accompanied by the type in words on the row (second line), in the accessible name (`AAPL, Ex-dividend, confirmed, …`) and the chip's `title`; the
+status stays in the coloured left border and the status chip, so no meaning is carried by colour alone. The legend in the controls is unchanged.
+
+Also shown on: the asset detail header (the existing coloured monogram is its fallback), the holdings table and cards, the dashboard's top holdings. **Follow-ups not done**: the
+Dividends page has no per-security list (only chart tooltips), the Assets (securities) page and the watchlist rows, and EODHD `General.WebURL` as a provider website.
+
+### Tests and what is not verified
+
+```bash
+pnpm --filter @portfolio/shared test:coverage        # logo-domains.test.ts: table format, every precedence level, suffixes, issuer prefix, unknown
+pnpm --filter @portfolio/platform test:coverage      # logos/: image validation, sources with a fake fetch, store cap, service (once, negative cache, hourly cap), route (304, 404, 429)
+pnpm --filter @portfolio/cloudflare-app test         # test/logos-suite.ts on Node and on Miniflare/workerd with fake icon services (auth, once-only fetch, ETag/304, override, cap, off, token source)
+pnpm --filter @portfolio/web test:coverage && (cd web && pnpm exec playwright test e2e/company-logos.spec.ts)   # monogram in the demo, image path with VITE_LOGOS=on, 320 and 1280 px, no overflow
+```
+
+**Not verified against the real services** (this was built without network access to them): that Google's favicon endpoint and DuckDuckGo's icon endpoint are
+still reachable without a key and what they answer for an unknown domain (the size check and `placeholderHashes` are there because the default icon could not be captured as a fixture;
+no hash is shipped), the exact content types and sizes they return, whether Google's redirect to its image host is followed as assumed, the logo.dev URL and the
+meaning of `fallback=404`, and every domain of the curated table against the live service (the entries were checked for format and uniqueness, not by fetching).

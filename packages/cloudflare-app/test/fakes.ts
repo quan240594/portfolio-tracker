@@ -3,6 +3,8 @@
  * They are plain functions from a minimal request to a plain reply, so the same fakes serve the Node tests (injected
  * `fetch`) and the workerd tests (Miniflare's `outboundService`), each side turning the reply into its own `Response`.
  */
+import { pngBytes } from '@portfolio/platform/testing';
+
 export interface FakeRequest {
   url: string;
   method: string;
@@ -12,6 +14,8 @@ export interface FakeRequest {
 export interface FakeReply {
   status: number;
   json?: unknown;
+  /** A binary body (an image); wins over `json`. */
+  bytes?: Uint8Array;
   headers?: Record<string, string>;
 }
 
@@ -176,4 +180,36 @@ export class FakePrices {
   private history(): { datetime: string; close: string }[] {
     return Array.from({ length: 5 }, (_, i) => ({ datetime: new Date(this.clock() - (4 - i) * 86_400_000).toISOString().slice(0, 10), close: String(100 + i) }));
   }
+}
+
+/**
+ * The keyless icon services the Hub's logo lookups reach (no real network): Google's favicon endpoint answers a 128 px PNG for the
+ * domains in `known`, everything else is a 404; DuckDuckGo's icon endpoint has nothing, and the token-based service answers only a request that carries `LOGO_DEV_TEST_TOKEN`. Every request is recorded, so a test can
+ * count the lookups that left the Hub.
+ */
+export const LOGO_DEV_TEST_TOKEN = 'test-logodev-token';
+
+export class FakeLogos {
+  readonly requests: string[] = [];
+  /** Domains the fake Google service has a logo for. */
+  readonly known = new Set(['apple.com', 'ishares.com']);
+  readonly png = pngBytes(128, 128);
+
+  readonly service: FakeService = (request) => {
+    const url = new URL(request.url);
+    if (url.host === 'www.google.com' && url.pathname === '/s2/favicons') {
+      this.requests.push(request.url);
+      return this.known.has(url.searchParams.get('domain') ?? '') ? { status: 200, bytes: this.png, headers: { 'content-type': 'image/png' } } : { status: 404, json: null };
+    }
+    if (url.host === 'img.logo.dev') {
+      this.requests.push(request.url);
+      const allowed = url.searchParams.get('token') === LOGO_DEV_TEST_TOKEN && this.known.has(url.pathname.slice(1));
+      return allowed ? { status: 200, bytes: this.png, headers: { 'content-type': 'image/png' } } : { status: 404, json: null };
+    }
+    if (url.host === 'icons.duckduckgo.com') {
+      this.requests.push(request.url);
+      return { status: 404, json: null };
+    }
+    return undefined;
+  };
 }

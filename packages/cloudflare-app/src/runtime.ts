@@ -56,6 +56,15 @@ export interface HubEnv {
   CALENDAR_RECHECK_DAYS?: string;
   CALENDAR_REFRESH_DIVIDENDS?: string;
   CALENDAR_SPLIT_LOOKBACK_DAYS?: string;
+  /**
+   * Company logos (all optional, see `parseLogosConfig`): `LOGO_SOURCES` (comma separated, order = priority, `off` = none; default
+   * `logodev,google,duckduckgo`), `LOGO_HOURLY_LIMIT` (default 30), `LOGO_NEGATIVE_TTL_DAYS` (default 7) and the Worker secret
+   * `LOGO_DEV_TOKEN` that switches the token-based source on.
+   */
+  LOGO_SOURCES?: string;
+  LOGO_HOURLY_LIMIT?: string;
+  LOGO_NEGATIVE_TTL_DAYS?: string;
+  LOGO_DEV_TOKEN?: string;
 }
 
 /** Everything the Worker reads on top of the Hub's variables. */

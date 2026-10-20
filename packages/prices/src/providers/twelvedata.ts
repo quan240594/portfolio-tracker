@@ -6,7 +6,7 @@ import { ProviderError, RateLimitError, RetryableProviderError, SymbolNotFoundEr
 import type { HttpClient } from '../http.js';
 import { resetOf, spendCredits, type DailyQuota, type MinuteQuota, type ProviderGate, type TokenBucket } from '../limits.js';
 import { makeQuote, normalizeCurrency } from '../models.js';
-import { asFloat, chunks, cleanText, definedOnly, dayOf, isRecord, nonEmpty, ownValue, type JsonRecord } from '../parse.js';
+import { asFloat, chunks, cleanText, definedOnly, dayOf, isRecord, nonEmpty, ownValue, websiteDomain, type JsonRecord } from '../parse.js';
 import { countryFor } from '../symbols.js';
 import { fromEpochSeconds } from '../time.js';
 import { clampRange, quotesToBatch, type PriceBatch, type PriceSource } from './base.js';
@@ -207,6 +207,7 @@ export class TwelveDataProvider implements PriceSource {
       country: country === undefined ? undefined : (ownValue(COUNTRY_NAMES, country) ?? country),
       exchange: nonEmpty(raw.exchange),
       description: cleanText(raw.description),
+      website: websiteDomain(raw.website),
     });
   }
 

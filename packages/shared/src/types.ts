@@ -77,6 +77,8 @@ export interface InstrumentProfile {
   beta?: number;
   /** YYYY-MM-DD the optional details above were last fetched; drives the lazy refresh TTL. */
   detailsAsOf?: string;
+  /** Company website as a bare public domain (a provider reports a URL, it is stored normalised); only used to look up the logo, see logo-domains.ts. */
+  website?: string;
   /** See `ProfileSource`; absent = `provider`. */
   profileSource?: ProfileSource;
   /** YYYY-MM-DD the enrichment job stored this symbol's history; only needed for profiles that are not from a provider. */

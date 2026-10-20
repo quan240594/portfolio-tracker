@@ -13,6 +13,7 @@
  * - POST   /classification/import     body = ClassificationImportRequest (max 1 MB); `dryRun` only reports what would change
  */
 import { z } from 'zod';
+import { normalizeDomain } from './logo-domains.js';
 import { ASSET_CLASSES, PROFILE_SOURCES, type AssetClass, type InstrumentProfile, type ProfileSource } from './types.js';
 
 export const CLASSIFICATION_ROUTES = {
@@ -32,12 +33,16 @@ export const classificationKeys = {
   prefix: 'CLASS#',
 } as const;
 
-/** The four fields an owner can override; every field is optional and an absent one falls through to the profile. */
+/**
+ * What an owner can override; every field is optional and an absent one falls through to the profile. `domain` is the website
+ * domain the company logo is looked up by (stored normalised, e.g. `apple.com`); it is not an allocation field and never reaches the profile.
+ */
 export interface ClassificationFields {
   name?: string;
   assetClass?: AssetClass;
   sector?: string;
   country?: string;
+  domain?: string;
 }
 
 export const CLASSIFICATION_FIELDS = ['name', 'assetClass', 'sector', 'country'] as const;
@@ -57,10 +62,22 @@ const text = (max: number) => z.string().trim().min(1).max(max);
 
 const fieldShape = { name: text(120).optional(), assetClass: z.enum(ASSET_CLASSES).optional(), sector: text(60).optional(), country: text(60).optional() };
 
-export const classificationFieldsSchema = z.object(fieldShape).strict();
+/** A website domain or URL the owner typed, stored as the bare normalised domain (`https://www.apple.com/` -> `apple.com`). */
+const domainField = z
+  .string()
+  .trim()
+  .min(1)
+  .max(300)
+  .transform((value, ctx) => {
+    const domain = normalizeDomain(value);
+    if (domain === undefined) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Enter a website domain such as apple.com' });
+    return domain ?? z.NEVER;
+  });
+
+export const classificationFieldsSchema = z.object({ ...fieldShape, domain: domainField.optional() }).strict();
 
 /** `PUT` body: the fields to store, at least one. */
-export const classificationPutSchema = classificationFieldsSchema.refine((fields) => hasClassification(fields), 'Give at least one of name, assetClass, sector or country');
+export const classificationPutSchema = classificationFieldsSchema.refine((fields) => hasClassification(fields), 'Give at least one of name, assetClass, sector, country or website domain');
 
 const isin = z
   .string()
@@ -89,7 +106,7 @@ export const classificationImportSchema = z
   .strict();
 export type ClassificationImportRequest = z.input<typeof classificationImportSchema>;
 
-export const hasClassification = (fields: ClassificationFields): boolean => CLASSIFICATION_FIELDS.some((field) => fields[field] !== undefined);
+export const hasClassification = (fields: ClassificationFields): boolean => CLASSIFICATION_FIELDS.some((field) => fields[field] !== undefined) || fields.domain !== undefined;
 
 /** The fields that are set, nothing else (a stored item or a request body may carry other attributes). */
 export function classificationFieldsOf(source: ClassificationFields): ClassificationFields {
@@ -98,6 +115,7 @@ export function classificationFieldsOf(source: ClassificationFields): Classifica
   if (source.assetClass !== undefined) out.assetClass = source.assetClass;
   if (source.sector !== undefined) out.sector = source.sector;
   if (source.country !== undefined) out.country = source.country;
+  if (source.domain !== undefined) out.domain = source.domain;
   return out;
 }
 
@@ -215,7 +233,9 @@ export function applyClassificationOverrides(
 ): Record<string, InstrumentProfile> {
   const out: Record<string, InstrumentProfile> = { ...profiles };
   for (const [symbol, override] of Object.entries(overrides)) {
-    const fields = classificationFieldsOf(override);
+    // The logo domain is not a profile field: only the four allocation fields are laid over the profile.
+    const { domain: _logoDomain, ...fields } = classificationFieldsOf(override);
+    if (!CLASSIFICATION_FIELDS.some((field) => fields[field] !== undefined)) continue;
     const profile = profiles[symbol];
     if (profile !== undefined) out[symbol] = { ...profile, ...fields };
     else if (currencies[symbol] !== undefined) out[symbol] = { symbol, name: fields.name ?? symbol, assetClass: fields.assetClass ?? 'OTHER', currency: currencies[symbol], ...fields };

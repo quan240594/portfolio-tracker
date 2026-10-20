@@ -25,6 +25,7 @@ export async function fetchRequestToPortable(request: Request): Promise<Portable
 export function portableToFetchResponse(response: PortableResponse): Response {
   const headers = new Headers(response.headers);
   for (const cookie of response.cookies ?? []) headers.append('set-cookie', cookie);
-  const body = NULL_BODY_STATUSES.has(response.status) || response.body === '' ? null : response.body;
+  const text = response.body === '' ? null : response.body;
+  const body = NULL_BODY_STATUSES.has(response.status) ? null : (response.bytes as Uint8Array<ArrayBuffer> | undefined) ?? text;
   return new Response(body, { status: response.status, headers });
 }
