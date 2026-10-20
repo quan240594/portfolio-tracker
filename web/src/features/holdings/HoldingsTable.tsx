@@ -2,6 +2,7 @@ import { useId, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { isCustomSymbol, isMarketSymbol, type Holding } from '@portfolio/shared';
 import { Change } from '../../components/Change';
+import { CompanyLogo } from '../../components/CompanyLogo';
 import { formatMoney, formatPercent, formatQuantity, formatWeight } from '../../lib/format';
 import { assetPath } from '../asset-detail/assetFormat';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
@@ -9,6 +10,12 @@ import { sortHoldings, type SortDir, type SortKey } from './sortHoldings';
 
 /** Custom assets have an internal `CUSTOM:<id>` symbol; show a readable label instead. */
 const holdingLabel = (h: Holding) => (isCustomSymbol(h.symbol) ? 'Custom asset' : h.symbol);
+
+/** The company logo of a market security (its symbol and name are written next to it); cash and custom assets have none. */
+function HoldingLogo({ holding }: Readonly<{ holding: Holding }>) {
+  if (!isMarketSymbol(holding.symbol)) return null;
+  return <CompanyLogo symbol={holding.symbol} name={holding.name} size={28} decorative />;
+}
 
 /** Market securities link to their detail page; cash and custom assets have none. */
 function HoldingSymbol({ holding, to }: Readonly<{ holding: Holding; to: string }>) {
@@ -158,11 +165,16 @@ export function HoldingsTable({ holdings, currency }: Readonly<Props>) {
             {sorted.map((h) => (
               <tr key={h.symbol} className="border-b border-slate-100 last:border-0 hover:bg-slate-50 dark:border-slate-800/60 dark:hover:bg-slate-800/40">
                 <th scope="row" className="min-w-[9rem] px-3 py-2.5 text-left font-normal">
-                  <div className="flex items-center gap-2">
-                    <HoldingSymbol holding={h} to={withScope(assetPath(h.symbol))} />
-                    {h.priceStale && <StaleBadge />}
+                  <div className="flex items-center gap-2.5">
+                    <HoldingLogo holding={h} />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <HoldingSymbol holding={h} to={withScope(assetPath(h.symbol))} />
+                        {h.priceStale && <StaleBadge />}
+                      </div>
+                      <div className="muted max-w-[20rem] text-xs break-words">{h.name}</div>
+                    </div>
                   </div>
-                  <div className="muted max-w-[20rem] text-xs break-words">{h.name}</div>
                 </th>
                 <td className="px-3 py-2.5 text-right tabular-nums">{formatQuantity(h.quantity)}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums">
@@ -223,12 +235,15 @@ export function HoldingsTable({ holdings, currency }: Readonly<Props>) {
           {sorted.map((h) => (
             <li key={h.symbol} className="card p-4">
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <HoldingSymbol holding={h} to={withScope(assetPath(h.symbol))} />
-                    {h.priceStale && <StaleBadge />}
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <HoldingLogo holding={h} />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <HoldingSymbol holding={h} to={withScope(assetPath(h.symbol))} />
+                      {h.priceStale && <StaleBadge />}
+                    </div>
+                    <div className="muted text-xs break-words">{h.name}</div>
                   </div>
-                  <div className="muted text-xs break-words">{h.name}</div>
                 </div>
                 <div className="text-right">
                   <div className="font-semibold tabular-nums">{formatMoney(h.marketValue, currency)}</div>

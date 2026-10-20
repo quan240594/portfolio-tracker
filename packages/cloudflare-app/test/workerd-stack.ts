@@ -2,7 +2,7 @@ import { build } from 'esbuild';
 import { Log, LogLevel, Miniflare, Response as MiniflareResponse } from 'miniflare';
 import { fileURLToPath } from 'node:url';
 import type { Stack } from './browser.js';
-import { FakeGithub, FakePrices, FakeTrading212, ORIGIN, OWNER_ID, TEST_CLIENT_ID, TEST_CLIENT_SECRET, TEST_SECRETS_KEY, TEST_SESSION_SECRET, route } from './fakes.js';
+import { FakeGithub, FakeLogos, FakePrices, FakeTrading212, ORIGIN, OWNER_ID, TEST_CLIENT_ID, TEST_CLIENT_SECRET, TEST_SECRETS_KEY, TEST_SESSION_SECRET, route } from './fakes.js';
 import { PINNED_NOW, type SuiteStartOptions } from './suite.js';
 
 const ENTRY = fileURLToPath(new URL('./entry.ts', import.meta.url));
@@ -42,7 +42,8 @@ export async function createWorkerdStack(options: SuiteStartOptions = {}): Promi
   const github = new FakeGithub();
   const trading212 = new FakeTrading212();
   const prices = new FakePrices(() => Date.now());
-  const services = [github.service, trading212.service, prices.service];
+  const logos = new FakeLogos();
+  const services = [github.service, trading212.service, prices.service, logos.service];
   const mf = new Miniflare({
     modules: [{ type: 'ESModule', path: 'worker.mjs', contents: await bundleWorker() }],
     // The Hub logs one JSON line per request; the tests do not need them.
@@ -70,10 +71,12 @@ export async function createWorkerdStack(options: SuiteStartOptions = {}): Promi
       SESSION_SECRET: TEST_SESSION_SECRET,
       SECRETS_KEY: TEST_SECRETS_KEY,
       ...options.prices,
+      ...options.logos,
       ...(options.limits ? { TEST_LIMITS: JSON.stringify(options.limits), TEST_NOW: String(PINNED_NOW) } : {}),
     },
     outboundService: (request) => {
       const reply = route(services, { url: request.url, method: request.method, header: (name) => request.headers.get(name) });
+      if (reply.bytes !== undefined) return new MiniflareResponse(reply.bytes as Uint8Array<ArrayBuffer>, { status: reply.status, headers: reply.headers });
       return MiniflareResponse.json(reply.json ?? null, { status: reply.status, headers: reply.headers });
     },
   });
@@ -100,6 +103,7 @@ export async function createWorkerdStack(options: SuiteStartOptions = {}): Promi
     github,
     trading212,
     prices,
+    logos,
     hubState,
     send: async (path, init) => (await mf.dispatchFetch(`${ORIGIN}${path}`, init as never)) as unknown as Response,
     drain,

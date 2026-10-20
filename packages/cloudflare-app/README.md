@@ -93,6 +93,14 @@ You need a Cloudflare account on the Free plan and a GitHub account. Every comma
    from the Hub alarm on the `prices-refresh` and `prices-calendar` schedules and only below 60 % of the free-plan budget. A provider quote is
    replaced by a newer Trading 212 one and replaces it again at its next refresh.
 
+   **Company logos (optional, nothing to set up).** The calendar, asset header, holdings and top holdings show company logos. The browser only asks
+   your own app (`GET /api/logos/<symbol>`); the Hub fetches each logo **once** from a keyless public icon service by company domain (never your holdings
+   list), stores it in its database (one row, at most 40 KB) and serves it with a day-long private cache. Missing logos fall back to a monogram. Wrong or
+   missing logo: *Edit classification* on the asset, field *Website domain*. Optional variables (`wrangler.jsonc` `vars`): `LOGO_SOURCES` (comma
+   separated, order = priority, default `logodev,google,duckduckgo`, `off` = no logos), `LOGO_HOURLY_LIMIT` (default 30 lookups an hour),
+   `LOGO_NEGATIVE_TTL_DAYS` (default 7); optional secret `LOGO_DEV_TOKEN` (`pnpm exec wrangler secret put LOGO_DEV_TOKEN`) switches a token-based source on
+   and puts it first. Cost: 1 row written per logo, once; terms-of-use caveat and everything else in `docs/architecture.md`, "Company logos".
+
 Until the variables and secrets are valid, every API and sign-in route answers 503 `NOT_CONFIGURED` naming the missing
 variable (never a value); `/health` and the static app keep working.
 
@@ -128,6 +136,8 @@ Signing in needs GitHub, so offline you can see the app shell and `/health`; the
 
 `pnpm --filter @portfolio/cloudflare-app test` needs no network and no secrets:
 
+- `test/logos-suite.ts` runs the **company logo** route through the same stacks (Node and workerd) against fake icon services (`FakeLogos`):
+  auth, one outbound fetch per domain, ETag/304, cached miss, override domain, hourly cap, `LOGO_SOURCES=off`, the token source.
 - `src/*.test.ts` unit-test the configuration, body limits, subject mapping, subrequest budget, the guarded job registry (priority,
   deferral, the price-service registration point), the Hub core and the Worker routing.
 - `test/suite.ts` is **one suite of the whole app**: GitHub sign-in (full OAuth round trip against a fake GitHub), anonymous 401,

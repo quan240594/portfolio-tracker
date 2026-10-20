@@ -90,6 +90,18 @@ describe('PUT and DELETE /classification/{symbol}', () => {
     expect(s.mgmt.overrides).toEqual([{ userId: 'demo', symbol: 'FUND.MI', name: 'My World Fund', sector: 'Diversified', country: 'World', createdAt: NOW, updatedAt: NOW }]);
   });
 
+  it('stores the website domain of the logo normalised, keeps it out of the allocation values and refuses one that is not a public host', async () => {
+    const s = setup();
+    const { status, body } = await put(s, 'AAA', { domain: 'https://www.Aaa-Inc.example.com/about' });
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ symbol: 'AAA', effective: { name: 'Aaa Inc', sector: 'Technology' }, override: { domain: 'aaa-inc.example.com' } });
+    expect(s.mgmt.overrides).toEqual([{ userId: 'demo', symbol: 'AAA', domain: 'aaa-inc.example.com', createdAt: NOW, updatedAt: NOW }]);
+    const profiles = await loadProfiles({ deps: s.deps, userId: 'demo' } as never, ['AAA']);
+    expect(profiles.AAA).toEqual(s.repo.profiles.AAA);
+    expect((await put(s, 'AAA', { domain: 'localhost' })).status).toBe(400);
+    expect((await put(s, 'AAA', { domain: '192.168.0.1' })).status).toBe(400);
+  });
+
   it('is applied by holdings, allocation and asset detail, and removed again by DELETE', async () => {
     const s = setup();
     const before = await s.call('GET', '/allocation', { query: { by: 'assetClass' } });

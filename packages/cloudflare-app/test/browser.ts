@@ -1,4 +1,4 @@
-import type { FakeGithub, FakePrices, FakeTrading212 } from './fakes.js';
+import type { FakeGithub, FakeLogos, FakePrices, FakeTrading212 } from './fakes.js';
 
 /** What a test sees of the deployed app, whatever runs it (Node with an in-process Hub, or real workerd through Miniflare). */
 export interface Stack {
@@ -6,6 +6,7 @@ export interface Stack {
   readonly github: FakeGithub;
   readonly trading212: FakeTrading212;
   readonly prices: FakePrices;
+  readonly logos: FakeLogos;
   /** Sends a request to the Worker exactly as a browser would reach it. */
   send(path: string, init?: RequestInit): Promise<Response>;
   /** Runs the Hub's alarm until no job is left (Node), or waits until the Hub reports no pending job (workerd). */

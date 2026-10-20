@@ -1,6 +1,8 @@
-import { fireEvent, screen, within } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
+import { afterEach } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import type { CalendarEvent } from '@portfolio/shared';
+import { LogosEnabledProvider, resetLogoSession } from '../../components/CompanyLogo';
 import { renderWithProviders, sp } from '../../test/utils';
 import { EventMarker } from './EventMarker';
 import { EventList, EventRow } from './EventList';
@@ -258,5 +260,66 @@ describe('DayDialog', () => {
   it('renders nothing without a date', () => {
     renderWithProviders(<DayDialog date={null} events={[]} baseCurrency="EUR" onClose={vi.fn()} onSelect={vi.fn()} />);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+
+describe('company logos in the calendar', () => {
+  afterEach(() => act(() => resetLogoSession()));
+
+  it('shows the monogram, the type as a corner marker and the type in words on a list row when logos are off', () => {
+    renderWithProviders(<EventList events={[event(), event({ id: 'pay', type: 'DIVIDEND_PAY', symbol: 'SAP.DE', name: 'SAP SE' })]} baseCurrency="EUR" onSelect={vi.fn()} today={TODAY} />);
+    const rows = screen.getAllByRole('button');
+    expect(rows[0]).toHaveAccessibleName(/^AAPL, Ex-dividend, confirmed, €\s3,74$/);
+    expect(rows[1]).toHaveAccessibleName(/^SAP\.DE, Dividend payment, confirmed/);
+    for (const row of rows) {
+      expect(row.querySelector('[data-logo="monogram"]')).not.toBeNull();
+      expect(row.querySelector('img')).toBeNull();
+      expect(row.querySelector('svg[data-shape]')).not.toBeNull();
+    }
+    expect(rows[0]).toHaveTextContent(/Ex-dividend · .* per share · 10 shares/);
+    expect(rows[1]?.querySelector('svg')).toHaveAttribute('data-shape', 'square');
+  });
+
+  it('shows the logo image instead of the letter badge, keeping the marker, the status border and the accessible name', () => {
+    renderWithProviders(
+      <LogosEnabledProvider value>
+        <EventList events={[event()]} baseCurrency="EUR" onSelect={vi.fn()} today={TODAY} />
+      </LogosEnabledProvider>,
+    );
+    const row = screen.getByRole('button', { name: /^AAPL, Ex-dividend, confirmed/ });
+    const img = row.querySelector('img')!;
+    expect(img).toHaveAttribute('src', '/api/logos/AAPL');
+    expect(img).toHaveAttribute('alt', '');
+    expect(row.querySelector('svg[data-shape="circle"]')).not.toBeNull();
+    expect(row).toHaveAttribute('data-status', 'CONFIRMED');
+    expect(row.className).toContain('border-l-4');
+  });
+
+  it('falls back to the monogram of a row whose image fails, without changing the row', () => {
+    renderWithProviders(
+      <LogosEnabledProvider value>
+        <EventList events={[event()]} baseCurrency="EUR" onSelect={vi.fn()} today={TODAY} />
+      </LogosEnabledProvider>,
+    );
+    const row = screen.getByRole('button', { name: /^AAPL, Ex-dividend/ });
+    fireEvent.error(row.querySelector('img')!);
+    expect(row.querySelector('img')).toBeNull();
+    expect(row.querySelector('[data-logo="monogram"] [data-monogram]')).toHaveAttribute('data-monogram', 'AA');
+    expect(row).toHaveAccessibleName(/^AAPL, Ex-dividend, confirmed/);
+  });
+
+  it('puts the logo on month chips and in the event dialog, next to the written name', () => {
+    renderWithProviders(
+      <LogosEnabledProvider value>
+        <MonthGrid month="2026-10" today={TODAY} events={[event()]} baseCurrency="EUR" onSelectEvent={vi.fn()} onSelectDay={vi.fn()} />
+        <EventDialog event={event()} baseCurrency="EUR" onClose={vi.fn()} withScope={(to) => to} />
+      </LogosEnabledProvider>,
+    );
+    const chip = screen.getByRole('button', { name: /^AAPL, Ex-dividend/ });
+    expect(chip.querySelector('img')).toHaveAttribute('src', '/api/logos/AAPL');
+    expect(chip).toHaveAttribute('title', expect.stringContaining('Ex-dividend'));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Apple Inc.')).toBeInTheDocument();
+    expect(dialog.querySelector('img')).toHaveAttribute('alt', '');
   });
 });

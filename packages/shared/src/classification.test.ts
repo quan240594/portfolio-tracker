@@ -38,6 +38,16 @@ describe('contract', () => {
     expect(classificationPutSchema.safeParse({ name: 'x', extra: 1 }).success).toBe(false);
   });
 
+  it('accepts the website domain alone, normalised, and refuses one that is not a public host', () => {
+    expect(classificationPutSchema.safeParse({ domain: ' https://www.Apple.com/mac ' })).toMatchObject({ success: true, data: { domain: 'apple.com' } });
+    expect(classificationPutSchema.safeParse({ name: 'x', domain: 'sap.com' })).toMatchObject({ success: true, data: { name: 'x', domain: 'sap.com' } });
+    expect(classificationPutSchema.safeParse({ domain: 'localhost' }).success).toBe(false);
+    expect(classificationPutSchema.safeParse({ domain: '10.0.0.1' }).success).toBe(false);
+    expect(classificationPutSchema.safeParse({ domain: '' }).success).toBe(false);
+    // An import row never carries a domain.
+    expect(classificationImportSchema.safeParse({ rows: [{ ticker: 'A', domain: 'apple.com' }] }).success).toBe(false);
+  });
+
   it('validates an import body and normalises tickers, ISINs and currencies', () => {
     const parsed = classificationImportSchema.parse({ rows: [{ ticker: ' fwra ', isin: ' ie00invent01', currency: 'eur', assetClass: 'ETF' }] });
     expect(parsed).toEqual({ dryRun: false, rows: [{ ticker: 'FWRA', isin: 'IE00INVENT01', currency: 'EUR', assetClass: 'ETF' }] });
@@ -50,6 +60,8 @@ describe('contract', () => {
     expect(classificationFieldsOf({ name: 'N', sector: undefined, country: 'C', assetClass: 'ETF', ...{ userId: 'u' } })).toEqual({ name: 'N', country: 'C', assetClass: 'ETF' });
     expect(hasClassification({})).toBe(false);
     expect(hasClassification({ sector: 'x' })).toBe(true);
+    expect(hasClassification({ domain: 'apple.com' })).toBe(true);
+    expect(classificationFieldsOf({ domain: 'apple.com', ...{ userId: 'u' } })).toEqual({ domain: 'apple.com' });
   });
 });
 
@@ -97,6 +109,12 @@ describe('applyClassificationOverrides', () => {
     expect(out.AAA).toBe(profiles.AAA);
     expect(out).not.toHaveProperty('ZZZ');
     expect(profiles['FUND.MI'].name).toBe('Invented World Fund UCITS');
+  });
+
+  it('does not lay the logo domain over the profile, and a domain-only override creates no profile', () => {
+    const out = applyClassificationOverrides(profiles, { AAA: { domain: 'aaa.example.com', sector: 'Energy' }, BBB: { domain: 'bbb.example.com' } }, { BBB: 'EUR' });
+    expect(out.AAA).toEqual({ ...profiles.AAA, sector: 'Energy' });
+    expect(out).not.toHaveProperty('BBB');
   });
 
   it('builds a profile from the override when the currency is known', () => {

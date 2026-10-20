@@ -1,4 +1,5 @@
 import type { CalendarEvent } from '@portfolio/shared';
+import { CompanyLogo } from '../../components/CompanyLogo';
 import { formatWeekdayDate } from '../../lib/format';
 import { STATUS_LABELS, eventAriaLabel, groupByDate } from './calendarModel';
 import { STATUS_CHIP, chipClasses } from './calendarColours';
@@ -23,7 +24,8 @@ export function EventRow({ event, baseCurrency, onSelect }: Readonly<RowProps>) 
         className={`flex w-full items-center gap-3 rounded-lg border-l-4 px-3 py-2 text-left text-sm hover:brightness-95 ${chipClasses(event.status)}`}
         data-status={event.status}
       >
-        <EventMarker type={event.type} className="h-5 w-5" />
+        {/* The type is the corner marker, spelled out in the second line and in the accessible name; the status is the border and the chip. */}
+        <CompanyLogo symbol={event.symbol} name={event.name} size={32} decorative badge={<EventMarker type={event.type} className="h-4 w-4" />} className="mr-0.5" />
         <span className="min-w-0 flex-1">
           <span className="block break-words">
             <span className="font-semibold">{event.symbol}</span> <span className="opacity-75">{event.name === event.symbol ? '' : event.name}</span>

@@ -1,6 +1,9 @@
 import {
   BudgetGuard,
   JOBS,
+  LogoService,
+  ItemLogoStore,
+  createLogoSources,
   durableObjectGbSeconds,
   fetchRequestToPortable,
   portableToFetchResponse,
@@ -20,6 +23,7 @@ import { createMarketDataService } from '@portfolio/prices';
 import { parseImportObjectKey } from '@portfolio/shared';
 import { readBodyBounded } from './body.js';
 import type { HubConfig } from './config.js';
+import { createHubLogoRoute, logoLookupGate } from './logos.js';
 import { ALL_JOB_FACTORIES, createJobRegistry, eventsFor, priceJobDeps, schedulesFor, type JobContext, type JobFactories } from './jobs.js';
 import { pricesStatus } from './prices-status.js';
 import { ARM_PATH, REQUEST_ID_HEADER, SUBJECT_HEADER, stripApiPrefix, userIdOfSubject } from './protocol.js';
@@ -59,6 +63,7 @@ export class HubCore {
   readonly guard: BudgetGuard;
   private readonly app: PortableHandler;
   private readonly uploadGate: PortableHandler;
+  private readonly logoRoute: (request: PortableRequest) => Promise<PortableResponse> | undefined;
   private readonly factories: JobFactories;
   private readonly now: () => Date;
   private readonly fetchImpl: typeof fetch;
@@ -97,6 +102,7 @@ export class HubCore {
     });
     guardRef.current = this.guard;
     const deps = this.buildDeps();
+    this.logoRoute = createHubLogoRoute({ service: this.buildLogoService(options.logger), deps, fetch: this.fetchImpl });
     const application = createApp(() => deps);
     this.app = withBudget((request) => (request.method === 'GET' && request.path === '/usage' ? this.usage() : this.ownRoute(request) ?? application(request)), this.guard);
     this.uploadGate = withBudget(() => Promise.resolve(UPLOAD_GATE_PASS), this.guard);
@@ -207,10 +213,24 @@ export class HubCore {
     return portableToFetchResponse(await this.app(forwarded));
   }
 
-  /** Routes the Hub serves itself, next to the API: `GET /prices/status`. */
+  /** Routes the Hub serves itself, next to the API: `GET /prices/status` and `GET /logos/{symbol}`. */
   private ownRoute(request: PortableRequest): Promise<PortableResponse> | undefined {
-    if (request.method !== 'GET' || request.path !== '/prices/status') return undefined;
-    return this.pricesStatus(request.identity?.subject);
+    if (request.method === 'GET' && request.path === '/prices/status') return this.pricesStatus(request.identity?.subject);
+    return this.logoRoute(request);
+  }
+
+  /** The logo service over the Hub's SQLite: one row per logo, lookups only while the usage budget is calm (see docs/architecture.md "Company logos"). */
+  private buildLogoService(logger?: Logger): LogoService {
+    const { logos } = this.config;
+    return new LogoService({
+      store: new ItemLogoStore(this.platform.items),
+      sources: createLogoSources(logos.sources, logos.logoDevToken),
+      now: this.now,
+      hourlyLimit: logos.hourlyLimit,
+      negativeTtlDays: logos.negativeTtlDays,
+      allowFetch: logoLookupGate(this.guard, logger),
+      logger,
+    });
   }
 
   /** The sources that are on, and how fresh the Trading 212 quotes of the signed-in user are (one read of the status item). */

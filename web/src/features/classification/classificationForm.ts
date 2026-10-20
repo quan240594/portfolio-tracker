@@ -6,11 +6,16 @@ export interface ClassificationForm {
   assetClass: AssetClass;
   sector: string;
   country: string;
+  /** Website domain the company logo is looked up by; empty = detected automatically. */
+  domain: string;
 }
 
+/** What the domain input is called in the dialog and in validation messages. */
+export const DOMAIN_LABEL = 'Website domain';
+
 /** The form starts at what the screens show today (the override where there is one). */
-export function initialForm({ effective }: Pick<ClassificationInstrument, 'effective'>): ClassificationForm {
-  return { name: effective.name, assetClass: effective.assetClass, sector: effective.sector ?? '', country: effective.country ?? '' };
+export function initialForm({ effective, override }: Pick<ClassificationInstrument, 'effective'> & Partial<Pick<ClassificationInstrument, 'override'>>): ClassificationForm {
+  return { name: effective.name, assetClass: effective.assetClass, sector: effective.sector ?? '', country: effective.country ?? '', domain: override?.domain ?? '' };
 }
 
 /**
@@ -26,6 +31,9 @@ export function fieldsToSend(form: ClassificationForm, base: ClassificationValue
   if (form.assetClass !== base.assetClass) fields.assetClass = form.assetClass;
   if (sector !== '' && sector !== base.sector) fields.sector = sector;
   if (country !== '' && country !== base.country) fields.country = country;
+  // The domain has no automatic counterpart to compare with: what is typed is what is stored, empty means detect it.
+  const domain = form.domain.trim();
+  if (domain !== '') fields.domain = domain;
   return fields;
 }
 
@@ -38,6 +46,11 @@ export function validateFields(fields: ClassificationFields): string | null {
   if (parsed.success) return null;
   const issue = parsed.error.issues[0]!;
   const field = issue.path[0];
-  const label = typeof field === 'string' && field in FIELD_LABELS ? FIELD_LABELS[field as keyof typeof FIELD_LABELS] : 'Classification';
+  const label = fieldLabel(field);
   return `${label}: ${issue.message}`;
+}
+
+function fieldLabel(field: unknown): string {
+  if (field === 'domain') return DOMAIN_LABEL;
+  return typeof field === 'string' && field in FIELD_LABELS ? FIELD_LABELS[field as keyof typeof FIELD_LABELS] : 'Classification';
 }

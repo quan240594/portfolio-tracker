@@ -6,7 +6,7 @@ import { csvRecords, parseCsv } from './csv.js';
 import { errorMessage, errorName, ProviderError, RateLimitError, RetryableProviderError, SubrequestBudgetError, SymbolNotFoundError } from './errors.js';
 import { HttpClient, budgetedFetch, buildUrl, redactUrl, type FetchLike } from './http.js';
 import { DailyQuota, MemoryQuotaLedger, StoreQuotaLedger, TokenBucket } from './limits.js';
-import { asFloat, asText, byText, cleanText, dayOf, definedOnly, isoDateOrNull, ownValue, positiveNumber, titleCase, validIsin } from './parse.js';
+import { asFloat, asText, byText, cleanText, websiteDomain, dayOf, definedOnly, isoDateOrNull, ownValue, positiveNumber, titleCase, validIsin } from './parse.js';
 import { cryptoParts, minimalProfile, normalizeSymbol, routeOf } from './symbols.js';
 import { addDays, amsterdamHour, daysBetweenDays, fromEpochSeconds, hourIn, isWeekday, utcDay, weekdayOf, zonedTimeToUtc } from './time.js';
 import { FakeFetch } from './testing/fake-fetch.js';
@@ -225,6 +225,11 @@ describe('parsing helpers', () => {
     expect(['12.5', ' 7 ', '1e3', '.5', '5.', '-0.25', 3, 2.5].map(asFloat)).toEqual([12.5, 7, 1000, 0.5, 5, -0.25, 3, 2.5]);
     expect(['', 'NA', 'None', '-', 'abc', 'inf', 'nan', null, undefined, true, {}, Number.NaN, Number.POSITIVE_INFINITY, '1e999'].map(asFloat)).toEqual(Array(14).fill(null));
     expect([25, '34.2', 0, '-1', 'None', undefined].map(positiveNumber)).toEqual([25, 34.2, null, null, null, null]);
+  });
+
+  it('reads a website as a bare public domain', () => {
+    expect(websiteDomain('https://www.Apple.com/mac')).toBe('apple.com');
+    expect([undefined, 5, '', 'None', 'localhost', '10.0.0.1'].map((value) => websiteDomain(value))).toEqual(Array(6).fill(undefined));
   });
 
   it('cleans free text and ISINs', () => {

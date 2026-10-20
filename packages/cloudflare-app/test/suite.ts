@@ -11,6 +11,8 @@ export interface SuiteStartOptions {
   limits?: MetricLimits;
   /** Environment of the price service: provider keys (test values) and tuning, e.g. `{ TWELVEDATA_API_KEY: ... }`. None by default. */
   prices?: Record<string, string>;
+  /** Variables of the logo service (`LOGO_SOURCES`, `LOGO_HOURLY_LIMIT`, `LOGO_DEV_TOKEN`...). */
+  logos?: Record<string, string>;
 }
 
 export type StartStack = (options?: SuiteStartOptions) => Promise<Stack>;

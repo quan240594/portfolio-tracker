@@ -6,6 +6,9 @@
 // that market-data source off and `GET /api/prices/status` says so): TWELVEDATA_API_KEY, EODHD_API_KEY, COINGECKO_API_KEY,
 // ALPHAVANTAGE_API_KEY. Optional plain variables (defaults in packages/prices/src/config.ts): COINGECKO_COIN_IDS, EODHD_DAILY_LIMIT,
 // ALPHAVANTAGE_DAILY_LIMIT, EU_REFRESH_HOURS, FX_HISTORY_START and the CALENDAR_* settings; add them to "vars" below to change them.
+//
+// Company logos (see docs/architecture.md, "Company logos"): optional variables LOGO_SOURCES (default "logodev,google,duckduckgo", "off" = none),
+// LOGO_HOURLY_LIMIT (default 30) and LOGO_NEGATIVE_TTL_DAYS (default 7), and the optional secret LOGO_DEV_TOKEN that switches the token-based source on.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "portfolio-tracker",

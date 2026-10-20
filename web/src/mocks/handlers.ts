@@ -20,6 +20,7 @@ import { growthHandlers } from './growthHandlers';
 import { goalsHandlers } from './goals-handlers';
 import { classificationHandlers } from './classification-handlers';
 import { calendarHandlers } from './calendarHandlers';
+import { logoHandlers } from './logo-handlers';
 import { categoryAllocation, managementHandlers } from './management-handlers';
 import { api, errorResponse, guard, latency } from './utils';
 
@@ -160,6 +161,7 @@ export const handlers: HttpHandler[] = [
   ...managementHandlers,
   ...goalsHandlers,
   ...classificationHandlers,
+  ...logoHandlers,
   ...securitiesHandlers,
   ...brokerHandlers,
 ];

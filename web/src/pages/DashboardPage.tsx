@@ -1,9 +1,10 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ALL_PORTFOLIOS, HISTORY_RANGES, type AllocationDimension, type GetPortfolioResponse, type HistoryRange } from '@portfolio/shared';
+import { ALL_PORTFOLIOS, HISTORY_RANGES, isMarketSymbol, type AllocationDimension, type GetPortfolioResponse, type HistoryRange } from '@portfolio/shared';
 import { useAllocation, useHistory, useHoldings, usePortfolio } from '../api/hooks';
 import { KpiCard } from '../components/KpiCard';
 import { Change } from '../components/Change';
+import { CompanyLogo } from '../components/CompanyLogo';
 import { ErrorState } from '../components/ErrorState';
 import { EmptyState } from '../components/EmptyState';
 import { LoadingRegion, Skeleton } from '../components/Skeleton';
@@ -190,6 +191,7 @@ function TopHoldingsCard() {
       <ul className="divide-y divide-slate-100 dark:divide-slate-800">
         {data.holdings.slice(0, 5).map((h) => (
           <li key={h.symbol} className="flex items-center gap-3 py-2.5 text-sm">
+            {isMarketSymbol(h.symbol) && <CompanyLogo symbol={h.symbol} name={h.name} size={28} decorative />}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 font-semibold">
                 {h.symbol} {h.priceStale && <StaleBadge />}

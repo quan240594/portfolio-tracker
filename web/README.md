@@ -41,7 +41,7 @@ The demo includes a seeded daily EUR/USD history (USD per 1 EUR drifting ~1.04 �
 | `typecheck` | `tsc -b --noEmit` |
 | `lint` | ESLint (typescript-eslint + react-hooks) |
 | `test` | Vitest unit/component tests (jsdom + MSW node server) |
-| `test:e2e` | Playwright (chromium): `e2e/` against `pnpm dev:mock --port $E2E_PORT` (default 5174), then `e2e-auth/` (`playwright.auth.config.ts`, a Cognito-mode build on `$E2E_AUTH_PORT`, default `$E2E_PORT`+100) proving the sign-in gate, then `e2e-github/` (`playwright.github.config.ts`, a GitHub-mode build on `$E2E_GITHUB_PORT`, default `$E2E_PORT`+200; `/auth/*` and `/api/*` are route mocks) covering sign-in, the app, sign-out, expiry and 320/1280 px layout |
+| `test:e2e` | Playwright (chromium): `e2e/` against `pnpm dev:mock --port $E2E_PORT` (default 5174), (including `e2e/company-logos.spec.ts`, which also starts a second mock server on `$E2E_PORT`+1 with `VITE_LOGOS=on`), then `e2e-auth/` (`playwright.auth.config.ts`, a Cognito-mode build on `$E2E_AUTH_PORT`, default `$E2E_PORT`+100) proving the sign-in gate, then `e2e-github/` (`playwright.github.config.ts`, a GitHub-mode build on `$E2E_GITHUB_PORT`, default `$E2E_PORT`+200; `/auth/*` and `/api/*` are route mocks) covering sign-in, the app, sign-out, expiry and 320/1280 px layout |
 | `test:e2e:pages` | `build:pages`, then Playwright (`playwright.pages.config.ts`, `e2e/pages.spec.ts`) against `dist/` served under `/portfolio-tracker/` by `scripts/serve-pages.mjs`, a GitHub-Pages-like static server (404.html fallback with status 404, `/portfolio-tracker` → 301) |
 
 First-time E2E setup: `pnpm --filter @portfolio/web exec playwright install chromium`.
@@ -54,6 +54,7 @@ Build-time (Vite `VITE_*`), see `.env.example`:
 |---|---|---|
 | `VITE_API_BASE_URL` | `/api` | API base. In AWS set to the API Gateway URL at build time. With `VITE_AUTH_MODE=github` it must stay same-origin (empty or a path such as `/api`): the session cookie is never sent cross-origin, so an absolute URL makes the app refuse to start. |
 | `VITE_USE_MOCKS` | `false` | `true` enables the MSW browser worker and the "Demo mode" banner. `--mode mock` (used by `dev:mock`/`build:mock`/`build:pages`) implies it. |
+| `VITE_LOGOS` | _(unset)_ | Company logos (`GET /api/logos/<symbol>`, Cloudflare deployment). Unset = on outside the demo, always off in mock mode and in unit tests (neutral monogram, no request). `on` also enables them in mock mode (a second Playwright server uses it; MSW serves a drawn stand-in for AAPL and KO), `off` disables them. See `docs/architecture.md`, "Company logos". |
 | `VITE_AUTH_MODE` | `none` | `cognito` puts every route behind the Cognito sign-in (TOTP MFA); `github` puts every route behind the Worker's "Sign in with GitHub" session cookie (personal Cloudflare deployment, SPA and API on one origin, no further settings; see `docs/architecture.md`, "Web: GitHub sign-in mode"). Any other value fails closed with a configuration error. Ignored in mock mode. Set by the deploy workflow from the Terraform outputs (`cognito`). |
 | `VITE_COGNITO_USER_POOL_ID`, `VITE_COGNITO_CLIENT_ID` | – | Required when `VITE_AUTH_MODE=cognito` (otherwise the app shows a configuration error instead of starting). |
 | `VITE_COGNITO_REGION` | from pool id | Optional; derived from the pool id (`eu-west-1_xxx`). |

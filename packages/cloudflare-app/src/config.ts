@@ -1,5 +1,5 @@
 import { parsePricesConfig, type PricesConfig } from '@portfolio/prices';
-import { MIN_SESSION_SECRET_LENGTH, resolveGithubAuthConfig, type GithubAuthConfig, type GithubFetch } from '@portfolio/platform';
+import { MIN_SESSION_SECRET_LENGTH, parseLogosConfig, resolveGithubAuthConfig, type GithubAuthConfig, type GithubFetch, type LogosConfig } from '@portfolio/platform';
 import type { HubEnv, WorkerEnv } from './runtime.js';
 
 export type ConfigResult<T> = { ok: true; config: T } | { ok: false; problems: string[] };
@@ -15,6 +15,8 @@ export interface HubConfig {
   symbolOverrides: Record<string, string>;
   /** The price service's configuration (provider keys are optional). */
   prices: PricesConfig;
+  /** The company logo service: sources, hourly lookup cap, negative cache (see `parseLogosConfig`). */
+  logos: LogosConfig;
 }
 
 export const DEFAULT_BASE_CURRENCY = 'EUR';
@@ -79,6 +81,7 @@ export function readHubConfig(env: HubEnv): ConfigResult<HubConfig> {
       brokerSecretPrefix: BROKER_SECRET_PREFIX,
       symbolOverrides: parseOverrides(env.T212_SYMBOL_OVERRIDES),
       prices: parsePricesConfig({ ...stringVars(env), BASE_CURRENCY: currency.toUpperCase() }),
+      logos: parseLogosConfig(stringVars(env)),
     },
   };
 }
