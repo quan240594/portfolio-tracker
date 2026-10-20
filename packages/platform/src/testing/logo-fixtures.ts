@@ -32,11 +32,17 @@ export const svgBytes = (body = '<circle cx="8" cy="8" r="8"/>', prologue = ''):
 
 export const htmlBytes = (): Uint8Array => new TextEncoder().encode('<!doctype html><html><body><svg></svg>Sign in</body></html>');
 
+function urlOf(input: RequestInfo | URL): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.href;
+  return input.url;
+}
+
 /** A `fetch` answering by URL substring; unmatched URLs are 404. Records the requests. */
 export function fakeFetch(routes: Readonly<Record<string, (signal?: AbortSignal | null) => Response | Promise<Response>>>): typeof fetch & { calls: string[] } {
   const calls: string[] = [];
   const impl = ((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    const url = urlOf(input);
     calls.push(url);
     const route = Object.entries(routes).find(([part]) => url.includes(part));
     if (route === undefined) return Promise.resolve(new Response('not found', { status: 404 }));

@@ -37,23 +37,26 @@ async function readCapped(response: Response, max: number, signal: AbortSignal):
   if (reader === undefined) return new Uint8Array();
   const deadline = new Promise<never>((_resolve, reject) => signal.addEventListener('abort', () => reject(new DOMException('The logo download timed out', 'AbortError')), { once: true }));
   deadline.catch(() => undefined);
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (let part = await Promise.race([reader.read(), deadline]); !part.done; part = await Promise.race([reader.read(), deadline])) {
-    size += part.value.length;
-    if (size > max) {
-      await reader.cancel();
-      return 'too-large';
-    }
-    chunks.push(part.value);
-  }
-  const bytes = new Uint8Array(size);
+  const chunks = await collectChunks(reader, deadline, max);
+  if (chunks === 'too-large') return chunks;
+  const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.length, 0));
   let at = 0;
   for (const chunk of chunks) {
     bytes.set(chunk, at);
     at += chunk.length;
   }
   return bytes;
+}
+
+/** Reads the stream chunk by chunk (a handful for an icon) until it ends, or 'too-large' once `max` bytes are exceeded. */
+async function collectChunks(reader: ReadableStreamDefaultReader<Uint8Array>, deadline: Promise<never>, max: number, chunks: Uint8Array[] = [], size = 0): Promise<Uint8Array[] | 'too-large'> {
+  const part = await Promise.race([reader.read(), deadline]);
+  if (part.done) return chunks;
+  if (size + part.value.length > max) {
+    await reader.cancel();
+    return 'too-large';
+  }
+  return collectChunks(reader, deadline, max, [...chunks, part.value], size + part.value.length);
 }
 
 interface Download {

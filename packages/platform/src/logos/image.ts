@@ -90,8 +90,8 @@ const MAX_PROLOGUE_ITEMS = 6;
 
 /** The end of the prologue item (XML declaration, comment or SVG doctype) `text` starts with, or -1 when it starts with something else. */
 function prologueEnd(text: string): number {
-  if (text.startsWith('<?xml')) return text.indexOf('?>') === -1 ? -1 : text.indexOf('?>') + 2;
-  if (text.startsWith('<!--')) return text.indexOf('-->') === -1 ? -1 : text.indexOf('-->') + 3;
+  if (text.startsWith('<?xml')) return text.includes('?>') ? text.indexOf('?>') + 2 : -1;
+  if (text.startsWith('<!--')) return text.includes('-->') ? text.indexOf('-->') + 3 : -1;
   if (SVG_DOCTYPE.test(text)) return text.indexOf('>') + 1 || -1;
   return -1;
 }
