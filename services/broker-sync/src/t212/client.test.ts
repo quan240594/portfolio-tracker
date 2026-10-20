@@ -100,7 +100,7 @@ describe('Trading212Client requests', () => {
       json({ items: [dividend] }),
       json({ items: [{ type: 'DEPOSIT', amount: 5, dateTime: '2024-01-01T00:00:00Z' }] }),
       json([{ instrument: { ticker: 'AAPL_US_EQ', currency: 'USD' }, quantity: 2 }, { bad: 1 }]),
-      json([{ ticker: 'AAPL_US_EQ', workingScheduleId: 3 }]),
+      json([{ ticker: 'AAPL_US_EQ', workingScheduleId: 3, type: 'STOCK', isin: 'US0378331005', name: 'Apple Inc', shortName: 'AAPL', currencyCode: 'USD', maxOpenQuantity: 5, addedOn: 7 }]),
       json([{ name: 'NYSE', workingSchedules: [{ id: 3 }] }]),
     ]);
     const divs = (await client.historyDividends().next()).value!;
@@ -109,7 +109,7 @@ describe('Trading212Client requests', () => {
     expect(cash.items[0]!.type).toBe('DEPOSIT');
     expect(urlOf(fetchFn, 1)).toBe('https://live.trading212.com/api/v0/equity/history/transactions?limit=50');
     await expect(client.positions()).resolves.toMatchObject({ items: [{ quantity: 2 }], invalid: 1 });
-    await expect(client.instruments()).resolves.toEqual([{ ticker: 'AAPL_US_EQ', workingScheduleId: 3 }]);
+    await expect(client.instruments()).resolves.toEqual([{ ticker: 'AAPL_US_EQ', workingScheduleId: 3, type: 'STOCK', isin: 'US0378331005', name: 'Apple Inc', shortName: 'AAPL', currencyCode: 'USD' }]);
     await expect(client.exchanges()).resolves.toEqual([{ name: 'NYSE', workingSchedules: [{ id: 3 }] }]);
   });
 

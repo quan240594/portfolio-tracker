@@ -4,7 +4,7 @@ import { silentLogger, type Logger } from '@portfolio/platform';
 import { z } from 'zod';
 import { ProviderError, RateLimitError, RetryableProviderError, SymbolNotFoundError } from '../errors.js';
 import type { HttpClient } from '../http.js';
-import type { DailyQuota, TokenBucket } from '../limits.js';
+import { resetOf, spendCredits, type DailyQuota, type MinuteQuota, type ProviderGate, type TokenBucket } from '../limits.js';
 import { makeQuote, normalizeCurrency } from '../models.js';
 import { asFloat, chunks, cleanText, definedOnly, dayOf, isRecord, nonEmpty, ownValue, type JsonRecord } from '../parse.js';
 import { countryFor } from '../symbols.js';
@@ -44,7 +44,19 @@ export interface TwelveDataOptions {
   now: () => Date;
   bucket: TokenBucket;
   quota: DailyQuota;
+  /** Credits per minute, persisted: without it a step assumes a full minute of credits. */
+  minuteQuota?: MinuteQuota;
+  /** Persisted "limit reached" blocks, so a provider that said no is not asked again before its reset. */
+  gate?: ProviderGate;
+  /** What the plan lacks (persisted), so a plan without `/profile` is not asked for it again by every step. */
+  plan?: PlanMemory;
   logger?: Logger;
+}
+
+/** The plan limits a provider has learned about itself, remembered between job steps. */
+export interface PlanMemory {
+  profileUnsupported(): Promise<boolean>;
+  markProfileUnsupported(): Promise<void>;
 }
 
 export class TwelveDataProvider implements PriceSource {
@@ -57,23 +69,35 @@ export class TwelveDataProvider implements PriceSource {
   }
 
   private async get(path: string, params: Record<string, unknown>, credits = 1, symbol?: string): Promise<JsonRecord> {
-    await this.options.quota.consume(credits);
+    await spendCredits(this.options, credits);
     await this.options.bucket.acquire(credits);
     const data = await this.options.http.getJson(`${TWELVEDATA_URL}${path}`, params, { Authorization: `apikey ${this.options.apiKey}` }, symbol);
-    this.raiseForError(data, symbol);
+    await this.raiseForError(data, symbol);
     return isRecord(data) ? data : {};
   }
 
+  /** The error of a 429: the message tells whether the minute's or the day's credits are gone, and when they are back. */
+  private limited(message: string, symbol: string | undefined): RateLimitError {
+    const scope = /\b(day|daily)\b/i.test(message) ? 'day' : 'minute';
+    return new RateLimitError(message, { provider: this.name, symbol, scope, resetAtMs: resetOf(scope, this.options.now().getTime()) });
+  }
+
   /** Twelve Data reports errors as HTTP 200 with `{status: "error", code, message}`. */
-  private raiseForError(data: unknown, symbol: string | undefined): void {
+  private async raiseForError(data: unknown, symbol: string | undefined): Promise<void> {
     if (!isRecord(data) || data.status !== 'error') return;
     const code = Math.trunc(asFloat(data.code) ?? 0);
     const message = `${this.name}: ${code} ${typeof data.message === 'string' ? data.message : ''}`.trim();
     const details = { provider: this.name, symbol };
-    if (code === 429) throw new RateLimitError(message, details);
+    if (code === 429) throw await this.blocked(this.limited(message, symbol));
     if (code >= 500) throw new RetryableProviderError(message, details);
     if (code === 400 || code === 404) throw new SymbolNotFoundError(message, details);
     throw new ProviderError(message, details);
+  }
+
+  /** Remembers the limit for every later step and resolves the error to throw. */
+  private async blocked(error: RateLimitError): Promise<RateLimitError> {
+    if (error.scope !== undefined && error.resetAtMs !== undefined) await this.options.gate?.block(error.resetAtMs, error.scope, error.message);
+    return error;
   }
 
   private parseQuote(symbol: string, raw: JsonRecord): Quote | null {
@@ -87,7 +111,7 @@ export class TwelveDataProvider implements PriceSource {
   private quoteFromEntry(canonical: string, raw: JsonRecord): Quote | null {
     if (raw.status !== 'error') return this.parseQuote(canonical, raw);
     this.logger.warn('twelvedata quote error', { symbol: canonical, code: raw.code, error: raw.message });
-    if (Math.trunc(asFloat(raw.code) ?? 0) === 429) throw new RateLimitError(`${this.name}: 429 in batch`, { provider: this.name, symbol: canonical });
+    if (Math.trunc(asFloat(raw.code) ?? 0) === 429) throw this.limited(`${this.name}: 429 in batch ${typeof raw.message === 'string' ? raw.message : ''}`.trim(), canonical);
     return null;
   }
 
@@ -104,11 +128,15 @@ export class TwelveDataProvider implements PriceSource {
     // A single symbol is answered with the quote itself, several with an object keyed by symbol.
     const entries: [string, unknown][] = batch.length === 1 ? [[[...mapping.keys()][0]!, data]] : Object.entries(data);
     const out: Record<string, Quote> = {};
-    for (const [providerSymbol, raw] of entries) {
-      const canonical = mapping.get(providerSymbol);
-      if (canonical === undefined || !isRecord(raw)) continue;
-      const quote = this.quoteFromEntry(canonical, raw);
-      if (quote) out[canonical] = quote;
+    try {
+      for (const [providerSymbol, raw] of entries) {
+        const canonical = mapping.get(providerSymbol);
+        if (canonical === undefined || !isRecord(raw)) continue;
+        const quote = this.quoteFromEntry(canonical, raw);
+        if (quote) out[canonical] = quote;
+      }
+    } catch (error) {
+      throw error instanceof RateLimitError ? await this.blocked(error) : error;
     }
     return out;
   }
@@ -152,7 +180,7 @@ export class TwelveDataProvider implements PriceSource {
   }
 
   private async profileRaw(symbol: string): Promise<JsonRecord | null> {
-    if (!this.profileEndpointSupported) return null;
+    if (!this.profileEndpointSupported || (await this.options.plan?.profileUnsupported())) return null;
     try {
       return await this.get('/profile', { symbol: toTwelveDataSymbol(symbol) }, 1, symbol);
     } catch (error) {
@@ -160,6 +188,7 @@ export class TwelveDataProvider implements PriceSource {
       if (!(error instanceof ProviderError) || error.retryable) throw error;
       this.logger.info('twelvedata /profile unavailable, using reference data', { error: error.message });
       this.profileEndpointSupported = false;
+      await this.options.plan?.markProfileUnsupported();
       return null;
     }
   }

@@ -11,6 +11,7 @@
  *   which the prices service already consumes for enrichment.
  */
 import type { AllocationSlice, AssetClass, Portfolio, Transaction } from './types.js';
+import type { ClassificationOverrideItem } from './classification.js';
 import type { RebalanceMode, RebalanceResult } from './rebalance.js';
 
 export const MANAGEMENT_ROUTES = {
@@ -197,4 +198,6 @@ export interface BackupResponse {
   categoryAssignments: CategoryAssignment[];
   customAssets: CustomAsset[];
   watchlist: WatchlistEntry[];
+  /** The owner's classification overrides; absent in backups made before they existed. */
+  classificationOverrides?: ClassificationOverrideItem[];
 }

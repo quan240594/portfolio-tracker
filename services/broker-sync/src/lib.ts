@@ -12,3 +12,5 @@ export { syncAllJob, syncJob, runAll, runSync, type SyncDeps, type SyncLimits, t
 export * from './t212/client.js';
 export { ItemQuoteStore, quoteItem, type QuoteStore } from './quote-store.js';
 export { MIN_INTERVAL_MS, refreshQuotesAfterSync, refreshQuotesJob, type QuoteDeps, type QuoteRunResult, type RefreshQuotesPayload, type UserQuoteResult } from './quotes.js';
+export { ItemProfileStore, profileItem, type ProfileStore } from './profile-store.js';
+export { heldInstruments, refreshBaselines, type HeldInstrument } from './baseline.js';

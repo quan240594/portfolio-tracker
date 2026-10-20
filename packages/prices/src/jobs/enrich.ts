@@ -1,41 +1,68 @@
 import type { DividendEvent, EodPrice, InstrumentProfile, Quote } from '@portfolio/shared';
-import { isMarketSymbol } from '@portfolio/shared';
+import { isMarketSymbol, sourceOf } from '@portfolio/shared';
 import type { EnrichmentSummary, JobHandler, JobPayloads } from '@portfolio/platform';
 import { z } from 'zod';
-import { errorMessage, ProviderError, ProviderUnavailableError, SymbolNotFoundError } from '../errors.js';
+import { errorMessage, ProviderError, ProviderUnavailableError, RateLimitError, SymbolNotFoundError } from '../errors.js';
+import { endOfUtcDay, RESET_MARGIN_MS } from '../limits.js';
 import { byText } from '../parse.js';
-import { makeProfile } from '../models.js';
-import { minimalProfile, normalizeSymbol, routeOf } from '../symbols.js';
+import { isCrypto, minimalProfile, normalizeSymbol, providerOf, routeOf } from '../symbols.js';
 import { addDays, utcDay } from '../time.js';
-import { createStepContext, decodeState, pendingStep, rethrowBudget, runStep, runUnits, type PriceJobDeps, type StepContext } from './common.js';
+import type { AttemptOutcome } from '../repository.js';
+import { createStepContext, pendingStep, rethrowBudget, runStep, runUnits, type PriceJobDeps, type StepContext } from './common.js';
 
 export const HISTORY_DAYS = 365;
 export const DIVIDEND_LOOKBACK_DAYS = 730;
 export const DIVIDEND_LOOKAHEAD_DAYS = 365;
-/** A symbol that failed transiently is tried again this many times in all (with a growing pause), like the Python queue's 3 receives. */
-export const MAX_ENRICH_ATTEMPTS = 3;
+/** A symbol is tried at most this many times a UTC day, whatever job asks (a rate-limit wait is not a try). */
+export const MAX_ATTEMPTS_PER_DAY = 3;
+/** A job that still has symbols left after this many days stops and reports them in `retry`. */
+export const MAX_ENRICH_DAYS = 3;
 const RETRY_PAUSE_MS = 60_000;
-/** Twelve Data allows 8 credits a minute: pause after a US symbol (profile, history and quote take 2 to 5 credits). */
-const US_PAUSE_MS = 30_000;
-/** profile (up to 4 calls), EOD history, dividends, quote. */
-const SYMBOL_CALLS = 7;
+const DAY_MS = 86_400_000;
+/** The longest a job sleeps in one step: a daily limit resets within a day (plus the margin). */
+const MAX_DEFER_MS = DAY_MS + 2 * RESET_MARGIN_MS;
+/** A pause after a limit that did not name its reset (a client-side wait names its own). */
+const DEFAULT_LIMIT_PAUSE_MS = 60_000;
+/** history, up to three profile calls, quote. */
+const CORE_CALLS = 5;
 
 const stateSchema = z.object({
-  v: z.literal(1),
+  v: z.literal(2),
   now: z.string(),
   total: z.number(),
   already: z.number(),
+  /** Symbols whose history, profile and quote are still to store. */
   pending: z.array(z.string()),
+  /** Symbols whose dividends are still to fetch: they only use what is left of the provider quota after every history. */
+  dividends: z.array(z.string()),
   enriched: z.array(z.string()),
-  /** Transient failures of the current round, tried again in the next one. */
-  failedNow: z.array(z.string()),
-  round: z.number(),
-  /** Epoch milliseconds before which the next symbol must not start (provider pacing). */
-  notBefore: z.number(),
+  /** Symbols given up on for this job (the job's time ran out). */
+  retry: z.array(z.string()),
+  /** Epoch milliseconds before which a symbol must not start (its retry pause, or the next day after its tries ran out). */
+  until: z.record(z.number()),
+  /** Epoch milliseconds before which nothing may be asked of a provider (it said its limit is reached). */
+  blocked: z.record(z.number()),
+  /** Tries of `attemptsDay` per symbol, mirrored in the store so other jobs count them too. */
+  attempts: z.record(z.number()),
+  attemptsDay: z.string(),
 });
 
+/** The first version of the state (rounds and a pause per US symbol): a job that was waiting when this code was deployed continues as v2. */
+const legacySchema = z.object({ v: z.literal(1), now: z.string(), total: z.number(), already: z.number(), pending: z.array(z.string()), enriched: z.array(z.string()), failedNow: z.array(z.string()) });
+
 type State = z.infer<typeof stateSchema>;
-type Outcome = 'enriched' | 'skipped' | 'retry';
+interface Unit {
+  kind: 'core' | 'dividends';
+  symbol: string;
+}
+
+function decode(cursor: string): State {
+  const raw: unknown = JSON.parse(cursor);
+  const legacy = legacySchema.safeParse(raw);
+  if (!legacy.success) return stateSchema.parse(raw);
+  const { v: _v, failedNow, ...rest } = legacy.data;
+  return { ...rest, v: 2, pending: [...rest.pending, ...failedNow], dividends: [], retry: [], until: {}, blocked: {}, attempts: {}, attemptsDay: utcDay(new Date(rest.now)) };
+}
 
 /** The symbols of a TransactionsChanged detail: trimmed, upper-cased, market symbols only, unique and sorted. */
 export function enrichmentSymbols(symbols: readonly unknown[]): string[] {
@@ -60,116 +87,204 @@ const orNull = async <T>(call: Promise<T>): Promise<T | null> => {
   }
 };
 
-async function dividendsOrEmpty(ctx: StepContext, symbol: string, start: string, end: string): Promise<DividendEvent[]> {
+/** The provider's profile, or null: it is the one optional part of an enrichment, so a limit or an outage leaves it to the details refresh. */
+async function providerProfile(ctx: StepContext, symbol: string, stored: InstrumentProfile | undefined): Promise<InstrumentProfile | null> {
+  // A Trading 212 baseline already has what the exchange-listed lookup returns (name, type, ISIN): its call would only cost quota.
+  if (stored !== undefined && sourceOf(stored) !== 'minimal' && routeOf(symbol) === 'listed') return null;
   try {
-    return await ctx.md.provider.getDividends(symbol, start, end);
+    return await orNull(ctx.md.provider.getProfile(symbol));
   } catch (error) {
-    if (!(error instanceof ProviderError) || error.retryable) throw error;
-    ctx.logger.warn('dividends unavailable', { symbol, error: error.message });
-    return [];
+    rethrowBudget(error);
+    if (!(error instanceof ProviderError)) throw error;
+    // A minute's credits are back in a minute: wait for them (the history is stored again then) instead of leaving the profile minimal.
+    if (error instanceof RateLimitError && error.scope === 'minute') throw error;
+    ctx.logger.info('profile left to the details refresh', { symbol, error: error.message });
+    return null;
   }
 }
 
-/** Fetches and stores everything for a new symbol. The PROFILE item is written last: it is the "enriched" marker. */
-async function fetchAndStore(ctx: StepContext, symbol: string, now: Date): Promise<Outcome> {
+/** A quote from the provider for a symbol that has none yet (the Trading 212 refresh usually stored one); a provider failure is a missing quote. */
+async function providerQuote(ctx: StepContext, symbol: string): Promise<Quote | null> {
+  const batch = await ctx.md.provider.getQuotes([symbol]);
+  return batch.quotes[symbol] ?? null;
+}
+
+/** Fetches and stores the history, quote and profile of a new symbol. Resolves false for a symbol no provider knows. */
+async function fetchAndStore(ctx: StepContext, symbol: string, now: Date): Promise<boolean> {
   const { provider } = ctx.md;
   const today = utcDay(now);
-  const profile: InstrumentProfile | null = await orNull(provider.getProfile(symbol));
   const history = await orNull(provider.getEodHistory(symbol, addDays(today, -HISTORY_DAYS), today));
   if (history === null) {
     ctx.logger.warn('unknown symbol; not enriching', { symbol });
-    return 'skipped';
+    return false;
   }
-  const dividends = await dividendsOrEmpty(ctx, symbol, addDays(today, -DIVIDEND_LOOKBACK_DAYS), addDays(today, DIVIDEND_LOOKAHEAD_DAYS));
-  const batch = await provider.getQuotes([symbol]);
-  if (batch.failed.some((failure) => failure.symbol === symbol && failure.retryable)) return 'retry';
-  const quote = batch.quotes[symbol] ?? quoteFromHistory(symbol, history, provider.name);
-  const stamped = profile === null ? minimalProfile(symbol) : makeProfile({ ...profile, detailsAsOf: today });
+  const stored = await ctx.repo.getProfile(symbol);
+  const profile = await providerProfile(ctx, symbol, stored);
+  const existingQuote = (await ctx.repo.latestQuotes([symbol])).get(symbol);
+  const quote = existingQuote ?? (await providerQuote(ctx, symbol)) ?? quoteFromHistory(symbol, history, provider.name);
   await ctx.repo.putEods(history);
-  await ctx.repo.putDividends(dividends);
-  if (quote !== null) await ctx.repo.putQuote(quote);
+  if (existingQuote === undefined && quote !== null) await ctx.repo.putQuote(quote);
   await ctx.repo.ensureTracked(symbol, now.toISOString());
-  await ctx.repo.putProfile(stamped);
-  ctx.logger.info('symbol enriched', { symbol, eod: history.length, dividends: dividends.length, quote: quote !== null });
-  return 'enriched';
+  await ctx.repo.putEnrichedProfile(symbol, profile, minimalProfile(symbol), today);
+  ctx.logger.info('symbol enriched', { symbol, eod: history.length, quote: quote !== null, profile: profile !== null });
+  return true;
 }
 
-/** Never throws except for the step budget: transient failures are `retry`, the rest `skipped`. */
-async function enrichSymbol(ctx: StepContext, symbol: string, now: Date): Promise<Outcome> {
+/** Epoch milliseconds a rate limit holds a provider until: its own reset, else the wait it named, else a minute. */
+function limitResume(error: RateLimitError, nowMs: number): number {
+  return Math.max(error.resetAtMs ?? nowMs + (error.retryAfterMs ?? DEFAULT_LIMIT_PAUSE_MS), nowMs + 1000);
+}
+
+/** Counts a try of today (kept in the store too) and sets the symbol's next start: a growing pause, or tomorrow once the tries are used up. */
+async function countAttempt(ctx: StepContext, state: State, symbol: string, nowMs: number, outcome: AttemptOutcome, error: string): Promise<void> {
+  const attempts = (state.attempts[symbol] ?? 0) + 1;
+  state.attempts[symbol] = attempts;
+  await ctx.repo.putAttempts('core', symbol, state.attemptsDay, attempts, outcome, error);
+  state.until[symbol] = attempts >= MAX_ATTEMPTS_PER_DAY ? endOfUtcDay(state.attemptsDay) + RESET_MARGIN_MS : nowMs + RETRY_PAUSE_MS * 2 ** (attempts - 1);
+}
+
+const finish = (list: string[], symbol: string): void => {
+  list.splice(list.indexOf(symbol), 1);
+};
+
+/** One symbol's core work. A rate limit holds the provider (and with it every symbol that needs it) without costing a try. */
+async function enrichSymbol(ctx: StepContext, state: State, symbol: string, now: Date, nowMs: number): Promise<void> {
   try {
-    return await fetchAndStore(ctx, symbol, now);
+    if (await fetchAndStore(ctx, symbol, now)) {
+      state.enriched.push(symbol);
+      if (!isCrypto(symbol)) state.dividends.push(symbol);
+    } else {
+      await countAttempt(ctx, state, symbol, nowMs, 'skipped', 'unknown symbol');
+    }
+    finish(state.pending, symbol);
   } catch (error) {
     rethrowBudget(error);
-    if (error instanceof ProviderUnavailableError) {
-      ctx.logger.warn('no provider for symbol; skipping', { symbol, error: error.message });
-      return 'skipped';
+    if (error instanceof RateLimitError) {
+      const provider = error.provider === '' ? providerOf(symbol) : error.provider;
+      state.blocked[provider] = Math.max(state.blocked[provider] ?? 0, limitResume(error, nowMs));
+      ctx.logger.info('provider limit; waiting for its reset', { provider, resumeAt: new Date(state.blocked[provider]!).toISOString() });
+    } else if (error instanceof ProviderUnavailableError || (error instanceof ProviderError && !error.retryable)) {
+      ctx.logger.warn('no data for symbol; skipping', { symbol, error: error.message });
+      await countAttempt(ctx, state, symbol, nowMs, 'skipped', error.message);
+      finish(state.pending, symbol);
+    } else {
+      ctx.logger.warn('retryable enrichment failure', { symbol, error: errorMessage(error) });
+      await countAttempt(ctx, state, symbol, nowMs, 'retry', errorMessage(error));
     }
-    if (error instanceof ProviderError && !error.retryable) {
-      ctx.logger.warn('non-retryable provider error; skipping', { symbol, error: error.message });
-      return 'skipped';
-    }
-    ctx.logger.warn('retryable enrichment failure', { symbol, error: errorMessage(error) });
-    return 'retry';
   }
+}
+
+async function fetchDividends(ctx: StepContext, symbol: string, now: Date): Promise<DividendEvent[]> {
+  const today = utcDay(now);
+  return ctx.md.provider.getDividends(symbol, addDays(today, -DIVIDEND_LOOKBACK_DAYS), addDays(today, DIVIDEND_LOOKAHEAD_DAYS));
+}
+
+/** Dividends are the nice-to-have of an enrichment: the calendar refresh stores them later when the provider's quota ran out. */
+async function storeDividends(ctx: StepContext, state: State, symbol: string, now: Date): Promise<void> {
+  try {
+    await ctx.repo.putDividends(await fetchDividends(ctx, symbol, now));
+  } catch (error) {
+    rethrowBudget(error);
+    if (error instanceof RateLimitError) {
+      ctx.logger.info('dividends left to the calendar refresh: provider limit', { symbol, error: error.message });
+      state.dividends.length = 0;
+      return;
+    }
+    ctx.logger.warn('dividends unavailable', { symbol, error: errorMessage(error) });
+  }
+  finish(state.dividends, symbol);
 }
 
 function summarize(state: State): EnrichmentSummary {
-  return { symbols: state.total, alreadyEnriched: state.already, enriched: state.enriched.toSorted(byText), retry: state.failedNow.toSorted(byText) };
+  return { symbols: state.total, alreadyEnriched: state.already, enriched: state.enriched.toSorted(byText), retry: state.retry.toSorted(byText) };
 }
 
 async function begin(ctx: StepContext, symbols: readonly string[], now: Date): Promise<State> {
   const unique = enrichmentSymbols(symbols);
-  const existing = await ctx.repo.symbolsWithProfile(unique);
-  return { v: 1, now: now.toISOString(), total: unique.length, already: existing.size, pending: unique.filter((s) => !existing.has(s)), enriched: [], failedNow: [], round: 1, notBefore: 0 };
+  const enriched = await ctx.repo.enrichedSymbols(unique);
+  const pending = unique.filter((symbol) => !enriched.has(symbol));
+  const day = utcDay(now);
+  const attempts = await ctx.repo.attemptsOn('core', pending, day);
+  const exhausted = [...attempts].filter(([, tries]) => tries.count >= MAX_ATTEMPTS_PER_DAY);
+  // A symbol that was skipped all day (unknown, or no provider for it) is not worth a wait: it is dropped. One that kept failing waits for tomorrow.
+  const dropped = new Set(exhausted.filter(([, tries]) => tries.skipped).map(([symbol]) => symbol));
+  const until = Object.fromEntries(exhausted.filter(([symbol]) => !dropped.has(symbol)).map(([symbol]) => [symbol, endOfUtcDay(day) + RESET_MARGIN_MS]));
+  return {
+    v: 2,
+    now: now.toISOString(),
+    total: unique.length,
+    already: enriched.size,
+    pending: pending.filter((symbol) => !dropped.has(symbol)),
+    dividends: [],
+    enriched: [],
+    retry: [],
+    until,
+    blocked: {},
+    attempts: Object.fromEntries([...attempts].map(([symbol, tries]) => [symbol, tries.count])),
+    attemptsDay: day,
+  };
 }
 
-/** Starts the next round with the transient failures after a pause, or reports that nothing is left (or no attempts are). */
-function nextRound(state: State): number | null {
-  if (state.failedNow.length === 0 || state.round >= MAX_ENRICH_ATTEMPTS) return null;
-  const pause = RETRY_PAUSE_MS * 2 ** (state.round - 1);
-  state.pending = state.failedNow;
-  state.failedNow = [];
-  state.round += 1;
-  return pause;
+/** A new UTC day starts every symbol's tries from zero; a job that outlived its time gives its symbols up. */
+function rollOver(state: State, nowMs: number): void {
+  const today = utcDay(new Date(nowMs));
+  if (state.attemptsDay !== today) {
+    state.attemptsDay = today;
+    state.attempts = {};
+  }
+  if (nowMs - Date.parse(state.now) > MAX_ENRICH_DAYS * DAY_MS) {
+    state.retry.push(...state.pending);
+    state.pending.length = 0;
+    state.dividends.length = 0;
+  }
+}
+
+const readyAt = (state: State, symbol: string): number => Math.max(state.until[symbol] ?? 0, state.blocked[providerOf(symbol)] ?? 0);
+
+/** The next unit that may start now: a core unit first (they need the quota the dividends would spend), then a dividend one. */
+function nextUnit(state: State, nowMs: number): Unit | undefined {
+  const core = state.pending.find((symbol) => readyAt(state, symbol) <= nowMs);
+  if (core !== undefined) return { kind: 'core', symbol: core };
+  const symbol = state.dividends[0];
+  return symbol !== undefined && (state.blocked.eodhd ?? 0) <= nowMs ? { kind: 'dividends', symbol } : undefined;
+}
+
+function* readyUnits(ctx: StepContext, state: State, nowMs: () => number): Generator<Unit, void, undefined> {
+  for (let unit = nextUnit(state, nowMs()); unit !== undefined && ctx.hasCalls(unit.kind === 'core' ? CORE_CALLS : 1); unit = nextUnit(state, nowMs())) yield unit;
+}
+
+/** Dividends are not worth a day's wait: when only they are left and EODHD is limited, the calendar refresh gets them later. */
+function dropBlockedDividends(state: State, nowMs: number): void {
+  if (state.pending.length === 0 && (state.blocked.eodhd ?? 0) > nowMs) state.dividends.length = 0;
+}
+
+/** Milliseconds until the earliest remaining unit may start, or null when nothing is left. */
+function waitUntilNext(state: State, nowMs: number): number | null {
+  const starts = [...state.pending.map((symbol) => readyAt(state, symbol)), ...(state.dividends.length > 0 ? [state.blocked.eodhd ?? 0] : [])];
+  return starts.length === 0 ? null : Math.min(MAX_DEFER_MS, Math.max(0, Math.min(...starts) - nowMs));
 }
 
 export type EnrichTransactionsJob = JobHandler<JobPayloads['enrichTransactions'], EnrichmentSummary>;
 
 /**
- * `enrichTransactions`: profile, one year of EOD history, dividends and the latest quote of every symbol that has no PROFILE
- * item yet. Idempotent (the PROFILE item is written last) and resumable: a few symbols per step, pausing for Twelve Data's
- * per-minute credits. Transient failures are tried again in up to `MAX_ENRICH_ATTEMPTS - 1` later rounds; what still fails
- * is listed in `retry` of the result.
+ * `enrichTransactions`: history, quote and profile of every symbol whose enrichment is not finished, then (with the provider quota
+ * that is left) its dividends. Idempotent and resumable: a few symbols per step. A provider whose limit is reached is not asked
+ * again before the limit resets (persisted, so every later step and job knows): the job sleeps until then and the other symbols
+ * carry on meanwhile. A symbol that fails is tried at most `MAX_ATTEMPTS_PER_DAY` times a day (persisted) with a growing pause.
+ * What still is not done after `MAX_ENRICH_DAYS` is listed in `retry` of the result.
  */
-/** The pending symbols that may start now: Twelve Data's per-minute credits pace the US ones, the others never wait. */
-function* readySymbols(ctx: StepContext, state: State, nowMs: () => number): Generator<string, void, undefined> {
-  while (ctx.hasCalls(SYMBOL_CALLS)) {
-    const next = state.pending.find((symbol) => routeOf(symbol) !== 'us' || nowMs() >= state.notBefore);
-    if (next === undefined) return;
-    yield next;
-  }
-}
-
 export function createEnrichTransactionsJob(deps: PriceJobDeps): EnrichTransactionsJob {
   return async ({ payload, cursor }) => {
     const ctx = createStepContext(deps);
-    const state = cursor === undefined ? await begin(ctx, payload.symbols, deps.clock()) : decodeState(stateSchema, cursor);
+    const state = cursor === undefined ? await begin(ctx, payload.symbols, deps.clock()) : decode(cursor);
     const now = new Date(state.now);
     const nowMs = (): number => deps.clock().getTime();
     return runStep(ctx, state, async () => {
-      await runUnits(readySymbols(ctx, state, nowMs), async (symbol) => {
-        const outcome = await enrichSymbol(ctx, symbol, now);
-        if (outcome === 'enriched') state.enriched.push(symbol);
-        if (outcome === 'retry') state.failedNow.push(symbol);
-        if (routeOf(symbol) === 'us') state.notBefore = nowMs() + US_PAUSE_MS;
-        state.pending.splice(state.pending.indexOf(symbol), 1);
-      });
-      if (state.pending.length === 0) {
-        const pause = nextRound(state);
-        if (pause === null) return { done: true, result: summarize(state) };
-        state.notBefore = nowMs() + pause;
-      }
-      return pendingStep(state, ctx.hasCalls(SYMBOL_CALLS) ? Math.max(0, state.notBefore - nowMs()) : 0);
+      rollOver(state, nowMs());
+      await runUnits(readyUnits(ctx, state, nowMs), (unit) => (unit.kind === 'core' ? enrichSymbol(ctx, state, unit.symbol, now, nowMs()) : storeDividends(ctx, state, unit.symbol, now)));
+      dropBlockedDividends(state, nowMs());
+      const wait = waitUntilNext(state, nowMs());
+      return wait === null ? { done: true, result: summarize(state) } : pendingStep(state, wait);
     });
   };
 }

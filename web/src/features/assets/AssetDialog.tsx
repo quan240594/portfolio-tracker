@@ -14,6 +14,7 @@ export const ASSET_CLASS_LABELS: Record<AssetClass, string> = {
   CASH: 'Cash',
   REAL_ESTATE: 'Real estate',
   DEPOSIT: 'Savings / deposit',
+  COMMODITY: 'Commodity',
   OTHER: 'Other (e.g. private equity)',
 };
 const SELECTABLE_CLASSES = ASSET_CLASSES.filter((c) => c !== 'CASH');

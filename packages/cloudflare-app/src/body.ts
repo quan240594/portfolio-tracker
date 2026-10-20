@@ -1,5 +1,15 @@
+import { MAX_CLASSIFICATION_IMPORT_BYTES } from '@portfolio/shared';
+
 /** Largest JSON body the API accepts through the Worker (the CSV upload has its own, larger limit). */
 export const MAX_API_BODY_BYTES = 256 * 1024;
+
+/** The classification import carries a whole holdings export as JSON: its own, larger limit (the API route enforces it too). */
+const IMPORT_PATH = '/api/classification/import';
+
+export function bodyLimitFor(pathname: string): number {
+  const path = pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
+  return path === IMPORT_PATH ? MAX_CLASSIFICATION_IMPORT_BYTES : MAX_API_BODY_BYTES;
+}
 
 function declaredLength(request: Request): number | undefined {
   const header = request.headers.get('content-length');

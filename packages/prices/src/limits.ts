@@ -1,6 +1,6 @@
 import { cond, type ItemKey, type ItemStore } from '@portfolio/platform';
 import { retryAttempts } from '@portfolio/shared';
-import { RateLimitError } from './errors.js';
+import { RateLimitError, type LimitScope } from './errors.js';
 import { asText } from './parse.js';
 import type { Sleep } from './http.js';
 
@@ -112,6 +112,14 @@ export class StoreQuotaLedger implements QuotaLedger {
   }
 }
 
+/** A quota is trusted again this long after its nominal reset, so a clock that runs a little ahead of the provider's does not hit the limit again. */
+export const RESET_MARGIN_MS = 60_000;
+const MINUTE_MS = 60_000;
+const DAY_MS = 86_400_000;
+
+/** The instant after the UTC day `day` (`YYYY-MM-DD`) ends. */
+export const endOfUtcDay = (day: string): number => Date.parse(`${day}T00:00:00Z`) + DAY_MS;
+
 /** The per-provider free-tier quota (calls or credits per UTC day), raising a RateLimitError once it is used up. */
 export class DailyQuota {
   constructor(
@@ -123,8 +131,145 @@ export class DailyQuota {
 
   async consume(units = 1): Promise<void> {
     const key = { PK: 'USAGE', SK: this.provider };
-    if (!(await this.ledger.consume(key, 'PROVIDER_USAGE', this.today(), units, this.limit))) {
-      throw new RateLimitError(`${this.provider} daily quota of ${this.limit} exhausted`, { provider: this.provider });
+    const day = this.today();
+    if (!(await this.ledger.consume(key, 'PROVIDER_USAGE', day, units, this.limit))) {
+      throw new RateLimitError(`${this.provider} daily quota of ${this.limit} exhausted`, { provider: this.provider, scope: 'day', resetAtMs: endOfUtcDay(day) + RESET_MARGIN_MS });
     }
+  }
+}
+
+/**
+ * The per-minute credits of a provider (Twelve Data: 8), persisted like the daily quota. A job step builds its providers anew,
+ * so an in-memory token bucket would start every step with full credits; this ledger remembers what the previous steps spent.
+ */
+export class MinuteQuota {
+  constructor(
+    private readonly ledger: QuotaLedger,
+    readonly provider: string,
+    readonly limit: number,
+    private readonly now: () => number,
+  ) {}
+
+  async consume(units = 1): Promise<void> {
+    const key = { PK: 'USAGE', SK: `${this.provider}#minute` };
+    const minute = Math.floor(this.now() / MINUTE_MS);
+    if (!(await this.ledger.consume(key, 'PROVIDER_USAGE', new Date(minute * MINUTE_MS).toISOString().slice(0, 16), units, this.limit))) {
+      throw new RateLimitError(`${this.provider} credits of this minute (${this.limit}) are used`, { provider: this.provider, scope: 'minute', resetAtMs: (minute + 1) * MINUTE_MS + 1000 });
+    }
+  }
+}
+
+/** When a quota of `scope` that ran out at `nowMs` is available again. */
+export const resetOf = (scope: LimitScope, nowMs: number): number =>
+  scope === 'day' ? endOfUtcDay(new Date(nowMs).toISOString().slice(0, 10)) + RESET_MARGIN_MS : (Math.floor(nowMs / MINUTE_MS) + 1) * MINUTE_MS + 1000;
+
+export const BLOCK_ENTITY = 'PROVIDER_BLOCK';
+export const blockKey = (provider: string): ItemKey => ({ PK: 'USAGE', SK: `BLOCK#${provider}` });
+const MAX_REASON_CHARS = 200;
+
+/** A provider that said "limit reached": nothing is asked of it before `until` (epoch milliseconds). */
+export interface ProviderBlock {
+  until: number;
+  scope?: LimitScope;
+}
+
+/** The persisted blocks (`USAGE/BLOCK#{provider}`), shared by every job step: a block written once saves every later call. */
+export class BlockBook {
+  constructor(
+    private readonly store: ItemStore,
+    private readonly clock: () => Date,
+  ) {}
+
+  /** The blocks still in force among `providers`. */
+  async active(providers: readonly string[]): Promise<Map<string, ProviderBlock>> {
+    const items = await this.store.getMany(providers.map(blockKey));
+    const nowMs = this.clock().getTime();
+    const out = new Map<string, ProviderBlock>();
+    for (const item of items) {
+      const until = typeof item.until === 'number' ? item.until : 0;
+      if (until > nowMs) out.set(item.SK.slice('BLOCK#'.length), { until, ...(item.scope === 'minute' || item.scope === 'day' ? { scope: item.scope } : {}) });
+    }
+    return out;
+  }
+
+  /** Records a block unless a longer one is stored. */
+  async block(provider: string, until: number, scope: LimitScope | undefined, reason: string): Promise<void> {
+    const current = (await this.active([provider])).get(provider);
+    if (current !== undefined && current.until >= until) return;
+    await this.store.put({ ...blockKey(provider), entityType: BLOCK_ENTITY, provider, until, ...(scope === undefined ? {} : { scope }), reason: reason.slice(0, MAX_REASON_CHARS), setAt: this.clock().toISOString() });
+  }
+}
+
+/** The check in front of every call of one provider: blocked means a RateLimitError at once, with no request and no quota spent. */
+export class ProviderGate {
+  private known: ProviderBlock | undefined;
+  private loaded = false;
+
+  constructor(
+    private readonly book: BlockBook,
+    readonly provider: string,
+    private readonly clock: () => Date,
+  ) {}
+
+  async assertOpen(): Promise<void> {
+    if (!this.loaded) {
+      this.known = (await this.book.active([this.provider])).get(this.provider);
+      this.loaded = true;
+    }
+    if (this.known !== undefined && this.known.until > this.clock().getTime()) {
+      throw new RateLimitError(`${this.provider} is limited until ${new Date(this.known.until).toISOString()}`, { provider: this.provider, scope: this.known.scope, resetAtMs: this.known.until });
+    }
+  }
+
+  /** The provider (or the ledger) says its quota is used up until `until`. */
+  async block(until: number, scope: LimitScope, reason: string): Promise<void> {
+    this.known = { until, scope };
+    this.loaded = true;
+    await this.book.block(this.provider, until, scope, reason);
+  }
+}
+
+export interface ProviderLimits {
+  quota: DailyQuota;
+  minuteQuota?: MinuteQuota;
+  gate?: ProviderGate;
+}
+
+/** Asks the gate, then spends the per-minute and the daily credits. A daily quota that ran out blocks the provider until its reset. */
+export async function spendCredits({ quota, minuteQuota, gate }: ProviderLimits, credits: number): Promise<void> {
+  await gate?.assertOpen();
+  await minuteQuota?.consume(credits);
+  try {
+    await quota.consume(credits);
+  } catch (error) {
+    if (error instanceof RateLimitError && gate !== undefined && error.resetAtMs !== undefined) await gate.block(error.resetAtMs, 'day', error.message);
+    throw error;
+  }
+}
+
+export const PLAN_ENTITY = 'PROVIDER_PLAN';
+/** A plan that lacks an endpoint is asked again after this long (the owner may have upgraded). */
+export const PLAN_RECHECK_MS = 7 * DAY_MS;
+
+/** `PlanMemory` in the item store (`USAGE/PLAN#{provider}`). */
+export class StorePlanMemory {
+  constructor(
+    private readonly store: ItemStore,
+    private readonly provider: string,
+    private readonly clock: () => Date,
+  ) {}
+
+  private get key(): ItemKey {
+    return { PK: 'USAGE', SK: `PLAN#${this.provider}` };
+  }
+
+  async profileUnsupported(): Promise<boolean> {
+    const item = await this.store.get(this.key);
+    return typeof item?.profileUnsupportedUntil === 'number' && item.profileUnsupportedUntil > this.clock().getTime();
+  }
+
+  async markProfileUnsupported(): Promise<void> {
+    const now = this.clock();
+    await this.store.update(this.key, { set: { entityType: PLAN_ENTITY, provider: this.provider, profileUnsupportedUntil: now.getTime() + PLAN_RECHECK_MS, checkedAt: now.toISOString() } });
   }
 }

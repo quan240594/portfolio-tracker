@@ -1,12 +1,15 @@
 import { cond, listByPrefix, type Item, type ItemKey, type ItemStore } from '@portfolio/platform';
 import {
+  CLASSIFICATION_ENTITY,
   GOAL_ENTITY,
   MANAGEMENT_ENTITY,
+  classificationKeys,
   fromItem,
   goalKeys,
   keys,
   managementKeys,
   type Category,
+  type ClassificationOverrideItem,
   type CategoryAssignment,
   type CustomAsset,
   type GoalItem,
@@ -40,6 +43,11 @@ export interface ManagementRepository {
   getGoal(userId: string, scope: string): Promise<GoalItem | null>;
   putGoal(goal: GoalItem): Promise<void>;
   deleteGoal(userId: string, scope: string): Promise<void>;
+  /** The user's classification overrides among `symbols`, by symbol. */
+  getClassificationOverrides(userId: string, symbols: readonly string[]): Promise<Record<string, ClassificationOverrideItem>>;
+  listClassificationOverrides(userId: string): Promise<ClassificationOverrideItem[]>;
+  putClassificationOverrides(items: readonly ClassificationOverrideItem[]): Promise<void>;
+  deleteClassificationOverride(userId: string, symbol: string): Promise<void>;
   /** Removes settings, categories, assignments, custom assets and the goal of a deleted portfolio. */
   deletePortfolioData(userId: string, portfolioId: string): Promise<void>;
 }
@@ -144,6 +152,24 @@ export class ItemManagementRepository implements ManagementRepository {
 
   deleteGoal(userId: string, scope: string): Promise<void> {
     return this.remove(goalKeys.goal(userId, scope));
+  }
+
+  async getClassificationOverrides(userId: string, symbols: readonly string[]): Promise<Record<string, ClassificationOverrideItem>> {
+    if (symbols.length === 0) return {};
+    const items = await this.store.getMany(symbols.map((symbol) => classificationKeys.override(userId, symbol)));
+    return Object.fromEntries(items.map((item) => [String(item.symbol), fromItem<ClassificationOverrideItem>(item)]));
+  }
+
+  listClassificationOverrides(userId: string): Promise<ClassificationOverrideItem[]> {
+    return this.listUser(userId, classificationKeys.prefix);
+  }
+
+  putClassificationOverrides(items: readonly ClassificationOverrideItem[]): Promise<void> {
+    return this.store.batchWrite(items.map((item) => ({ type: 'put', item: { ...classificationKeys.override(item.userId, item.symbol), entityType: CLASSIFICATION_ENTITY, ...item } })));
+  }
+
+  deleteClassificationOverride(userId: string, symbol: string): Promise<void> {
+    return this.remove(classificationKeys.override(userId, symbol));
   }
 
   async deletePortfolioData(userId: string, portfolioId: string): Promise<void> {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { declaresTooLarge, readBodyBounded } from './body.js';
+import { MAX_CLASSIFICATION_IMPORT_BYTES } from '@portfolio/shared';
+import { MAX_API_BODY_BYTES, bodyLimitFor, declaresTooLarge, readBodyBounded } from './body.js';
 
 const put = (body: BodyInit | null, headers: Record<string, string> = {}) => new Request('https://x.test/', { method: 'PUT', body, headers });
 
@@ -51,5 +52,14 @@ describe('declaresTooLarge', () => {
     expect(declaresTooLarge(put('x', { 'content-length': '-5' }), 10)).toBe(false);
     expect(declaresTooLarge(put('x', { 'content-length': 'abc' }), 10)).toBe(false);
     expect(declaresTooLarge(put('x'), 10)).toBe(false);
+  });
+});
+
+describe('bodyLimitFor', () => {
+  it('gives the classification import its own limit and every other path the API limit', () => {
+    expect(bodyLimitFor('/api/classification/import')).toBe(MAX_CLASSIFICATION_IMPORT_BYTES);
+    expect(bodyLimitFor('/api/classification/import/')).toBe(MAX_CLASSIFICATION_IMPORT_BYTES);
+    expect(bodyLimitFor('/api/classification/FWRA.MI')).toBe(MAX_API_BODY_BYTES);
+    expect(bodyLimitFor('/api/transactions')).toBe(MAX_API_BODY_BYTES);
   });
 });

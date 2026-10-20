@@ -1,7 +1,7 @@
 import { silentLogger, type CorporateActionsSource, type EarningsSource, type ItemStore, type Logger } from '@portfolio/platform';
 import type { PricesConfig } from './config.js';
 import { HttpClient, type FetchLike, type Sleep } from './http.js';
-import { DailyQuota, StoreQuotaLedger, TokenBucket } from './limits.js';
+import { BlockBook, DailyQuota, MinuteQuota, ProviderGate, StorePlanMemory, StoreQuotaLedger, TokenBucket } from './limits.js';
 import { AlphaVantageProvider } from './providers/alphavantage.js';
 import { AlphaVantageEarnings, EodhdCorporateActions } from './providers/calendar.js';
 import { CoinGeckoProvider } from './providers/coingecko.js';
@@ -56,11 +56,23 @@ export function createMarketData(deps: MarketDataDeps, fetch: FetchLike = deps.f
   const quota = (provider: string, limit: number): DailyQuota => new DailyQuota(ledger, provider, limit, () => utcDay(clock()));
   const bucket = (capacity: number, perSecond: number): TokenBucket => new TokenBucket(capacity, perSecond, nowMs, sleep, MAX_INLINE_WAIT_MS);
   const { keys } = config;
+  const blocks = new BlockBook(deps.store, clock);
+  const gate = (provider: string): ProviderGate => new ProviderGate(blocks, provider, clock);
 
   const twelvedata = keys.twelvedata
-    ? new TwelveDataProvider({ apiKey: keys.twelvedata, http: http('twelvedata'), now: clock, bucket: bucket(TWELVEDATA_CREDITS_PER_MINUTE, TWELVEDATA_CREDITS_PER_MINUTE / 60), quota: quota('twelvedata', config.dailyLimits.twelvedata), logger })
+    ? new TwelveDataProvider({
+        apiKey: keys.twelvedata,
+        http: http('twelvedata'),
+        now: clock,
+        bucket: bucket(TWELVEDATA_CREDITS_PER_MINUTE, TWELVEDATA_CREDITS_PER_MINUTE / 60),
+        quota: quota('twelvedata', config.dailyLimits.twelvedata),
+        minuteQuota: new MinuteQuota(ledger, 'twelvedata', TWELVEDATA_CREDITS_PER_MINUTE, nowMs),
+        gate: gate('twelvedata'),
+        plan: new StorePlanMemory(deps.store, 'twelvedata', clock),
+        logger,
+      })
     : undefined;
-  const eodhd = keys.eodhd ? new EodhdProvider({ apiKey: keys.eodhd, http: http('eodhd'), now: clock, bucket: bucket(5, 1), quota: quota('eodhd', config.dailyLimits.eodhd), logger }) : undefined;
+  const eodhd = keys.eodhd ? new EodhdProvider({ apiKey: keys.eodhd, http: http('eodhd'), now: clock, bucket: bucket(5, 1), quota: quota('eodhd', config.dailyLimits.eodhd), gate: gate('eodhd'), logger }) : undefined;
   const coingecko = keys.coingecko ? new CoinGeckoProvider({ apiKey: keys.coingecko, http: http('coingecko'), now: clock, bucket: bucket(30, 0.5), extraCoinIds: config.coinGeckoCoinIds, logger }) : undefined;
   const alphavantageQuota = quota('alphavantage', config.dailyLimits.alphavantage);
   const alphavantage = keys.alphavantage ? new AlphaVantageProvider({ apiKey: keys.alphavantage, http: http('alphavantage'), now: clock, bucket: bucket(5, 5 / 60), quota: alphavantageQuota }) : undefined;

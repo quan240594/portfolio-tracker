@@ -7,9 +7,11 @@ import { BrokerError, describeError } from './errors.js';
 import { mergeQuote, resolvePrice, type EuroRates, type QuoteCandidate } from './quote-price.js';
 import type { QuoteStore } from './quote-store.js';
 import type { BrokerStore } from './store.js';
+import { heldInstruments, refreshBaselines } from './baseline.js';
+import type { ProfileStore } from './profile-store.js';
 import { loadExchangeNames, resolveSymbols } from './symbols.js';
 import type { Trading212Api } from './t212/client.js';
-import type { OpenPosition } from './t212/schemas.js';
+import type { OpenPosition, TradableInstrument } from './t212/schemas.js';
 
 /**
  * The `refreshT212Quotes` job: Trading 212's own open positions as a keyless, near-live quote source. Per user with a connected
@@ -23,6 +25,8 @@ export type RefreshQuotesPayload = z.infer<typeof payloadSchema>;
 export interface QuoteDeps {
   store: Pick<BrokerStore, 'listUserIds' | 'listStates' | 'getFxRates'>;
   quotes: QuoteStore;
+  /** Where the baseline profiles (name, type, ISIN, currency) of the held symbols are written; absent = no baseline. */
+  profiles?: ProfileStore;
   credentials: CredentialSource;
   /** Needs `positions`, plus the exchange metadata when an instrument cannot be mapped without it. */
   createApi: (credentials: Trading212Credentials) => Pick<Trading212Api, 'positions' | 'instruments' | 'exchanges'>;
@@ -38,6 +42,8 @@ export interface UserQuoteResult {
   quoted: number;
   /** Positions that got no quote: not mapped, no price, or a newer quote is stored. */
   skipped: number;
+  /** Baseline profiles written in this run (absent without a profile store). */
+  profiles?: number;
 }
 
 export interface QuoteRunResult {
@@ -110,30 +116,49 @@ async function recordFailure(deps: QuoteDeps, userId: string, previous: T212Quot
   return notRefreshed(userId, 'failed', state);
 }
 
+/** The instruments metadata of one run: one (large, rate-limited) request at most hourly, shared by the exchange mapping and the baseline profiles. */
+interface InstrumentsLoader {
+  /** The instruments, or none when they were requested within the hour already. */
+  load(): Promise<TradableInstrument[]>;
+  /** Whether a new request is allowed now. */
+  allowed(): boolean;
+  triedAt(): string | undefined;
+}
+
+function instrumentsLoader(api: Pick<Trading212Api, 'instruments'>, previous: T212QuoteStatus | null, nowMs: number): InstrumentsLoader {
+  let triedAt = previous?.metadataTriedAt;
+  let requested: Promise<TradableInstrument[]> | undefined;
+  const allowed = (): boolean => triedAt === undefined || nowMs - Date.parse(triedAt) >= METADATA_RETRY_MS;
+  return {
+    allowed,
+    triedAt: () => triedAt,
+    load: () => {
+      if (requested !== undefined) return requested;
+      if (!allowed()) return Promise.resolve([]);
+      triedAt = new Date(nowMs).toISOString();
+      requested = api.instruments();
+      return requested;
+    },
+  };
+}
+
 interface Mapped {
   symbols: Map<string, SymbolMapping>;
   /** Tickers resolved through the exchange metadata (or the cache of them), to reuse without loading it again. */
   cache: Record<string, string>;
-  metadataTriedAt?: string;
 }
 
 /** Maps every held instrument with the importer's mapper; the exchange metadata is the (rate-limited) last resort, tried at most hourly. */
-async function mapInstruments(deps: QuoteDeps, api: Pick<Trading212Api, 'instruments' | 'exchanges'>, items: readonly OpenPosition[], previous: T212QuoteStatus | null): Promise<Mapped> {
-  const nowMs = deps.now().getTime();
+async function mapInstruments(deps: QuoteDeps, api: Pick<Trading212Api, 'instruments' | 'exchanges'>, items: readonly OpenPosition[], previous: T212QuoteStatus | null, instruments: InstrumentsLoader): Promise<Mapped> {
   const cached = previous?.tickerSymbols ?? {};
-  let metadataTriedAt = previous?.metadataTriedAt;
-  const loadExchanges = async () => {
-    if (metadataTriedAt !== undefined && nowMs - Date.parse(metadataTriedAt) < METADATA_RETRY_MS) return new Map<string, string>();
-    metadataTriedAt = new Date(nowMs).toISOString();
-    return loadExchangeNames(api);
-  };
+  const loadExchanges = async () => (instruments.allowed() ? loadExchangeNames(api, () => instruments.load()) : new Map<string, string>());
   const refs = items.map(({ instrument }) => ({ ticker: instrument.ticker, isin: instrument.isin, currency: instrument.currency }));
   const symbols = await resolveSymbols(refs, { ...cached, ...deps.symbolOverrides }, loadExchanges);
   const cache: Record<string, string> = {};
   for (const [ticker, mapping] of symbols) {
     if (mapping.ok && (mapping.via === 'exchange' || cached[ticker] === mapping.symbol)) cache[ticker] = mapping.symbol;
   }
-  return { symbols, cache: Object.fromEntries(Object.entries(cache).slice(0, MAX_TICKER_CACHE)), ...(metadataTriedAt === undefined ? {} : { metadataTriedAt }) };
+  return { symbols, cache: Object.fromEntries(Object.entries(cache).slice(0, MAX_TICKER_CACHE)) };
 }
 
 /** Rates are only needed to check the scale of London prices, so they are only read when a position can need it. */
@@ -168,11 +193,14 @@ async function refreshUser(deps: QuoteDeps, userId: string, trigger: RefreshQuot
   } catch (error) {
     return recordFailure(deps, userId, previous, error);
   }
-  const mapped = await mapInstruments(deps, api, items, previous);
+  const instruments = instrumentsLoader(api, previous, deps.now().getTime());
+  const mapped = await mapInstruments(deps, api, items, previous, instruments);
   const asOf = deps.now().toISOString();
   const wanted = candidates(items, mapped, await ratesFor(deps, items), asOf);
   const stored = await deps.quotes.latest(wanted.map((candidate) => candidate.symbol));
   const quotes = wanted.map((candidate) => mergeQuote(candidate, stored.get(candidate.symbol))).filter((quote): quote is Quote => quote !== undefined);
+  // Before the status is saved: loading the instruments records the time of the request in it.
+  const baselines = deps.profiles === undefined ? undefined : await refreshBaselines(deps.profiles, heldInstruments(items, mapped.symbols), () => instruments.load());
   const { lastError: _lastError, nextAttemptAt: _nextAttemptAt, ...rest }: Partial<T212QuoteStatus> = previous ?? {};
   await deps.quotes.save(quotes, {
     ...rest,
@@ -184,9 +212,9 @@ async function refreshUser(deps: QuoteDeps, userId: string, trigger: RefreshQuot
     quoted: quotes.length,
     skipped: items.length - quotes.length,
     tickerSymbols: mapped.cache,
-    ...(mapped.metadataTriedAt === undefined ? {} : { metadataTriedAt: mapped.metadataTriedAt }),
+    ...(instruments.triedAt() === undefined ? {} : { metadataTriedAt: instruments.triedAt() }),
   });
-  return { userId, outcome: 'refreshed', quoted: quotes.length, skipped: items.length - quotes.length };
+  return { userId, outcome: 'refreshed', quoted: quotes.length, skipped: items.length - quotes.length, ...(baselines === undefined ? {} : { profiles: baselines }) };
 }
 
 interface RunCursor {

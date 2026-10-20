@@ -967,7 +967,9 @@ cannot be sourced from the free data already stored or derived from it; nothing 
 earlier get them lazily: each scheduled refresh fetches the details of **at most one** tracked symbol whose `detailsAsOf` is
 missing or older than 30 days (`PROFILE_DETAILS_PER_RUN`, `PROFILE_DETAILS_TTL_DAYS`) and updates only those attributes
 (never name/sector/country), also stamping symbols the provider does not know so they are not retried every run. At four
-runs a day that is at most four profile calls a day in total; the API itself never calls a provider.
+runs a day that is at most four profile calls a day in total; the API itself never calls a provider. *(Superseded for the
+Cloudflare price service: see "Instrument classification (baseline, providers, overrides)": up to 3 symbols per run, quota-aware,
+and a Trading 212 baseline or minimal profile is upgraded with the provider's name, sector and country, not only the details.)*
 
 ## Dividend growth trend and forecast
 
@@ -2262,9 +2264,10 @@ interface PriceJobDeps {
   `quotes` -> `details`. The cursor holds the tracked symbols, the pending quote batches (8 US, 15 EU, 50 crypto per call), what was
   refreshed/failed/skipped, the per-source `readyAt` and the FX plan. Twelve Data batches are spaced by `delayMs`; EU symbols
   refresh in the hours of `EU_REFRESH_HOURS` (Europe/Amsterdam, via `Intl`) or when their stored quote is missing or older than 24 h.
-* **`enrichTransactions`** (`JobHandler<TransactionsChangedDetail, EnrichmentSummary>`): symbols without a `PROFILE`, a few per step
-  (a US symbol pauses the next US symbol by 30 s for Twelve Data's per-minute credits). Transient failures are tried again in later
-  rounds (3 attempts in all, pauses of 60 s and 120 s) instead of an SQS redelivery; what still fails is `retry` in the result.
+* **`enrichTransactions`** (`JobHandler<TransactionsChangedDetail, EnrichmentSummary>`): symbols whose enrichment is not finished (no
+  `PROFILE`, or one that is only a Trading 212 baseline / minimal profile), a few per step. Quota-aware since the free-plan diagnosis:
+  persisted per-minute credits and provider blocks, at most 3 tries per symbol and UTC day, dividends last (see "Instrument
+  classification (baseline, providers, overrides)"); what is not done after 3 days is `retry` in the result.
 * **`refreshCalendar`** (`JobHandler<{trigger: 'scheduled'}, CalendarRefreshSummary>`): earnings (one call, `alphavantage` budget),
   then the due symbols oldest first within the `eodhd` budget, 2 calls per symbol (1 without dividends). A provider rate limit
   stops the run (`corporateActions.status` is `rate-limited`, a new member of the platform's `CalendarStatus`).
@@ -2648,3 +2651,189 @@ field names and units of `GET /api/v0/equity/positions` (taken from the public d
 `quantity`, `currentPrice`, `averagePricePaid`, `walletImpact.{currency,totalCost,currentValue,unrealizedProfitLoss,fxImpact}`), whether
 London prices arrive in pence under a `GBX` or a `GBP` label (both are handled), the exact rate-limit headers, and how fresh `currentPrice` is
 outside the sessions.
+
+## Instrument classification (baseline, providers, overrides)
+
+Observed on the live Free-plan deployment (20 Oct 2026): the dashboard Allocation donut said `Other` 84.5 % / `Stock` 15.5 %, holdings
+were named by their symbol (`FWRA.MI`) and the Sector / Country tabs were as poor. The asset class, name, sector and country of a
+holding come from the `PROFILE` item of its symbol (one item shared by all users), and the owner has only the free keys
+(`TWELVEDATA_API_KEY`, `EODHD_API_KEY`; Twelve Data: 8 credits a minute and no `/profile`; EODHD: 20 calls a day, HTTP 402 after that;
+no Alpha Vantage). Durable Object analytics also showed ~6 subrequests and 12 rows written **every minute for ~55 minutes** after the
+keys were set (2.7 GB-s a minute) until the job stopped by itself.
+
+### Diagnosis (reproduced with fakes: `packages/prices/src/testing/free-plan-sim.ts`)
+
+The simulation runs the real jobs for a 26-symbol portfolio of invented symbols (14 US, 8 exchange-listed shares, 4 funds) on fake
+free-plan providers, driven like the alarm queue (a step per alarm, `delayMs` moves the clock, failing steps retried with the queue's
+backoff) and counts alarm steps, subrequests and SQLite rows written (one per item written, plus one for the job row of each step).
+
+* **Cause of the missing profiles.** `enrichTransactions` fetched profile, history, dividends and quote of a symbol as ONE unit and only
+  wrote the `PROFILE` item (the "enriched" marker) at the end. EODHD's 20 calls a day were gone after 5 symbols (each used 4 calls:
+  search, history, dividends, quote), and every other symbol, US ones included, then failed at its EODHD **dividends** call with a
+  retryable `RateLimitError`, after Twelve Data credits had been spent on its profile and history: nothing was stored, so those 21
+  symbols stayed without a `PROFILE` (name = symbol, class `Other`, sector/country `Unknown`).
+* **Cause of the per-minute burn.** A failing symbol was retried in 3 rounds (60 s and 120 s pauses) and every US symbol paced the
+  next one by 30 s, so 21 failing symbols made roughly one step a minute for the better part of an hour (the model: 42 steps, 146
+  subrequests and 228 rows in the first hour, then quiet; the real object wrote about twice the rows per step, ~55 minutes). Nothing
+  remembered the failure, so every new `TransactionsChanged` event (each sync) started the same storm again. The Twelve Data per-minute
+  limit was an in-memory token bucket that every step (a new provider instance) started full, and `/profile` was re-asked by every step.
+* **Why minimal stayed minimal.** A symbol that did get a minimal profile (nothing found) was marked enriched; the lazy details refresh
+  only ever updated `description/isin/marketCap/eps/beta/peRatio` of an existing profile, never name, sector or country.
+
+| First 14 hours on the free plans, 26 symbols | Before | After |
+|---|---|---|
+| Alarm steps in the first hour / in 14 h | 42 / 48 | 5 / 11 |
+| Subrequests in the first hour / in 14 h | 146 / 156 | 58 / 69 |
+| Rows written in the first hour / in 14 h | 228 / 329 | 271 / 381 (the first hour now stores the history of 21 symbols instead of 5) |
+| Symbols with a profile at the end | 5 of 26 (all listed, no US one) | 21 of 26; the other 5 wait for the EODHD reset and all 26 are done on day 2 |
+| Rows written per hour while the quota is exhausted (56 re-syncs, 15 h) | storm for ~1 h | 4 (idle) to 41 (a scheduled price refresh) |
+| Estimated Durable Object time of the first hour (2.7 GB-s a step observed) | ~110 GB-s | ~15 GB-s |
+
+(The GB-s figures are estimates from the observed 2.7 GB-s a minute, not measured; the step and row counts are the model's.)
+
+### Precedence of what a screen shows for a symbol
+
+`owner override  >  provider profile  >  Trading 212 baseline  >  minimal`
+
+* **minimal** (`profileSource: 'minimal'`): derived from the symbol only (name = symbol, class `OTHER`, currency and country by exchange
+  suffix). Written only when nothing else is known.
+* **Trading 212 baseline** (`profileSource: 'trading212'`): name, STOCK/ETF type, ISIN and currency of every held symbol from Trading 212,
+  keyless (below). **Country is a low-priority default taken from the ISIN prefix**: the issuer's country for a share, but for an ETF
+  or ETC the fund's **domicile** (Ireland, Luxembourg, Jersey ...), not where it invests; a provider's country or the owner's override replaces it.
+* **provider profile** (`profileSource: 'provider'`, or no field at all for items written before the field existed): sector and the country
+  of the company from Twelve Data / Alpha Vantage / EODHD. `mergeProfile` (`packages/shared/src/classification.ts`) merges field by field:
+  the richer source wins, a lower one only fills what is missing, and a placeholder (name = symbol, class `OTHER`) never replaces a real value.
+  So a provider never loses the ISIN, and the baseline never overrides a provider.
+* **owner override**: a per-user, per-symbol `{name?, assetClass?, sector?, country?}` applied on top of the profile in ONE place,
+  `loadProfiles(ctx, symbols)` (`services/api/src/lib/profiles.ts`), used by every read endpoint (portfolio, holdings, allocation, analytics,
+  dividends, calendar, growth, watchlist, asset detail, closed securities), so all of them agree. An override of a symbol that has no
+  stored profile creates one in the currency of its quote (else the base currency).
+
+### Item shapes
+
+| Item | Key (`PK` / `SK`) | Fields |
+|---|---|---|
+| `PROFILE` (existing) | `TICKER#{symbol}` / `PROFILE` | `symbol, name, assetClass, currency, sector?, country?, exchange?, isin?, ...details`, **new** `profileSource?: 'minimal' \| 'trading212' \| 'provider'`, **new** `enrichedAt?: YYYY-MM-DD` (the enrichment stored the history; a profile without `profileSource` counts as enriched) |
+| `CLASSIFICATION` (new) | `USER#{userId}` / `CLASS#{symbol}` | `userId, symbol, name?, assetClass?, sector?, country?, createdAt, updatedAt` (keys in `classificationKeys`) |
+| `ENRICH_STATE` (new) | `TICKER#{symbol}` / `ENRICH#core` or `ENRICH#profile` | `symbol, day (UTC), attempts, outcome: 'retry' \| 'skipped', lastError` (one row per failed try; a counter of another day counts as none) |
+| `PROVIDER_BLOCK` (new) | `USAGE` / `BLOCK#{provider}` | `provider, until (epoch ms), scope: 'minute' \| 'day', reason, setAt` |
+| `ENRICH_STATE` heal marker (new) | `USAGE` / `ENRICH#HEAL` | `day`: the day the scheduled refresh last handed never-enriched symbols to an enrichment job |
+| `PROVIDER_PLAN` (new) | `USAGE` / `PLAN#twelvedata` | `provider, profileUnsupportedUntil (epoch ms, one week), checkedAt` |
+| quota ledger (existing, one more key) | `USAGE` / `twelvedata#minute` | `{day: 'YYYY-MM-DDTHH:MM', used}` next to the daily `USAGE / {provider}` ledger |
+
+`AssetClass` gained `COMMODITY` (`ASSET_CLASSES`), the closest honest class for a gold ETC; the web label is "Commodity".
+
+### Quota handling (packages/prices)
+
+* **Per-minute credits are persisted.** `MinuteQuota` (Twelve Data: 8) is a ledger item per UTC minute, spent before the daily quota, so a
+  new step no longer starts with a full minute. Running out raises `RateLimitError { scope: 'minute', resetAtMs: next minute + 1 s }`.
+* **Daily limits are persisted blocks.** `DailyQuota` running out, EODHD's HTTP 402 and a Twelve Data 429 whose message says "day" write a
+  `PROVIDER_BLOCK` until the next UTC midnight (+1 minute margin); a 429 about the minute blocks until the next minute. Every provider call
+  goes through `spendCredits` (`ProviderGate` first): while blocked it raises `RateLimitError` immediately, with no request and no quota spent,
+  for every job and every later step.
+* **Waiting instead of retrying.** A rate limit costs the symbol no try: the job records `blocked[provider] = resetAtMs` in its cursor,
+  carries on with the symbols of the other providers, and sleeps (`delayMs`, at most a day and two minutes) until the earliest start. A
+  client-side limit names its own wait; one that names nothing is a minute.
+* **Bounded tries.** A symbol is tried at most `MAX_ATTEMPTS_PER_DAY = 3` times per UTC day across all jobs (`ENRICH#core`, one row per failed
+  try), with pauses of 60 s and 120 s, then it waits for the next day; a job gives up after `MAX_ENRICH_DAYS = 3` days and lists the rest in
+  `retry`. A symbol that was skipped all day (unknown, or no key for its provider) is dropped, not waited for. One symbol never blocks the others.
+* **Dividends last and optional.** The history of every symbol is stored first; dividends then use what is left of the EODHD quota, and a limit
+  drops them for the job (the calendar refresh stores them later). Profile and quote are best-effort too: a quote already stored by Trading 212
+  is kept, a missing one falls back to the newest EOD close; a profile that is rate limited is left to the details refresh (a *minute* limit
+  waits instead: it is back in a minute).
+* **Healing.** The scheduled `refreshPrices` (once a UTC day, `PriceJobDeps.enqueueEnrichment`, wired by the Hub to an `enrichTransactions`
+  job) hands the tracked symbols that were never enriched (no profile, or only a baseline or minimal one without `enrichedAt`) to an enrichment
+  job, so a symbol whose first enrichment never ran (keys set later, a sync without new transactions) no longer waits for the next event.
+* **Twelve Data `/profile`** is asked once per plan check: its absence is stored (`PROVIDER_PLAN`) for a week instead of per step.
+* **EODHD saved.** A listed symbol that has a Trading 212 baseline does not get the EODHD `/search` profile call (it returns name, type and
+  ISIN, which the baseline has); inside the EU window a listed quote younger than 2 h (Trading 212 stores one every 15 minutes) is not refreshed.
+* **Details refresh** (`refreshPrices`, up to 3 symbols a run): picks the stalest profiles whose provider is not blocked and that failed fewer
+  than 2 times today (`ENRICH#profile`), upgrades a baseline or minimal profile with the provider's name, sector and country (`mergeProfile`),
+  and only updates the detail fields of a provider profile. A failed lookup (not a rate limit) counts as a try.
+
+### Trading 212 baseline (services/broker-sync)
+
+The `refreshT212Quotes` job (`QuoteDeps.profiles?: ProfileStore`, `ItemProfileStore`) now also writes a baseline profile for every held symbol it
+can improve, as ONE batched write, no extra request in the usual case: the position's `instrument` already carries `name`, `isin` and
+`currency`; only the STOCK/ETF **type** needs the instruments metadata (`GET /api/v0/equity/metadata/instruments`: `type`, `name`, `shortName`,
+`isin`, `currencyCode`, now parsed). That list is loaded at most hourly (`metadataTriedAt` in the quote status) and shared with the exchange
+mapping, and only while a held symbol has no real asset class; if it fails the names are written anyway and the type follows within the hour.
+The T212 ticker is mapped to the app symbol with the importer's `resolveSymbols` / `mapT212Symbol`. The write is skipped when the merge
+changes nothing, so the steady state costs one `getMany` of the held profiles per run. A baseline never degrades a provider profile
+(`mergeProfile`), and a legacy minimal-looking profile (name = symbol, class `OTHER`) is upgraded field by field. `UserQuoteResult.profiles` counts the writes.
+Type mapping: `STOCK` → STOCK, `ETF` → ETF, `CRYPTOCURRENCY`/`CRYPTO` → CRYPTO, anything else → OTHER (an ETC is an `ETF` at Trading 212).
+
+### Owner overrides: API
+
+All routes need sign-in, are user scoped and use the standard error envelope (`CLASSIFICATION_ROUTES`, `packages/shared/src/classification.ts`):
+
+* `GET /classification` → `{ instruments: [{ symbol, effective, base, source, isin, currency, override, held, updatedAt }] }` for the held symbols
+  (all portfolios) and the symbols that have an override; `base` is the profile alone, `effective` the override on top, `source` is
+  `minimal | trading212 | provider | none`.
+* `PUT /classification/{symbol}` with `{name?, assetClass?, sector?, country?}` (at least one; strict: unknown fields are a 400) replaces the override and answers the instrument.
+* `DELETE /classification/{symbol}` → 204 (also when none was stored).
+* `POST /classification/import` with `{ dryRun?: boolean, rows: [{ ticker, isin?, currency?, name?, assetClass?, sector?, country? }] }` (at most 1,000 rows and
+  **1 MB**: the Worker allows this one path a body of `MAX_CLASSIFICATION_IMPORT_BYTES` instead of the 256 KiB of the other routes, and the route
+  answers 413 above it). The server only matches and stores: by **ISIN first** (the stored profile's ISIN, i.e. Trading 212 metadata), then by
+  ticker without its exchange suffix (`FWRA` → `FWRA.MI`); several listings of one ISIN or ticker are told apart by ticker, then currency. It
+  never guesses: a row is reported `unmatched` with a reason `not-held`, `ambiguous`, `isin-mismatch` (ISIN contradicts the instrument), `duplicate`
+  (an earlier row claimed the symbol) or `empty` (no classification field). The answer lists `matched` (with the `changes` per field) and `unmatched`;
+  `dryRun: true` stores nothing. Rows set only the fields they carry and merge with an existing override; an override that would not change is not rewritten.
+* The backup (`GET /export/backup`) includes `classificationOverrides`.
+
+### Snowball "Holdings" import (browser)
+
+`parseSnowballHoldings` (`packages/shared/src/classification-csv.ts`, run in the browser like the Trading 212 converter) reads the columns
+**Holding** (ticker), **Holdings' name**, **Sector**, **Country**, **Category**, **ISIN** and **Currency** by name (a repeated column name is read from
+its first occurrence; BOM, quotes and CRLF handled) and sends normalised JSON; nothing else of the file is read or sent. Mapping (all explicit, in `SNOWBALL_*` tables, tested):
+
+| Snowball | App | Notes |
+|---|---|---|
+| Category `Funds` / `Fund` / `ETF(s)` | asset class `ETF` | |
+| Category `Commodities` / `Commodity` | `COMMODITY` | new asset class |
+| Category `Crypto` / `Cryptocurrenc(y/ies)` | `CRYPTO` | |
+| Category `Bonds` / `Bond` | `BOND` | |
+| Category `Cash` | `CASH` | |
+| Category = a GICS sector (`Information Technology`, `Healthcare`, `Utilities`, ...) | `STOCK` | Snowball's Category is the owner's own grouping and mixes sectors with asset kinds |
+| Category empty, Sector `Funds` / a GICS sector | `ETF` / `STOCK` | fallback |
+| Category not in a table | asset class left as it is | reported as an issue |
+| Sector `Information Technology` | `Technology` | the vocabulary of the providers (Alpha Vantage: `TECHNOLOGY` → `Technology`) |
+| Sector `Healthcare` / `Health Care` | `Healthcare` | |
+| Sector `Financials` | `Financial Services` | |
+| Sector `Consumer Discretionary` / `Consumer Staples` | `Consumer Cyclical` / `Consumer Defensive` | |
+| Sector `Communication Services`, `Industrials`, `Energy`, `Real Estate`, `Utilities` | as is | |
+| Sector `Materials` | `Basic Materials` | |
+| Sector `Funds` | `Diversified` | |
+| Sector `Other` | `Digital Assets` for CRYPTO, `Commodities` for COMMODITY, else `Other` | |
+| any other sector | kept as written | |
+| Country `United States of America` / `USA` / `US` | `United States` | other aliases: `UK`, `Great Britain` → `United Kingdom`, `Korea, Republic of` → `South Korea`, `Russian Federation` → `Russia`, `Czechia` → `Czech Republic` |
+| Country `Other` and any other | kept as written | `Other` stays `Other` (the owner's own word for "not one country") |
+| Holdings' name | `name` | |
+| ISIN (valid 12 characters) / Currency (3 letters) | match keys only | not stored as overrides |
+
+### Web
+
+* **Assets page → "Asset classification"**: pick the Snowball file; it is parsed in the browser (1 MB limit), a dry run shows the preview table
+  (matched rows with what changes per field, unchanged rows, unmatched rows with the reason, parser issues) and **Confirm** stores it.
+* **Asset detail → "Edit classification"**: name, asset class, sector and country with the automatic value shown next to each field; **Reset to automatic**
+  removes the override; an "Edited by you" badge shows where one applies. Only the fields that differ from the automatic value are sent.
+  Saving, resetting or importing refreshes every classification-dependent view (allocation, holdings, analytics, asset detail, watchlist).
+
+### Tests and how to run them
+
+```bash
+export PATH=/Users/quando/.nvm/versions/node/v20.19.0/bin:$PATH
+pnpm --filter @portfolio/shared test:coverage      # merge, overrides, matching, ISIN country, Snowball parser and mapping tables
+pnpm --filter @portfolio/prices test:coverage      # limits, blocks, plan memory, enrichment, details refresh, free-plan simulation (free-plan.test.ts)
+pnpm --filter @portfolio/broker-sync test:coverage # baseline profiles in the quote job
+pnpm --filter @portfolio/api test:coverage         # routes, repository items, the API scenario (also run on workerd by cloudflare-app)
+pnpm --filter @portfolio/cloudflare-app test       # scenarios on node and on Miniflare/workerd, body limits
+pnpm --filter @portfolio/web test:coverage && (cd web && pnpm exec playwright test e2e/classification.spec.ts)
+```
+
+### What is not verified
+
+Everything above runs against fakes: the real Twelve Data / EODHD / Trading 212 answers were not called (their error bodies, the exact
+wording of the Twelve Data 429, whether the free plan counts `/stocks` and `/etfs` as credits, and the shape of the real instruments
+metadata are as documented or inferred). The Snowball mapping was checked against the vocabulary of the owner's export (category, sector and
+country labels only), not its positions. The GB-s figures are estimates.

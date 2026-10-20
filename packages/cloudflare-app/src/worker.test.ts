@@ -3,6 +3,7 @@ import { MAX_FILE_BYTES } from '@portfolio/cloudflare';
 import { Browser } from '../test/browser.js';
 import { createNodeStack } from '../test/node-stack.js';
 import { OWNER_ID } from '../test/fakes.js';
+import { MAX_CLASSIFICATION_IMPORT_BYTES } from '@portfolio/shared';
 import { MAX_API_BODY_BYTES } from './body.js';
 import type { WorkerEnv } from './runtime.js';
 
@@ -84,6 +85,17 @@ describe('Worker routing to the Hub', () => {
     const upload = await new Browser(stack).request('/api/uploads/abcdefghijklmnopqrstuvwxyz', { method: 'PUT', body: new Uint8Array(MAX_FILE_BYTES + 1) });
     expect(upload.status).toBe(413);
     expect(hub).not.toHaveBeenCalled();
+  });
+
+  it('lets the classification import carry a bigger body than other API calls, up to its own limit', async () => {
+    const stack = await createNodeStack();
+    const owner = new Browser(stack);
+    await owner.signIn();
+    const hub = vi.fn(() => Promise.resolve(new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })));
+    stack.env.HUB = withHub(stack, hub).HUB;
+    expect((await owner.request('/api/classification/import', { method: 'POST', body: 'x'.repeat(MAX_API_BODY_BYTES + 1) })).status).toBe(200);
+    expect((await owner.request('/api/classification/import/', { method: 'POST', body: 'x'.repeat(MAX_CLASSIFICATION_IMPORT_BYTES + 1) })).status).toBe(413);
+    expect(hub).toHaveBeenCalledTimes(1);
   });
 
   it('answers unknown /auth routes with 404', async () => {

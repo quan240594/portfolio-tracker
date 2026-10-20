@@ -1,5 +1,6 @@
 import {
   JOB_CEILINGS,
+  JOBS,
   QueueEventPublisher,
   guardJob,
   logger,
@@ -18,7 +19,7 @@ import {
   type ScheduledJob,
   type SecretStore,
 } from '@portfolio/platform';
-import { ItemBrokerStore, ItemQuoteStore, SecretCredentialStore, Trading212Client, brokerSyncJob, refreshQuotesAfterSync, refreshQuotesJob, type QuoteDeps, type SyncDeps } from '@portfolio/broker-sync';
+import { ItemBrokerStore, ItemProfileStore, ItemQuoteStore, SecretCredentialStore, Trading212Client, brokerSyncJob, refreshQuotesAfterSync, refreshQuotesJob, type QuoteDeps, type SyncDeps } from '@portfolio/broker-sync';
 import { ItemIngestStore, importUploadedJob } from '@portfolio/ingest';
 import { DEFAULT_STEP_SUBREQUESTS, PRICE_SCHEDULES, createPriceJobs, type PriceJobDeps } from '@portfolio/prices';
 import type { HubConfig } from './config.js';
@@ -49,7 +50,7 @@ export type JobFactories = { [N in JobName]?: JobFactory<N> };
 /** Subrequests one Trading 212 sync step can use: `T212_PAGES_PER_STEP` pages, each retried up to `T212_MAX_ATTEMPTS` times, plus the exchange list. */
 export const T212_PAGES_PER_STEP = 5;
 export const T212_MAX_ATTEMPTS = 3;
-/** The quote refresh makes one positions request, plus the two metadata requests when an instrument cannot be mapped (hourly at most). */
+/** The quote refresh makes one positions request, plus the two metadata requests when an instrument cannot be mapped or a held symbol has no asset class yet (hourly at most). */
 export const T212_QUOTE_SUBREQUESTS = 3;
 const T212_QUOTE_TIMEOUT_MS = 15_000;
 
@@ -76,6 +77,8 @@ export const CORE_JOB_FACTORIES: JobFactories = {
     const deps: QuoteDeps = {
       store: new ItemBrokerStore(items),
       quotes: new ItemQuoteStore(items),
+      // The same run writes the baseline profiles (name, type, ISIN) of the held symbols: no extra request, see docs/architecture.md.
+      profiles: new ItemProfileStore(items),
       credentials: new SecretCredentialStore(secrets, config.brokerSecretPrefix),
       // One attempt and no waiting: a limit or an error is recorded and backed off by the job; the alarm must never sleep for it.
       createApi: (credentials) => new Trading212Client({ credentials, fetchFn: fetch, maxAttempts: 1, timeoutMs: T212_QUOTE_TIMEOUT_MS, maxWaitMs: 0 }),
@@ -87,9 +90,18 @@ export const CORE_JOB_FACTORIES: JobFactories = {
 };
 
 /** What the price jobs need, built from the Hub's ports (`@portfolio/prices`' `PriceJobDeps`). */
-export function priceJobDeps({ items, fetch, now, sleep, config }: JobContext): PriceJobDeps {
+export function priceJobDeps({ items, fetch, now, sleep, config, queue }: JobContext): PriceJobDeps {
   // Every fetch of a price step goes through the alarm's counted `fetch`; the service's own per-step budget (40) sits below it.
-  return { store: items, fetch, clock: now, sleep, config: config.prices, logger };
+  return {
+    store: items,
+    fetch,
+    clock: now,
+    sleep,
+    config: config.prices,
+    logger,
+    // The scheduled refresh starts the enrichment of tracked symbols that never had one (once a day).
+    enqueueEnrichment: (symbols) => queue.enqueue({ job: JOBS.enrichTransactions, payload: { userId: '', portfolioId: '', reason: 'IMPORTED', symbols: [...symbols] } }),
+  };
 }
 
 /**

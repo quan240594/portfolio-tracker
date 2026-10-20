@@ -1,9 +1,16 @@
 import { mapT212Symbol, type SymbolMapping, type T212InstrumentRef } from '@portfolio/shared';
 import type { Trading212Api } from './t212/client.js';
+import type { TradableInstrument } from './t212/schemas.js';
 
-/** ticker -> exchange name, from the instruments + exchanges metadata (1 request per 50 s, so loaded at most once). */
-export async function loadExchangeNames(api: Pick<Trading212Api, 'instruments' | 'exchanges'>): Promise<Map<string, string>> {
-  const [instruments, exchanges] = await Promise.all([api.instruments(), api.exchanges()]);
+/**
+ * ticker -> exchange name, from the instruments + exchanges metadata (1 request per 50 s, so loaded at most once). `instruments`
+ * lets the caller share the (large) instruments request with other users of it, e.g. the baseline profiles.
+ */
+export async function loadExchangeNames(
+  api: Pick<Trading212Api, 'instruments' | 'exchanges'>,
+  instrumentList: () => Promise<TradableInstrument[]> = () => api.instruments(),
+): Promise<Map<string, string>> {
+  const [instruments, exchanges] = await Promise.all([instrumentList(), api.exchanges()]);
   const bySchedule = new Map<number, string>();
   for (const exchange of exchanges) for (const schedule of exchange.workingSchedules) bySchedule.set(schedule.id, exchange.name);
   const byTicker = new Map<string, string>();

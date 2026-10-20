@@ -97,4 +97,80 @@ describe('PriceRepository', () => {
     expect(await repo.consumeBudget('eodhd', '2026-10-15', 2, 3)).toBe(false);
     expect(await store.get(budgetKey('eodhd'))).toEqual({ PK: 'CALENDAR', SK: 'BUDGET#eodhd', entityType: 'CALENDAR_BUDGET', day: '2026-10-15', used: 2 });
   });
+
+  describe('profile sources', () => {
+    const provider = { symbol: 'AAA', name: 'Aaa Inc', assetClass: 'STOCK' as const, currency: 'USD', sector: 'Technology', country: 'United States', description: 'Makes things.' };
+
+    it('treats a profile as enriched when it has no source (legacy) or the job stamped it', async () => {
+      const store = new MemoryItemStore().load([
+        profile('LEGACY'),
+        profile('BASELINE', { profileSource: 'trading212' }),
+        profile('STAMPED', { profileSource: 'trading212', enrichedAt: '2026-10-13' }),
+        profile('MINIMAL', { profileSource: 'minimal' }),
+      ]);
+      const repo = new PriceRepository(store);
+      expect(await repo.enrichedSymbols(['LEGACY', 'BASELINE', 'STAMPED', 'MINIMAL', 'NONE'])).toEqual(new Set(['LEGACY', 'STAMPED']));
+      expect(await repo.enrichedSymbols([])).toEqual(new Set());
+      expect(await repo.getProfile('BASELINE')).toMatchObject({ symbol: 'BASELINE', profileSource: 'trading212' });
+      expect(await repo.getProfile('NONE')).toBeUndefined();
+    });
+
+    it('lists the stale profiles with their source', async () => {
+      const store = new MemoryItemStore().load([profile('AAA'), profile('BBB', { profileSource: 'trading212' }), profile('CCC', { profileSource: 'nonsense', detailsAsOf: '2026-10-12' })]);
+      const repo = new PriceRepository(store);
+      expect(await repo.staleProfiles(['AAA', 'BBB', 'CCC'], '2026-10-13')).toEqual([
+        { symbol: 'AAA', source: 'provider' },
+        { symbol: 'BBB', source: 'trading212' },
+        { symbol: 'CCC', source: 'provider' },
+      ]);
+      expect(await repo.staleProfiles([], '2026-10-13')).toEqual([]);
+    });
+
+    it('merges a provider profile over a baseline or minimal profile and only updates details on a provider profile', async () => {
+      const store = new MemoryItemStore().load([profile('AAA', { name: 'AAA', assetClass: 'OTHER', isin: 'US0000000002', country: 'Ireland', profileSource: 'trading212' })]);
+      const repo = new PriceRepository(store);
+      await repo.putProfileDetails('AAA', provider, '2026-10-13');
+      expect(await store.get({ PK: 'TICKER#AAA', SK: 'PROFILE' })).toMatchObject({ name: 'Aaa Inc', assetClass: 'STOCK', sector: 'Technology', country: 'United States', isin: 'US0000000002', description: 'Makes things.', profileSource: 'provider', detailsAsOf: '2026-10-13' });
+      // Now a provider profile: only the details move.
+      await repo.putProfileDetails('AAA', { ...provider, name: 'Renamed', sector: 'Energy', beta: 1.1 }, '2026-10-14');
+      expect(await store.get({ PK: 'TICKER#AAA', SK: 'PROFILE' })).toMatchObject({ name: 'Aaa Inc', sector: 'Technology', beta: 1.1, detailsAsOf: '2026-10-14' });
+      // Nothing found on a baseline: only the date.
+      const baselineStore = new MemoryItemStore().load([profile('BBB', { profileSource: 'trading212' })]);
+      await new PriceRepository(baselineStore).putProfileDetails('BBB', null, '2026-10-13');
+      expect(await baselineStore.get({ PK: 'TICKER#BBB', SK: 'PROFILE' })).toMatchObject({ profileSource: 'trading212', detailsAsOf: '2026-10-13' });
+    });
+
+    it('stamps the enrichment: provider over baseline, the baseline kept when no provider answered, the minimal profile as the floor', async () => {
+      const store = new MemoryItemStore().load([profile('BASE', { name: 'Base Co', profileSource: 'trading212', isin: 'US0000000002' })]);
+      const repo = new PriceRepository(store);
+      const minimal = (symbol: string) => ({ symbol, name: symbol, assetClass: 'OTHER' as const, currency: 'USD' });
+      await repo.putEnrichedProfile('BASE', null, minimal('BASE'), '2026-10-13');
+      expect(await store.get({ PK: 'TICKER#BASE', SK: 'PROFILE' })).toMatchObject({ name: 'Base Co', assetClass: 'STOCK', profileSource: 'trading212', isin: 'US0000000002', enrichedAt: '2026-10-13' });
+      await repo.putEnrichedProfile('BASE', { ...provider, symbol: 'BASE' }, minimal('BASE'), '2026-10-14');
+      expect(await store.get({ PK: 'TICKER#BASE', SK: 'PROFILE' })).toMatchObject({ name: 'Aaa Inc', sector: 'Technology', isin: 'US0000000002', profileSource: 'provider', enrichedAt: '2026-10-14', detailsAsOf: '2026-10-14' });
+      await repo.putEnrichedProfile('NEW', null, minimal('NEW'), '2026-10-13');
+      expect(await store.get({ PK: 'TICKER#NEW', SK: 'PROFILE' })).toMatchObject({ name: 'NEW', profileSource: 'minimal', enrichedAt: '2026-10-13' });
+    });
+  });
+
+  describe('attempts and blocks', () => {
+    it('counts the tries of today only', async () => {
+      const store = new MemoryItemStore();
+      const repo = new PriceRepository(store);
+      await repo.putAttempts('core', 'AAA', '2026-10-13', 2, 'retry', 'x'.repeat(500));
+      await repo.putAttempts('core', 'BBB', '2026-10-12', 3, 'retry', 'old');
+      await repo.putAttempts('profile', 'AAA', '2026-10-13', 1, 'skipped', 'profile');
+      expect(await repo.attemptsOn('core', ['AAA', 'BBB', 'CCC'], '2026-10-13')).toEqual(new Map([['AAA', { count: 2, skipped: false }]]));
+      expect(await repo.attemptsOn('profile', ['AAA'], '2026-10-13')).toEqual(new Map([['AAA', { count: 1, skipped: true }]]));
+      expect(await repo.attemptsOn('core', [], '2026-10-13')).toEqual(new Map());
+      expect(((await store.get({ PK: 'TICKER#AAA', SK: 'ENRICH#core' }))!.lastError as string).length).toBe(200);
+    });
+
+    it('reads the blocks in force', async () => {
+      const store = new MemoryItemStore().load([{ PK: 'USAGE', SK: 'BLOCK#eodhd', until: Date.parse('2026-10-14T00:01:00Z'), scope: 'day' }]);
+      const repo = new PriceRepository(store);
+      expect((await repo.blockedProviders(['eodhd', 'twelvedata'], new Date('2026-10-13T16:30:00Z'))).get('eodhd')).toEqual({ until: Date.parse('2026-10-14T00:01:00Z'), scope: 'day' });
+      expect(await repo.blockedProviders(['eodhd'], new Date('2026-10-14T00:02:00Z'))).toEqual(new Map());
+    });
+  });
 });

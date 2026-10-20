@@ -15,6 +15,11 @@ export const CALL_RESERVE = 4;
 export interface PriceJobDeps extends MarketDataDeps {
   /** Subrequests (fetches, retries included) one step may use. Default 40. */
   stepSubrequests?: number;
+  /**
+   * Starts the enrichment (history, dividends, provider profile) of tracked symbols that were never enriched: a symbol whose first
+   * enrichment never ran (keys set later, a sync without new transactions) would otherwise wait for the next event. Absent = off.
+   */
+  enqueueEnrichment?: (symbols: readonly string[]) => Promise<void>;
 }
 
 /** What one step works with: providers around a budgeted `fetch`, the repository and the logger. */

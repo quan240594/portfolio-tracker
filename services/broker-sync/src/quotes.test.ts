@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { HandlerResult } from './app.js';
 import { BrokerError } from './errors.js';
 import { MemoryBrokerStore } from './memory-store.js';
+import { ItemProfileStore } from './profile-store.js';
 import { ItemQuoteStore } from './quote-store.js';
 import { MIN_INTERVAL_MS, refreshQuotesAfterSync, refreshQuotesJob, type QuoteDeps, type QuoteRunResult } from './quotes.js';
 import type { SyncResult } from './sync.js';
@@ -25,7 +26,7 @@ class Clock {
 interface FakeApiData {
   positions?: OpenPosition[];
   error?: Error;
-  instruments?: { ticker: string; workingScheduleId?: number }[];
+  instruments?: { ticker: string; workingScheduleId?: number; type?: string; name?: string; shortName?: string; isin?: string; currencyCode?: string }[];
   exchanges?: { name: string; workingSchedules: { id: number }[] }[];
   metadataError?: Error;
 }
@@ -412,5 +413,112 @@ describe('refreshQuotesAfterSync', () => {
   it('never fails the sync when the refresh cannot be enqueued', async () => {
     const { handler } = setupWrap(finished(result({})), vi.fn((_message: unknown) => Promise.reject(new Error('queue down'))));
     await expect(handler({ payload: { all: true } })).resolves.toMatchObject({ done: true });
+  });
+});
+
+describe('baseline profiles', () => {
+  const FUND = 'IE00B3XXRP09';
+  const positions = [
+    position({ ticker: 'AAPL_US_EQ', name: 'Apple', isin: 'US0378331005' }),
+    position({ ticker: 'VUSAl_EQ', name: 'Vanguard S&P 500 UCITS ETF', isin: FUND, currency: 'GBX', currentPrice: 9650 }),
+    position({ ticker: 'SAPd_EQ', name: 'SAP SE', isin: 'DE0007164600', currency: 'EUR', currentPrice: 231.4 }),
+  ];
+  const instruments = [
+    { ticker: 'AAPL_US_EQ', type: 'STOCK', name: 'Apple Inc', shortName: 'AAPL' },
+    { ticker: 'VUSAl_EQ', type: 'ETF', name: 'Vanguard S&P 500', shortName: 'VUSA', currencyCode: 'GBX' },
+    { ticker: 'SAPd_EQ', type: 'STOCK', name: 'SAP SE', workingScheduleId: 7 },
+  ];
+  const profile = (t: Awaited<ReturnType<typeof setup>>, symbol: string) => t.store.items.snapshot().find((item) => item.PK === `TICKER#${symbol}` && item.SK === 'PROFILE');
+  const withProfiles = (data: FakeApiData) =>
+    setup(data).then((t) => ({ ...t, profiles: new ItemProfileStore(t.store.items) })).then((t) => {
+      t.deps.profiles = t.profiles;
+      return t;
+    });
+
+  it('writes a baseline profile for every held symbol: the position name, the type from the metadata, the ISIN and an ISIN-prefix country', async () => {
+    const t = await withProfiles({ positions, instruments });
+    const { results } = await t.run();
+    expect(results[0]).toMatchObject({ outcome: 'refreshed', quoted: 3, profiles: 3 });
+    expect(profile(t, 'AAPL')).toEqual({ PK: 'TICKER#AAPL', SK: 'PROFILE', entityType: 'PROFILE', symbol: 'AAPL', name: 'Apple', assetClass: 'STOCK', currency: 'USD', isin: 'US0378331005', country: 'United States', profileSource: 'trading212' });
+    expect(profile(t, 'VUSA.L')).toMatchObject({ name: 'Vanguard S&P 500 UCITS ETF', assetClass: 'ETF', currency: 'GBP', isin: FUND, country: 'Ireland', profileSource: 'trading212' });
+    expect(profile(t, 'SAP.DE')).toMatchObject({ name: 'SAP SE', assetClass: 'STOCK', country: 'Germany' });
+    expect(t.api.metadataCalls).toBe(1);
+  });
+
+  it('shares the instruments request with the exchange mapping, and does not ask again once every type is known', async () => {
+    const bare = [position({ ticker: 'SAP_EQ', isin: 'DE0007164600', currency: 'EUR', name: 'SAP SE' })];
+    const t = await withProfiles({ positions: bare, instruments: [{ ticker: 'SAP_EQ', workingScheduleId: 7, type: 'STOCK' }], exchanges: [{ name: 'Xetra', workingSchedules: [{ id: 7 }] }] });
+    await t.run();
+    expect(t.api.metadataCalls).toBe(1);
+    expect(profile(t, 'SAP.DE')).toMatchObject({ assetClass: 'STOCK' });
+    t.clock.advance(2 * 3_600_000);
+    const { results } = await t.run();
+    expect(t.api.metadataCalls).toBe(1);
+    expect(results[0]).toMatchObject({ profiles: 0 });
+  });
+
+  it('writes no profile when nothing improves', async () => {
+    const t = await withProfiles({ positions, instruments });
+    await t.run();
+    const before = t.store.items.snapshot().filter((item) => item.SK === 'PROFILE');
+    const batches: number[] = [];
+    const original = t.store.items.batchWrite.bind(t.store.items);
+    t.store.items.batchWrite = (operations) => {
+      batches.push(operations.length);
+      return original(operations);
+    };
+    t.clock.advance(15 * 60_000);
+    expect((await t.run()).results[0]).toMatchObject({ profiles: 0 });
+    // Only the quotes and the status (3 + 1) are written: no profile write.
+    expect(batches).toEqual([4]);
+    expect(t.store.items.snapshot().filter((item) => item.SK === 'PROFILE')).toEqual(before);
+  });
+
+  it('keeps a provider profile: it only gains the ISIN, never loses its sector, name or country', async () => {
+    const t = await withProfiles({ positions: [positions[0]!], instruments });
+    t.store.items.load([{ PK: 'TICKER#AAPL', SK: 'PROFILE', entityType: 'PROFILE', symbol: 'AAPL', name: 'Apple Inc.', assetClass: 'STOCK', currency: 'USD', sector: 'Technology', country: 'United States' }]);
+    expect((await t.run()).results[0]).toMatchObject({ profiles: 1 });
+    expect(profile(t, 'AAPL')).toMatchObject({ name: 'Apple Inc.', sector: 'Technology', country: 'United States', isin: 'US0378331005' });
+    expect(profile(t, 'AAPL')).not.toHaveProperty('profileSource', 'trading212');
+    expect(t.api.metadataCalls).toBe(0);
+  });
+
+  it('upgrades a minimal or placeholder profile and never lets the baseline replace a provider country', async () => {
+    const t = await withProfiles({ positions: [positions[1]!], instruments });
+    t.store.items.load([{ PK: 'TICKER#VUSA.L', SK: 'PROFILE', entityType: 'PROFILE', symbol: 'VUSA.L', name: 'VUSA.L', assetClass: 'OTHER', currency: 'GBP', country: 'United Kingdom', exchange: 'London Stock Exchange' }]);
+    await t.run();
+    expect(profile(t, 'VUSA.L')).toMatchObject({ name: 'Vanguard S&P 500 UCITS ETF', assetClass: 'ETF', country: 'United Kingdom', isin: FUND });
+  });
+
+  it('writes the names it has when the metadata is not available, and adds the type within the hour limit once it is', async () => {
+    const t = await withProfiles({ positions, instruments, metadataError: new BrokerError('T212_RATE_LIMITED', 'slow', 429) });
+    expect((await t.run()).results[0]).toMatchObject({ outcome: 'refreshed', profiles: 3 });
+    expect(profile(t, 'VUSA.L')).toMatchObject({ name: 'Vanguard S&P 500 UCITS ETF', assetClass: 'OTHER', profileSource: 'trading212' });
+    expect(t.api.metadataCalls).toBe(1);
+    // Within the hour the metadata is not requested again.
+    t.clock.advance(15 * 60_000);
+    t.api.data.metadataError = undefined;
+    await t.run();
+    expect(t.api.metadataCalls).toBe(1);
+    expect(profile(t, 'VUSA.L')).toMatchObject({ assetClass: 'OTHER' });
+    t.clock.advance(60 * 60_000);
+    expect((await t.run()).results[0]).toMatchObject({ profiles: 3 });
+    expect(t.api.metadataCalls).toBe(2);
+    expect(profile(t, 'VUSA.L')).toMatchObject({ assetClass: 'ETF', country: 'Ireland' });
+    expect(profile(t, 'AAPL')).toMatchObject({ assetClass: 'STOCK' });
+  });
+
+  it('never fails the quote refresh: a store failure is only logged', async () => {
+    const t = await withProfiles({ positions, instruments });
+    t.deps.profiles = { get: () => Promise.reject(new Error('throttled')), putMany: () => Promise.resolve() };
+    expect((await t.run()).results[0]).toMatchObject({ outcome: 'refreshed', quoted: 3, profiles: 0 });
+    expect(t.stored('AAPL')).toBeDefined();
+  });
+
+  it('is off without a profile store, and ignores instruments that cannot be mapped', async () => {
+    const t = await setup({ positions, instruments });
+    expect((await t.run()).results[0]).not.toHaveProperty('profiles');
+    const unmapped = await withProfiles({ positions: [position({ ticker: 'WEIRD', isin: undefined, currency: 'EUR' })], instruments });
+    expect((await unmapped.run()).results[0]).toMatchObject({ profiles: 0 });
   });
 });

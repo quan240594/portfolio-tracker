@@ -91,3 +91,8 @@ export function routeOf(symbol: string): Route {
   if (isCrypto(symbol)) return 'crypto';
   return hasExchangeSuffix(symbol) ? 'listed' : 'us';
 }
+
+/** The market-data source that serves each route (its quotes, history and profile). */
+export const SOURCE_OF_ROUTE: Readonly<Record<Route, string>> = { us: 'twelvedata', listed: 'eodhd', crypto: 'coingecko' };
+
+export const providerOf = (symbol: string): string => SOURCE_OF_ROUTE[routeOf(symbol)];

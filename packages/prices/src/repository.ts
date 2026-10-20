@@ -1,6 +1,6 @@
 import { cond, queryAll, type BatchOp, type Item, type ItemStore } from '@portfolio/platform';
-import { CALENDAR_ENTITY, ENTITY, calendarKeys, keys, type DividendEvent, type EodPrice, type FxDay, type FxRates, type InstrumentProfile, type Quote, type StoredEarningsEvent, type StoredSplitEvent } from '@portfolio/shared';
-import { StoreQuotaLedger } from './limits.js';
+import { CALENDAR_ENTITY, ENTITY, calendarKeys, isProfileSource, keys, mergeProfile, sourceOf, type DividendEvent, type EodPrice, type FxDay, type FxRates, type InstrumentProfile, type ProfileSource, type Quote, type StoredEarningsEvent, type StoredSplitEvent } from '@portfolio/shared';
+import { BlockBook, StoreQuotaLedger, type ProviderBlock } from './limits.js';
 import { profileDetails } from './models.js';
 import { byText, definedOnly } from './parse.js';
 
@@ -12,6 +12,22 @@ export const BUDGET_PK = 'CALENDAR';
 
 export const stateKey = (symbol: string) => ({ PK: calendarKeys.tickerPk(symbol), SK: STATE_SK });
 export const budgetKey = (provider: string) => ({ PK: BUDGET_PK, SK: `BUDGET#${provider}` });
+
+export const ENRICH_STATE_ENTITY = 'ENRICH_STATE';
+/** What an attempt counter counts: the enrichment of a symbol (`core`) or the lookup of its provider profile (`profile`). */
+export type AttemptKind = 'core' | 'profile';
+/** How a try ended: `retry` (a transient failure, worth trying again later) or `skipped` (the symbol is unknown or unavailable: trying again changes nothing). */
+export type AttemptOutcome = 'retry' | 'skipped';
+
+/** The tries of one day of a symbol. */
+export interface Attempts {
+  count: number;
+  /** Whether the last try ended `skipped`. */
+  skipped: boolean;
+}
+export const healKey = { PK: 'USAGE', SK: 'ENRICH#HEAL' } as const;
+export const attemptKey = (symbol: string, kind: AttemptKind) => ({ PK: calendarKeys.tickerPk(symbol), SK: `ENRICH#${kind}` });
+const MAX_ERROR_CHARS = 200;
 
 const TICKER_PREFIX = 'TICKER#';
 const FAR_FUTURE = '9999-12-31';
@@ -67,6 +83,9 @@ function trackedSymbol(item: Item): string {
   return item.SK.startsWith(TICKER_PREFIX) ? item.SK.slice(TICKER_PREFIX.length) : '';
 }
 
+/** The source a stored PROFILE item says it comes from (none: a provider profile). */
+const sourceOfItem = (item: Item): ProfileSource => sourceOf({ profileSource: isProfileSource(item.profileSource) ? item.profileSource : undefined });
+
 const numberOf = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) ? value : null);
 
 /** Reads and writes the market-data items of the single table through the ItemStore port. */
@@ -92,30 +111,101 @@ export class PriceRepository {
     return out;
   }
 
-  /** The symbols among `symbols` that already have a PROFILE item (the "enriched" marker). */
+  /** The symbols among `symbols` that already have a PROFILE item. */
   async symbolsWithProfile(symbols: readonly string[]): Promise<Set<string>> {
     const items = symbols.length === 0 ? [] : await this.store.getMany(symbols.map((symbol) => keys.profile(symbol)));
     return new Set(items.map(symbolOfPk));
   }
 
+  /**
+   * The symbols among `symbols` the enrichment job has finished: their history is stored. That is every profile that does not say
+   * where it comes from (written by the enrichment before sources existed) and every one the job stamped with `enrichedAt`; a
+   * Trading 212 baseline or a profile upgraded by the details refresh has a name but no history yet.
+   */
+  async enrichedSymbols(symbols: readonly string[]): Promise<Set<string>> {
+    const items = symbols.length === 0 ? [] : await this.store.getMany(symbols.map((symbol) => keys.profile(symbol)));
+    return new Set(items.filter((item) => typeof item.enrichedAt === 'string' || item.profileSource === undefined).map(symbolOfPk));
+  }
+
+  /** The stored profile of `symbol`, or undefined. */
+  async getProfile(symbol: string): Promise<InstrumentProfile | undefined> {
+    const item = await this.store.get(keys.profile(symbol));
+    return item === undefined ? undefined : (item as unknown as InstrumentProfile);
+  }
+
   /** Symbols with a PROFILE whose optional details were never fetched or before `cutoff`, never-fetched first. */
   async staleProfileDetails(symbols: readonly string[], cutoff: string): Promise<string[]> {
+    return (await this.staleProfiles(symbols, cutoff)).map(({ symbol }) => symbol);
+  }
+
+  /** Like `staleProfileDetails`, with the source of each stored profile. */
+  async staleProfiles(symbols: readonly string[], cutoff: string): Promise<{ symbol: string; source: ProfileSource }[]> {
     if (symbols.length === 0) return [];
     const items = await this.store.getMany(symbols.map((symbol) => keys.profile(symbol)));
     return items
-      .map((item) => ({ fetched: typeof item.detailsAsOf === 'string' ? item.detailsAsOf : '', symbol: symbolOfPk(item) }))
+      .map((item) => ({ fetched: typeof item.detailsAsOf === 'string' ? item.detailsAsOf : '', symbol: symbolOfPk(item), source: sourceOfItem(item) }))
       .filter(({ fetched }) => fetched < cutoff)
       .toSorted((a, b) => byText(a.fetched, b.fetched) || byText(a.symbol, b.symbol))
-      .map(({ symbol }) => symbol);
+      .map(({ symbol, source }) => ({ symbol, source }));
   }
 
   /**
-   * Stores only the optional details (and their fetch date) on the existing PROFILE item, so a refresh can never degrade the
-   * name/sector/country written at enrichment. `profile` null = nothing found. Throws when the PROFILE item does not exist.
+   * Stores what a provider knows about `symbol` on its PROFILE item, never degrading it: a provider profile overrides the Trading
+   * 212 baseline and the minimal one field by field (see `mergeProfile`), nothing replaces a real value with a placeholder. The
+   * detail fields and `detailsAsOf` of the provider profile are stored with it. Throws when the PROFILE item does not exist.
+   * `profile` null = nothing found: only the fetch date is stored.
    */
   async putProfileDetails(symbol: string, profile: InstrumentProfile | null, asOf: string): Promise<void> {
+    const existing = await this.store.get(keys.profile(symbol));
+    if (existing === undefined) throw new Error(`No PROFILE item for ${symbol}`);
+    const stored = existing as unknown as InstrumentProfile;
+    if (profile !== null && sourceOfItem(existing) !== 'provider') {
+      await this.store.put(profileItem(mergeProfile(stored, { ...profile, profileSource: 'provider', detailsAsOf: asOf })));
+      return;
+    }
     const updated = await this.store.update(keys.profile(symbol), { set: { ...profileDetails(profile), detailsAsOf: asOf } }, { condition: cond.exists });
     if (updated === undefined) throw new Error(`No PROFILE item for ${symbol}`);
+  }
+
+  /**
+   * The last write of the enrichment of a new symbol: the provider profile merged over what is stored (a Trading 212 baseline stays
+   * the floor), or, when no provider answered, the stored profile (else the minimal one) marked as enriched. `enrichedAt` is the
+   * marker that the history is stored; `detailsAsOf` is only set with a provider profile.
+   */
+  async putEnrichedProfile(symbol: string, provider: InstrumentProfile | null, fallback: InstrumentProfile, day: string): Promise<void> {
+    const existing = await this.store.get(keys.profile(symbol));
+    const stored = existing === undefined ? undefined : (existing as unknown as InstrumentProfile);
+    const incoming: InstrumentProfile = provider === null ? { ...fallback, profileSource: 'minimal', enrichedAt: day } : { ...provider, profileSource: 'provider', detailsAsOf: day, enrichedAt: day };
+    await this.store.put(profileItem({ ...mergeProfile(stored, incoming), enrichedAt: day }));
+  }
+
+  /** The tries of today per symbol (a counter of another day counts as none). */
+  async attemptsOn(kind: AttemptKind, symbols: readonly string[], day: string): Promise<Map<string, Attempts>> {
+    const items = symbols.length === 0 ? [] : await this.store.getMany(symbols.map((symbol) => attemptKey(symbol, kind)));
+    return new Map(items.filter((item) => item.day === day && typeof item.attempts === 'number').map((item) => [symbolOfPk(item), { count: Number(item.attempts), skipped: item.outcome === 'skipped' }]));
+  }
+
+  /** Stores the number of tries of `day`, how the last one ended and why. */
+  async putAttempts(kind: AttemptKind, symbol: string, day: string, attempts: number, outcome: AttemptOutcome, error: string): Promise<void> {
+    await this.store.put({ ...attemptKey(symbol, kind), entityType: ENRICH_STATE_ENTITY, symbol, day, attempts, outcome, lastError: error.slice(0, MAX_ERROR_CHARS) });
+  }
+
+  /** Whether the not-yet-enriched symbols were already handed to an enrichment job on `day`. */
+  async healedOn(day: string): Promise<boolean> {
+    return (await this.store.get(healKey))?.day === day;
+  }
+
+  async markHealed(day: string): Promise<void> {
+    await this.store.put({ ...healKey, entityType: ENRICH_STATE_ENTITY, day });
+  }
+
+  /** The "limit reached" blocks still in force among `providers`. */
+  blockedProviders(providers: readonly string[], now: Date): Promise<Map<string, ProviderBlock>> {
+    return new BlockBook(this.store, () => now).active(providers);
+  }
+
+  putProfile(profile: InstrumentProfile): Promise<boolean> {
+    return this.store.put(profileItem(profile));
   }
 
   async putQuotes(quotes: readonly Quote[]): Promise<void> {
@@ -124,10 +214,6 @@ export class PriceRepository {
 
   putQuote(quote: Quote): Promise<boolean> {
     return this.store.put(quoteItem(quote));
-  }
-
-  putProfile(profile: InstrumentProfile): Promise<boolean> {
-    return this.store.put(profileItem(profile));
   }
 
   putFx(fx: FxRates): Promise<boolean> {

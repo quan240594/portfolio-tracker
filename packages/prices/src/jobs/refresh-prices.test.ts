@@ -269,6 +269,120 @@ describe('refreshPrices', () => {
     });
   });
 
+  describe('profile details and classification', () => {
+    const profile = (symbol: string, extra: Record<string, unknown> = {}): Item => ({ PK: `TICKER#${symbol}`, SK: 'PROFILE', entityType: 'PROFILE', symbol, name: symbol, assetClass: 'OTHER', currency: 'USD', ...extra });
+    const apple = { Symbol: 'AAPL', Name: 'Apple Inc.', AssetType: 'Common Stock', Currency: 'USD', Country: 'USA', Sector: 'TECHNOLOGY', Description: 'Designs phones.' };
+    const run = (h: ReturnType<typeof harness>) => drive(h, createRefreshPricesJob(h.deps), { trigger: 'scheduled' });
+
+    it('upgrades a Trading 212 baseline with the provider profile: sector and country override, the ISIN stays', async () => {
+      const h = harness({ fake: liveFake().add('alphavantage.co', apple) });
+      track(h.store, 'AAPL');
+      h.store.load([profile('AAPL', { name: 'Apple', assetClass: 'STOCK', isin: 'US0378331005', country: 'Ireland', profileSource: 'trading212' })]);
+      expect((await run(h)).result.profileDetailsRefreshed).toBe(1);
+      expect(stored(h.store, 'TICKER#AAPL', 'PROFILE')).toMatchObject({ name: 'Apple Inc.', assetClass: 'STOCK', sector: 'Technology', country: 'United States', isin: 'US0378331005', description: 'Designs phones.', profileSource: 'provider', detailsAsOf: '2026-10-13' });
+      expect(stored(h.store, 'TICKER#AAPL', 'PROFILE')).not.toHaveProperty('enrichedAt');
+    });
+
+    it('does not ask EODHD for the profile of a listed symbol that has a Trading 212 baseline, and marks it fetched', async () => {
+      const h = harness({ fake: liveFake() });
+      track(h.store, 'ASML.AS');
+      h.store.load([profile('ASML.AS', { name: 'ASML Holding', assetClass: 'STOCK', currency: 'EUR', profileSource: 'trading212' })]);
+      expect((await run(h)).result.profileDetailsRefreshed).toBe(1);
+      expect(h.fake.urls.some((url) => url.includes('/api/search/'))).toBe(false);
+      expect(stored(h.store, 'TICKER#ASML.AS', 'PROFILE')).toMatchObject({ name: 'ASML Holding', profileSource: 'trading212', detailsAsOf: '2026-10-13' });
+    });
+
+    it('asks EODHD for the profile of a listed symbol that only has a minimal one', async () => {
+      const h = harness({ fake: liveFake().add('eodhd.com/api/search/ASML', [{ Code: 'ASML', Exchange: 'AS', Name: 'ASML Holding', Type: 'Common Stock', Country: 'Netherlands', Currency: 'EUR' }]) });
+      track(h.store, 'ASML.AS');
+      h.store.load([profile('ASML.AS', { currency: 'EUR', profileSource: 'minimal' })]);
+      await run(h);
+      expect(stored(h.store, 'TICKER#ASML.AS', 'PROFILE')).toMatchObject({ name: 'ASML Holding', assetClass: 'STOCK', profileSource: 'provider' });
+    });
+
+    it('skips a provider that is limited and a symbol that failed twice today, so one stuck symbol never blocks the others', async () => {
+      const h = harness({ fake: liveFake().add('symbol=BBB', { ...apple, Symbol: 'BBB' }).add('symbol=AAA', { status: 500 }), env: { TWELVEDATA_API_KEY: '' } });
+      track(h.store, 'AAA', 'BBB');
+      h.store.load([profile('AAA', { profileSource: 'minimal' }), profile('BBB', { profileSource: 'minimal' }), { PK: 'TICKER#AAA', SK: 'ENRICH#profile', entityType: 'ENRICH_STATE', symbol: 'AAA', day: '2026-10-13', attempts: 2 }]);
+      expect((await run(h)).result.profileDetailsRefreshed).toBe(1);
+      expect(h.fake.urls.some((url) => url.includes('symbol=AAA'))).toBe(false);
+      expect(stored(h.store, 'TICKER#BBB', 'PROFILE')).toMatchObject({ profileSource: 'provider' });
+
+      const limited = harness({ fake: liveFake().add('alphavantage.co', apple) });
+      track(limited.store, 'AAPL');
+      limited.store.load([profile('AAPL'), { PK: 'USAGE', SK: 'BLOCK#twelvedata', entityType: 'PROVIDER_BLOCK', provider: 'twelvedata', until: NOW.getTime() + 3_600_000, scope: 'day' }]);
+      expect((await run(limited)).result.profileDetailsRefreshed).toBe(0);
+      expect(limited.fake.urls.some((url) => url.includes('alphavantage.co'))).toBe(false);
+    });
+
+    it('counts a failed lookup as a try of today, but not a provider limit', async () => {
+      const failing = harness({ fake: liveFake().add('alphavantage.co', { status: 500 }), env: { TWELVEDATA_API_KEY: '' } });
+      track(failing.store, 'AAPL');
+      failing.store.load([profile('AAPL')]);
+      await run(failing);
+      expect(stored(failing.store, 'TICKER#AAPL', 'ENRICH#profile')).toMatchObject({ day: '2026-10-13', attempts: 1 });
+      await run(failing);
+      expect(stored(failing.store, 'TICKER#AAPL', 'ENRICH#profile')).toMatchObject({ attempts: 2 });
+      await run(failing);
+      expect(stored(failing.store, 'TICKER#AAPL', 'ENRICH#profile')).toMatchObject({ attempts: 2 });
+
+      const limited = harness({ fake: liveFake().add('alphavantage.co', { Information: 'rate limit is 25 requests per day' }), env: { TWELVEDATA_API_KEY: '' } });
+      track(limited.store, 'AAPL');
+      limited.store.load([profile('AAPL')]);
+      await run(limited);
+      expect(stored(limited.store, 'TICKER#AAPL', 'ENRICH#profile')).toBeUndefined();
+    });
+
+    it('keeps a fresh listed quote inside the EU window (the Trading 212 refresh stores one every 15 minutes)', async () => {
+      const h = harness({ fake: liveFake() });
+      track(h.store, 'ASML.AS', 'SAP.DE');
+      const quote = (symbol: string, asOf: string): Item => ({ PK: `TICKER#${symbol}`, SK: 'QUOTE#LATEST', entityType: 'QUOTE', symbol, price: 1, previousClose: 1, currency: 'EUR', asOf, source: 'trading212' });
+      h.store.load([quote('ASML.AS', '2026-10-13T16:20:00.000Z'), quote('SAP.DE', '2026-10-13T11:00:00.000Z')]);
+      h.fake.add('eodhd.com/api/real-time/SAP.XETRA', { code: 'SAP.XETRA', close: 2, previousClose: 2, timestamp: Date.parse('2026-10-13T16:30:00Z') / 1000 });
+      const { result } = await run(h);
+      expect(result).toMatchObject({ euWindow: true, refreshed: 1, skippedSymbols: ['ASML.AS'] });
+      expect(h.fake.urls.some((url) => url.includes('real-time/ASML.AS'))).toBe(false);
+    });
+  });
+
+  describe('healing enrichment', () => {
+    const profile = (symbol: string, extra: Record<string, unknown> = {}): Item => ({ PK: `TICKER#${symbol}`, SK: 'PROFILE', entityType: 'PROFILE', symbol, name: symbol, assetClass: 'STOCK', currency: 'USD', ...extra });
+    const withEnqueue = (h: ReturnType<typeof harness>, enqueue: (symbols: readonly string[]) => Promise<void>) => createRefreshPricesJob({ ...h.deps, enqueueEnrichment: enqueue });
+    const run = (h: ReturnType<typeof harness>, enqueue: (symbols: readonly string[]) => Promise<void>) => drive(h, withEnqueue(h, enqueue), { trigger: 'scheduled' });
+
+    it('hands the tracked symbols that were never enriched to an enrichment job, once a day', async () => {
+      const h = harness({ fake: liveFake() });
+      track(h.store, 'AAPL', 'ASML.AS', 'BTC-EUR', 'NEW.DE');
+      h.store.load([profile('AAPL', { profileSource: 'trading212' }), profile('ASML.AS'), profile('BTC-EUR', { profileSource: 'trading212', enrichedAt: '2026-10-12' })]);
+      const enqueue = vi.fn(() => Promise.resolve());
+      await run(h, enqueue);
+      expect(enqueue).toHaveBeenCalledTimes(1);
+      expect(enqueue).toHaveBeenCalledWith(['AAPL', 'NEW.DE']);
+      expect(stored(h.store, 'USAGE', 'ENRICH#HEAL')).toMatchObject({ day: '2026-10-13' });
+      await run(h, enqueue);
+      expect(enqueue).toHaveBeenCalledTimes(1);
+      h.clock.advance(24 * 3_600_000);
+      await run(h, enqueue);
+      expect(enqueue).toHaveBeenCalledTimes(2);
+    });
+
+    it('starts nothing when every tracked symbol is enriched, and keeps going when the job cannot be started', async () => {
+      const done = harness({ fake: liveFake() });
+      track(done.store, 'AAPL');
+      done.store.load([profile('AAPL')]);
+      const enqueue = vi.fn(() => Promise.resolve());
+      await run(done, enqueue);
+      expect(enqueue).not.toHaveBeenCalled();
+      expect(stored(done.store, 'USAGE', 'ENRICH#HEAL')).toBeUndefined();
+
+      const broken = harness({ fake: liveFake() });
+      track(broken.store, 'NEW');
+      const failing = vi.fn(() => Promise.reject(new Error('queue down')));
+      expect((await run(broken, failing)).result).toMatchObject({ failed: 0 });
+      expect(stored(broken.store, 'USAGE', 'ENRICH#HEAL')).toBeUndefined();
+    });
+  });
+
   describe('resumable steps', () => {
     it('spreads Twelve Data batches over steps at 8 credits a minute', async () => {
       const symbols = Array.from({ length: 20 }, (_, i) => `T${String(i).padStart(2, '0')}`);

@@ -16,6 +16,7 @@ import {
 } from '@portfolio/shared';
 import { ok, validate, type RouteResult } from '../lib/http.js';
 import type { RouteContext } from '../deps.js';
+import { loadProfiles } from '../lib/profiles.js';
 import type { RouteHandler } from '../router.js';
 import { loadAnalyticsData } from './analytics.js';
 
@@ -33,7 +34,7 @@ export async function benchmarkOptions(ctx: RouteContext, data: Pick<AnalyticsDa
   ];
   const from = addIsoDays(data.today, -RECENT_PRICE_DAYS);
   const [profiles, hasData] = await Promise.all([
-    repo.getProfiles(symbols),
+    loadProfiles(ctx, symbols),
     Promise.all(
       symbols.map(async (s) => {
         const loaded = data.eod[s];
@@ -61,3 +62,4 @@ export const growthHandlers: Record<keyof typeof GROWTH_ROUTES, RouteHandler> = 
   analyticsGrowth: getGrowth,
   analyticsHoldingsPerformance: getHoldingsPerformance,
 };
+

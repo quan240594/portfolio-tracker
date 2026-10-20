@@ -59,8 +59,25 @@ You need a Cloudflare account on the Free plan and a GitHub account. Every comma
    sync, and stores a quote per held symbol (`source: 't212'`); holdings and totals are then valued at those prices instead of at cost.
    It runs below 80 % of the free-plan budget (about 2 % of the daily row cap, see `docs/architecture.md`, "Trading 212 position
    quotes"); `GET /api/prices/status` (`t212Quotes`) shows its last refresh and any failure (rejected key, rate limit).
-   **Charts, history, dividends, splits and company profiles still need EOD data from the market-data keys below**; until they are set the
-   day change starts at 0 and price charts stay empty.
+   The same run also writes a **baseline profile** for every held symbol (a real name such as "iShares ...", STOCK/ETF type, ISIN, currency, and a
+   country taken from the ISIN prefix, which for an ETF is the fund's domicile), so the Allocation and Holdings views show proper names and
+   classes without any key. **Charts, history, dividends, splits and sector / country of the company still need the market-data keys below**;
+   until they are set the day change starts at 0 and price charts stay empty.
+
+   **What to expect from free keys.** The free plans are small (Twelve Data: 8 credits a minute, `/profile` is not included; EODHD: 20 calls a
+   day). The price jobs know that: they keep the minute and day usage in the database, remember a "limit reached" answer until the limit resets
+   (next minute, or the next UTC midnight) instead of retrying, try a symbol at most 3 times a day, and fetch dividends last. With about 25 holdings
+   the history of the exchange-listed ones (1 EODHD call each) can need two days to complete; nothing is lost and nothing retries every minute.
+   Sector and country of a company only come from a provider profile (Alpha Vantage, or Twelve Data's reference data for the country): with free
+   keys set them yourself, below.
+
+   **Classify your holdings yourself (owner override, wins over every provider).** On the *Assets* page, "Asset classification" imports the
+   Snowball **Holdings** CSV export: the file is read in your browser (Holding, Holdings' name, Sector, Country, Category, ISIN and Currency are
+   used, nothing else is sent), you get a preview of every row (matched by ISIN first, then by ticker, e.g. `FWRA` to `FWRA.MI`; rows that cannot
+   be matched are listed with the reason, never guessed) and confirm. Categories become asset classes (`Funds` = ETF, `Commodities` = Commodity,
+   `Crypto` = Crypto, sector names = Stock), GICS sectors are renamed to the app's sector names (`Information Technology` = Technology, ...).
+   A single asset is edited from its detail page ("Edit classification"). The mapping tables are in `docs/architecture.md`,
+   "Instrument classification (baseline, providers, overrides)".
 
    **Optional: market-data keys** (the price service). Without them prices come from Trading 212 as above (else they keep their last stored value) and only
    exchange rates (keyless ECB source) refresh; `GET /api/prices/status` shows which source is off and which secret switches it on.

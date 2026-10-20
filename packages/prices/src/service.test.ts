@@ -47,7 +47,8 @@ describe('createMarketDataService', () => {
     const calendar = await service.refreshCalendar(NOW);
     expect(calendar).toMatchObject({ tracked: 1, earnings: { status: 'ok', events: 1 }, corporateActions: { status: 'ok', checked: 1 } });
     const enriched = await service.enrichSymbols({ symbols: ['AAPL', 'cash.eur'] }, NOW);
-    expect(enriched).toMatchObject({ symbols: 1, enriched: [] });
+    // The profile lookup failed (the fake answers with CSV): that no longer fails the enrichment.
+    expect(enriched).toMatchObject({ symbols: 1, enriched: ['AAPL'], retry: [] });
   });
 
   it('lets the clock follow the pauses of a paced job', async () => {

@@ -6,7 +6,13 @@ export interface ProviderErrorDetails {
   status?: number;
   /** Milliseconds after which the call may be retried (rate limits). */
   retryAfterMs?: number;
+  /** Epoch milliseconds at which a quota that ran out is available again (rate limits that know it). */
+  resetAtMs?: number;
+  /** The window of the quota that ran out: credits per minute or calls per UTC day. */
+  scope?: LimitScope;
 }
+
+export type LimitScope = 'minute' | 'day';
 
 const NO_DETAILS: ProviderErrorDetails = {};
 
@@ -17,6 +23,8 @@ export class ProviderError extends Error {
   readonly symbol?: string;
   readonly status?: number;
   readonly retryAfterMs?: number;
+  readonly resetAtMs?: number;
+  readonly scope?: LimitScope;
 
   constructor(message: string, details: ProviderErrorDetails = NO_DETAILS) {
     super(message);
@@ -24,6 +32,8 @@ export class ProviderError extends Error {
     this.symbol = details.symbol;
     this.status = details.status;
     this.retryAfterMs = details.retryAfterMs;
+    this.resetAtMs = details.resetAtMs;
+    this.scope = details.scope;
   }
 
   get retryable(): boolean {
