@@ -67,7 +67,8 @@ interface Context {
   timeline: FxTimeline | undefined;
 }
 
-function heldQuantities(transactions: readonly Transaction[], today: string): Map<string, number> {
+/** Shares held on `today` per symbol (positions above zero). Throws when the transactions cannot be replayed (an oversold position). */
+export function heldQuantities(transactions: readonly Transaction[], today: string): Map<string, number> {
   const held = new Map<string, number>();
   for (const [symbol, position] of buildPositions(transactions, today)) if (position.quantity > EPSILON) held.set(symbol, position.quantity);
   return held;

@@ -1,3 +1,5 @@
+import { createTestSubscriber } from '@portfolio/platform/testing';
+import { MAX_PUSH_DEVICES, drain, sequentially } from '@portfolio/shared';
 import { describe, expect, it } from 'vitest';
 
 export interface ScenarioResponse {
@@ -133,6 +135,85 @@ export function defineApiScenarios(label: string, target: ApiScenarioTarget): vo
       const after = await call('GET', '/classification');
       expect(after.body.instruments.find((i: { symbol: string }) => i.symbol === symbol)).toMatchObject({ override: null });
       expect((await call('DELETE', `/portfolios/${id}`, { query: { force: 'true' } })).status).toBe(204);
+    });
+
+    it('manages dividend notifications: settings, devices and a test push, or reports the feature unavailable', async () => {
+      const state = await call('GET', '/notifications');
+      expect(state.status).toBe(200);
+      if (!state.body.available) {
+        // A deployment without a push sender (the AWS demo): the web app hides the feature.
+        expect(state.body).toMatchObject({ available: false, configured: false, devices: [] });
+        expect((await call('PUT', '/notifications/settings', { body: {} })).status).toBe(404);
+        expect((await call('POST', '/notifications/test')).status).toBe(404);
+        return;
+      }
+      expect(state.body.settings).toMatchObject({ types: { exDividend: true, declared: true, received: true }, exDividendDaysBefore: 2 });
+      expect(state.body.maxDevices).toBe(MAX_PUSH_DEVICES);
+      if (!state.body.configured) {
+        const unsigned = await call('POST', '/notifications/subscriptions', { body: {} });
+        expect(unsigned.status).toBe(503);
+        expect(unsigned.body.error.code).toBe('PUSH_NOT_CONFIGURED');
+        return;
+      }
+      expect(state.body.publicKey).toMatch(/^[\w-]{87}$/);
+
+      // Settings: partial updates, validated.
+      const updated = await call('PUT', '/notifications/settings', { body: { types: { received: false }, exDividendDaysBefore: 4 } });
+      expect(updated.status).toBe(200);
+      expect(updated.body).toEqual({ types: { exDividend: true, declared: true, received: false }, exDividendDaysBefore: 4 });
+      expect((await call('GET', '/notifications')).body.settings).toEqual(updated.body);
+      for (const bad of [{ exDividendDaysBefore: 9 }, { types: { other: true } }, { quietHours: false }]) {
+        expect((await call('PUT', '/notifications/settings', { body: bad })).status).toBe(400);
+      }
+
+      // Devices: the endpoint must be a real push service, the keys real keys.
+      const subscriber = await createTestSubscriber(`https://fcm.googleapis.com/fcm/send/scenario-${crypto.randomUUID()}`);
+      const { endpoint, keys } = subscriber.subscription;
+      for (const refused of ['http://fcm.googleapis.com/fcm/send/x', 'https://example.com/x', 'https://127.0.0.1/x', 'https://fcm.googleapis.com@example.com/x']) {
+        const response = await call('POST', '/notifications/subscriptions', { body: { endpoint: refused, keys } });
+        expect(response.status).toBe(400);
+      }
+      expect((await call('POST', '/notifications/subscriptions', { body: { endpoint, keys: { p256dh: 'x', auth: 'y' } } })).status).toBe(400);
+      const created = await call('POST', '/notifications/subscriptions', { body: { endpoint, keys, label: ' Scenario phone ' } });
+      expect(created.status).toBe(201);
+      expect(created.body).toMatchObject({ created: true, device: { label: 'Scenario phone', service: 'fcm.googleapis.com', failures: 0 } });
+      const deviceId = created.body.device.id as string;
+      expect(JSON.stringify(created.body)).not.toContain(keys.auth);
+      const again = await call('POST', '/notifications/subscriptions', { body: { endpoint, keys, label: 'Scenario phone' } });
+      expect([again.status, again.body.created, again.body.device.id]).toEqual([200, false, deviceId]);
+      const listed = (await call('GET', '/notifications')).body.devices as { id: string }[];
+      expect(listed.filter((device) => device.id === deviceId)).toHaveLength(1);
+      expect(JSON.stringify(listed)).not.toContain('scenario-');
+
+      // A test push reaches the device (the platform's push service answers 201).
+      const test = await call('POST', '/notifications/test', { body: { subscriptionId: deviceId } });
+      expect(test.status).toBe(200);
+      expect(test.body.results).toEqual([{ id: deviceId, label: 'Scenario phone', result: 'ok', removed: false }]);
+      expect((await call('POST', '/notifications/test', { body: { subscriptionId: 'f'.repeat(32) } })).status).toBe(404);
+      expect((await call('POST', '/notifications/test', { body: { subscriptionId: 'nope' } })).status).toBe(400);
+
+      // At most ten devices.
+      const extra: string[] = [];
+      await drain(
+        sequentially(Array.from({ length: MAX_PUSH_DEVICES }, (_unused, index) => index), async (index) => {
+          const other = await createTestSubscriber(`https://fcm.googleapis.com/fcm/send/scenario-extra-${index}-${crypto.randomUUID()}`);
+          const response = await call('POST', '/notifications/subscriptions', { body: other.subscription });
+          if (response.status === 201) extra.push(response.body.device.id as string);
+          else expect(response.body.error.code).toBe('TOO_MANY_DEVICES');
+        }),
+      );
+      expect(extra.length).toBeLessThanOrEqual(MAX_PUSH_DEVICES - 1);
+      expect((await call('GET', '/notifications')).body.devices).toHaveLength(MAX_PUSH_DEVICES);
+      const overflow = await createTestSubscriber(`https://fcm.googleapis.com/fcm/send/scenario-over-${crypto.randomUUID()}`);
+      expect((await call('POST', '/notifications/subscriptions', { body: overflow.subscription })).status).toBe(409);
+
+      // Clean up: remove every device, then the removal is not repeatable.
+      await drain(sequentially([deviceId, ...extra], async (id) => expect((await call('DELETE', `/notifications/subscriptions/${id}`)).status).toBe(204)));
+      expect((await call('DELETE', `/notifications/subscriptions/${deviceId}`)).status).toBe(404);
+      expect((await call('DELETE', '/notifications/subscriptions/not-an-id')).status).toBe(400);
+      expect((await call('GET', '/notifications')).body.devices).toEqual([]);
+      expect((await call('POST', '/notifications/test')).status).toBe(409);
+      expect((await call('PUT', '/notifications/settings', { body: { types: { received: true }, exDividendDaysBefore: 2 } })).status).toBe(200);
     });
 
     it.skipIf(target.importCsv === undefined)('imports a CSV: upload target, processing, status and transactions', async () => {

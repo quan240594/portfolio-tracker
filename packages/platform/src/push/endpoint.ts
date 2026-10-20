@@ -47,3 +47,9 @@ export function validatePushEndpoint(endpoint: unknown, allowedHosts: readonly s
   if (!hostAllowed(host, allowedHosts)) return { ok: false, reason: 'The endpoint is not a known push service' };
   return { ok: true, url };
 }
+
+/** Stable id of a subscription: the first 128 bits of the SHA-256 of its endpoint, hex. The endpoint itself is never used as a key. */
+export async function endpointId(endpoint: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(endpoint)));
+  return Array.from(digest.slice(0, 16), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}

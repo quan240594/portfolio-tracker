@@ -1,4 +1,4 @@
-export { DEFAULT_PUSH_HOSTS, MAX_ENDPOINT_LENGTH, parseAllowedHosts, validatePushEndpoint, type EndpointCheck } from './endpoint.js';
+export { DEFAULT_PUSH_HOSTS, MAX_ENDPOINT_LENGTH, endpointId, parseAllowedHosts, validatePushEndpoint, type EndpointCheck } from './endpoint.js';
 export { MAX_RECORD_PLAINTEXT, PushCryptoError, RECORD_SIZE, decodeUserAgentKeys, deriveContentKeys, ecPrivateJwk, encryptPayload, type ContentKeys, type EncryptOptions, type PushKeys } from './encrypt.js';
 export { VAPID_JWT_LIFETIME_SECONDS, VapidConfigError, createVapidSigner, generateVapidKeys, type VapidConfig, type VapidKeys, type VapidSigner } from './vapid.js';
 export {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PUSH_HOSTS, MAX_ENDPOINT_LENGTH, parseAllowedHosts, validatePushEndpoint } from './endpoint.js';
+import { DEFAULT_PUSH_HOSTS, MAX_ENDPOINT_LENGTH, endpointId, parseAllowedHosts, validatePushEndpoint } from './endpoint.js';
 
 describe('validatePushEndpoint', () => {
   it.each([
@@ -65,5 +65,19 @@ describe('parseAllowedHosts', () => {
 
   it('splits, trims and lower-cases a configured list', () => {
     expect(parseAllowedHosts(' Push.Example.org, *.Other.example ')).toEqual(['push.example.org', '*.other.example']);
+  });
+});
+
+describe('endpointId', () => {
+  it('is 32 hex characters, stable, and different per endpoint', async () => {
+    const a = await endpointId('https://fcm.googleapis.com/fcm/send/a');
+    expect(a).toMatch(/^[0-9a-f]{32}$/);
+    expect(await endpointId('https://fcm.googleapis.com/fcm/send/a')).toBe(a);
+    expect(await endpointId('https://fcm.googleapis.com/fcm/send/b')).not.toBe(a);
+  });
+
+  it('is the SHA-256 prefix', async () => {
+    // sha256("abc") = ba7816bf8f01cfea414140de5dae2223...
+    expect(await endpointId('abc')).toBe('ba7816bf8f01cfea414140de5dae2223');
   });
 });
