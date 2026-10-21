@@ -121,6 +121,7 @@ describe('createQueryClient', () => {
 describe('titleFor', () => {
   it('maps known routes, asset detail pages and unknown paths', () => {
     expect(titleFor('/assets')).toBe('Assets');
+    expect(titleFor('/settings/diagnostics')).toBe('Diagnostics');
     expect(titleFor('/assets/ASML.AS')).toBe('ASML.AS · Asset detail');
     expect(titleFor('/assets/BTC%2DEUR')).toBe('BTC-EUR · Asset detail');
     expect(titleFor('/assets/%E0%A4%A')).toBe('Asset detail');

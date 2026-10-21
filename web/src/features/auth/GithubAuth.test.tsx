@@ -8,6 +8,7 @@ import { server } from '../../mocks/server';
 import { api as apiPath, errorResponse } from '../../mocks/utils';
 import { fakeAuthService, fakeGithubSession, GITHUB_CONFIG, renderAuthApp } from '../../test/auth';
 import { createTestQueryClient } from '../../test/utils';
+import { report as diagnosticsReport } from '../../test/diagnostics';
 import { useAuth } from './AuthContext';
 import { GithubAuthProvider } from './GithubAuthProvider';
 import { SESSION_EXPIRED_NOTICE } from './errors';
@@ -202,6 +203,46 @@ describe('GitHub mode: Notifications entry of the account menu', () => {
     await user.click(screen.getByRole('button', { name: 'Account' }));
     expect(await screen.findByRole('button', { name: 'Sign out' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Notifications' })).not.toBeInTheDocument();
+  });
+});
+
+describe('GitHub mode: Diagnostics entry of the account menu', () => {
+  it('offers Diagnostics when the server has the alarm log, asks for one run only, and opens the page', async () => {
+    const user = userEvent.setup();
+    let limit: string | null = null;
+    server.use(
+      http.get(apiPath('/diagnostics/alarms'), ({ request }) => {
+        limit = new URL(request.url).searchParams.get('limit');
+        return HttpResponse.json(diagnosticsReport());
+      }),
+    );
+    renderGithub();
+    await dashboard();
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    await user.click(await screen.findByRole('link', { name: 'Diagnostics' }));
+    expect(limit).toBe('1');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Diagnostics' })).toBeInTheDocument();
+    expect(await screen.findByRole('table')).toBeInTheDocument();
+    expect(document.title).toBe('Diagnostics · Portfolio Tracker');
+  });
+
+  it('hides the entry on a deployment without the alarm log (the default API answers 404)', async () => {
+    const user = userEvent.setup();
+    renderGithub();
+    await dashboard();
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    expect(await screen.findByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('link', { name: 'Diagnostics' })).not.toBeInTheDocument());
+  });
+
+  it('hides the entry while the log cannot be read', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(apiPath('/diagnostics/alarms'), () => errorResponse(500, 'INTERNAL', 'Boom')));
+    renderGithub();
+    await dashboard();
+    await user.click(screen.getByRole('button', { name: 'Account' }));
+    expect(await screen.findByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Diagnostics' })).not.toBeInTheDocument();
   });
 });
 

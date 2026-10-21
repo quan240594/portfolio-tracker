@@ -1,4 +1,5 @@
 import { MAX_JOB_STEPS, SCHEDULED_JOBS, toUnixCron, type JobHandler, type JobMessage, type JobName, type JobQueue, type JobRegistry, type ScheduledJob } from '@portfolio/platform';
+import type { AlarmJobOutcome, AlarmJobSummary, ArmReason } from './alarm-diagnostics.js';
 import { nextCronRun } from './cron.js';
 import { MeteredSql, type AlarmStorageHost, type UsageOptions } from './sql.js';
 
@@ -43,6 +44,14 @@ export interface AlarmJobQueueOptions extends UsageOptions {
   failedRetentionMs?: number;
   /** Observability hook: one event per step outcome. Never receives payloads. */
   onEvent?: (event: AlarmEvent) => void;
+  /** Called after every `setAlarm` the queue makes (the diagnostics log records them). Must not throw. */
+  onArm?: (event: ArmEvent) => void;
+}
+
+export interface ArmEvent {
+  reason: ArmReason;
+  /** The time the alarm was set for (epoch ms). */
+  alarmAt: number;
 }
 
 export type AlarmEvent =
@@ -59,6 +68,10 @@ export interface AlarmReport {
   failed: number;
   /** When the alarm is armed for next (epoch ms), or null when nothing is pending. */
   nextAlarm: number | null;
+  /** What each job that ran did (the last step's outcome and the number of steps), in order of first appearance. */
+  jobs: AlarmJobSummary[];
+  /** True when the run stopped on its step or time budget while work was still due (the rest runs in the next alarm). */
+  yielded: boolean;
 }
 
 export interface FailedJob {
@@ -67,6 +80,12 @@ export interface FailedJob {
   attempts: number;
   error: string | null;
   updatedAt: number;
+}
+
+/** What is open, without payloads: the pending jobs (earliest first, at most `limit`) and the next slot of each schedule. */
+export interface PendingWork {
+  jobs: { job: string; dueAt: number; attempts: number }[];
+  schedules: { name: string; nextRunAt: number }[];
 }
 
 type JobRow = {
@@ -118,6 +137,10 @@ export class AlarmJobQueue implements JobQueue {
   private readonly schedules: readonly ScheduledJob[];
   private readonly policy: typeof DEFAULTS;
   private running: Promise<AlarmReport> | undefined;
+  /** True from the first instruction of a run to its last (set before the first handler can run, unlike `running`). */
+  private active = false;
+  /** Set when something asked for the alarm while a run was in progress: the run arms it once, at its end. */
+  private rearmRequested = false;
 
   constructor(
     private readonly storage: AlarmStorageHost,
@@ -146,24 +169,39 @@ export class AlarmJobQueue implements JobQueue {
       nowMs,
       nowMs,
     );
+    if (this.active) {
+      // The run in progress picks the job up (or arms for it at its end): setting the alarm now would only supersede it.
+      this.rearmRequested = true;
+      return;
+    }
     const current = await this.storage.getAlarm();
-    if (current === null || dueAt < current) await this.storage.setAlarm(dueAt);
+    if (current === null || dueAt < current) await this.setAlarm('job-enqueued', dueAt);
   }
 
   /**
    * Initialises the cron schedules and arms the alarm for the earliest pending job or schedule. Call it when the Durable
-   * Object starts (inside `blockConcurrencyWhile`), so the schedules survive a deploy that cleared the alarm.
+   * Object starts (inside `blockConcurrencyWhile`), so the schedules survive a deploy that cleared the alarm. While an alarm
+   * run is in progress it changes nothing: the run keeps the schedules and arms the alarm itself when it ends, and a
+   * `setAlarm` from here would replace the alarm of the invocation that is executing.
    */
-  async arm(): Promise<number | null> {
+  async arm(reason: Extract<ArmReason, 'start' | 'keep-alive'> = 'start'): Promise<number | null> {
+    if (this.active) {
+      this.rearmRequested = true;
+      return this.target();
+    }
     this.syncSchedules();
-    return await this.rearm();
+    return await this.rearm(reason);
   }
 
   /** Runs everything that is due now (see the class comment) and re-arms the alarm. Call it from `alarm()`. */
   runAlarm(handlers: JobRegistry): Promise<AlarmReport> {
-    this.running ??= this.execute(handlers).finally(() => {
-      this.running = undefined;
-    });
+    if (!this.running) {
+      this.active = true;
+      this.running = this.execute(handlers).finally(() => {
+        this.running = undefined;
+        this.active = false;
+      });
+    }
     return this.running;
   }
 
@@ -176,18 +214,36 @@ export class AlarmJobQueue implements JobQueue {
       .map((row) => ({ id: row.id, job: row.job, attempts: row.attempts, error: row.last_error, updatedAt: row.updated_at }));
   }
 
+  /** The open work, for diagnostics (names and times only). */
+  pending(limit = 20): PendingWork {
+    return {
+      jobs: this.db
+        .rows<{ job: string; due_at: number; attempts: number }>("SELECT job, due_at, attempts FROM jobs WHERE state = 'pending' ORDER BY due_at, enqueued_at, id LIMIT ?", limit)
+        .map((row) => ({ job: row.job, dueAt: row.due_at, attempts: row.attempts })),
+      schedules: this.db.rows<{ name: string; next_run_at: number }>('SELECT name, next_run_at FROM schedules ORDER BY next_run_at, name').map((row) => ({ name: row.name, nextRunAt: row.next_run_at })),
+    };
+  }
+
   /** Earliest due time among the open jobs (epoch ms), or null. Cron schedules are not included. */
   nextJobDueAt(): number | null {
     return this.db.first<{ due: number | null }>("SELECT MIN(due_at) AS due FROM jobs WHERE state = 'pending'")?.due ?? null;
   }
 
   private async execute(handlers: JobRegistry): Promise<AlarmReport> {
-    const report: AlarmReport = { steps: 0, completed: 0, retried: 0, failed: 0, nextAlarm: null };
+    const report: AlarmReport = { steps: 0, completed: 0, retried: 0, failed: 0, nextAlarm: null, jobs: [], yielded: false };
     this.syncSchedules();
     this.db.rows("DELETE FROM jobs WHERE state = 'failed' AND updated_at < ?", this.now() - this.policy.failedRetentionMs);
     await this.drain(handlers, report, this.now() + this.policy.maxRunMs);
-    report.nextAlarm = await this.rearm();
+    report.yielded = this.nextDue() !== undefined;
+    report.nextAlarm = await this.rearmAfterRun();
     return report;
+  }
+
+  /** The one `setAlarm` of a run, at its end; once more for each time something asked for the alarm while it was being set. */
+  private async rearmAfterRun(): Promise<number | null> {
+    this.rearmRequested = false;
+    const next = await this.rearm('rearm-after-run');
+    return this.rearmRequested ? await this.rearmAfterRun() : next;
   }
 
   /** Runs the due jobs one step at a time (recursively, so no `await` sits in a loop) until none is due or the budget is spent. */
@@ -223,9 +279,17 @@ export class AlarmJobQueue implements JobQueue {
     else this.recordContinuation(row, outcome.step, report);
   }
 
+  /** Keeps one summary per job name: the outcome of its latest step and how many steps it took. */
+  private note(report: AlarmReport, job: string, outcome: AlarmJobOutcome, delayMs: number | null): void {
+    const existing = report.jobs.find((entry) => entry.job === job);
+    if (existing) Object.assign(existing, { outcome, delayMs, steps: existing.steps + 1 });
+    else report.jobs.push({ job, outcome, steps: 1, delayMs });
+  }
+
   private recordDone(row: JobRow, result: unknown, report: AlarmReport): void {
     this.db.rows('DELETE FROM jobs WHERE id = ?', row.id);
     report.completed++;
+    this.note(report, row.job, isSkipped(result) ? 'skipped' : 'done', null);
     this.options.onEvent?.({ type: 'completed', job: row.job, result });
   }
 
@@ -237,6 +301,7 @@ export class AlarmJobQueue implements JobQueue {
     const nowMs = this.now();
     const delayMs = Math.max(0, step.delayMs ?? 0);
     this.db.rows('UPDATE jobs SET cursor = ?, due_at = ?, attempts = 0, steps = steps + 1, last_error = NULL, updated_at = ? WHERE id = ?', step.next, nowMs + delayMs, nowMs, row.id);
+    this.note(report, row.job, 'continued', delayMs);
     this.options.onEvent?.({ type: 'continued', job: row.job, delayMs });
   }
 
@@ -250,12 +315,14 @@ export class AlarmJobQueue implements JobQueue {
     const retryInMs = backoffMs(attempt, this.policy.baseBackoffMs, this.policy.maxBackoffMs);
     this.db.rows('UPDATE jobs SET attempts = ?, due_at = ?, last_error = ?, updated_at = ? WHERE id = ?', attempt, nowMs + retryInMs, error, nowMs, row.id);
     report.retried++;
+    this.note(report, row.job, 'retried', retryInMs);
     this.options.onEvent?.({ type: 'retry', job: row.job, attempt, retryInMs, error });
   }
 
   private markFailed(row: JobRow, error: string, report: AlarmReport, attempts = row.attempts): void {
     this.db.rows("UPDATE jobs SET state = 'failed', attempts = ?, last_error = ?, updated_at = ? WHERE id = ?", attempts, error, this.now(), row.id);
     report.failed++;
+    this.note(report, row.job, 'failed', null);
     this.options.onEvent?.({ type: 'failed', job: row.job, error });
   }
 
@@ -290,17 +357,29 @@ export class AlarmJobQueue implements JobQueue {
     );
   }
 
-  /** Arms the alarm for the earliest open job or schedule (never in the past) unless it is armed for exactly that time. */
-  private async rearm(): Promise<number | null> {
+  /** The time the alarm should be armed for: the earliest open job or schedule, never in the past; null when nothing is pending. */
+  private target(): number | null {
     const dueTimes = [this.nextJobDueAt(), this.db.first<{ due: number | null }>('SELECT MIN(next_run_at) AS due FROM schedules')?.due ?? null].filter(
       (time): time is number => time !== null,
     );
-    if (dueTimes.length === 0) return null;
-    const target = Math.max(Math.min(...dueTimes), this.now());
-    if ((await this.storage.getAlarm()) !== target) await this.storage.setAlarm(target);
+    return dueTimes.length === 0 ? null : Math.max(Math.min(...dueTimes), this.now());
+  }
+
+  /** Arms the alarm for `target()` unless it is armed for exactly that time. */
+  private async rearm(reason: ArmReason): Promise<number | null> {
+    const target = this.target();
+    if (target === null) return null;
+    if ((await this.storage.getAlarm()) !== target) await this.setAlarm(reason, target);
     return target;
   }
+
+  private async setAlarm(reason: ArmReason, alarmAt: number): Promise<void> {
+    await this.storage.setAlarm(alarmAt);
+    this.options.onArm?.({ reason, alarmAt });
+  }
 }
+
+const isSkipped = (result: unknown): boolean => typeof result === 'object' && result !== null && 'skipped' in result;
 
 const nextSlot = (schedule: ScheduledJob, afterMs: number): number => nextCronRun(toUnixCron(schedule), afterMs, schedule.timezone);
 

@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { createConsoleLogger, setLogger } from '@portfolio/platform';
 import { readHubConfig } from './config.js';
+import type { AlarmInfo } from './diagnostics.js';
 import { HubCore, type HubOptions } from './hub-core.js';
 import { errorResponse } from './responses.js';
 import type { HubEnv, HubState } from './runtime.js';
@@ -48,10 +49,13 @@ export class Hub extends DurableObject<HubEnv> {
     return errorResponse(503, 'NOT_CONFIGURED', `The Hub is not configured: ${this.problems.join('; ')}`);
   }
 
-  async alarm(): Promise<void> {
+  /**
+   * Runs the due jobs. It does not wait for `started()`: the run keeps the schedules itself and arms the alarm once, when it
+   * ends, whereas `start()` would `setAlarm` while this very alarm is executing and supersede it (see "Alarm diagnostics").
+   */
+  async alarm(alarmInfo?: AlarmInfo): Promise<void> {
     if (!this.core) return;
-    await this.started();
-    await this.core.alarm();
+    await this.core.alarm(alarmInfo);
   }
 
   /** The core, for subclasses (tests) that add routes next to `fetch`. */

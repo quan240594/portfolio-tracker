@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useNotifications } from '../../api/notificationsHooks';
+import { useAlarmDiagnostics } from '../diagnostics/useAlarmDiagnostics';
 import { useAuth } from './AuthContext';
 
 /** The Notifications entry: only offered when the server says it can send push notifications (the AWS demo and the mock API cannot). */
@@ -10,6 +11,17 @@ function NotificationsLink({ onNavigate }: Readonly<{ onNavigate: () => void }>)
   return (
     <Link to="/settings/notifications" className="btn-secondary w-full" onClick={onNavigate}>
       Notifications
+    </Link>
+  );
+}
+
+/** The Diagnostics entry: only offered when the server has the alarm diagnostics endpoint (the personal Cloudflare deployment). One run is enough to ask. */
+function DiagnosticsLink({ onNavigate }: Readonly<{ onNavigate: () => void }>) {
+  const diagnostics = useAlarmDiagnostics(1);
+  if (diagnostics.availability !== 'ready') return null;
+  return (
+    <Link to="/settings/diagnostics" className="btn-secondary w-full" onClick={onNavigate}>
+      Diagnostics
     </Link>
   );
 }
@@ -72,6 +84,7 @@ export function AccountMenu() {
             </p>
           )}
           <NotificationsLink onNavigate={() => setOpen(false)} />
+          <DiagnosticsLink onNavigate={() => setOpen(false)} />
           <button type="button" className="btn-secondary w-full" onClick={onSignOut}>
             Sign out
           </button>

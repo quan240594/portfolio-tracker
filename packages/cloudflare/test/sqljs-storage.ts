@@ -23,6 +23,8 @@ export class SqlJsStorage implements AlarmStorageHost, SqlStorageLike {
   alarm: number | null = null;
   readonly alarmCalls: number[] = [];
   private depth = 0;
+  private handlerRunning = false;
+  private handlerTouchedAlarm = false;
 
   private constructor(private readonly db: Database) {}
 
@@ -61,14 +63,33 @@ export class SqlJsStorage implements AlarmStorageHost, SqlStorageLike {
     }
   }
 
+  /** Like the runtime: while an alarm handler runs, `getAlarm` reports no alarm until the handler calls `setAlarm`. */
   getAlarm(): Promise<number | null> {
-    return Promise.resolve(this.alarm);
+    return Promise.resolve(this.handlerRunning && !this.handlerTouchedAlarm ? null : this.alarm);
   }
 
   setAlarm(scheduledTime: number): Promise<void> {
     this.alarm = scheduledTime;
+    this.handlerTouchedAlarm = true;
     this.alarmCalls.push(scheduledTime);
     return Promise.resolve();
+  }
+
+  /**
+   * Runs an `alarm()` handler the way the runtime does: the fired alarm is consumed when the handler starts (`getAlarm` is null
+   * until the handler sets one) and is deleted when the handler returns without having set a new one. A throwing handler leaves
+   * the alarm untouched (the platform retries it).
+   */
+  async runAlarmHandler<T>(handler: () => Promise<T>): Promise<T> {
+    this.handlerRunning = true;
+    this.handlerTouchedAlarm = false;
+    try {
+      const result = await handler();
+      if (!this.handlerTouchedAlarm) this.alarm = null;
+      return result;
+    } finally {
+      this.handlerRunning = false;
+    }
   }
 
   /** Every row of a query (for assertions on the stored form). */

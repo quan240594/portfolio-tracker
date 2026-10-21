@@ -29,7 +29,7 @@ export interface DurableObjectPlatform {
   /** Runs the due jobs and re-arms the alarm. Call from the Durable Object's `alarm()`. */
   runAlarm(handlers: JobRegistry): Promise<AlarmReport>;
   /** Initialises the cron schedules and arms the alarm. Call from the constructor inside `blockConcurrencyWhile`. */
-  arm(): Promise<number | null>;
+  arm(reason?: Parameters<AlarmJobQueue['arm']>[0]): Promise<number | null>;
   /** The Worker's `PUT /api/uploads/<token>` route calls this with the request body (see `SqlFileStore`). */
   acceptUpload(token: string, body: Uint8Array | ArrayBuffer): Promise<AcceptUploadResult>;
   /** Sets the origin of upload URLs (call with `new URL(request.url).origin` while serving a request). */
@@ -57,7 +57,7 @@ export function createDurableObjectPlatform({ ctx, secretsKey, now, onUsage, upl
     jobs,
     usage: new SqlUsageStore(storage, { onUsage }),
     runAlarm: (handlers) => jobs.runAlarm(handlers),
-    arm: () => jobs.arm(),
+    arm: (reason) => jobs.arm(reason),
     acceptUpload: (token, body) => files.acceptUpload(token, body),
     setUploadBaseUrl: (origin) => {
       baseUrl = origin;

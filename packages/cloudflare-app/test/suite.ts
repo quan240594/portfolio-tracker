@@ -1,7 +1,7 @@
 import { MAX_FILE_BYTES } from '@portfolio/cloudflare';
 import { METRIC_LIMITS, type MetricLimits } from '@portfolio/platform';
 import { createTestSubscriber, verifyVapidAuthorization } from '@portfolio/platform/testing';
-import { usageSnapshotSchema } from '@portfolio/shared';
+import { alarmDiagnosticsSchema, usageSnapshotSchema, type AlarmDiagnosticsReport } from '@portfolio/shared';
 import { defineApiScenarios } from '@portfolio/api/testing';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { Browser, type Stack } from './browser.js';
@@ -282,6 +282,55 @@ export function defineAppSuite(label: string, start: StartStack): void {
       }
       expect((await new Browser(stack).request('/auth/session')).status).toBe(200);
       expect((await new Browser(stack).request('/health')).status).toBe(200);
+    });
+  });
+
+  describe(`${label}: alarm diagnostics`, () => {
+    let stack: Stack;
+    let owner: Browser;
+    beforeAll(async () => {
+      stack = await start();
+      owner = new Browser(stack);
+      await owner.signIn();
+    });
+    afterAll(() => stack?.dispose());
+
+    const report = async (): Promise<AlarmDiagnosticsReport> => {
+      const response = await owner.request('/api/diagnostics/alarms?limit=20');
+      expect(response.status).toBe(200);
+      return alarmDiagnosticsSchema.parse(await response.json());
+    };
+    const waitForRun = async (deadline = Date.now() + 10_000): Promise<AlarmDiagnosticsReport> => {
+      const current = await report();
+      if (current.runs.some((run) => run.outcome !== null)) return current;
+      if (Date.now() > deadline) throw new Error('No alarm run was recorded');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return waitForRun(deadline);
+    };
+
+    it('is closed to everyone but the owner', async () => {
+      expect((await new Browser(stack).request('/api/diagnostics/alarms')).status).toBe(401);
+    });
+
+    it('records what the alarm did: a started and finished run per invocation, no platform retry, and what is armed next', async () => {
+      await stack.enqueue('refreshT212Quotes', { trigger: 'scheduled' });
+      await stack.drain();
+      const body = await waitForRun();
+      const finished = body.runs.filter((run) => run.outcome !== null);
+      expect(finished.length).toBeGreaterThan(0);
+      for (const run of finished) {
+        expect(run).toMatchObject({ unfinished: false, retryCount: 0, isRetry: false, error: null });
+        expect(run.finishedAt).toBeGreaterThanOrEqual(run.startedAt);
+        expect(run.durationMs).toBe(run.finishedAt! - run.startedAt);
+        expect(run.nextAlarmAt).not.toBeNull();
+      }
+      expect(finished.some((run) => run.jobs.some((job) => job.job === 'refreshT212Quotes'))).toBe(true);
+      expect(body.summary).toMatchObject({ unfinished: 0, failed: 0, retries: 0 });
+      expect(body.summary.runs).toBeGreaterThanOrEqual(finished.length);
+      expect(body.armed.schedules.length).toBeGreaterThan(0);
+      expect(body.armed.alarmAt).not.toBeNull();
+      // The end-of-run `setAlarm` is on the run row; nothing else sets the alarm while a run is executing.
+      expect(body.arms.filter((arm) => arm.runId !== null)).toEqual([]);
     });
   });
 

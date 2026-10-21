@@ -3124,3 +3124,98 @@ GitHub-auth config at 320 and 1280 px).
 **Not verified against real services:** FCM, Mozilla autopush and Apple accept the exact request (the VAPID and `aes128gcm` formats follow the RFCs and are checked
 against the RFC vector, but only a real subscription proves the push services' own acceptance and limits), Chrome's behaviour when the permission was blocked earlier, delivery
 timing, and iOS.
+
+## Alarm diagnostics
+
+Observation on the first days of the personal deployment (Cloudflare GraphQL analytics, no log access because `wrangler tail` is blocked on the owner's network and
+the Workers observability API is not authorised for our token): over 30 hours the Hub had 265 alarm invocations with status `success`, 232 with status
+`clientDisconnected` (counted as errors) and 238 http invocations, all `success`. Prices, syncs and notifications worked and CPU and rows were tiny, so it may be
+benign, but it was unexplained. This section records the analysis, the one defect it found, and the log the Hub now keeps so the next answer does not need
+platform logs.
+
+### Root-cause analysis (from the code and from workerd)
+
+Documented semantics used: `alarm(alarmInfo)` receives `{ retryCount, isRetry }`; a handler that throws is retried with exponential backoff up to 6 times; one alarm
+is scheduled at a time; `setAlarm` replaces it; while a handler runs, `getAlarm()` returns `null` until the handler calls `setAlarm` (checked in workerd with a
+throw-away Durable Object: `getAlarm()` is `null` at the start of the handler, `setAlarm(now)` inside it is visible to `getAlarm()` afterwards, and the alarm
+that was set during the handler fires again after it).
+
+| Question | Finding |
+|---|---|
+| (a) Which code calls `setAlarm`/`deleteAlarm`; can one run during a running alarm? | `deleteAlarm` is never called. `setAlarm` was called from `AlarmJobQueue.enqueue` (earlier than the current alarm), from `rearm()` (`arm()` at start, `arm()` from the cron keep-alive, and at the end of `runAlarm`). **Yes, three of them ran inside a running alarm**: (1) `Hub.alarm()` awaited `started()`, whose `core.start()` calls `arm()` inside `blockConcurrencyWhile`; on a woken object `getAlarm()` is `null` (the alarm is running), the slot that fired is due, so `rearm()` called `setAlarm(now)` while that very alarm was executing; (2) every `enqueue` made by a handler (the sync enqueues the quote refresh and the notification run) called `setAlarm` again; (3) a request that woke the object during a run did the same through `start()`. The end of the run then called `setAlarm` once more, replacing the alarm it had just set. |
+| (b) Does "join the in-progress run" return a promise that never settles or settles early? | No. `runAlarm` returns the same promise as the first caller (`running ??= execute().finally(...)`), which settles when the run does; a test pins this (`second` is `first`, one handler call). |
+| (c) Does `alarm()` return before its work finishes? | No. `Hub.alarm` awaits `HubCore.alarm`, which awaits `runAlarm` and `settle` (ledger flush). The only floating promise is `void guard.recordRows(...)` in the `onUsage` callback: `record` is `async` but only chains synchronous SQLite calls, so it settles in microtasks before the handler's own awaits finish; it cannot outlive the invocation in a way the runtime would cancel. |
+| (d) Does the handler throw on purpose to get retries? | No. Job failures are caught per step (`invoke`) and re-scheduled by the queue's own capped backoff (5 s doubling to 15 min, 5 attempts), the alarm itself returns normally. The handler only throws for an infrastructure error (SQLite), which the platform retries (`isRetry`); the diagnostics below record `retryCount`. |
+| (e) Do the 15-minute quote slot or the 09:00/12:30/18:30/22:30 slots produce two invocations? | No by design: `syncSchedules` enqueues every due slot (`schedule:<name>:<slot>`) in one pass and one `drain` runs them all in one invocation (e.g. 12:30 runs the intraday sync and the quote refresh together). Two invocations for one slot only came out of (a). |
+
+**Defect fixed (the self-inflicted `setAlarm` during a running alarm).** A cold wake for a slot did `setAlarm(now)` while its own invocation was running and again
+at the end. In workerd (Miniflare) this is harmless (no second invocation; the experiment above), so the unit and workerd tests cannot show a `clientDisconnected`.
+In production the alarm service receives an alarm "for right now" while the previous one is still executing; a superseded or cancelled delivery being reported as
+`clientDisconnected` fits the shape of the observation (about one extra invocation per successful one: every cold wake for a slot, plus the http-enqueued ones), but
+**this is a probable cause, not a proven one**; only the diagnostics log below can confirm it on the real account. The fix removes every `setAlarm` that can execute
+while a run is active:
+
+- `AlarmJobQueue` keeps `active` (true from the first instruction of a run to its last). `enqueue` and `arm` do nothing to the alarm while it is set; they ask for a
+  re-arm (`rearmRequested`) and the run sets the alarm exactly once, at its end (`rearmAfterRun`, once more only if something asked while it was being set).
+- `Hub.alarm()` no longer awaits `started()` (the run keeps the schedules itself); requests still arm the alarm in `started()`, which is now a no-op during a run.
+- Result: one `setAlarm` per alarm run (workerd and Node tests assert it); the old path (start inside the handler) provably made two (a Node test with a storage double
+  that models `getAlarm() === null` inside the handler keeps that reproduction).
+
+The platform's own retry covers a run that is cut short: the alarm is only deleted when the handler completes, and the daily cron keep-alive re-arms after a deploy.
+
+### What is recorded (`alarm_runs`, `alarm_arms`)
+
+Two ring buffers in the Hub's SQLite (`packages/cloudflare/src/alarm-diagnostics.ts`), pruned on insert (ids only grow: one range delete), no secondary index:
+
+```
+alarm_runs(id INTEGER PRIMARY KEY, started_at, retry_count, is_retry, scheduled_for NULL, trigger,
+           finished_at NULL, duration_ms NULL, outcome NULL, jobs NULL (JSON), subrequests NULL,
+           next_alarm_at NULL, error_class NULL, error_message NULL)            -- last 300 runs
+alarm_arms(id INTEGER PRIMARY KEY, at, reason, alarm_at, run_id NULL)           -- last 300 arms
+```
+
+- A run row is inserted at the **start** of every alarm invocation (`retryCount` and `isRetry` from `alarmInfo`; `scheduledFor` from `alarmInfo.scheduledTime`, else
+  `getAlarm()`, else `null`: inside a handler the runtime reports no alarm, so it is usually `null` in production; `trigger` = the schedule slots and job names that were due,
+  never payloads) and **updated at the end** with `finishedAt`, `durationMs`, `outcome`, `jobs`, `subrequests`, `nextAlarmAt` and, if the run threw, the error class and a
+  sanitised message (at most 200 characters; URLs, `key=value` credentials, bearer values and long token-like strings are replaced; whitespace collapsed).
+- `outcome`: `completed`; `deferred` (the run handed work to a later alarm: it stopped on its step/time budget with work still due, or a job asked to continue after a pause,
+  which is what the budget guard and the subrequest reserve do); `failed` (the run threw; the error is rethrown so the platform retries).
+- `jobs`: one entry per job name that ran: `outcome` of its last step (`done`, `continued`, `skipped` (dropped by the guard), `retried`, `failed`), `steps`, `delayMs`.
+- `alarm_arms`: every `setAlarm` made **outside** the normal end of a run, with `reason` (`start`, `keep-alive` (cron), `job-enqueued`, `rearm-after-run` for a second
+  one in the same run) and the `run_id` that was executing, if any. The normal end-of-run `setAlarm` is on the run row (`nextAlarmAt`), which is what keeps a run at 3 rows.
+  After the fix a row with `run_id` set should never appear; if one does, something superseded a running alarm.
+
+### How to read it
+
+`GET /api/diagnostics/alarms?limit=50` (owner only, like every `/api` route: Worker session check, then the Hub requires the verified subject; `limit` 1 to 100, default 50)
+and the page `/settings/diagnostics` (Account menu, personal deployment only). The body is `AlarmDiagnosticsReport` in `@portfolio/shared` (`diagnostics-api.ts`):
+`{ generatedAt, armed: { alarmAt, dueJobs[], schedules[] }, summary: { since, runs, completed, deferred, failed, unfinished, inProgress, retries, maxRetryCount },
+runs[] (newest first, with unfinished), arms[] }`. Times are epoch milliseconds.
+
+- **A run that has a `startedAt` and no `finishedAt` for more than two minutes is `unfinished` ("No finish")**: the invocation began and the runtime ended it before the
+  handler could write its end (cancelled, evicted, disconnected). That row *is* the evidence; the `scheduledFor`, `trigger` and the neighbouring runs tell which slot it was.
+  A recent one without a finish is just the run in progress (`inProgress`).
+- Many `unfinished` rows right after the fix: the cause is not (only) the `setAlarm` described above; compare their timing with `alarm_arms` and the platform's status counts.
+- None, and the `clientDisconnected` count in the analytics also stops growing: the self-inflicted supersession was it. None, but the analytics still count them: the
+  disconnect happens before our handler runs (the runtime never delivered the invocation to us), which no log inside the object can show.
+- `isRetry`/`retryCount` > 0: the platform retried a run that threw; `error` has the class and message.
+
+### Cost against the free plan
+
+A run is 3 rows written (insert, update, the prune delete of the oldest row once the buffer is full) plus 2 for an arm outside a normal run. About 100 alarm runs a day
+(61 quote slots, the syncs, notifications, continuations) is about 300 rows, 0.3 % of the 100,000 daily write cap; a typical day has a handful of extra arms. Reads: the page
+reads at most 100 runs and 100 arms by id plus the 24-hour summary (the whole 300-row buffer once); that is about 700 rows per page view against 5,000,000. The account menu
+asks for one run to decide whether to show the link (cached 60 s). Storage: 300 rows of a few hundred bytes. The writes go through the same metered SQL as every other adapter, so the
+budget guard counts them. A failure of the diagnostics log is swallowed (logged), never an alarm failure.
+
+### Tests
+
+`pnpm --filter @portfolio/cloudflare test` (ring-buffer pruning, rows written per run, sanitising, summary maths, the queue's single `setAlarm` per run, arm reasons, the report of
+each job, `pending()`), `pnpm --filter @portfolio/cloudflare-app test` (the Hub: completed/deferred/failed runs, a run that never ends is reported as unfinished once old enough, a broken log
+does not break the alarm, the woken-Hub alarm sets the alarm once and the old path set it twice, endpoint shape/limit/auth, and in Node **and in real workerd** that every recorded run
+finishes with no platform retry) and `pnpm --filter @portfolio/web test` plus `pnpm --filter @portfolio/web exec playwright test -c playwright.github.config.ts diagnostics` (the page, the menu entry,
+320 and 1280 px without horizontal overflow).
+
+**Not verified without real Cloudflare logs:** that the `setAlarm` during a running alarm is what the platform reports as `clientDisconnected` (workerd/Miniflare does not
+reproduce it), what `alarmInfo` carries on the real runtime (workerd passes `scheduledTime`; the documented fields are `retryCount` and `isRetry`), and whether the status counts
+stop growing after the fix. After deploying this version, open `/settings/diagnostics` after a day: compare the runs with the analytics counts.

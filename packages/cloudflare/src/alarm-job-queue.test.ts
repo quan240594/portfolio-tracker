@@ -2,7 +2,7 @@ import { JOBS, MAX_JOB_STEPS, SCHEDULED_JOBS, type JobHandler, type JobPayloads,
 import { runJobQueueContract } from '@portfolio/platform/testing';
 import { describe, expect, it } from 'vitest';
 import { SqlJsStorage, TestClock } from '../test/sqljs-storage.js';
-import { AlarmJobQueue, backoffMs, runAlarm, type AlarmEvent, type AlarmJobQueueOptions } from './alarm-job-queue.js';
+import { AlarmJobQueue, backoffMs, runAlarm, type AlarmEvent, type AlarmJobQueueOptions, type ArmEvent } from './alarm-job-queue.js';
 import type { SqlUsage } from './sql.js';
 
 const NOTHING = { schedules: [] } satisfies AlarmJobQueueOptions;
@@ -230,7 +230,7 @@ describe('AlarmJobQueue.runAlarm', () => {
     await queue.enqueue({ job: JOBS.syncBroker, payload });
     await queue.runAlarm(handlers);
     const before = storage.rows('SELECT * FROM jobs');
-    expect(await queue.runAlarm(handlers)).toEqual({ steps: 0, completed: 0, retried: 0, failed: 0, nextAlarm: null });
+    expect(await queue.runAlarm(handlers)).toEqual({ steps: 0, completed: 0, retried: 0, failed: 0, nextAlarm: null, jobs: [], yielded: false });
     expect(storage.rows('SELECT * FROM jobs')).toEqual(before);
     expect(calls).toBe(1);
   });
@@ -453,5 +453,137 @@ describe('runAlarm', () => {
     await new AlarmJobQueue(storage, { ...NOTHING, now: clock.now }).enqueue({ job: JOBS.syncBroker, payload });
     const report = await runAlarm({ storage, handlers: registry(() => ok()), now: clock.now, ...NOTHING });
     expect(report).toMatchObject({ steps: 1, completed: 1 });
+  });
+});
+
+describe('the alarm while a run is in progress', () => {
+  const collect = (arms: ArmEvent[]) => ({ ...NOTHING, onArm: (event: ArmEvent) => void arms.push(event) });
+
+  it('is set once, at the end of the run: a job enqueued by a handler does not supersede the running alarm', async () => {
+    const arms: ArmEvent[] = [];
+    const { queue, storage, clock } = await setup(collect(arms));
+    await queue.enqueue({ job: JOBS.syncBroker, payload });
+    arms.length = 0;
+    storage.alarmCalls.length = 0;
+    const handlers = registry(async () => {
+      await queue.enqueue({ job: JOBS.syncBroker, payload: { all: true }, delayMs: 60_000 });
+      return { done: true, result: null };
+    });
+    const report = await storage.runAlarmHandler(() => queue.runAlarm(handlers));
+    expect(report).toMatchObject({ steps: 1, completed: 1, nextAlarm: clock.ms + 60_000 });
+    expect(storage.alarmCalls).toEqual([clock.ms + 60_000]);
+    expect(arms).toEqual([{ reason: 'rearm-after-run', alarmAt: clock.ms + 60_000 }]);
+  });
+
+  it('is not touched by arm() (the start of the object or the cron keep-alive) while a run is in progress', async () => {
+    const arms: ArmEvent[] = [];
+    const { queue, storage, clock } = await setup({ ...collect(arms), schedules: SCHEDULED_JOBS.slice(0, 1) });
+    await queue.arm();
+    await queue.enqueue({ job: JOBS.syncBroker, payload });
+    arms.length = 0;
+    storage.alarmCalls.length = 0;
+    let during: number | null | undefined;
+    const handlers = registry(async () => {
+      during = await queue.arm('keep-alive');
+      return { done: true, result: null };
+    });
+    await storage.runAlarmHandler(() => queue.runAlarm(handlers));
+    expect(during).toBe(clock.ms); // what it would arm for, the job being due now
+    expect(arms.map((event) => event.reason)).toEqual(['rearm-after-run']);
+    expect(storage.alarmCalls).toHaveLength(1);
+    expect(clock.ms).toBeLessThan(storage.alarm!);
+  });
+
+  it('arms again when something asked for the alarm while it was being set at the end of the run', async () => {
+    const arms: ArmEvent[] = [];
+    const { queue, storage, clock } = await setup(collect(arms));
+    await queue.enqueue({ job: JOBS.syncBroker, payload });
+    await queue.enqueue({ job: JOBS.syncBroker, payload, delayMs: 60_000 });
+    arms.length = 0;
+    const realSet = storage.setAlarm.bind(storage);
+    let late = false;
+    storage.setAlarm = async (time: number) => {
+      await realSet(time);
+      if (!late) {
+        late = true;
+        await queue.enqueue({ job: JOBS.syncBroker, payload: { all: true }, delayMs: 1_000 });
+      }
+    };
+    await queue.runAlarm(registry(() => ok()));
+    expect(arms).toEqual([
+      { reason: 'rearm-after-run', alarmAt: clock.ms + 60_000 },
+      { reason: 'rearm-after-run', alarmAt: clock.ms + 1_000 },
+    ]);
+    expect(storage.alarm).toBe(clock.ms + 1_000);
+  });
+
+  it('records the arm reasons outside a run: start, keep-alive and a job enqueued', async () => {
+    const arms: ArmEvent[] = [];
+    const { queue, clock } = await setup({ ...collect(arms), schedules: SCHEDULED_JOBS.slice(0, 1) });
+    await queue.arm();
+    await queue.enqueue({ job: JOBS.syncBroker, payload, delayMs: 1_000 });
+    await queue.arm('keep-alive');
+    await queue.arm('keep-alive'); // already right: no second call
+    expect(arms.map((event) => event.reason)).toEqual(['start', 'job-enqueued']);
+    expect(arms[1]!.alarmAt).toBe(clock.ms + 1_000);
+  });
+});
+
+describe('the run report', () => {
+  it('summarises each job: steps, the last outcome and the pause', async () => {
+    const { queue } = await setup({ ...NOTHING, baseBackoffMs: 1_000, maxAttempts: 3 });
+    await queue.enqueue({ job: JOBS.syncBroker, payload });
+    await queue.enqueue({ job: JOBS.refreshT212Quotes, payload: { trigger: 'scheduled' } });
+    await queue.enqueue({ job: JOBS.notifyDividends, payload: { trigger: 'scheduled' } });
+    const handlers: JobRegistry = {
+      syncBroker: (({ cursor }: { cursor?: string }) => (cursor === undefined ? Promise.resolve({ done: false, next: 'p2', delayMs: 0 }) : ok())) as never,
+      refreshT212Quotes: (() => ok({ skipped: 'budget-blocked' })) as never,
+      notifyDividends: (() => Promise.reject(new Error('boom'))) as never,
+    };
+    const report = await queue.runAlarm(handlers);
+    expect(report.jobs).toEqual([
+      { job: 'syncBroker', outcome: 'done', steps: 2, delayMs: null },
+      { job: 'refreshT212Quotes', outcome: 'skipped', steps: 1, delayMs: null },
+      { job: 'notifyDividends', outcome: 'retried', steps: 1, delayMs: 1_000 },
+    ]);
+    expect(report.yielded).toBe(false);
+  });
+
+  it('marks the outcome failed once a job runs out of attempts, and continued with its pause', async () => {
+    const { queue } = await setup({ ...NOTHING, maxAttempts: 1 });
+    await queue.enqueue({ job: JOBS.syncBroker, payload });
+    await queue.enqueue({ job: JOBS.notifyDividends, payload: { trigger: 'scheduled' } });
+    const handlers: JobRegistry = {
+      syncBroker: (() => Promise.reject(new Error('nope'))) as never,
+      notifyDividends: (() => Promise.resolve({ done: false, next: 'later', delayMs: 5_000 })) as never,
+    };
+    const report = await queue.runAlarm(handlers);
+    expect(report.jobs).toEqual([
+      { job: 'syncBroker', outcome: 'failed', steps: 1, delayMs: null },
+      { job: 'notifyDividends', outcome: 'continued', steps: 1, delayMs: 5_000 },
+    ]);
+  });
+
+  it('says it yielded when it stopped with work still due', async () => {
+    const { queue } = await setup({ ...NOTHING, maxStepsPerRun: 1 });
+    await queue.enqueue({ job: JOBS.syncBroker, payload });
+    await queue.enqueue({ job: JOBS.syncBroker, payload });
+    expect((await queue.runAlarm(registry(() => ok()))).yielded).toBe(true);
+    expect((await queue.runAlarm(registry(() => ok()))).yielded).toBe(false);
+  });
+});
+
+describe('AlarmJobQueue.pending', () => {
+  it('lists the open jobs by due time and the next slot of every schedule, without payloads', async () => {
+    const { queue, clock } = await setup({ schedules: SCHEDULED_JOBS.slice(0, 2) });
+    await queue.arm();
+    await queue.enqueue({ job: JOBS.syncBroker, payload: { all: true }, delayMs: 5_000 });
+    await queue.enqueue({ job: JOBS.syncBroker, payload });
+    const pending = queue.pending(1);
+    expect(pending.jobs).toEqual([{ job: 'syncBroker', dueAt: clock.ms, attempts: 0 }]);
+    expect(pending.schedules.map((schedule) => schedule.name)).toEqual(expect.arrayContaining(['prices-calendar', 'prices-refresh']));
+    expect(pending.schedules).toHaveLength(2);
+    expect(JSON.stringify(queue.pending())).not.toContain('userId');
+    expect(queue.pending().jobs).toHaveLength(2);
   });
 });
