@@ -8,7 +8,8 @@ The Cloudflare adapters of the platform ports (`@portfolio/platform`), built on 
 | `ItemStore` | `SqlItemStore` | table `items(pk, sk, data)`, `WITHOUT ROWID`, primary key `(pk, sk)` |
 | `SecretStore` | `SqlSecretStore` | table `secrets`, AES-256-GCM (WebCrypto), key from a Worker secret |
 | `FileStore` | `SqlFileStore` | tables `files` (blobs up to 1.5 MiB) and `uploads` (single-use tokens) |
-| `JobQueue` | `AlarmJobQueue` + `runAlarm` | tables `jobs`, `schedules`; the Durable Object alarm |
+| `JobQueue` | `AlarmJobQueue` + `runAlarm` | tables `jobs`, `schedules`; the Durable Object alarm (set once per run, at its end; never while a run is active) |
+| (diagnostics) | `AlarmDiagnostics` | tables `alarm_runs`, `alarm_arms`: ring buffers of the last 300 alarm runs and arms |
 | `UsageStore` (budget guard ledger) | `SqlUsageStore` | table `usage`, one row per UTC day, atomic `INSERT ... ON CONFLICT DO UPDATE` |
 
 `createDurableObjectPlatform({ ctx, secretsKey, now, onUsage })` builds all of them (`platform.usage` is the ledger of the `BudgetGuard`);

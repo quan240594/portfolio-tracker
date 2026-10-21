@@ -5,4 +5,5 @@ export * from './file-store.js';
 export * from './usage-store.js';
 export * from './cron.js';
 export * from './alarm-job-queue.js';
+export * from './alarm-diagnostics.js';
 export * from './platform.js';

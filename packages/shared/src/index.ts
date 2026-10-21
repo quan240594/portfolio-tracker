@@ -32,6 +32,7 @@ export * from './calendar-ics.js';
 export * from './asset-detail-api.js';
 export * from './asset-detail.js';
 export * from './usage-api.js';
+export * from './diagnostics-api.js';
 export * from './classification.js';
 export * from './classification-csv.js';
 export * from './logo-domains.js';

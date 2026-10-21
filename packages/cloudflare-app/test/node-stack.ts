@@ -73,7 +73,7 @@ export async function createNodeStack(options: NodeStackOptions = {}): Promise<S
   const worker = createWorker({ fetch: (url, init) => outbound(url, init as RequestInit), now: () => clock.ms });
   const drain = async (round = 0): Promise<void> => {
     if (round >= 100) throw new Error('The queue did not drain');
-    await core.alarm();
+    await storage.runAlarmHandler(() => core.alarm());
     const due = core.platform.jobs.nextJobDueAt();
     if (due === null) return;
     clock.ms = Math.max(clock.ms, due);

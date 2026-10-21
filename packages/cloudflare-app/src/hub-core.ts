@@ -18,12 +18,13 @@ import {
 } from '@portfolio/platform';
 import { ItemManagementRepository, ItemNotificationRepository, ItemRepository, createApp, type Deps } from '@portfolio/api';
 import { ItemBrokerStore, ItemQuoteStore, SecretCredentialStore, Trading212Client } from '@portfolio/broker-sync';
-import { MAX_FILE_BYTES, createDurableObjectPlatform, uploadTokenFromUrl, type AlarmJobQueueOptions, type DurableObjectPlatform } from '@portfolio/cloudflare';
+import { AlarmDiagnostics, MAX_FILE_BYTES, createDurableObjectPlatform, describeDiagnosticError, uploadTokenFromUrl, type AlarmJobQueueOptions, type ArmEvent, type DurableObjectPlatform } from '@portfolio/cloudflare';
 import { createMarketDataService } from '@portfolio/prices';
 import { parseImportObjectKey } from '@portfolio/shared';
 import { readBodyBounded } from './body.js';
 import type { HubConfig } from './config.js';
 import { createHubLogoRoute, logoLookupGate } from './logos.js';
+import { alarmReport, finishOf, limitOf, triggerOf, type AlarmInfo } from './diagnostics.js';
 import { ALL_JOB_FACTORIES, createJobRegistry, eventsFor, priceJobDeps, schedulesFor, type JobContext, type JobFactories } from './jobs.js';
 import { pricesStatus } from './prices-status.js';
 import { pushConfig } from './push.js';
@@ -51,6 +52,7 @@ export interface HubOptions {
 }
 
 const DEFAULT_FLUSH_AFTER = 20;
+const NO_ALARM_INFO: AlarmInfo = {};
 const UPLOAD_GATE_PASS: PortableResponse = { status: 204, headers: {}, body: '' };
 
 /**
@@ -62,6 +64,8 @@ const UPLOAD_GATE_PASS: PortableResponse = { status: 204, headers: {}, body: '' 
 export class HubCore {
   readonly platform: DurableObjectPlatform;
   readonly guard: BudgetGuard;
+  /** The alarm diagnostics log (ring buffers in the same SQLite, see docs/architecture.md "Alarm diagnostics"). */
+  readonly diagnostics: AlarmDiagnostics;
   private readonly app: PortableHandler;
   private readonly uploadGate: PortableHandler;
   private readonly logoRoute: (request: PortableRequest) => Promise<PortableResponse> | undefined;
@@ -69,6 +73,12 @@ export class HubCore {
   private readonly now: () => Date;
   private readonly fetchImpl: typeof fetch;
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly logger: Logger | undefined;
+  private readonly storage: HubState['storage'];
+  /** Id of the diagnostics row of the alarm run in progress (arms made meanwhile point at it). */
+  private currentRun: number | undefined;
+  /** Whether the end-of-run `setAlarm` of the current run was already seen (the run row carries it; a second one is recorded). */
+  private finalArmSeen = false;
 
   constructor(
     ctx: HubState,
@@ -76,6 +86,8 @@ export class HubCore {
     options: HubOptions = {},
   ) {
     this.now = options.now ?? (() => new Date());
+    this.logger = options.logger;
+    this.storage = ctx.storage;
     this.factories = options.jobFactories ?? ALL_JOB_FACTORIES;
     this.fetchImpl = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
@@ -91,7 +103,14 @@ export class HubCore {
       onUsage: ({ rowsRead, rowsWritten }) => {
         void guardRef.current?.recordRows({ read: rowsRead, written: rowsWritten });
       },
+      onArm: (event) => this.noteArm(event),
       ...options.queue,
+    });
+    this.diagnostics = new AlarmDiagnostics(ctx.storage, {
+      now: this.now,
+      onUsage: ({ rowsRead, rowsWritten }) => {
+        void guardRef.current?.recordRows({ read: rowsRead, written: rowsWritten });
+      },
     });
     this.guard = new BudgetGuard({
       store: this.platform.usage,
@@ -124,15 +143,88 @@ export class HubCore {
     }
   }
 
-  /** `alarm()` of the Durable Object: counts as one request, runs the due jobs behind the guard, re-arms itself. */
-  async alarm(): Promise<void> {
+  /**
+   * `alarm(alarmInfo)` of the Durable Object: counts as one request, runs the due jobs behind the guard, re-arms itself. The
+   * diagnostics row is written first and completed last, so a run that is cut short leaves a start without a finish.
+   */
+  async alarm(info: AlarmInfo = NO_ALARM_INFO): Promise<void> {
     const started = Date.now();
+    const runId = await this.beginRun(info);
     await this.guard.record({ durableObjectRequests: 1 });
+    const budget = new SubrequestBudget();
     try {
-      const budget = new SubrequestBudget();
-      await this.platform.runAlarm(this.registry(budget));
+      const report = await this.platform.runAlarm(this.registry(budget));
+      this.endRun(runId, finishOf(report, budget.used));
+    } catch (error) {
+      this.endRun(runId, { outcome: 'failed', jobs: [], subrequests: budget.used, nextAlarmAt: null, error: describeDiagnosticError(error) });
+      throw error;
     } finally {
+      this.currentRun = undefined;
       await this.settle(started);
+    }
+  }
+
+  /** `GET /api/diagnostics/alarms`: what the alarm did lately (see `AlarmDiagnosticsReport` in `@portfolio/shared`). */
+  async alarmDiagnostics(limit: string | undefined): Promise<PortableResponse> {
+    const count = limitOf(limit);
+    const report = alarmReport({
+      nowMs: this.now().getTime(),
+      runs: this.diagnostics.recentRuns(count),
+      arms: this.diagnostics.recentArms(count),
+      summary: this.diagnostics.summary(),
+      alarmAt: await this.storage.getAlarm(),
+      pending: this.platform.jobs.pending(),
+    });
+    return { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }, body: JSON.stringify(report) };
+  }
+
+  /** Starts the diagnostics row of an alarm invocation. Never throws: the log must not be able to break the alarm. */
+  private async beginRun(info: AlarmInfo): Promise<number | undefined> {
+    try {
+      const scheduledFor = info.scheduledTime ?? (await this.storage.getAlarm());
+      const id = this.diagnostics.begin({
+        retryCount: info.retryCount ?? 0,
+        isRetry: info.isRetry ?? false,
+        scheduledFor,
+        trigger: this.triggerNow(),
+      });
+      this.currentRun = id;
+      this.finalArmSeen = false;
+      return id;
+    } catch (error) {
+      this.logger?.warn('The alarm diagnostics could not record a run start', { error: describeDiagnosticError(error).message });
+      return undefined;
+    }
+  }
+
+  /** What is due right now, or `unknown` when the queue cannot be read (that must not cost the run its row). */
+  private triggerNow(): string {
+    try {
+      return triggerOf(this.platform.jobs.pending(), this.now().getTime());
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  private endRun(runId: number | undefined, finish: Parameters<AlarmDiagnostics['finish']>[1]): void {
+    if (runId === undefined) return;
+    try {
+      this.diagnostics.finish(runId, finish);
+    } catch (error) {
+      this.logger?.warn('The alarm diagnostics could not record a run end', { error: describeDiagnosticError(error).message });
+    }
+  }
+
+  /** Records a `setAlarm` of the queue. The normal re-arm at the end of a run is on the run row, so only the others (and a repeated one) get an arm row. */
+  private noteArm(event: ArmEvent): void {
+    if (event.reason === 'rearm-after-run' && !this.finalArmSeen) {
+      this.finalArmSeen = true;
+      return;
+    }
+    try {
+      this.diagnostics.recordArm(event.reason, event.alarmAt, this.currentRun ?? null);
+    } catch (error) {
+      this.logger?.warn('The alarm diagnostics could not record an arm', { error: describeDiagnosticError(error).message });
     }
   }
 
@@ -184,7 +276,7 @@ export class HubCore {
 
   private async keepAlive(): Promise<Response> {
     await this.guard.record({ durableObjectRequests: 1 });
-    await this.platform.arm();
+    await this.platform.arm('keep-alive');
     return new Response(null, { status: 204 });
   }
 
@@ -217,6 +309,7 @@ export class HubCore {
   /** Routes the Hub serves itself, next to the API: `GET /prices/status` and `GET /logos/{symbol}`. */
   private ownRoute(request: PortableRequest): Promise<PortableResponse> | undefined {
     if (request.method === 'GET' && request.path === '/prices/status') return this.pricesStatus(request.identity?.subject);
+    if (request.method === 'GET' && request.path === '/diagnostics/alarms') return this.alarmDiagnostics(request.query.limit);
     return this.logoRoute(request);
   }
 

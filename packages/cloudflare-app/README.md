@@ -127,6 +127,14 @@ variable (never a value); `/health` and the static app keep working.
 > **Corporate laptop:** `*.workers.dev` is blocked on many managed networks and `wrangler tail` may be too. Do the
 > deploy and the first sign-in from a personal device or network (the app itself is just HTTPS afterwards).
 
+## Alarm diagnostics
+
+The Hub keeps a small log of what its alarm did (the last 300 runs and the alarm changes made outside a normal run, in its own SQLite), because `wrangler tail` and the platform logs
+are not always reachable. `GET /api/diagnostics/alarms?limit=50` (owner only) returns the newest runs first, a 24-hour summary, what is armed and what is due; the web app shows
+it at `/settings/diagnostics` (Account menu, only when the endpoint exists). **A run that started and never finished is a cancelled or disconnected invocation.** Cost: 3 rows
+written per run (about 0.3 % of the daily cap). See "Alarm diagnostics" in [docs/architecture.md](../../docs/architecture.md) for the schema, how to read it and the analysis of the
+`clientDisconnected` alarm invocations.
+
 ## Identity-required mode
 
 The API's `authMode` is `cognito` in this deployment. That name is historical: it means **identity required** (no identity, no
@@ -170,4 +178,5 @@ Signing in needs GitHub, so offline you can see the app shell and `/health`; the
   `test/node.test.ts` (real Worker and Hub code over SQLite compiled to WebAssembly, pinned clock; **this is what coverage
   measures**) and `test/workerd.test.ts` (the same suite against the esbuild bundle in real workerd through Miniflare, with a
   SQLite-backed Durable Object, real alarms and the static assets binding).
+- `src/hub-diagnostics.test.ts` and the "alarm diagnostics" block of `test/suite.ts` (Node and workerd) cover the alarm log and its endpoint.
 - A real network call fails the test (`test/setup.ts`); GitHub and Trading 212 are fakes (`test/fakes.ts`).
