@@ -439,10 +439,30 @@ describe('baseline profiles', () => {
     const t = await withProfiles({ positions, instruments });
     const { results } = await t.run();
     expect(results[0]).toMatchObject({ outcome: 'refreshed', quoted: 3, profiles: 3 });
-    expect(profile(t, 'AAPL')).toEqual({ PK: 'TICKER#AAPL', SK: 'PROFILE', entityType: 'PROFILE', symbol: 'AAPL', name: 'Apple', assetClass: 'STOCK', currency: 'USD', isin: 'US0378331005', country: 'United States', profileSource: 'trading212' });
-    expect(profile(t, 'VUSA.L')).toMatchObject({ name: 'Vanguard S&P 500 UCITS ETF', assetClass: 'ETF', currency: 'GBP', isin: FUND, country: 'Ireland', profileSource: 'trading212' });
+    expect(profile(t, 'AAPL')).toEqual({ PK: 'TICKER#AAPL', SK: 'PROFILE', entityType: 'PROFILE', symbol: 'AAPL', name: 'Apple', assetClass: 'STOCK', currency: 'USD', isin: 'US0378331005', country: 'United States', t212Ticker: 'AAPL_US_EQ', profileSource: 'trading212' });
+    expect(profile(t, 'VUSA.L')).toMatchObject({ name: 'Vanguard S&P 500 UCITS ETF', assetClass: 'ETF', currency: 'GBP', isin: FUND, country: 'Ireland', t212Ticker: 'VUSAl_EQ', profileSource: 'trading212' });
     expect(profile(t, 'SAP.DE')).toMatchObject({ name: 'SAP SE', assetClass: 'STOCK', country: 'Germany' });
     expect(t.api.metadataCalls).toBe(1);
+  });
+
+  it('stores the Trading 212 ticker of every held symbol, case of the exchange part kept, and rewrites nothing once it is there', async () => {
+    const t = await withProfiles({ positions, instruments });
+    await t.run();
+    expect(['AAPL', 'VUSA.L', 'SAP.DE'].map((symbol) => profile(t, symbol)?.t212Ticker)).toEqual(['AAPL_US_EQ', 'VUSAl_EQ', 'SAPd_EQ']);
+    t.clock.advance(15 * 60_000);
+    expect((await t.run()).results[0]).toMatchObject({ profiles: 0 });
+  });
+
+  it('adds the ticker to a profile stored before the field existed, a provider profile included, without degrading it', async () => {
+    const t = await withProfiles({ positions: [positions[0]!, positions[1]!], instruments });
+    t.store.items.load([
+      { PK: 'TICKER#AAPL', SK: 'PROFILE', entityType: 'PROFILE', symbol: 'AAPL', name: 'Apple Inc.', assetClass: 'STOCK', currency: 'USD', sector: 'Technology', isin: 'US0378331005', country: 'United States' },
+      { PK: 'TICKER#VUSA.L', SK: 'PROFILE', entityType: 'PROFILE', symbol: 'VUSA.L', name: 'Vanguard S&P 500 UCITS ETF', assetClass: 'ETF', currency: 'GBP', isin: FUND, country: 'Ireland', profileSource: 'trading212' },
+    ]);
+    expect((await t.run()).results[0]).toMatchObject({ profiles: 2 });
+    expect(profile(t, 'AAPL')).toMatchObject({ name: 'Apple Inc.', sector: 'Technology', t212Ticker: 'AAPL_US_EQ' });
+    expect(profile(t, 'AAPL')).toHaveProperty('profileSource', 'provider');
+    expect(profile(t, 'VUSA.L')).toMatchObject({ t212Ticker: 'VUSAl_EQ', profileSource: 'trading212' });
   });
 
   it('shares the instruments request with the exchange mapping, and does not ask again once every type is known', async () => {

@@ -140,6 +140,18 @@ describe('PriceRepository', () => {
       expect(await baselineStore.get({ PK: 'TICKER#BBB', SK: 'PROFILE' })).toMatchObject({ profileSource: 'trading212', detailsAsOf: '2026-10-13' });
     });
 
+    it('keeps the Trading 212 ticker through every provider write', async () => {
+      const store = new MemoryItemStore().load([profile('KMB', { name: 'Kimberly', profileSource: 'trading212', t212Ticker: 'KMB_US_EQ' })]);
+      const repo = new PriceRepository(store);
+      await repo.putProfileDetails('KMB', { ...provider, symbol: 'KMB' }, '2026-10-13');
+      expect(await store.get({ PK: 'TICKER#KMB', SK: 'PROFILE' })).toMatchObject({ profileSource: 'provider', t212Ticker: 'KMB_US_EQ' });
+      await repo.putProfileDetails('KMB', { ...provider, symbol: 'KMB', name: 'Again' }, '2026-10-14');
+      expect(await store.get({ PK: 'TICKER#KMB', SK: 'PROFILE' })).toMatchObject({ t212Ticker: 'KMB_US_EQ' });
+      const other = new MemoryItemStore().load([profile('VICI', { name: 'Vici', profileSource: 'trading212', t212Ticker: 'VICI_US_EQ' })]);
+      await new PriceRepository(other).putEnrichedProfile('VICI', { ...provider, symbol: 'VICI' }, { symbol: 'VICI', name: 'VICI', assetClass: 'OTHER', currency: 'USD' }, '2026-10-13');
+      expect(await other.get({ PK: 'TICKER#VICI', SK: 'PROFILE' })).toMatchObject({ profileSource: 'provider', t212Ticker: 'VICI_US_EQ' });
+    });
+
     it('stamps the enrichment: provider over baseline, the baseline kept when no provider answered, the minimal profile as the floor', async () => {
       const store = new MemoryItemStore().load([profile('BASE', { name: 'Base Co', profileSource: 'trading212', isin: 'US0000000002' })]);
       const repo = new PriceRepository(store);

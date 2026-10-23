@@ -31,7 +31,7 @@ function EventChip({ event, baseCurrency, onSelect }: Readonly<ChipProps>) {
       className={`flex w-full min-w-0 items-center gap-1 rounded border-l-4 px-1 py-1.5 text-left sm:py-0.5 text-xs leading-tight hover:brightness-95 ${chipClasses(event.status)} ${italic}`}
       data-status={event.status}
     >
-      <CompanyLogo symbol={event.symbol} name={event.name} size={18} decorative badge={<EventMarker type={event.type} className="h-2.5 w-2.5" />} className="mr-0.5" />
+      <CompanyLogo symbol={event.symbol} name={event.name} size={18} decorative badge={<EventMarker type={event.type} className="h-2.5 w-2.5" />} />
       <span className="truncate font-semibold">{event.symbol}</span>
       {amount && <span className="ml-auto shrink-0 tabular-nums">{amount}</span>}
     </button>

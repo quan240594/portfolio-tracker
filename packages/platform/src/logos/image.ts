@@ -8,10 +8,10 @@
 export const LOGO_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'] as const;
 export type LogoType = (typeof LOGO_TYPES)[number];
 
-/** The cap of one stored logo (an icon of 128 px is far below it); bigger files are refused before they are stored. */
-export const MAX_LOGO_BYTES = 40_000;
-/** Pictures narrower or lower than this are favicons, not logos: a service answers them when it has nothing better. */
-export const DEFAULT_MIN_LOGO_PIXELS = 32;
+/** The cap of one stored logo (a 240 px PNG of the Trading 212 bucket is 5 to 16 KB); bigger files are refused before they are stored. */
+export const MAX_LOGO_BYTES = 64_000;
+/** Pictures narrower or lower than this are favicons, not logos (they would be blurry upscaled): the screens show the monogram instead. */
+export const DEFAULT_MIN_LOGO_PIXELS = 64;
 
 export interface ImageInfo {
   type: LogoType;

@@ -7,6 +7,7 @@
  * the fund's DOMICILE (Ireland, Luxembourg, Jersey ...), not where it invests, so a fund's country is only as good as that.
  */
 import { normalizeCurrency } from './broker-fx.js';
+import { isT212Ticker } from './t212-ticker.js';
 import type { AssetClass, InstrumentProfile } from './types.js';
 
 /** ISO 3166 alpha-2 prefix of an ISIN -> English country name (the names the market-data providers use). */
@@ -103,6 +104,7 @@ export function trading212Profile(symbol: string, instrument: Trading212Instrume
     currency: currency === undefined ? fallbackCurrency : normalizeCurrency(currency).currency,
     ...(isin === undefined ? {} : { isin }),
     ...(country === undefined ? {} : { country }),
+    ...(isT212Ticker(instrument.ticker) ? { t212Ticker: instrument.ticker } : {}),
     profileSource: 'trading212',
   };
 }

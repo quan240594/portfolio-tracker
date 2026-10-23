@@ -20,7 +20,7 @@ describe('readHubConfig', () => {
   });
 
   it('hands the logo service its sources, limits and optional token', () => {
-    expect(readHubConfig({ ...hubEnv })).toMatchObject({ ok: true, config: { logos: { sources: ['logodev', 'google', 'duckduckgo'], hourlyLimit: 30, negativeTtlDays: 7 } } });
+    expect(readHubConfig({ ...hubEnv })).toMatchObject({ ok: true, config: { logos: { sources: ['t212', 'logodev', 'google', 'duckduckgo'], allowAnyHost: false, hourlyLimit: 30, negativeTtlDays: 7 } } });
     const result = readHubConfig({ ...hubEnv, LOGO_SOURCES: 'duckduckgo', LOGO_HOURLY_LIMIT: '5', LOGO_DEV_TOKEN: ' pk ', HUB: {} } as never);
     expect(result).toMatchObject({ ok: true, config: { logos: { sources: ['duckduckgo'], hourlyLimit: 5, logoDevToken: 'pk' } } });
   });

@@ -1,23 +1,28 @@
 import { SubrequestBudget } from './subrequests.js';
-import { createLogoRoute, guardJob, type BudgetGuard, type Logger, type LogoService, type PortableRequest, type PortableResponse } from '@portfolio/platform';
+import { createLogoRoute, guardJob, type BudgetGuard, type Logger, type LogoService, type LogoSubject, type PortableRequest, type PortableResponse } from '@portfolio/platform';
 import type { Deps } from '@portfolio/api';
-import { resolveLogoDomain } from '@portfolio/shared';
+import { isT212Ticker, resolveLogoDomain } from '@portfolio/shared';
 
-/** Outbound calls one logo lookup may make: three sources at most, with room for the redirect a source follows. */
+/** Outbound calls one logo lookup may make: four sources at most, with room for the redirects the domain sources follow. */
 export const LOGO_SUBREQUEST_CEILING = 8;
 /** The name the budget guard knows logo lookups by: a convenience, so it gives way first (`guardJob` stops it at the warning threshold). */
 export const LOGO_JOB_NAME = 'fetchLogo';
 
 /**
- * The domain to look a symbol's logo up by: the owner's override, the website of the stored provider profile, the curated
- * ticker table, the ETF issuer prefix (see `resolveLogoDomain`). Two rows are read: the override and the profile.
+ * What to look a symbol's logo up by: the Trading 212 ticker of the stored profile, and the domain (the owner's override, the website
+ * of the stored provider profile, the curated ticker table, the ETF issuer prefix, see `resolveLogoDomain`). An owner's domain
+ * override is an explicit choice, so it wins over the ticker. Two rows are read: the override and the profile.
  */
-export function createLogoDomainResolver(deps: Pick<Deps, 'repo' | 'mgmt'>): (userId: string, symbol: string) => Promise<string | undefined> {
+export function createLogoSubjectResolver(deps: Pick<Deps, 'repo' | 'mgmt'>): (userId: string, symbol: string) => Promise<LogoSubject | undefined> {
   return async (userId, symbol) => {
     const [overrides, profiles] = await Promise.all([deps.mgmt.getClassificationOverrides(userId, [symbol]), deps.repo.getProfiles([symbol])]);
     const override = overrides[symbol];
     const profile = profiles[symbol];
-    return resolveLogoDomain({ symbol, name: override?.name ?? profile?.name, override: override?.domain, website: profile?.website })?.domain;
+    const domain = resolveLogoDomain({ symbol, name: override?.name ?? profile?.name, override: override?.domain, website: profile?.website })?.domain;
+    const ticker = profile?.t212Ticker;
+    const t212Ticker = override?.domain === undefined && isT212Ticker(ticker) ? ticker : undefined;
+    if (domain === undefined && t212Ticker === undefined) return undefined;
+    return { ...(domain === undefined ? {} : { domain }), ...(t212Ticker === undefined ? {} : { t212Ticker }) };
   };
 }
 
@@ -31,7 +36,7 @@ export interface HubLogoOptions {
 export function createHubLogoRoute({ service, deps, fetch: fetchImpl }: HubLogoOptions): (request: PortableRequest) => Promise<PortableResponse> | undefined {
   return createLogoRoute({
     service,
-    resolveDomain: createLogoDomainResolver(deps),
+    resolveSubject: createLogoSubjectResolver(deps),
     fetchFor: () => new SubrequestBudget(LOGO_SUBREQUEST_CEILING).wrap(fetchImpl),
   });
 }

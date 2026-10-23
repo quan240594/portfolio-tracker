@@ -318,7 +318,7 @@ export class HubCore {
     const { logos } = this.config;
     return new LogoService({
       store: new ItemLogoStore(this.platform.items),
-      sources: createLogoSources(logos.sources, logos.logoDevToken),
+      sources: createLogoSources(logos.sources, { logoDevToken: logos.logoDevToken, t212Base: logos.t212Base, allowAnyHost: logos.allowAnyHost }),
       now: this.now,
       hourlyLimit: logos.hourlyLimit,
       negativeTtlDays: logos.negativeTtlDays,

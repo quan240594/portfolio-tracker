@@ -21,25 +21,30 @@ export function EventRow({ event, baseCurrency, onSelect }: Readonly<RowProps>) 
         type="button"
         onClick={() => onSelect(event)}
         aria-label={eventAriaLabel(event, amount)}
-        className={`flex w-full items-center gap-3 rounded-lg border-l-4 px-3 py-2 text-left text-sm hover:brightness-95 ${chipClasses(event.status)}`}
+        className={`block w-full rounded-lg border-l-4 px-3 py-2 text-left text-sm hover:brightness-95 ${chipClasses(event.status)}`}
         data-status={event.status}
       >
-        {/* The type is the corner marker, spelled out in the second line and in the accessible name; the status is the border and the chip. */}
-        <CompanyLogo symbol={event.symbol} name={event.name} size={32} decorative badge={<EventMarker type={event.type} className="h-4 w-4" />} className="mr-0.5" />
-        <span className="min-w-0 flex-1">
-          <span className="block break-words">
-            <span className="font-semibold">{event.symbol}</span> <span className="opacity-75">{event.name === event.symbol ? '' : event.name}</span>
-          </span>
-          <span className="block text-xs break-words opacity-80">{eventDetailLine(event)}</span>
-        </span>
-        <span className="flex shrink-0 flex-col items-end gap-1">
-          {amount && (
-            <span className="font-medium tabular-nums">
-              <span className="sr-only">{label} </span>
-              {amount}
+        {/* A plain span carries the flex row (a button as a flex container is not reliable everywhere): logo | text column | amount and status. */}
+        <span className="flex w-full items-center gap-3" data-row="">
+          {/* The type is the corner marker, spelled out in the second line and in the accessible name; the status is the border and the chip. */}
+          <CompanyLogo symbol={event.symbol} name={event.name} size={32} decorative badge={<EventMarker type={event.type} className="h-4 w-4" />} />
+          <span className="min-w-0 flex-1" data-row-text="">
+            <span className="block break-words" data-row-line="title">
+              <span className="font-semibold">{event.symbol}</span> <span className="opacity-75">{event.name === event.symbol ? '' : event.name}</span>
             </span>
-          )}
-          <span className={`rounded-full border px-2 py-px text-[11px] font-medium ${STATUS_CHIP[event.status]} ${event.status === 'ESTIMATED' ? 'border-dashed' : ''}`}>{STATUS_LABELS[event.status]}</span>
+            <span className="block text-xs break-words opacity-80" data-row-line="detail">
+              {eventDetailLine(event)}
+            </span>
+          </span>
+          <span className="flex shrink-0 flex-col items-end gap-1">
+            {amount && (
+              <span className="font-medium tabular-nums">
+                <span className="sr-only">{label} </span>
+                {amount}
+              </span>
+            )}
+            <span className={`rounded-full border px-2 py-px text-[11px] font-medium ${STATUS_CHIP[event.status]} ${event.status === 'ESTIMATED' ? 'border-dashed' : ''}`}>{STATUS_LABELS[event.status]}</span>
+          </span>
         </span>
       </button>
     </li>

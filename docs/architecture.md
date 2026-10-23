@@ -2868,8 +2868,9 @@ and the native `<input type="date">` pickers, which the browser renders in its o
 
 The calendar (list, month grid and event dialog), the asset detail header, the holdings table and the dashboard's top holdings show the
 company logo of each security. **No logo file is in the repository**: logos are trademarks, fetched at runtime by the server and used only to
-identify the holding. Where there is none (the demo, no logo found, a broken image) a neutral monogram of the same shape is shown, so the screens
-never depend on a logo being there.
+identify the holding. Where there is none (the demo, no logo found, a broken image) a neutral monogram of the same shape (a circle) is shown, so the screens
+never depend on a logo being there. The look is the one of the Trading 212 app: **sharp round brand logos**. The first versions only had favicons (16 to 64 px, upscaled and
+blurry); the logos now come first from the **Trading 212 logo bucket** (240 px), see "Sources".
 
 ### Flow
 
@@ -2877,17 +2878,21 @@ never depend on a logo being there.
 browser  GET /api/logos/SAP.DE   (same origin, session cookie, like the rest of /api)
   Worker   sign-in + same-origin check, forwards If-None-Match
   Hub      withBudget (counted like any request)
-           resolve the domain:  override > provider website > curated table > ETF issuer prefix   (2 rows read)
-           LogoStore.get(domain)
-             found    -> 200 bytes, ETag, Cache-Control: private, max-age=86400   (304 on If-None-Match)
-             missing  and not yet due again -> 404, Cache-Control: private, max-age=3600
-             unknown  -> hourly cap, usage guard, then ONE lookup: the sources in order, first valid image wins,
-                         stored as one row (found, or "missing" with its retry time)
+           resolve the subject: the Trading 212 ticker of the stored profile (t212Ticker) and the domain
+                                (override > provider website > curated table > ETF issuer prefix)   (2 rows read);
+                                an explicit owner domain override wins over the ticker
+           LogoStore.get(key)   key = t212:<ticker> when the t212 source is on and the symbol has a ticker, else the domain
+             found (schema v2, source still switched on) -> 200 bytes, ETag, Cache-Control: private, max-age=86400   (304 on If-None-Match)
+             missing (v2) and not yet due again -> 404, Cache-Control: private, max-age=3600
+             unknown, a v1 item, or a logo of a source that is switched off
+                      -> hourly cap, usage guard, then ONE lookup: the sources in order (a source only for a subject it can
+                         serve), first valid image wins, stored as one row (found, or "missing" with its retry time)
 ```
 
 The browser never contacts a third party: it only asks its own origin. The upstream service sees the **public company domain** (for example
-`sap.com`) and the Worker's IP, nothing else: no cookie, no referrer, no account, no symbol, and never the list of holdings (lookups are lazy, one
-domain at a time, only when the screen shows that symbol and nobody fetched the domain before; the five iShares ETFs share one row).
+`sap.com`) or the **Trading 212 ticker** of the instrument (`SAPd_EQ`, a public identifier) and the Worker's IP, nothing else: no cookie, no referrer, no account,
+no symbol, and never the list of holdings (lookups are lazy, one at a time, only when the screen shows that symbol and nobody fetched it before; the five iShares ETFs
+share one row by domain, an instrument with a ticker has its own row `t212:<ticker>`).
 
 ### Domain resolution (`packages/shared/src/logo-domains.ts`, table in `logo-domain-table.ts`)
 
@@ -2906,42 +2911,62 @@ domain is looked up once (a different domain is a different row, so nothing stal
 
 ### Sources (`packages/platform/src/logos/sources.ts`)
 
-`LogoSource` is `{ name, fetchLogo(domain, options) }` over `fetch`; `LOGO_SOURCES` (a Worker variable, comma separated, order = priority, `off`
-= no logos) picks and orders them. Default `logodev,google,duckduckgo`:
+`LogoSource` is `{ name, by, fetchLogo(subject, options) }` over `fetch`, where `subject` is `{ domain?, t212Ticker? }` and `by` says which of the two the source is asked
+by (a source is skipped, with no request, for a subject without it); `LOGO_SOURCES` (a Worker variable, comma separated, order = priority, `off` = no logos; an empty variable means the default) picks and orders them. Default **`t212,logodev,google,duckduckgo`**:
 
 | Name | URL | Notes |
 |---|---|---|
-| `logodev` | `https://img.logo.dev/<domain>?token=…&size=128&format=png&fallback=404` | Token-based; **off unless the Worker secret `LOGO_DEV_TOKEN` is set** (`wrangler secret put LOGO_DEV_TOKEN`), then tried first. Not in the free path. |
+| `t212` | `https://trading212equities.s3.eu-central-1.amazonaws.com/<T212 ticker>.png` | Asked **by ticker**. The logos of the Trading 212 app: public, keyless, 240x240 PNG, full-bleed square (the app crops them to circles). The ticker is the `instrument.ticker` of the Trading 212 API (`AAPL_US_EQ`, `SMGBl_EQ`, `FOOd_EQ`: lower case letters in the exchange part), stored on the profile of every held symbol (see below). **Undocumented asset bucket, not part of the official API**: it may change, move or disappear without notice and its terms are not stated; the owner accepted it for this personal app. Logos are trademarks used only to identify the holding, shown only to the signed-in owner, fetched once and cached by the server. A miss (404, an HTML page, anything not a valid image) only falls back to the domain sources and then to the monogram. || `logodev` | `https://img.logo.dev/<domain>?token=…&size=128&format=png&fallback=404` | Token-based; **off unless the Worker secret `LOGO_DEV_TOKEN` is set** (`wrangler secret put LOGO_DEV_TOKEN`), then tried first. Not in the free path. |
 | `google` | `https://www.google.com/s2/favicons?domain=<domain>&sz=128` | Keyless, up to 128 px. |
 | `duckduckgo` | `https://icons.duckduckgo.com/ip3/<domain>.ico` | Keyless, usually smaller. Known to answer image data under an icon content type: PNG/JPEG/WebP data under `image/x-icon` or `image/vnd.microsoft.icon` is accepted (the bytes decide the type), a real `.ico` container is not. |
 
-Clearbit's logo API was shut down and is not used. **The terms of use of the keyless services are not guaranteed**: they are public endpoints
-meant for favicons, used here at a trickle (see the cost below) for personal identification of holdings. Nothing in the app depends on them: if
+Clearbit's logo API was shut down and is not used. **The terms of use of the keyless services are not guaranteed**: Google's and DuckDuckGo's are public endpoints
+meant for favicons (so a logo from them is the site's favicon at its native size: usually 16 to 64 px, which the 64 px minimum below sends to the monogram instead of showing blurry),
+and the Trading 212 bucket is an undocumented asset bucket; all are used here at a trickle (see the cost below) for personal identification of holdings. Nothing in the app depends on them: if
 a service disappears, changes its terms or starts answering something else, remove it from `LOGO_SOURCES` (no deploy of code needed, only the
-variable) or add a source (a class with `fetchLogo`, registered in `createLogoSources`); with no source left every logo is the monogram.
+variable) or add a source (a class with `fetchLogo`, registered in `createLogoSources`); with no source left every logo is the monogram. **One-line switch-off of the Trading 212
+bucket: `LOGO_SOURCES=google,duckduckgo`** (or `LOGO_SOURCES=off` for no logo at all). A stored logo of a source that is switched off is not served any more (it is looked up again by the sources that
+are left), so switching a source off takes effect at once without clearing anything.
+
+Settings of the `t212` source: `LOGO_T212_BASE` (default the bucket above) must be a plain `https` origin on a host ending in `.amazonaws.com` (no credentials, path or query; anything else is ignored and the
+default is used: the host cannot be pointed at an internal address); `LOGO_ALLOW_ANY_HOST=1` lifts that rule and is **for tests only** (the fake upstream of the Miniflare suite). The ticker is checked
+with `/^[A-Za-z0-9_.-]{1,40}$/` (not made of dots only) when it is stored and again before each request, then URL-encoded; a bad ticker makes no request. The source never follows a redirect (`redirect: 'manual'`,
+a 3xx is a failure; workerd has no `error` mode).
+
+**The Trading 212 ticker** is the optional field `t212Ticker` of the PROFILE item (`InstrumentProfile`, `packages/shared`). The quote job writes it with the baseline profile (`trading212Profile`, `services/broker-sync/src/baseline.ts`)
+for every symbol the positions call returns, at no extra request: a profile stored before the field existed gets it on the next quote run (one batched write). `mergeProfile` merges it field by field: whichever side has a
+valid ticker keeps it, so a provider profile never erases it.
 
 Strict validation of every download (`image.ts`): the status must be 200 (404/410 = not found), the declared content type one of `image/png`,
 `image/jpeg`, `image/webp`, `image/svg+xml`, the bytes must really be that type (HTML under an image type is refused by its first bytes), at most
-`MAX_LOGO_BYTES` (40 000; the declared length and the streamed body are both checked, a stalled body ends with the 4 s deadline), nothing is rewritten or stripped. Placeholders: a picture
-with a side under 32 px is refused (the services answer a 16 px globe when they have nothing), and `placeholderHashes` (SHA-256 of the exact bytes
+`MAX_LOGO_BYTES` (64 000, for the 240 px PNGs of the bucket, 5 to 16 KB; the declared length and the streamed body are both checked, a stalled body ends with the 4 s deadline), nothing is rewritten or stripped. Placeholders: a picture
+with a side under **64 px** (`DEFAULT_MIN_LOGO_PIXELS`, for all sources) is refused: favicons (16 to 48 px) would only be blurry, so the monogram is better, and `placeholderHashes` (SHA-256 of the exact bytes
 of a known default icon) can list more. An SVG with `<script>`, `<foreignObject>`, `<iframe>`, `<embed>`, `<object>`, event handlers or
 `javascript:` is refused, and an SVG served as a page carries `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox`.
 
 ### Storage and caching
 
-`LogoStore` (`packages/platform/src/logos/store.ts`) is a port; `ItemLogoStore` keeps one item per domain over the `ItemStore` (key
-`PK = LOGO#<domain>`, `SK = LOGO`, shared by users because a logo says nothing about the owner): `status`, `contentType`, the bytes as base64
-(about 54 KB at the cap, far below the 2 MB row limit), `size`, `etag` (SHA-256 prefix), `source`, `fetchedAt`. `putFound` refuses more than the cap
-(`LogoTooLargeError`). A domain no source had a logo for is stored as `missing` with `retryAfter` (7 days, `LOGO_NEGATIVE_TTL_DAYS`; **one hour**
+`LogoStore` (`packages/platform/src/logos/store.ts`) is a port; `ItemLogoStore` keeps one item per key over the `ItemStore` (key
+`PK = LOGO#<key>`, `SK = LOGO`, shared by users because a logo says nothing about the owner; the key is the normalised domain or `t212:<ticker>`): `v` (the schema version,
+`LOGO_SCHEMA_VERSION = 2`), `status`, `contentType`, the bytes as base64
+(about 85 KB at the cap, far below the 2 MB row limit), `size`, `etag`, `source`, `fetchedAt`. `putFound` refuses more than the cap
+(`LogoTooLargeError`). A key no source had a logo for is stored as `missing` with `retryAfter` (7 days, `LOGO_NEGATIVE_TTL_DAYS`; **one hour**
 after a timeout, network error or 5xx/429, which may pass). A found logo is never fetched again.
 
-Responses: `Cache-Control: private, max-age=86400` and a strong `ETag` (a conditional request is a `304` with no body), `X-Content-Type-Options: nosniff`.
+**Invalidation of the old favicon results.** The items stored before the Trading 212 source existed have no `v` (version 1) and are **ignored** by `get` (a found logo and a cached "no logo" alike);
+the next request of each held symbol looks it up again, lazily and once, from the better source, and overwrites the item (same key for a domain, a new key for a ticker). After the deploy nothing has to be
+cleared by hand; the cost is one lookup (1 to 4 outbound calls, 1 row written) per symbol the owner looks at.
+
+Responses: `Cache-Control: private, max-age=86400` (a day at most) and a strong `ETag` that carries the version and the source (`"v2-<source>-<SHA-256 prefix>"`, so a better source for the same
+bytes revalidates; a conditional request is a `304` with no body), `X-Content-Type-Options: nosniff`.
+The web asks `/api/logos/<symbol>?v=2` (`LOGO_URL_VERSION`): the query changes every URL, so a browser that still holds a favicon from the old URL with a day of `max-age` left never shows it again.
 A miss is a `404` with `private, max-age=3600`. The web remembers a failed symbol for the session (a module-level set), so a list of rows never retries per row. An
 AWS deployment has no logo route: its API answers 404 (or 403/501 from the gateway) and the screens show monograms; one request per symbol per session.
 
 ### Cost and limits
 
-Per **new** logo: one request of the Hub, 2 rows read (override and profile) + 1 (logo), up to 3 outbound subrequests (one per source, a `SubrequestBudget`
+Per **new** logo: one request of the Hub, 2 rows read (override and profile) + 1 (logo), **1 outbound subrequest** when the Trading 212 bucket has the logo (up to 4, one per source, when
+it falls through; a `SubrequestBudget`
 of 8 per lookup, so a lookup can never pass the 50 of the free plan) and **1 row written** (the found or missing note). A stored logo costs one
 request and 3 rows read, only when the browser's copy is older than a day (then it is a `304`, a few hundred bytes). First load of the owner's 26
 securities: at most 26 lookups, about 78 outbound calls over a few seconds and 26 rows written, once; after that the daily cost is about 26 requests and
@@ -2951,13 +2976,19 @@ per domain at a time (concurrent requests share it). Over the cap a lookup answe
 
 ### Web
 
-`CompanyLogo` (`web/src/components/CompanyLogo.tsx`): an `<img>` with explicit `width`/`height`, `loading="lazy"`, `decoding="async"`, `object-fit: contain`, in a rounded
-white container with a ring (dark and transparent logos stay legible in both themes); `alt=""` when the name or symbol is written next to it, else the company name; on error,
-or when logos are off, the monogram (first two letters of the symbol, drawn by CSS so copying the page never picks them up) in a box of the same size, so nothing
-shifts. **Logos are off in the demo (mock mode, the GitHub Pages build) and in unit tests** (`LOGOS_ENABLED` in `web/src/config.ts`; `VITE_LOGOS=on`/`off` overrides): no request to
+`CompanyLogo` (`web/src/components/CompanyLogo.tsx`): a **circle** like the Trading 212 app: an `<img>` with explicit `width`/`height`, `loading="lazy"`, `decoding="async"`, `object-fit: cover`
+(the 240 px square is cropped to the circle), `rounded-full`, no padding, in a clipped round frame with a thin neutral ring (`ring-slate-900/15`, `dark:ring-white/25`, readable in both themes).
+The light background sits **behind the picture only**: an opaque logo covers it, a transparent PNG/SVG from a fallback source stays legible. `alt=""` when the name or symbol is written next to it, else the company name; on error,
+or when logos are off, the monogram (first two letters of the symbol, drawn by CSS so copying the page never picks them up) in a circle of the same size, so nothing
+shifts. Sizes are unchanged: 32 px in calendar rows, 18 px on month chips, 40 px in the event dialog, 28 px in holdings and top holdings, 56 px in the asset header (whose own monogram is a circle too). **Logos are off in the demo (mock mode, the GitHub Pages build) and in unit tests** (`LOGOS_ENABLED` in `web/src/config.ts`; `VITE_LOGOS=on`/`off` overrides): no request to
 `/api/logos` is made there. In the calendar the **event type** was the letter badge; it is now a small marker (shape + letter, `EventMarker`) at the corner of the
 logo, always accompanied by the type in words on the row (second line), in the accessible name (`AAPL, Ex-dividend, confirmed, …`) and the chip's `title`; the
 status stays in the coloured left border and the status chip, so no meaning is carried by colour alone. The legend in the controls is unchanged.
+
+**Calendar row structure** (`EventList.tsx`): the row is a `<button>` (block, full width, the coloured border and chip) containing one plain `<span data-row class="flex w-full items-center gap-3">` (a button is not a reliable
+flex container everywhere) with three children: (1) `CompanyLogo` (`shrink-0`, fixed size, the marker `data-logo-marker` positioned `absolute` against it and its overhang reserved by `mr-1.5` inside the component),
+(2) the text column `<span data-row-text class="min-w-0 flex-1">` holding the two line blocks (`data-row-line="title"`: symbol and name, `data-row-line="detail"`: type, amount per share, shares), which wrap inside this column,
+all lines at the same left edge, (3) `<span class="shrink-0 flex-col items-end">` with the amount and the status chip. Chips (`MonthGrid.tsx`) and the event dialog header use the same component with the same reserved room.
 
 Also shown on: the asset detail header (the existing coloured monogram is its fallback), the holdings table and cards, the dashboard's top holdings. **Follow-ups not done**: the
 Dividends page has no per-security list (only chart tooltips), the Assets (securities) page and the watchlist rows, and EODHD `General.WebURL` as a provider website.
@@ -2965,11 +2996,16 @@ Dividends page has no per-security list (only chart tooltips), the Assets (secur
 ### Tests and what is not verified
 
 ```bash
-pnpm --filter @portfolio/shared test:coverage        # logo-domains.test.ts: table format, every precedence level, suffixes, issuer prefix, unknown
-pnpm --filter @portfolio/platform test:coverage      # logos/: image validation, sources with a fake fetch, store cap, service (once, negative cache, hourly cap), route (304, 404, 429)
-pnpm --filter @portfolio/cloudflare-app test         # test/logos-suite.ts on Node and on Miniflare/workerd with fake icon services (auth, once-only fetch, ETag/304, override, cap, off, token source)
-pnpm --filter @portfolio/web test:coverage && (cd web && pnpm exec playwright test e2e/company-logos.spec.ts)   # monogram in the demo, image path with VITE_LOGOS=on, 320 and 1280 px, no overflow
+pnpm --filter @portfolio/shared test:coverage        # logo-domains.test.ts: table format, every precedence level; t212-ticker.test.ts; classification.test.ts: ticker merge
+pnpm --filter @portfolio/platform test:coverage      # logos/: image validation, sources with a fake fetch (t212: valid, wrong type, html, oversize, 404, timeout, bad ticker, host guard, base override), store (v1 -> v2, etag), service (order, fallback chain, once, negative cache, hourly cap), route (304, 404, 429)
+pnpm --filter @portfolio/broker-sync test:coverage   # quotes.test.ts: the ticker stored with the baseline profile and kept through a provider profile
+pnpm --filter @portfolio/prices test                 # repository.test.ts: a provider write keeps t212Ticker
+pnpm --filter @portfolio/cloudflare-app test         # test/logos-suite.ts on Node and on Miniflare/workerd with fake services (auth, once-only fetch, ETag/304, override, cap, off, token source, the fake Trading 212 bucket: by ticker, fallback, switch-off, base override)
+pnpm --filter @portfolio/web test:coverage && (cd web && pnpm exec playwright test e2e/company-logos.spec.ts)   # monogram in the demo, image path with VITE_LOGOS=on, 320 and 1280 px, no overflow, row geometry (every line right of the logo and marker), round logos on every screen
 ```
+
+**Verified from a laptop, not from the Worker**: the Trading 212 bucket answers public 240x240 PNGs (`AAPL_US_EQ`, `KMB_US_EQ`, `JPM_US_EQ`, `TSM_US_EQ`, `SMGBl_EQ`, `FOOd_EQ`, 4.8 to 16 KB); that the Cloudflare Worker is
+served the same (no bot or geo block) is only confirmed by the owner's phone. The favicon endpoints returned each site's favicon at its native size (kimberly-clark.com 48 px, jpmorganchase.com about 64 px, tsmc.com 16 px).
 
 **Not verified against the real services** (this was built without network access to them): that Google's favicon endpoint and DuckDuckGo's icon endpoint are
 still reachable without a key and what they answer for an unknown domain (the size check and `placeholderHashes` are there because the default icon could not be captured as a fixture;
