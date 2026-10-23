@@ -1,5 +1,5 @@
 import { cond, queryAll, type BatchOp, type Item, type ItemStore } from '@portfolio/platform';
-import { CALENDAR_ENTITY, ENTITY, calendarKeys, isProfileSource, keys, mergeProfile, sourceOf, type DividendEvent, type EodPrice, type FxDay, type FxRates, type InstrumentProfile, type ProfileSource, type Quote, type StoredEarningsEvent, type StoredSplitEvent } from '@portfolio/shared';
+import { CALENDAR_ENTITY, ENTITY, calendarKeys, isProfileSource, keys, majorDividend, majorEod, majorQuote, mergeProfile, minorUnit, sourceOf, type DividendEvent, type EodPrice, type FxDay, type FxRates, type InstrumentProfile, type ProfileSource, type Quote, type StoredEarningsEvent, type StoredSplitEvent } from '@portfolio/shared';
 import { BlockBook, StoreQuotaLedger, type ProviderBlock } from './limits.js';
 import { profileDetails } from './models.js';
 import { byText, definedOnly } from './parse.js';
@@ -26,6 +26,28 @@ export interface Attempts {
   skipped: boolean;
 }
 export const healKey = { PK: 'USAGE', SK: 'ENRICH#HEAL' } as const;
+/** Marks the one-time repair of stored minor-unit prices (pence) as done. */
+export const minorUnitRepairKey = { PK: 'USAGE', SK: 'REPAIR#minor-units-v1' } as const;
+
+/** Rows a repair step read and rewrote. */
+export interface RepairRows {
+  read: number;
+  written: number;
+}
+
+const PRICE_FIELDS = ['close', 'price', 'previousClose'] as const;
+
+/** The item with its prices in the major currency, or undefined when its currency is no minor unit (nothing to rewrite). */
+function rescaledItem(item: Item): Item | undefined {
+  const minor = minorUnit(item.currency);
+  if (minor === null) return undefined;
+  const out: Record<string, unknown> = { ...item, currency: minor.currency };
+  for (const field of PRICE_FIELDS) {
+    const value = item[field];
+    if (typeof value === 'number') out[field] = value / minor.divisor;
+  }
+  return out as Item;
+}
 export const attemptKey = (symbol: string, kind: AttemptKind) => ({ PK: calendarKeys.tickerPk(symbol), SK: `ENRICH#${kind}` });
 const MAX_ERROR_CHARS = 200;
 
@@ -106,7 +128,7 @@ export class PriceRepository {
       const price = numberOf(item.price);
       const previousClose = numberOf(item.previousClose);
       if (typeof item.symbol !== 'string' || price === null || previousClose === null || typeof item.currency !== 'string' || typeof item.asOf !== 'string') continue;
-      out.set(item.symbol, { symbol: item.symbol, price, previousClose, currency: item.currency, asOf: item.asOf, source: typeof item.source === 'string' ? item.source : '' });
+      out.set(item.symbol, majorQuote({ symbol: item.symbol, price, previousClose, currency: item.currency, asOf: item.asOf, source: typeof item.source === 'string' ? item.source : '' }));
     }
     return out;
   }
@@ -199,6 +221,30 @@ export class PriceRepository {
     await this.store.put({ ...healKey, entityType: ENRICH_STATE_ENTITY, day });
   }
 
+  /** Whether the one-time minor-unit repair (see `repairMinorUnits`) has completed. */
+  async minorUnitRepairDone(): Promise<boolean> {
+    return (await this.store.get(minorUnitRepairKey)) !== undefined;
+  }
+
+  async markMinorUnitRepair(doneAt: string, rows: RepairRows): Promise<void> {
+    await this.store.put({ ...minorUnitRepairKey, entityType: ENRICH_STATE_ENTITY, doneAt, ...rows });
+  }
+
+  /**
+   * Rewrites the stored EOD rows and the latest quote of `symbol` that are still in a minor unit (pence...) into the major
+   * currency: one query over the symbol's EOD rows, one read of its quote and ONE batched write of the rows that change.
+   * Idempotent: a row already in a major currency is never touched, so a rerun reads the same rows and writes none.
+   */
+  async repairMinorUnits(symbol: string): Promise<RepairRows> {
+    const [eods, quote] = await Promise.all([
+      queryAll(this.store, { pk: keys.tickerPk(symbol), sk: { beginsWith: keys.eodPrefix } }),
+      this.store.get(keys.quote(symbol)),
+    ]);
+    const writes = [...eods, ...(quote === undefined ? [] : [quote])].flatMap((item) => rescaledItem(item) ?? []);
+    if (writes.length > 0) await this.store.batchWrite(putOps(writes));
+    return { read: eods.length + (quote === undefined ? 0 : 1), written: writes.length };
+  }
+
   /** The "limit reached" blocks still in force among `providers`. */
   blockedProviders(providers: readonly string[], now: Date): Promise<Map<string, ProviderBlock>> {
     return new BlockBook(this.store, () => now).active(providers);
@@ -209,11 +255,11 @@ export class PriceRepository {
   }
 
   async putQuotes(quotes: readonly Quote[]): Promise<void> {
-    await this.store.batchWrite(putOps(quotes.flatMap((quote) => [quoteItem(quote), eodItem({ symbol: quote.symbol, date: quote.asOf.slice(0, 10), close: quote.price, currency: quote.currency })])));
+    await this.store.batchWrite(putOps(quotes.map((quote) => majorQuote(quote)).flatMap((quote) => [quoteItem(quote), eodItem({ symbol: quote.symbol, date: quote.asOf.slice(0, 10), close: quote.price, currency: quote.currency })])));
   }
 
   putQuote(quote: Quote): Promise<boolean> {
-    return this.store.put(quoteItem(quote));
+    return this.store.put(quoteItem(majorQuote(quote)));
   }
 
   putFx(fx: FxRates): Promise<boolean> {
@@ -234,13 +280,13 @@ export class PriceRepository {
   }
 
   async putEods(rows: readonly EodPrice[]): Promise<number> {
-    const ops = putOps(rows.map(eodItem));
+    const ops = putOps(rows.map((row) => eodItem(majorEod(row))));
     await this.store.batchWrite(ops);
     return ops.length;
   }
 
   async putDividends(events: readonly DividendEvent[]): Promise<number> {
-    const ops = putOps(events.map(dividendItem));
+    const ops = putOps(events.map((event) => dividendItem(majorDividend(event))));
     await this.store.batchWrite(ops);
     return ops.length;
   }

@@ -5,7 +5,7 @@ import { alarmDiagnosticsSchema, usageSnapshotSchema, type AlarmDiagnosticsRepor
 import { defineApiScenarios } from '@portfolio/api/testing';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { Browser, type Stack } from './browser.js';
-import { AAPL_CLOSE, AAPL_T212_PRICE, AV_KEY, SAP_PRICE, T212_KEY, T212_SECRET, TD_KEY, OTHER_ID, OWNER_ID, OWNER_LOGIN, TEST_VAPID } from './fakes.js';
+import { AAPL_CLOSE, AAPL_T212_PRICE, AV_KEY, EODHD_KEY, SAP_PRICE, T212_KEY, T212_SECRET, TD_KEY, OTHER_ID, OWNER_ID, OWNER_LOGIN, TEST_VAPID } from './fakes.js';
 
 export interface SuiteStartOptions {
   /** Caps the budget guard measures against (the Hub's clock is pinned at `PINNED_NOW` whenever limits are given). */
@@ -380,6 +380,32 @@ export function defineAppSuite(label: string, start: StartStack): void {
         expect(summary.body.totalValue).toBeGreaterThan(0);
         // No Twelve Data call in this test may carry the key anywhere but the Authorization header (the fake rejects it otherwise).
         expect(stack.prices.callsTo('api.twelvedata.com').length).toBeGreaterThan(0);
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('values a London ETF in pounds, not pence: pence history from the provider never reaches the portfolio history', async () => {
+      const { stack, call, portfolio } = await signedIn({ prices: { ...keys, EODHD_API_KEY: EODHD_KEY } });
+      try {
+        const london = { portfolioId: portfolio, date: '2026-01-05', type: 'BUY', symbol: 'SMGB.L', quantity: 10, price: 30, currency: 'GBP' };
+        expect((await call('POST', '/transactions', london)).status).toBe(201);
+        await stack.drain();
+        await stack.enqueue('refreshPrices', { trigger: 'scheduled' });
+        await stack.drain();
+        expect(await stack.failedJobs()).toEqual([]);
+        expect(stack.prices.callsTo('eodhd.com').length).toBeGreaterThan(0);
+
+        const history = await call('GET', `/history?portfolioId=${portfolio}&range=ALL`);
+        expect(history.status).toBe(200);
+        const points = history.body.points as { date: string; value: number; invested: number }[];
+        const last = points.at(-1)!;
+        // 10 units at 30.40 pounds, in EUR at about 0.86 to 0.87 pounds per euro: about 350, a hundred times less than the pence reading.
+        expect(last.value).toBeGreaterThan(340);
+        expect(last.value).toBeLessThan(360);
+        expect(Math.max(...points.map((point) => point.value))).toBeLessThan(400);
+        expect(last.invested).toBeGreaterThan(340);
+        expect(last.invested).toBeLessThan(360);
       } finally {
         await stack.dispose();
       }

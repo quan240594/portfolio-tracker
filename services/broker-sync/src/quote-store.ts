@@ -1,5 +1,5 @@
 import type { BatchOp, Item, ItemStore } from '@portfolio/platform';
-import { ENTITY, T212_QUOTE_STATUS_ENTITY, brokerKeys, fromItem, keys, type Quote, type T212QuoteStatus } from '@portfolio/shared';
+import { ENTITY, T212_QUOTE_STATUS_ENTITY, brokerKeys, fromItem, keys, majorQuote, type Quote, type T212QuoteStatus } from '@portfolio/shared';
 
 /** What the Trading 212 quote refresh stores: the latest quotes and its own status (the back-off and `GET /prices/status` read it). */
 export interface QuoteStore {
@@ -15,12 +15,13 @@ const numberOf = (value: unknown): number | undefined => (typeof value === 'numb
 /** The same item the price service writes (`PriceRepository.putQuotes`), so the API reads it like any other quote. */
 export const quoteItem = (quote: Quote): Item => ({ ...keys.quote(quote.symbol), entityType: ENTITY.quote, ...quote });
 
+/** A quote stored in a minor unit before the providers rescaled at the source is read in major units. */
 function readQuote(item: Item): Quote | undefined {
   const price = numberOf(item.price);
   const previousClose = numberOf(item.previousClose);
   if (typeof item.symbol !== 'string' || price === undefined || previousClose === undefined) return undefined;
   if (typeof item.currency !== 'string' || typeof item.asOf !== 'string') return undefined;
-  return { symbol: item.symbol, price, previousClose, currency: item.currency, asOf: item.asOf, source: typeof item.source === 'string' ? item.source : '' };
+  return majorQuote({ symbol: item.symbol, price, previousClose, currency: item.currency, asOf: item.asOf, source: typeof item.source === 'string' ? item.source : '' });
 }
 
 /** QuoteStore on an ItemStore: the key scheme of the quote and status items, whatever the storage. */

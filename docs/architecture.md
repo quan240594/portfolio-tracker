@@ -3255,3 +3255,35 @@ finishes with no platform retry) and `pnpm --filter @portfolio/web test` plus `p
 **Not verified without real Cloudflare logs:** that the `setAlarm` during a running alarm is what the platform reports as `clientDisconnected` (workerd/Miniflare does not
 reproduce it), what `alarmInfo` carries on the real runtime (workerd passes `scheduledTime`; the documented fields are `retryCount` and `isRetry`), and whether the status counts
 stop growing after the fix. After deploying this version, open `/settings/diagnostics` after a day: compare the runs with the analytics counts.
+
+## Minor-unit currencies (GBX) in price history
+
+**Invariant: stored prices are always in major units; a minor-unit code (GBX/GBp pence, ZAc, ILA) never reaches a valuation.**
+
+**The bug (23 Oct 2026).** EODHD quotes London symbols in pence and the TypeScript price service labelled their EOD history `GBX` but stored the raw closes: `makeEod` (the port
+of the Python `EodPrice.__post_init__` rescale, which `Quote` and `DividendEvent` already had through `makeQuote`/`makeDividend`) was defined and never called. The history valuation
+multiplies a close by the quantity in the *position* currency (GBP), so every London ETF was counted about 100 times: a 1Y "Value vs invested" chart of about EUR 850,000 for a
+portfolio worth about EUR 64,000. The headline figures were right because they use Trading 212 quotes. The Python service rescales in its dataclasses and does not have the bug.
+
+**Defence in three layers.**
+1. *At the source:* every provider's `getEodHistory` (EODHD, Twelve Data, CoinGecko) applies `makeEod`; the profile builders only relabel the currency (`majorCurrencyCode`); and the
+   price repository rescales every EOD row, quote and dividend it writes (`putEods`, `putQuotes`, `putQuote`, `putDividends`), so no producer can store a minor unit.
+2. *At read time (heals stored data):* `ItemRepository.getEod/getQuotes/getDividendEvents` (services/api, the loader of every route, the analytics and the notifications) and the Trading 212
+   quote store pass rows through `majorEod/majorQuote/majorDividend` (`packages/shared/src/minor-units.ts`). They are idempotent and return a major-currency row untouched: a `GBP` row is
+   never divided. A wrong stored row can therefore never be valued 100x, whether or not the repair has run.
+3. *One-time repair of the stored rows:* a final phase `repair` of the `refreshPrices` job (`jobs/repair-minor-units.ts`) rewrites the EOD rows and the latest quote of every tracked
+   symbol that are still labelled with a minor unit, then stores the marker `USAGE / REPAIR#minor-units-v1` (with the rows read/written). With the marker present a refresh costs one
+   read. The pass takes whole symbols until it has read 5,000 rows (a step; the cursor carries the queue and an older cursor without it still decodes), writes only the rows that change in
+   one batch per symbol, and never writes a repaired row again, so a rerun or a second alarm is a read-only pass and cannot loop. A symbol whose write failed is logged and leaves the
+   marker unset, so a later refresh retries it. **Cost, once:** about 250 EOD rows per symbol (a year of history), i.e. roughly 26 x 250 = 6,500 rows read in two steps (of the 5,000,000 a day)
+   and, for the London symbols only, about 250 rows written each (a few hundred to about 1,500 of the 100,000 a day). No subrequest is used.
+
+**Sanity guard (deliberately not added).** A close that deviates 50x from the average cost per unit is only treated as pence when its label says minor unit or is unknown. A labelled
+row is already rescaled by layers 1 to 3 without comparing anything, and no writer can produce an unlabelled one (`EodPrice.currency` is required and every producer sets it), so the guard
+would never fire; rows labelled with a major currency are never altered. **Residual risk:** a London line quoted in USD or EUR that EODHD reports without a currency would be labelled `GBX` by
+`priceCurrencyFor` (the Python service does the same) and shown 100x too small; Trading 212 quotes, which cover held positions, already settle this with their own mislabel check.
+
+Tests: `pnpm --filter @portfolio/prices test` (every provider for GBX/GBp/ZAc/ILA/normal currencies, the write guards, the repair step and the job, the Python parity cases
+`eodhd-eod-london-pence` and `twelvedata-time-series-minor-units`), `pnpm --filter @portfolio/shared test`, `pnpm --filter @portfolio/api test` (stored pence rows read in pounds by
+history, holdings, asset detail, benchmark and dividends) and `pnpm --filter @portfolio/cloudflare-app test` (Node and real workerd: pence from an EODHD fake through the real job path
+give a sane history; Node: stored pence rows are healed at read time, repaired once by the refresh job, and a second refresh rewrites nothing).

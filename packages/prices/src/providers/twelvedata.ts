@@ -1,11 +1,11 @@
 import type { AssetClass, EodPrice, InstrumentProfile, Quote } from '@portfolio/shared';
-import { sequentially } from '@portfolio/shared';
+import { majorCurrencyCode, sequentially } from '@portfolio/shared';
 import { silentLogger, type Logger } from '@portfolio/platform';
 import { z } from 'zod';
 import { ProviderError, RateLimitError, RetryableProviderError, SymbolNotFoundError } from '../errors.js';
 import type { HttpClient } from '../http.js';
 import { resetOf, spendCredits, type DailyQuota, type MinuteQuota, type ProviderGate, type TokenBucket } from '../limits.js';
-import { makeQuote, normalizeCurrency } from '../models.js';
+import { makeEod, makeQuote, normalizeCurrency } from '../models.js';
 import { asFloat, chunks, cleanText, definedOnly, dayOf, isRecord, nonEmpty, ownValue, websiteDomain, type JsonRecord } from '../parse.js';
 import { countryFor } from '../symbols.js';
 import { fromEpochSeconds } from '../time.js';
@@ -158,7 +158,7 @@ export class TwelveDataProvider implements PriceSource {
     for (const value of Array.isArray(data.values) ? (data.values as unknown[]) : []) {
       const row = seriesRow.safeParse(value);
       const date = row.success ? dayOf(row.data.datetime) : '';
-      if (row.success && row.data.close !== null && date !== '') rows.push({ symbol, date, close: row.data.close, currency });
+      if (row.success && row.data.close !== null && date !== '') rows.push(makeEod({ symbol, date, close: row.data.close, currency }));
     }
     return clampRange(rows, start, end);
   }
@@ -202,7 +202,7 @@ export class TwelveDataProvider implements PriceSource {
       symbol,
       name: nonEmpty(raw.name) ?? symbol,
       assetClass: assetClassFromType(raw.type),
-      currency: normalizeCurrency(raw.currency, 'USD'),
+      currency: majorCurrencyCode(normalizeCurrency(raw.currency, 'USD')),
       sector: nonEmpty(raw.sector),
       country: country === undefined ? undefined : (ownValue(COUNTRY_NAMES, country) ?? country),
       exchange: nonEmpty(raw.exchange),

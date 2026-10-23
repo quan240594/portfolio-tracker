@@ -531,6 +531,33 @@ PROVIDER_CASES: list[dict[str, Any]] = [
         ],
     },
     {
+        "id": "eodhd-eod-london-pence",
+        "python": "test_symbols_keys.py::test_minor_unit_prices_are_rescaled_to_major_currency",
+        "provider": "eodhd",
+        "now": NOW,
+        "routes": [{"match": "/eod/VOD.LSE", "responses": [[{"date": "2026-10-09", "close": 7250.5}, {"date": "2026-10-08", "close": 7190}]]}],
+        "calls": [{"method": "get_eod_history", "args": ["VOD.L", "2026-01-01", "2026-10-13"]}],
+    },
+    {
+        "id": "twelvedata-time-series-minor-units",
+        "python": "test_symbols_keys.py::test_minor_unit_prices_are_rescaled_to_major_currency",
+        "provider": "twelvedata",
+        "now": NOW,
+        "routes": [
+            {
+                "match": "/time_series",
+                "responses": [
+                    {
+                        "meta": {"symbol": "VOD", "currency": "GBp"},
+                        "values": [{"datetime": "2026-10-09", "close": "7250.5"}, {"datetime": "2026-10-08", "close": "7190"}],
+                        "status": "ok",
+                    }
+                ],
+            }
+        ],
+        "calls": [{"method": "get_eod_history", "args": ["VOD.L", "2026-01-01", "2026-10-13"]}],
+    },
+    {
         "id": "eodhd-profile-search",
         "python": "test_providers_http.py::test_eodhd_profile_search + test_profile_details.py::test_eodhd_search_result_carries_a_valid_isin",
         "provider": "eodhd",

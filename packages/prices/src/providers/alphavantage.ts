@@ -1,4 +1,5 @@
 import type { DividendEvent, EodPrice, InstrumentProfile, Quote } from '@portfolio/shared';
+import { majorCurrencyCode } from '@portfolio/shared';
 import { ProviderError, RateLimitError } from '../errors.js';
 import type { HttpClient } from '../http.js';
 import type { DailyQuota, TokenBucket } from '../limits.js';
@@ -50,7 +51,7 @@ export class AlphaVantageProvider implements PriceSource {
       symbol,
       name: nonEmpty(data.Name) ?? symbol,
       assetClass: assetClassFromType(data.AssetType),
-      currency: (nonEmpty(data.Currency) ?? 'USD').toUpperCase(),
+      currency: majorCurrencyCode((nonEmpty(data.Currency) ?? 'USD').toUpperCase()),
       sector: sectorTitle(data.Sector),
       country: country === undefined ? undefined : (ownValue(COUNTRY_NAMES, country) ?? country),
       exchange: nonEmpty(data.Exchange),

@@ -1,6 +1,6 @@
 import { drain, sequentially } from '@portfolio/shared';
 import { silentLogger, type JobStep, type Logger } from '@portfolio/platform';
-import type { ZodType } from 'zod';
+import type { ZodType, ZodTypeDef } from 'zod';
 import { SubrequestBudgetError } from '../errors.js';
 import { budgetedFetch, type BudgetedFetch } from '../http.js';
 import { createMarketData, type MarketData, type MarketDataDeps } from '../market.js';
@@ -62,7 +62,7 @@ export function* whileAffordable<T>(queue: readonly T[], affordable: () => boole
 /** Runs `task` for the items one after another (see `whileAffordable`). */
 export const runUnits = <T>(items: Iterable<T>, task: (item: T) => Promise<void>): Promise<void> => drain(sequentially(items, task));
 
-export function decodeState<S>(schema: ZodType<S>, cursor: string): S {
+export function decodeState<S>(schema: ZodType<S, ZodTypeDef, unknown>, cursor: string): S {
   return schema.parse(JSON.parse(cursor));
 }
 

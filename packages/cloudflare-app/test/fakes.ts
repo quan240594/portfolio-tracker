@@ -166,6 +166,13 @@ export function route(services: readonly FakeService[], request: FakeRequest): F
 export const TD_KEY = 'test-twelvedata-key';
 export const AV_KEY = 'test-alphavantage-key';
 export const AAPL_CLOSE = 230.12;
+export const EODHD_KEY = 'test-eodhd-key';
+/** A London ETF: EODHD quotes its history in pence (GBX), the app must hold it in pounds. */
+export const LONDON_EODHD_SYMBOL = 'SMGB.LSE';
+export const LONDON_PENCE = [3000, 3012.5, 3025, 3040] as const;
+/** The four latest days up to the clock's day, so the rows always fall inside the history window the enrichment asks for. */
+export const londonPenceCloses = (clockMs: number): [string, number][] =>
+  LONDON_PENCE.map((close, i) => [new Date(clockMs - (LONDON_PENCE.length - 1 - i) * 86_400_000).toISOString().slice(0, 10), close]);
 
 /**
  * The market-data sources the price jobs call: Twelve Data (quote, daily history), Alpha Vantage (company overview) and the
@@ -200,6 +207,14 @@ export class FakePrices {
         default:
           return { status: 404, json: { code: 404, status: 'error', message: 'not available' } };
       }
+    },
+    'eodhd.com': (url) => {
+      if (url.searchParams.get('api_token') !== EODHD_KEY) return { status: 401, json: { message: 'bad key' } };
+      if (url.pathname.startsWith('/api/search/')) return { status: 200, json: [{ Code: 'SMGB', Exchange: 'LSE', Name: 'London Test ETF', Type: 'ETF', Country: 'UK', Currency: 'GBP' }] };
+      if (url.pathname === `/api/eod/${LONDON_EODHD_SYMBOL}`) return { status: 200, json: londonPenceCloses(this.clock()).map(([date, close]) => ({ date, close })) };
+      if (url.pathname === `/api/real-time/${LONDON_EODHD_SYMBOL}`) return { status: 200, json: { code: LONDON_EODHD_SYMBOL, close: LONDON_PENCE.at(-1), previousClose: LONDON_PENCE.at(-2), timestamp: Math.floor(this.clock() / 1000) } };
+      if (url.pathname.startsWith('/api/div/')) return { status: 200, json: [] };
+      return { status: 404, json: { message: 'not available' } };
     },
     'www.alphavantage.co': () => ({
       status: 200,
