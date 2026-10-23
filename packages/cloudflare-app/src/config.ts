@@ -1,3 +1,4 @@
+import { parseEarningsConfig, type EarningsConfig } from '@portfolio/earnings';
 import { parsePricesConfig, type PricesConfig } from '@portfolio/prices';
 import { MIN_SESSION_SECRET_LENGTH, parseAllowedHosts, parseLogosConfig, resolveGithubAuthConfig, type GithubAuthConfig, type GithubFetch, type LogosConfig } from '@portfolio/platform';
 import type { HubEnv, WorkerEnv } from './runtime.js';
@@ -19,6 +20,8 @@ export interface HubConfig {
   logos: LogosConfig;
   /** Web Push: both keys are needed, otherwise the notification feature is off (never an error). */
   push: PushSettings;
+  /** Earnings summaries: `SEC_CONTACT`, the model and the neuron cap; the feature is off until the contact and the AI binding exist (never an error). */
+  earnings: EarningsConfig;
 }
 
 export interface PushSettings {
@@ -90,6 +93,7 @@ export function readHubConfig(env: HubEnv): ConfigResult<HubConfig> {
       symbolOverrides: parseOverrides(env.T212_SYMBOL_OVERRIDES),
       prices: parsePricesConfig({ ...stringVars(env), BASE_CURRENCY: currency.toUpperCase() }),
       logos: parseLogosConfig(stringVars(env)),
+      earnings: parseEarningsConfig(stringVars(env)),
       push: {
         ...(present(env.VAPID_PUBLIC_KEY) ? { publicKey: env.VAPID_PUBLIC_KEY.trim() } : {}),
         ...(present(env.VAPID_PRIVATE_KEY) ? { privateKey: env.VAPID_PRIVATE_KEY.trim() } : {}),

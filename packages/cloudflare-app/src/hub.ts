@@ -25,7 +25,7 @@ export class Hub extends DurableObject<HubEnv> {
     setLogger(createConsoleLogger({ service: 'portfolio-tracker-hub' }));
     const config = readHubConfig(env);
     if (config.ok) {
-      this.core = new HubCore(ctx, config.config, (new.target as typeof Hub).hubOptions(env));
+      this.core = new HubCore(ctx, config.config, { ...(env.AI === undefined ? {} : { ai: env.AI }), ...(new.target as typeof Hub).hubOptions(env) });
     } else {
       this.problems = config.problems;
     }

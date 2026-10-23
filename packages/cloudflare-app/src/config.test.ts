@@ -25,6 +25,12 @@ describe('readHubConfig', () => {
     expect(result).toMatchObject({ ok: true, config: { logos: { sources: ['duckduckgo'], hourlyLimit: 5, logoDevToken: 'pk' } } });
   });
 
+  it('hands the earnings feature its contact, model and neuron cap (the AI binding is an object and never a variable)', () => {
+    expect(readHubConfig({ ...hubEnv })).toMatchObject({ ok: true, config: { earnings: { secProblem: 'missing', model: '@cf/meta/llama-3.1-8b-instruct-fp8', dailyNeurons: 6000, estimatesConfigured: false } } });
+    const result = readHubConfig({ ...hubEnv, SEC_CONTACT: ' PortfolioTracker/1.0 (me@example.invalid) ', EARNINGS_AI_DAILY_NEURONS: '9999', ALPHAVANTAGE_API_KEY: 'k', AI: { run: () => Promise.resolve({}) } } as never);
+    expect(result).toMatchObject({ ok: true, config: { earnings: { secUserAgent: 'PortfolioTracker/1.0 (me@example.invalid)', dailyNeurons: 8000, estimatesConfigured: true } } });
+  });
+
   it('defaults the currency to EUR and ignores unusable overrides', () => {
     for (const overrides of [undefined, '', 'not json', '[1]', 'null']) {
       expect(readHubConfig({ ...hubEnv, T212_SYMBOL_OVERRIDES: overrides })).toMatchObject({ ok: true, config: { baseCurrency: 'EUR', symbolOverrides: {} } });

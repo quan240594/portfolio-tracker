@@ -68,7 +68,7 @@ function revenuePart(summary: EarningsSummary): string | undefined {
 /** The template's key per-share or ratio figure: FCF per share where the template shows free cash flow, else its first reported slot. */
 function keyKpiPart(summary: EarningsSummary): string | undefined {
   const fcfPerShare = summary.headline.fcfPerShare;
-  if (fcfPerShare !== undefined) return `FCF/share ${formatPerShare(fcfPerShare.value, summary.reportingCurrency)}`;
+  if (fcfPerShare !== undefined) return `FCF/share ${formatPerShare(roundTo(fcfPerShare.value, 2), summary.reportingCurrency)}`;
   const kpi = summary.kpis.find((entry) => entry.metric !== undefined);
   return kpi?.metric === undefined ? undefined : `${kpi.label} ${formatMetricValue(kpi.metric, summary.reportingCurrency)}`;
 }

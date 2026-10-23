@@ -2,6 +2,7 @@ import { build } from 'esbuild';
 import { Log, LogLevel, Miniflare, Response as MiniflareResponse } from 'miniflare';
 import { fileURLToPath } from 'node:url';
 import type { DrainOptions, Stack } from './browser.js';
+import { aiAnswers, secFor } from './earnings-fakes.js';
 import { FakeGithub, FakeLogos, FakePrices, FakePush, FakeTrading212, ORIGIN, OWNER_ID, TEST_CLIENT_ID, TEST_CLIENT_SECRET, TEST_SECRETS_KEY, TEST_SESSION_SECRET, TEST_VAPID, route } from './fakes.js';
 import { PINNED_NOW, type SuiteStartOptions } from './suite.js';
 
@@ -46,7 +47,8 @@ export async function createWorkerdStack(options: SuiteStartOptions = {}): Promi
   const prices = new FakePrices(() => Date.now());
   const logos = new FakeLogos();
   const push = new FakePush();
-  const services = [github.service, trading212.service, prices.service, logos.service, push.service];
+  const sec = secFor(options.earnings);
+  const services = [github.service, trading212.service, sec.service, prices.service, logos.service, push.service];
   const mf = new Miniflare({
     modules: [{ type: 'ESModule', path: 'worker.mjs', contents: await bundleWorker() }],
     // The Hub logs one JSON line per request; the tests do not need them.
@@ -75,6 +77,8 @@ export async function createWorkerdStack(options: SuiteStartOptions = {}): Promi
       SECRETS_KEY: TEST_SECRETS_KEY,
       ...(options.noVapid ? {} : { VAPID_PUBLIC_KEY: TEST_VAPID.publicKey, VAPID_PRIVATE_KEY: TEST_VAPID.privateKey }),
       ...options.prices,
+      ...(options.earnings?.contact === undefined ? {} : { SEC_CONTACT: options.earnings.contact }),
+      ...(options.earnings?.ai ? { TEST_AI: aiAnswers(options.earnings.releases ?? []) } : {}),
       ...options.logos,
       ...(options.limits ? { TEST_LIMITS: JSON.stringify(options.limits), TEST_NOW: String(PINNED_NOW) } : {}),
     },
@@ -111,9 +115,14 @@ export async function createWorkerdStack(options: SuiteStartOptions = {}): Promi
     prices,
     logos,
     push,
+    sec,
     hubState,
     send: async (path, init) => (await mf.dispatchFetch(`${ORIGIN}${path}`, init as never)) as unknown as Response,
     drain: (options) => drain(options),
+    seed: async (items) => {
+      const hub = await namespace();
+      await hub.get(hub.idFromName('hub')).fetch('http://hub.internal/__test/seed', { method: 'POST', body: JSON.stringify(items) });
+    },
     enqueue: async (job, payload) => {
       const hub = await namespace();
       await hub.get(hub.idFromName('hub')).fetch('http://hub.internal/__test/enqueue', { method: 'POST', body: JSON.stringify({ job, payload }) });

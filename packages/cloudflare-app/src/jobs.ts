@@ -23,7 +23,9 @@ import { ItemNotificationRepository, ItemRepository, MAX_PUSHES_PER_USER_STEP, n
 import { ItemBrokerStore, ItemProfileStore, ItemQuoteStore, SecretCredentialStore, Trading212Client, brokerSyncJob, refreshQuotesAfterSync, refreshQuotesJob, type HandlerResult, type QuoteDeps, type SyncDeps } from '@portfolio/broker-sync';
 import { ItemIngestStore, importUploadedJob } from '@portfolio/ingest';
 import { DEFAULT_STEP_SUBREQUESTS, PRICE_SCHEDULES, createPriceJobs, type PriceJobDeps } from '@portfolio/prices';
+import { CHECKS_PER_STEP, createFetchEarningsSummaryJob, createWatchEarningsJob, type AiLike, type NeuronMeter } from '@portfolio/earnings';
 import type { HubConfig } from './config.js';
+import { earningsJobDeps } from './earnings.js';
 import { pushConfig } from './push.js';
 import { SubrequestBudget } from './subrequests.js';
 
@@ -44,6 +46,10 @@ export interface JobContext {
   fetch: typeof fetch;
   /** Pauses (`setTimeout`); the price service's HTTP client backs off with it, never for long. */
   sleep: (ms: number) => Promise<void>;
+  /** The Workers AI binding; absent until the owner adds it (the earnings feature is then off). */
+  ai?: AiLike;
+  /** The Workers AI allowance of the day (the budget guard's `aiNeurons` counter). */
+  neurons: NeuronMeter;
 }
 
 export type JobFactory<N extends JobName> = (context: JobContext) => JobHandler<JobPayloads[N]>;
@@ -119,6 +125,16 @@ export const CORE_JOB_FACTORIES: JobFactories = {
     }),
 };
 
+/**
+ * Earnings summaries: `watchEarnings` (one SEC request per candidate symbol, queues a release it finds) and `fetchEarningsSummary` (reads the
+ * release with Workers AI, verifies and stores it). Both run only below 60 % of the budget and are dropped, not deferred, above it: the next
+ * watch finds the release again. Without `SEC_CONTACT` or the AI binding they finish at once without any outbound call.
+ */
+export const EARNINGS_JOB_FACTORIES: JobFactories = {
+  watchEarnings: (context) => createWatchEarningsJob(() => earningsJobDeps(context)),
+  fetchEarningsSummary: (context) => createFetchEarningsSummaryJob(() => earningsJobDeps(context)),
+};
+
 /** What the price jobs need, built from the Hub's ports (`@portfolio/prices`' `PriceJobDeps`). */
 export function priceJobDeps({ items, fetch, now, sleep, config, queue }: JobContext): PriceJobDeps {
   // Every fetch of a price step goes through the alarm's counted `fetch`; the service's own per-step budget (40) sits below it.
@@ -157,17 +173,25 @@ export const JOB_SUBREQUEST_RESERVE: Readonly<Partial<Record<JobName, number>>> 
   refreshT212Quotes: T212_QUOTE_SUBREQUESTS,
   // One user's step: at most 3 notifications to 10 devices, one subrequest per push.
   notifyDividends: MAX_PUSHES_PER_USER_STEP,
+  // A watch step: the ticker table (once) and one submissions request per candidate, at most `CHECKS_PER_STEP` (10).
+  watchEarnings: CHECKS_PER_STEP + 4,
+  // A release: the filing index, up to three documents, the estimate and at most two model calls.
+  fetchEarningsSummary: 8,
 };
 
-export const ALL_JOB_FACTORIES: JobFactories = { ...CORE_JOB_FACTORIES, ...PRICE_JOB_FACTORIES };
+export const ALL_JOB_FACTORIES: JobFactories = { ...CORE_JOB_FACTORIES, ...PRICE_JOB_FACTORIES, ...EARNINGS_JOB_FACTORIES };
 
 /** The jobs that have a handler: schedules of other jobs are not kept (they would only fail and retry). */
 export const registeredJobs = (factories: JobFactories = ALL_JOB_FACTORIES): JobName[] => Object.keys(factories) as JobName[];
 
-/** The schedules the Hub keeps: those of the registered jobs (the price schedules among them once the price service is registered). */
-export const schedulesFor = (factories: JobFactories = ALL_JOB_FACTORIES): ScheduledJob[] => {
+/**
+ * The schedules the Hub keeps: those of the registered jobs (the price schedules among them once the price service is registered). The
+ * earnings watch is kept only while the feature has what it needs (`earningsOn`): without the SEC contact or the AI binding it would wake the
+ * Durable Object 23 times a day to do nothing.
+ */
+export const schedulesFor = (factories: JobFactories = ALL_JOB_FACTORIES, earningsOn = true): ScheduledJob[] => {
   const known = new Set<string>(registeredJobs(factories));
-  return SCHEDULED_JOBS.filter((schedule) => known.has(schedule.job));
+  return SCHEDULED_JOBS.filter((schedule) => known.has(schedule.job) && (earningsOn || schedule.job !== JOBS.watchEarnings));
 };
 
 /** The price service's own schedules (`prices-refresh`, `prices-calendar`), for the status report. */

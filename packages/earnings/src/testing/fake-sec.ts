@@ -37,28 +37,34 @@ export class FakeSec {
     return this.requests.map((request) => request.url);
   }
 
+  /** Answers a request as plain data (so a host with its own response type can wrap it) and records it. */
+  handle(url: string, userAgent?: string, acceptEncoding?: string): PlainReply {
+    this.requests.push({ url, userAgent, acceptEncoding });
+    if (this.forceStatus !== undefined) return { status: this.forceStatus, body: 'blocked', headers: { 'retry-after': '120' } };
+    return this.route(url);
+  }
+
   readonly fetch = (url: string, init?: RequestInit): Promise<Response> => {
     const headers = new Headers(init?.headers);
-    this.requests.push({ url, userAgent: headers.get('user-agent') ?? undefined, acceptEncoding: headers.get('accept-encoding') ?? undefined });
-    if (this.forceStatus !== undefined) return Promise.resolve(new Response('blocked', { status: this.forceStatus, headers: { 'retry-after': '120' } }));
-    return Promise.resolve(this.route(url));
+    const reply = this.handle(url, headers.get('user-agent') ?? undefined, headers.get('accept-encoding') ?? undefined);
+    return Promise.resolve(new Response(reply.body, { status: reply.status, headers: reply.headers }));
   };
 
-  private route(url: string): Response {
+  private route(url: string): PlainReply {
     if (url === 'https://www.sec.gov/files/company_tickers.json') return json(this.tickerTable());
     const submissions = /^https:\/\/data\.sec\.gov\/submissions\/CIK(\d{10})\.json$/.exec(url);
     if (submissions) return this.submissions(Number(submissions[1]));
     const archive = /^https:\/\/www\.sec\.gov\/Archives\/edgar\/data\/(\d+)\/(\d{18})\/(.+)$/.exec(url);
-    if (!archive) return new Response('not found', { status: 404 });
+    if (!archive) return notFound();
     const [, cik, accession, file] = archive;
     const spec = this.filings.find((candidate) => Number(candidate.release.cik) === Number(cik) && candidate.release.accession.replaceAll('-', '') === accession);
-    if (!spec) return new Response('not found', { status: 404 });
+    if (!spec) return notFound();
     if (file === 'index.json') return json({ directory: { name: `/Archives/edgar/data/${cik}/${accession}`, item: [{ name: 'primary.htm', type: 'text.gif', size: '1000' }, { name: spec.release.exhibit, type: 'text.gif', size: '9000' }, { name: 'image.jpg', type: 'image.gif', size: '10' }] } });
     const name = decodeURIComponent(file!);
-    if (this.documents.has(name)) return new Response(this.documents.get(name), { status: 200 });
-    if (name === spec.release.exhibit) return new Response(spec.release.html, { status: 200 });
-    if (name === 'primary.htm') return new Response('<html><body>Item 2.02 Results of Operations. See Exhibit 99.1.</body></html>', { status: 200 });
-    return new Response('not found', { status: 404 });
+    if (this.documents.has(name)) return text(this.documents.get(name)!);
+    if (name === spec.release.exhibit) return text(spec.release.html);
+    if (name === 'primary.htm') return text('<html><body>Item 2.02 Results of Operations. See Exhibit 99.1.</body></html>');
+    return notFound();
   }
 
   private tickerTable(): Record<string, unknown> {
@@ -70,9 +76,9 @@ export class FakeSec {
     return table;
   }
 
-  private submissions(cik: number): Response {
+  private submissions(cik: number): PlainReply {
     const own = this.filings.filter((spec) => Number(spec.release.cik) === cik);
-    if (own.length === 0) return new Response('not found', { status: 404 });
+    if (own.length === 0) return notFound();
     const column = <T>(pick: (spec: FilingSpec) => T): T[] => own.map(pick);
     return json({
       cik: String(cik),
@@ -90,4 +96,12 @@ export class FakeSec {
   }
 }
 
-const json = (body: unknown): Response => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+export interface PlainReply {
+  status: number;
+  body: string;
+  headers: Record<string, string>;
+}
+
+const json = (body: unknown): PlainReply => ({ status: 200, body: JSON.stringify(body), headers: { 'content-type': 'application/json' } });
+const text = (body: string): PlainReply => ({ status: 200, body, headers: { 'content-type': 'text/html' } });
+const notFound = (): PlainReply => ({ status: 404, body: 'not found', headers: {} });
