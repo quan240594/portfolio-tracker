@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CompanyLogo, LogosEnabledProvider, logoUrl, monogramOf, resetLogoSession } from './CompanyLogo';
+import { CompanyLogo, LOGO_URL_VERSION, LogosEnabledProvider, logoUrl, monogramOf, resetLogoSession } from './CompanyLogo';
 
 afterEach(() => act(() => resetLogoSession()));
 
@@ -20,13 +20,50 @@ describe('CompanyLogo', () => {
   it('asks our own origin for the logo, with a fixed size, lazy loading and the symbol encoded', () => {
     enabled(<CompanyLogo symbol="BRK/B" name="Berkshire" size={32} />);
     const img = screen.getByRole('img', { name: 'Berkshire' });
-    expect(img).toHaveAttribute('src', '/api/logos/BRK%2FB');
+    expect(img).toHaveAttribute('src', '/api/logos/BRK%2FB?v=2');
     expect(img).toHaveAttribute('src', logoUrl('BRK/B'));
     expect(img).toHaveAttribute('width', '32');
     expect(img).toHaveAttribute('height', '32');
     expect(img).toHaveAttribute('loading', 'lazy');
     expect(img).toHaveAttribute('decoding', 'async');
-    expect(img.className).toContain('object-contain');
+    expect(img.className).toContain('object-cover');
+    expect(img.className).not.toContain('object-contain');
+  });
+
+  it('versions the URL so a browser never keeps a picture of an older source', () => {
+    expect(logoUrl('AAPL')).toBe(`/api/logos/AAPL?v=${LOGO_URL_VERSION}`);
+    expect(LOGO_URL_VERSION).toBeGreaterThanOrEqual(2);
+  });
+
+  it('is a circle: a clipped round box with a thin ring, a round image without padding, the same in the monogram', () => {
+    const { container } = enabled(<CompanyLogo symbol="AAPL" name="Apple" size={32} />);
+    const frame = container.querySelector('img')!.parentElement!;
+    expect(frame.className).toContain('rounded-full');
+    expect(frame.className).toContain('overflow-hidden');
+    expect(frame.className).toMatch(/ring-1/);
+    expect(frame.className).toMatch(/dark:ring-/);
+    const img = container.querySelector('img')!;
+    expect(img.className).toContain('rounded-full');
+    expect(img.className).toContain('bg-white');
+    expect(img.className).not.toMatch(/\bp-\d/);
+    fireEvent.error(img);
+    const monogram = container.querySelector('[data-logo] > span')!;
+    expect(monogram.className).toContain('rounded-full');
+    expect(monogram.className).not.toContain('rounded-md');
+  });
+
+  it('reserves room for the corner marker on its right only when there is one, so text next to it never touches it', () => {
+    const { container } = enabled(
+      <>
+        <CompanyLogo symbol="AAPL" badge={<span>P</span>} />
+        <CompanyLogo symbol="KO" />
+      </>,
+    );
+    const [withBadge, without] = Array.from(container.querySelectorAll('[data-logo]'));
+    expect(withBadge!.className).toContain('mr-1.5');
+    expect(without!.className).not.toContain('mr-');
+    expect(withBadge!.className).toContain('shrink-0');
+    expect(container.querySelectorAll('[data-logo-marker]')).toHaveLength(1);
   });
 
   it('uses the symbol as alternative text without a name and empty alt text when the name is written next to it', () => {
@@ -63,7 +100,7 @@ describe('CompanyLogo', () => {
       </>,
     );
     expect(next.container.querySelectorAll('img')).toHaveLength(1);
-    expect(next.container.querySelector('img')).toHaveAttribute('src', '/api/logos/ASML.AS');
+    expect(next.container.querySelector('img')).toHaveAttribute('src', '/api/logos/ASML.AS?v=2');
   });
 
   it('turns every row of a symbol into the monogram when one of them fails', () => {

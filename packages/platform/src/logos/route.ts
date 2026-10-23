@@ -1,17 +1,21 @@
 import { assetSymbolSchema, type ApiError } from '@portfolio/shared';
 import type { PortableRequest, PortableResponse } from '../http.js';
 import type { LogoOutcome, LogoService } from './service.js';
+import type { LogoSubject } from './sources.js';
 import type { StoredLogo } from './store.js';
 
-/** A found logo is revalidated daily (a fixed domain fix shows within a day); the validator makes that a cheap 304. */
+/** A found logo is revalidated daily at most (the validator carries the source and the schema version, so a better source shows within a day); the validator makes that a cheap 304. */
 export const LOGO_CACHE_SECONDS = 86_400;
 /** What a browser remembers of "no logo" before it asks again (the screens also remember it for the session). */
 export const LOGO_MISSING_CACHE_SECONDS = 3600;
 
 export interface LogoRouteOptions {
   service: LogoService;
-  /** The domain to look the logo of `symbol` up by for this user (override, provider website, curated table, issuer), or undefined. */
-  resolveDomain: (userId: string, symbol: string, request: PortableRequest) => Promise<string | undefined>;
+  /**
+   * What to look the logo of `symbol` up by for this user: the Trading 212 ticker of the stored profile and/or the domain (override,
+   * provider website, curated table, issuer), or undefined when there is neither.
+   */
+  resolveSubject: (userId: string, symbol: string, request: PortableRequest) => Promise<LogoSubject | undefined>;
   /** A fresh counted `fetch` for one lookup (the Hub budgets the outbound calls of each request). */
   fetchFor?: () => typeof fetch;
 }
@@ -59,8 +63,8 @@ function outcomeResponse(outcome: LogoOutcome, request: PortableRequest): Portab
 }
 
 /**
- * `GET /logos/{symbol}` (the path without the `/api` prefix): the stored logo bytes of the company behind the symbol, with a long
- * private cache, an ETag and `304`; a miss is a cached `404`. The route answers `undefined` for any other request so it can sit
+ * `GET /logos/{symbol}` (the path without the `/api` prefix): the stored logo bytes of the company behind the symbol, with a private
+ * cache (a day at most), an ETag and `304`; a miss is a cached `404`. The route answers `undefined` for any other request so it can sit
  * in front of the application router. Authentication, the budget and the same-origin check are the caller's, as for every API route.
  */
 export function createLogoRoute(options: LogoRouteOptions): (request: PortableRequest) => Promise<PortableResponse> | undefined {
@@ -69,9 +73,9 @@ export function createLogoRoute(options: LogoRouteOptions): (request: PortableRe
     const symbol = decodeSymbol(symbolPart);
     if (userId === undefined) return error(401, 'UNAUTHENTICATED', 'Authentication required', { 'cache-control': 'no-store' });
     if (symbol === undefined) return notFound();
-    const domain = await options.resolveDomain(userId, symbol, request);
-    if (domain === undefined) return notFound();
-    return outcomeResponse(await options.service.lookup(domain, options.fetchFor?.()), request);
+    const subject = await options.resolveSubject(userId, symbol, request);
+    if (subject === undefined) return notFound();
+    return outcomeResponse(await options.service.lookup(subject, options.fetchFor?.()), request);
   }
   return (request) => {
     const match = request.method === 'GET' ? PATH.exec(request.path) : null;

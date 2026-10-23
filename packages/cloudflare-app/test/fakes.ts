@@ -217,8 +217,13 @@ export class FakePrices {
   }
 }
 
+/** The host of the (undocumented) Trading 212 logo bucket and a made-up one for the `LOGO_T212_BASE` override scenario. */
+export const T212_BUCKET_HOST = 'trading212equities.s3.eu-central-1.amazonaws.com';
+export const T212_FAKE_BUCKET_HOST = 'fake-bucket.test';
+
 /**
- * The keyless icon services the Hub's logo lookups reach (no real network): Google's favicon endpoint answers a 128 px PNG for the
+ * The keyless icon services the Hub's logo lookups reach (no real network): the fake Trading 212 bucket answers a 240 px PNG for the
+ * tickers in `tickers`; Google's favicon endpoint answers a 128 px PNG for the
  * domains in `known`, everything else is a 404; DuckDuckGo's icon endpoint has nothing, and the token-based service answers only a request that carries `LOGO_DEV_TEST_TOKEN`. Every request is recorded, so a test can
  * count the lookups that left the Hub.
  */
@@ -229,9 +234,17 @@ export class FakeLogos {
   /** Domains the fake Google service has a logo for. */
   readonly known = new Set(['apple.com', 'ishares.com']);
   readonly png = pngBytes(128, 128);
+  /** Trading 212 tickers the fake bucket has a logo for (`<ticker>.png`). */
+  readonly tickers = new Set(['SAPd_EQ', 'AAPL_US_EQ']);
+  readonly t212Png = pngBytes(240, 240, 3000);
 
   readonly service: FakeService = (request) => {
     const url = new URL(request.url);
+    if (url.host === T212_BUCKET_HOST || url.host === T212_FAKE_BUCKET_HOST) {
+      this.requests.push(request.url);
+      const ticker = url.pathname.slice(1).replace(/\.png$/, '');
+      return this.tickers.has(ticker) ? { status: 200, bytes: this.t212Png, headers: { 'content-type': 'image/png' } } : { status: 404, json: null };
+    }
     if (url.host === 'www.google.com' && url.pathname === '/s2/favicons') {
       this.requests.push(request.url);
       return this.known.has(url.searchParams.get('domain') ?? '') ? { status: 200, bytes: this.png, headers: { 'content-type': 'image/png' } } : { status: 404, json: null };

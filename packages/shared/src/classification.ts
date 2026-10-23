@@ -14,6 +14,7 @@
  */
 import { z } from 'zod';
 import { normalizeDomain } from './logo-domains.js';
+import { isT212Ticker } from './t212-ticker.js';
 import { ASSET_CLASSES, PROFILE_SOURCES, type AssetClass, type InstrumentProfile, type ProfileSource } from './types.js';
 
 export const CLASSIFICATION_ROUTES = {
@@ -218,6 +219,10 @@ export function mergeProfile(existing: InstrumentProfile | undefined, incoming: 
     if (pick[field] === undefined) delete merged[field];
     else merged[field] = pick[field];
   }
+  // The Trading 212 ticker is an identifier, not a rating: whichever profile has a valid one keeps it (the richer first).
+  const t212Ticker = [high, low].find((profile) => isT212Ticker(profile.t212Ticker))?.t212Ticker;
+  if (t212Ticker === undefined) delete merged.t212Ticker;
+  else merged.t212Ticker = t212Ticker;
   merged.profileSource = sourceOf(high);
   return merged as unknown as InstrumentProfile;
 }

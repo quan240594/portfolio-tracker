@@ -288,11 +288,33 @@ describe('company logos in the calendar', () => {
     );
     const row = screen.getByRole('button', { name: /^AAPL, Ex-dividend, confirmed/ });
     const img = row.querySelector('img')!;
-    expect(img).toHaveAttribute('src', '/api/logos/AAPL');
+    expect(img).toHaveAttribute('src', '/api/logos/AAPL?v=2');
     expect(img).toHaveAttribute('alt', '');
     expect(row.querySelector('svg[data-shape="circle"]')).not.toBeNull();
     expect(row).toHaveAttribute('data-status', 'CONFIRMED');
     expect(row.className).toContain('border-l-4');
+  });
+
+  it('lays a row out as logo | text column | amount, the lines in one column of their own next to the logo', () => {
+    renderWithProviders(
+      <LogosEnabledProvider value>
+        <EventList events={[event()]} baseCurrency="EUR" onSelect={vi.fn()} today={TODAY} />
+      </LogosEnabledProvider>,
+    );
+    const row = screen.getByRole('button', { name: /^AAPL, Ex-dividend/ });
+    // The flex row is a span inside the button (a button is not a reliable flex container everywhere).
+    const flex = row.querySelector('[data-row]')!;
+    expect(row.className).not.toContain('flex');
+    expect(flex.className).toContain('flex');
+    const [logo, text, aside] = Array.from(flex.children) as HTMLElement[];
+    expect(logo).toHaveAttribute('data-logo');
+    expect(logo!.className).toContain('shrink-0');
+    expect(logo!.querySelector('[data-logo-marker]')).not.toBeNull();
+    expect(text).toHaveAttribute('data-row-text');
+    expect(text!.className).toContain('min-w-0');
+    expect(Array.from(text!.children).map((line) => line.getAttribute('data-row-line'))).toEqual(['title', 'detail']);
+    expect(aside!.className).toContain('shrink-0');
+    expect(flex.children).toHaveLength(3);
   });
 
   it('falls back to the monogram of a row whose image fails, without changing the row', () => {
@@ -316,7 +338,7 @@ describe('company logos in the calendar', () => {
       </LogosEnabledProvider>,
     );
     const chip = screen.getByRole('button', { name: /^AAPL, Ex-dividend/ });
-    expect(chip.querySelector('img')).toHaveAttribute('src', '/api/logos/AAPL');
+    expect(chip.querySelector('img')).toHaveAttribute('src', '/api/logos/AAPL?v=2');
     expect(chip).toHaveAttribute('title', expect.stringContaining('Ex-dividend'));
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText('Apple Inc.')).toBeInTheDocument();

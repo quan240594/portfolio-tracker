@@ -31,8 +31,11 @@ export function resetLogoSession(): void {
   for (const listener of listeners) listener();
 }
 
+/** Version of the stored logos (the server's `LOGO_SCHEMA_VERSION`): a new one changes every URL, so a browser never keeps showing a picture of an older source. */
+export const LOGO_URL_VERSION = 2;
+
 /** Same origin and authenticated like the rest of `/api`: the browser never contacts a logo service. */
-export const logoUrl = (symbol: string): string => `${API_BASE_URL}/logos/${encodeURIComponent(symbol)}`;
+export const logoUrl = (symbol: string): string => `${API_BASE_URL}/logos/${encodeURIComponent(symbol)}?v=${LOGO_URL_VERSION}`;
 
 /** The first letters of the symbol (`SAP.DE` -> `SA`), the neutral stand-in of a logo. */
 export function monogramOf(symbol: string): string {
@@ -57,9 +60,13 @@ interface Props {
 const DEFAULT_SIZE = 24;
 
 /**
- * The logo of a security: the image from our own server, in a rounded light container (so dark or transparent logos stay legible
- * in both themes), or a neutral monogram of the same shape when logos are off (demo), no logo exists or the image fails. The box has
- * a fixed size, so nothing moves when the image arrives.
+ * The logo of a security as a circle, like the Trading 212 app: the image from our own server (a square picture, cropped to the circle
+ * with `object-cover`, a thin neutral ring that reads in both themes), or a neutral monogram circle when logos are off (demo), no logo
+ * exists or the image fails. The box has a fixed size, so nothing moves when the image arrives. A light background sits behind the
+ * picture only (no padding): an opaque logo covers it, a transparent one from a fallback source stays legible.
+ *
+ * The corner marker overhangs the circle by a few pixels; the component reserves that room on its right (`mr-1.5`), so the text next
+ * to it can never touch it.
  */
 export function CompanyLogo({ symbol, name, size = DEFAULT_SIZE, decorative = false, badge, fallback, className = '' }: Readonly<Props>) {
   const enabled = useContext(LogosEnabledContext);
@@ -70,10 +77,11 @@ export function CompanyLogo({ symbol, name, size = DEFAULT_SIZE, decorative = fa
   );
   const label = name ?? symbol;
   const showImage = enabled && !missing;
+  const room = badge === undefined ? '' : 'mr-1.5';
   return (
-    <span className={`relative inline-flex shrink-0 ${className}`} style={{ width: size, height: size }} data-logo={showImage ? 'image' : 'monogram'}>
+    <span className={`relative inline-flex shrink-0 ${room} ${className}`} style={{ width: size, height: size }} data-logo={showImage ? 'image' : 'monogram'}>
       {showImage ? (
-        <span className="flex h-full w-full items-center justify-center overflow-hidden rounded-md bg-white ring-1 ring-slate-300 dark:ring-slate-500">
+        <span className="block h-full w-full overflow-hidden rounded-full ring-1 ring-slate-900/15 dark:ring-white/25">
           <img
             src={logoUrl(symbol)}
             alt={decorative ? '' : label}
@@ -82,13 +90,13 @@ export function CompanyLogo({ symbol, name, size = DEFAULT_SIZE, decorative = fa
             loading="lazy"
             decoding="async"
             draggable={false}
-            className="h-full w-full object-contain p-0.5"
+            className="block h-full w-full rounded-full bg-white object-cover"
             onError={() => markWithoutLogo(symbol)}
           />
         </span>
       ) : (
         (fallback ?? (
-          <span className="flex h-full w-full items-center justify-center overflow-hidden rounded-md bg-slate-200 font-bold text-slate-700 dark:bg-slate-700 dark:text-slate-100" style={{ fontSize: Math.max(8, Math.round(size * 0.4)) }}>
+          <span className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-slate-200 font-bold text-slate-700 ring-1 ring-slate-900/10 dark:bg-slate-700 dark:text-slate-100 dark:ring-white/20" style={{ fontSize: Math.max(8, Math.round(size * 0.4)) }}>
             {/* Drawn by CSS from the attribute, so copying the page or reading its text never picks the letters up as content. */}
             <span aria-hidden="true" data-monogram={monogramOf(symbol)} className="before:content-[attr(data-monogram)]" />
             {!decorative && <span className="sr-only">{label}</span>}
@@ -96,7 +104,7 @@ export function CompanyLogo({ symbol, name, size = DEFAULT_SIZE, decorative = fa
         ))
       )}
       {badge !== undefined && (
-        <span aria-hidden="true" className="absolute -right-1 -bottom-1 flex rounded-full bg-white ring-2 ring-white dark:bg-slate-900 dark:ring-slate-900">
+        <span aria-hidden="true" data-logo-marker="" className="absolute -right-1 -bottom-1 flex rounded-full bg-white ring-2 ring-white dark:bg-slate-900 dark:ring-slate-900">
           {badge}
         </span>
       )}

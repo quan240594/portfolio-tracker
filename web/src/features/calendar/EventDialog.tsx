@@ -92,9 +92,9 @@ export function EventDialog({ event, baseCurrency, onClose, withScope }: Readonl
         </>
       }
     >
-      <div className="mb-3 flex items-center gap-2">
-        <CompanyLogo symbol={event.symbol} name={event.name} size={40} decorative badge={<EventMarker type={event.type} className="h-5 w-5" />} className="mr-1" />
-        <p className="font-medium">{event.name}</p>
+      <div className="mb-3 flex items-center gap-3">
+        <CompanyLogo symbol={event.symbol} name={event.name} size={40} decorative badge={<EventMarker type={event.type} className="h-5 w-5" />} />
+        <p className="min-w-0 font-medium break-words">{event.name}</p>
       </div>
       <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
         <Row label="Type">{meta.label}</Row>

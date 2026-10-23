@@ -79,6 +79,8 @@ export interface InstrumentProfile {
   detailsAsOf?: string;
   /** Company website as a bare public domain (a provider reports a URL, it is stored normalised); only used to look up the logo, see logo-domains.ts. */
   website?: string;
+  /** The Trading 212 ticker of the instrument (`instrument.ticker`, e.g. `AAPL_US_EQ`), stored for held symbols; only used to look up the logo, see t212-ticker.ts. */
+  t212Ticker?: string;
   /** See `ProfileSource`; absent = `provider`. */
   profileSource?: ProfileSource;
   /** YYYY-MM-DD the enrichment job stored this symbol's history; only needed for profiles that are not from a provider. */

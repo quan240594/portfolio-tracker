@@ -1,7 +1,7 @@
-import { sequentially } from '@portfolio/shared';
+import { isT212Ticker, sequentially } from '@portfolio/shared';
 import { silentLogger, type Logger } from '../logger.js';
-import type { LogoStore, StoredLogo } from './store.js';
-import { DEFAULT_LOGO_TIMEOUT_MS, type LogoFailure, type LogoFetchResult, type LogoSource } from './sources.js';
+import { t212LogoKey, type LogoStore, type StoredLogo } from './store.js';
+import { DEFAULT_LOGO_TIMEOUT_MS, type LogoFailure, type LogoFetchResult, type LogoSource, type LogoSubject } from './sources.js';
 
 export type LogoOutcome =
   | { kind: 'found'; logo: StoredLogo }
@@ -16,7 +16,7 @@ export interface LogoServiceOptions {
   /** The `fetch` of the lookups when `lookup` is not given one; the Hub gives each lookup its own counted one. */
   fetch?: typeof fetch;
   now: () => Date;
-  /** Domains looked up at the sources per clock hour; 0 = never fetch (stored logos are still served). */
+  /** Lookups at the sources per clock hour; 0 = never fetch (stored logos are still served). */
   hourlyLimit: number;
   negativeTtlDays: number;
   /** Asked once before a lookup reaches the sources (the Hub's `guardJob`): false = the usage budget is too busy, nothing is fetched. */
@@ -36,10 +36,13 @@ const BUDGET_RETRY_SECONDS = 600;
 const TRANSIENT: ReadonlySet<LogoFailure> = new Set(['timeout', 'network', 'http-error']);
 
 /**
- * The logo of a public domain: the stored one, or, at most once per domain, one lookup at the sources in order. Everything is
- * written once (one row per domain, a found logo or a `missing` note with its retry time), so the cost of a logo is one lookup
- * of up to `sources.length` outbound calls and one row written, ever. Lookups are one domain at a time, counted per clock hour,
- * and refused while the usage budget is busy; concurrent requests for one domain share one lookup.
+ * The logo of a holding: the stored one, or, at most once per key, one lookup at the sources in order. The key is the Trading 212
+ * ticker when a source by ticker is switched on and the holding has one (one logo per instrument), else the public domain (the
+ * five iShares ETFs share one). A source is only asked for a subject it can serve (a domain source is skipped without a domain). Everything
+ * is written once (one row per key, a found logo or a `missing` note with its retry time), so the cost of a logo is one lookup of
+ * up to `sources.length` outbound calls and one row written, ever. A stored logo of a source that is switched off is not served and
+ * is looked up again. Lookups are one at a time, counted per clock hour, and refused while the usage budget is busy; concurrent
+ * requests for one key share one lookup.
  */
 export class LogoService {
   private readonly inFlight = new Map<string, Promise<LogoOutcome>>();
@@ -51,22 +54,31 @@ export class LogoService {
     this.logger = options.logger ?? silentLogger;
   }
 
-  lookup(domain: string, fetchImpl?: typeof fetch): Promise<LogoOutcome> {
-    const running = this.inFlight.get(domain);
+  lookup(subject: LogoSubject, fetchImpl?: typeof fetch): Promise<LogoOutcome> {
+    const key = this.keyOf(subject);
+    if (key === undefined) return Promise.resolve({ kind: 'missing', reason: this.options.sources.length === 0 ? 'disabled' : 'no-logo' });
+    const running = this.inFlight.get(key);
     if (running !== undefined) return running;
-    const started = this.resolve(domain, fetchImpl ?? this.options.fetch ?? ((input, init) => globalThis.fetch(input, init))).finally(() => this.inFlight.delete(domain));
-    this.inFlight.set(domain, started);
+    const started = this.resolve(key, subject, fetchImpl ?? this.options.fetch ?? ((input, init) => globalThis.fetch(input, init))).finally(() => this.inFlight.delete(key));
+    this.inFlight.set(key, started);
     return started;
   }
 
-  private async resolve(domain: string, fetchImpl: typeof fetch): Promise<LogoOutcome> {
-    const entry = await this.options.store.get(domain);
-    if (entry?.status === 'found') return { kind: 'found', logo: entry };
-    if (entry !== undefined && Date.parse(entry.retryAfter) > this.options.now().getTime()) return { kind: 'missing', reason: 'cached' };
+  /** The row a subject is stored under, or undefined when no switched-on source can serve it. */
+  private keyOf({ domain, t212Ticker }: LogoSubject): string | undefined {
+    const { sources } = this.options;
+    if (isT212Ticker(t212Ticker) && sources.some((source) => source.by === 't212Ticker')) return t212LogoKey(t212Ticker);
+    return domain !== undefined && sources.some((source) => source.by === 'domain') ? domain : undefined;
+  }
+
+  private async resolve(key: string, subject: LogoSubject, fetchImpl: typeof fetch): Promise<LogoOutcome> {
+    const entry = await this.options.store.get(key);
+    if (entry?.status === 'found' && this.options.sources.some((source) => source.name === entry.source)) return { kind: 'found', logo: entry };
+    if (entry?.status === 'missing' && Date.parse(entry.retryAfter) > this.options.now().getTime()) return { kind: 'missing', reason: 'cached' };
     if (this.options.sources.length === 0 || this.options.hourlyLimit <= 0) return { kind: 'missing', reason: 'disabled' };
     const refused = await this.refusal();
     if (refused !== undefined) return refused;
-    return this.fetchFromSources(domain, fetchImpl);
+    return this.fetchFromSources(key, subject, fetchImpl);
   }
 
   /** Budget guard first, then the per-hour count: a refused lookup counts nothing. */
@@ -83,11 +95,12 @@ export class LogoService {
     return undefined;
   }
 
-  private async fetchFromSources(domain: string, fetchImpl: typeof fetch): Promise<LogoOutcome> {
+  private async fetchFromSources(key: string, subject: LogoSubject, fetchImpl: typeof fetch): Promise<LogoOutcome> {
     const { sources, store, now, timeoutMs, maxBytes, minPixels, placeholderHashes } = this.options;
     const failures: LogoFailure[] = [];
     let found: Extract<LogoFetchResult, { ok: true }> | undefined;
-    const tries = sequentially(sources, (source) => source.fetchLogo(domain, { fetch: fetchImpl, timeoutMs: timeoutMs ?? DEFAULT_LOGO_TIMEOUT_MS, maxBytes, minPixels, placeholderHashes }));
+    const askable = sources.filter((source) => subject[source.by] !== undefined);
+    const tries = sequentially(askable, (source) => source.fetchLogo(subject, { fetch: fetchImpl, timeoutMs: timeoutMs ?? DEFAULT_LOGO_TIMEOUT_MS, maxBytes, minPixels, placeholderHashes }));
     for await (const result of tries) {
       if (result.ok) {
         found = result;
@@ -98,12 +111,12 @@ export class LogoService {
     }
     const at = now();
     if (found !== undefined) {
-      const logo = await store.putFound({ domain, contentType: found.logo.contentType, bytes: found.logo.bytes, source: found.source, fetchedAt: at.toISOString() });
+      const logo = await store.putFound({ key, contentType: found.logo.contentType, bytes: found.logo.bytes, source: found.source, fetchedAt: at.toISOString() });
       return { kind: 'found', logo };
     }
     const transient = failures.some((reason) => TRANSIENT.has(reason));
     const wait = transient ? TRANSIENT_RETRY_MS : this.options.negativeTtlDays * DAY_MS;
-    await store.putMissing({ domain, checkedAt: at.toISOString(), retryAfter: new Date(at.getTime() + wait).toISOString() });
+    await store.putMissing({ key, checkedAt: at.toISOString(), retryAfter: new Date(at.getTime() + wait).toISOString() });
     return { kind: 'missing', reason: 'no-logo' };
   }
 }

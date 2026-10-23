@@ -1,4 +1,4 @@
-import { LOGO_SOURCE_NAMES, type LogoSourceName } from './sources.js';
+import { DEFAULT_T212_LOGO_BASE, LOGO_SOURCE_NAMES, normalizeT212LogoBase, type LogoSourceName } from './sources.js';
 
 /** Settings of the logo service, from Worker variables (all optional) and the optional secret `LOGO_DEV_TOKEN`. */
 export interface LogosConfig {
@@ -6,13 +6,17 @@ export interface LogosConfig {
   sources: LogoSourceName[];
   /** Secret of the token-based source; without it that source is skipped. */
   logoDevToken?: string;
-  /** Most domains looked up at the sources in one clock hour (each lookup tries the sources one after the other). */
+  /** Base URL of the Trading 212 logo bucket (`LOGO_T212_BASE`): an https amazonaws.com origin, else the default. */
+  t212Base: string;
+  /** Tests only (`LOGO_ALLOW_ANY_HOST=1`): lets `t212Base` be any http(s) origin, for a fake upstream. */
+  allowAnyHost: boolean;
+  /** Most lookups (a domain or an instrument) made at the sources in one clock hour (each lookup tries the sources one after the other). */
   hourlyLimit: number;
   /** Days a domain nobody had a logo for is not asked again. */
   negativeTtlDays: number;
 }
 
-export const DEFAULT_LOGO_SOURCES: readonly LogoSourceName[] = ['logodev', 'google', 'duckduckgo'];
+export const DEFAULT_LOGO_SOURCES: readonly LogoSourceName[] = ['t212', 'logodev', 'google', 'duckduckgo'];
 export const DEFAULT_LOGO_HOURLY_LIMIT = 30;
 export const MAX_LOGO_HOURLY_LIMIT = 500;
 export const DEFAULT_LOGO_NEGATIVE_TTL_DAYS = 7;
@@ -36,9 +40,12 @@ function sourcesOf(raw: string | undefined): LogoSourceName[] {
 
 export function parseLogosConfig(env: Readonly<Record<string, string | undefined>>): LogosConfig {
   const token = (env.LOGO_DEV_TOKEN ?? '').trim();
+  const allowAnyHost = (env.LOGO_ALLOW_ANY_HOST ?? '').trim() === '1';
   return {
     sources: sourcesOf(env.LOGO_SOURCES),
     ...(token === '' ? {} : { logoDevToken: token }),
+    t212Base: normalizeT212LogoBase(env.LOGO_T212_BASE, { allowAnyHost }) ?? DEFAULT_T212_LOGO_BASE,
+    allowAnyHost,
     hourlyLimit: integerIn(env.LOGO_HOURLY_LIMIT, DEFAULT_LOGO_HOURLY_LIMIT, 0, MAX_LOGO_HOURLY_LIMIT),
     negativeTtlDays: integerIn(env.LOGO_NEGATIVE_TTL_DAYS, DEFAULT_LOGO_NEGATIVE_TTL_DAYS, 1, MAX_NEGATIVE_TTL_DAYS),
   };

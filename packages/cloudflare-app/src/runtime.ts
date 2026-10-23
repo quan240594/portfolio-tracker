@@ -67,13 +67,16 @@ export interface HubEnv {
   CALENDAR_SPLIT_LOOKBACK_DAYS?: string;
   /**
    * Company logos (all optional, see `parseLogosConfig`): `LOGO_SOURCES` (comma separated, order = priority, `off` = none; default
-   * `logodev,google,duckduckgo`), `LOGO_HOURLY_LIMIT` (default 30), `LOGO_NEGATIVE_TTL_DAYS` (default 7) and the Worker secret
-   * `LOGO_DEV_TOKEN` that switches the token-based source on.
+   * `t212,logodev,google,duckduckgo`; `google,duckduckgo` switches the undocumented Trading 212 logo bucket off), `LOGO_HOURLY_LIMIT` (default 30),
+   * `LOGO_NEGATIVE_TTL_DAYS` (default 7), `LOGO_T212_BASE` (an https `*.amazonaws.com` origin; `LOGO_ALLOW_ANY_HOST=1` is for tests only) and the
+   * Worker secret `LOGO_DEV_TOKEN` that switches the token-based source on.
    */
   LOGO_SOURCES?: string;
   LOGO_HOURLY_LIMIT?: string;
   LOGO_NEGATIVE_TTL_DAYS?: string;
   LOGO_DEV_TOKEN?: string;
+  LOGO_T212_BASE?: string;
+  LOGO_ALLOW_ANY_HOST?: string;
 }
 
 /** Everything the Worker reads on top of the Hub's variables. */

@@ -93,6 +93,16 @@ describe('mergeProfile', () => {
     expect(isProfileSource('other')).toBe(false);
   });
 
+  it('keeps the Trading 212 ticker whichever profile wins, and never stores an invalid one', () => {
+    const withTicker: InstrumentProfile = { ...baseline, t212Ticker: 'FUNDm_EQ' };
+    expect(mergeProfile(withTicker, provider).t212Ticker).toBe('FUNDm_EQ');
+    expect(mergeProfile(provider, withTicker).t212Ticker).toBe('FUNDm_EQ');
+    expect(mergeProfile(withTicker, { ...provider, t212Ticker: undefined }).t212Ticker).toBe('FUNDm_EQ');
+    expect(mergeProfile(withTicker, { ...provider, t212Ticker: 'NEWm_EQ' }).t212Ticker).toBe('NEWm_EQ');
+    expect(mergeProfile(withTicker, { ...provider, t212Ticker: 'a/b' }).t212Ticker).toBe('FUNDm_EQ');
+    expect(mergeProfile({ ...provider, t212Ticker: '..' }, provider)).not.toHaveProperty('t212Ticker');
+  });
+
   it('drops a field no side has', () => {
     const merged = mergeProfile({ ...baseline, sector: undefined }, { ...baseline, name: 'FUND.MI', sector: undefined });
     expect(merged).not.toHaveProperty('sector');
@@ -209,9 +219,11 @@ describe('Trading 212 baseline profile', () => {
       currency: 'EUR',
       isin: 'IE00INVENT01',
       country: 'Ireland',
+      t212Ticker: 'FUNDm_EQ',
       profileSource: 'trading212',
     });
-    expect(trading212Profile('AAA', { ticker: 'AAA_US_EQ', shortName: 'AAA', type: 'STOCK' }, 'USD')).toEqual({ symbol: 'AAA', name: 'AAA', assetClass: 'STOCK', currency: 'USD', profileSource: 'trading212' });
+    expect(trading212Profile('AAA', { ticker: 'AAA_US_EQ', shortName: 'AAA', type: 'STOCK' }, 'USD')).toEqual({ symbol: 'AAA', name: 'AAA', assetClass: 'STOCK', currency: 'USD', t212Ticker: 'AAA_US_EQ', profileSource: 'trading212' });
+    expect(trading212Profile('AAA', { ticker: '../x', type: 'STOCK' }, 'USD')).not.toHaveProperty('t212Ticker');
     expect(trading212Profile('SMGB.L', { ticker: 'SMGBl_EQ', name: ' ', type: 'WARRANT', isin: 'JE00INVENT02', currency: 'GBX' }, 'GBP')).toMatchObject({ name: 'SMGB.L', assetClass: 'OTHER', currency: 'GBP', country: 'Jersey' });
   });
 
