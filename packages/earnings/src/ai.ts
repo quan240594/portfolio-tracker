@@ -7,7 +7,7 @@
  * `{ response, usage? }`; JSON mode needs a model that supports it (the default `@cf/meta/llama-3.1-8b-instruct-fp8` accepts `response_format`);
  * Free plan: 10,000 neurons per day, resets at 00:00 UTC, a request over the allowance fails.
  */
-import { KPI_TEMPLATES, type KpiTemplateId } from '@portfolio/shared';
+import { KPI_TEMPLATES, sequentially, type KpiTemplateId } from '@portfolio/shared';
 import { extractionJsonSchema, extractionSchema, type Extraction } from './schema.js';
 
 export const DEFAULT_AI_MODEL = '@cf/meta/llama-3.1-8b-instruct-fp8';
@@ -137,6 +137,16 @@ export function classifyAiError(error: unknown): 'allowance' | 'no-json' | 'ai-e
   return 'ai-error';
 }
 
+type CallResult = { ok: true; json: unknown; neurons: number } | { ok: false; detail: 'allowance' | 'no-json' | 'ai-error'; neurons: number };
+type RunVerdict = { kind: 'done'; extraction: Extraction } | { kind: 'stop'; reason: 'ai-error' | 'allowance' } | { kind: 'retry'; detail: string };
+
+/** What one call means for the loop: finished, impossible to retry (platform error or allowance), or worth a second attempt. */
+function judgeRun(run: CallResult): RunVerdict {
+  if (!run.ok) return run.detail === 'ai-error' || run.detail === 'allowance' ? { kind: 'stop', reason: run.detail } : { kind: 'retry', detail: run.detail };
+  const parsed = extractionSchema.safeParse(run.json);
+  return parsed.success ? { kind: 'done', extraction: parsed.data as Extraction } : { kind: 'retry', detail: 'schema' };
+}
+
 export interface ExtractorOptions {
   ai: AiLike;
   meter: NeuronMeter;
@@ -159,26 +169,29 @@ export class WorkersAiExtractor implements TextExtractor {
     let neurons = 0;
     let calls = 0;
     let detail: string | undefined;
-    for (const attempt of [1, 2] as const) {
-      const messages = buildMessages(input, attempt);
-      const estimate = neuronsFor(this.#model, estimateTokens(messages.map((message) => message.content).join('\n')), MAX_OUTPUT_TOKENS);
-      if ((await this.#meter.remaining()) < estimate) return { ok: false, reason: 'allowance', model: this.#model, neurons, calls, ...(detail === undefined ? {} : { detail }) };
+    const failure = (reason: ExtractionFailure) => ({ ok: false as const, reason, model: this.#model, neurons, calls, ...(detail === undefined ? {} : { detail }) });
+    // One attempt after the other on purpose: the second only happens after the first failed, and only while the allowance still covers it.
+    for await (const attempt of sequentially([1, 2] as const, (number) => this.#attempt(input, number))) {
+      if (attempt.kind === 'allowance') return failure('allowance');
       calls += 1;
-      const run = await this.#call(messages, input.template, estimate);
-      neurons += run.neurons;
-      if (run.ok) {
-        const parsed = extractionSchema.safeParse(run.json);
-        if (parsed.success) return { ok: true, extraction: parsed.data as Extraction, model: this.#model, neurons, calls };
-        detail = 'schema';
-      } else {
-        detail = run.detail;
-        if (run.detail === 'ai-error' || run.detail === 'allowance') return { ok: false, reason: run.detail, model: this.#model, neurons, calls };
-      }
+      neurons += attempt.neurons;
+      if (attempt.kind === 'done') return { ok: true, extraction: attempt.extraction, model: this.#model, neurons, calls };
+      if (attempt.kind === 'stop') return { ok: false, reason: attempt.reason, model: this.#model, neurons, calls };
+      detail = attempt.detail;
     }
-    return { ok: false, reason: 'invalid-json', model: this.#model, neurons, calls, ...(detail === undefined ? {} : { detail }) };
+    return failure('invalid-json');
   }
 
-  async #call(messages: AiMessage[], template: KpiTemplateId, estimate: number): Promise<{ ok: true; json: unknown; neurons: number } | { ok: false; detail: 'allowance' | 'no-json' | 'ai-error'; neurons: number }> {
+  /** One model call, unless its estimated neurons no longer fit the allowance. */
+  async #attempt(input: ExtractInput, attempt: 1 | 2): Promise<{ kind: 'allowance' } | (RunVerdict & { neurons: number })> {
+    const messages = buildMessages(input, attempt);
+    const estimate = neuronsFor(this.#model, estimateTokens(messages.map((message) => message.content).join('\n')), MAX_OUTPUT_TOKENS);
+    if ((await this.#meter.remaining()) < estimate) return { kind: 'allowance' };
+    const run = await this.#call(messages, input.template, estimate);
+    return { ...judgeRun(run), neurons: run.neurons };
+  }
+
+  async #call(messages: AiMessage[], template: KpiTemplateId, estimate: number): Promise<CallResult> {
     try {
       const result = await this.#ai.run(this.#model, {
         messages,

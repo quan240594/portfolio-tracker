@@ -9,7 +9,7 @@ import { LoadingRegion, Skeleton } from '../../components/Skeleton';
 import { formatDateTime } from '../../lib/format';
 import { EarningsCard } from './EarningsCard';
 
-const NOTICE = 'rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-100';
+const NOTICE = 'block rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-100';
 
 /** True when today's Workers AI allowance of the feature is used up (new summaries wait for 00:00 UTC). */
 export const allowanceUsedUp = (status: EarningsStatusResponse): boolean =>
@@ -40,14 +40,14 @@ function Notices({ status }: Readonly<{ status: EarningsStatusResponse }>) {
   return (
     <>
       {status.secBlockedUntil && (
-        <p role="status" className={NOTICE}>
+        <output className={NOTICE}>
           The SEC asked us to slow down, so lookups are paused until {formatDateTime(status.secBlockedUntil)}. Nothing is lost: the check resumes by itself.
-        </p>
+        </output>
       )}
       {allowanceUsedUp(status) && status.neurons && (
-        <p role="status" className={NOTICE}>
+        <output className={NOTICE}>
           Today&apos;s free Workers AI allowance for earnings is used up ({status.neurons.used} of {status.neurons.dailyCap} neurons). New summaries resume after 00:00 UTC ({formatDateTime(status.neurons.resetsAt)} your time).
-        </p>
+        </output>
       )}
     </>
   );
@@ -84,18 +84,22 @@ function RefreshButton({ symbol }: Readonly<{ symbol: string }>) {
         {refresh.isPending ? 'Asking…' : `Check ${symbol} now`}
       </button>
       {message && (
-        <p role="status" className="muted max-w-xs text-right text-xs">
+        <output className="muted block max-w-xs text-right text-xs">
           {message}
-        </p>
+        </output>
       )}
     </div>
   );
 }
 
+function checkedLine(entry: EarningsStatusResponse['symbols'][number]): string {
+  if (!entry.lastCheckedAt) return `${entry.symbol}: not checked yet`;
+  const reason = entry.lastReason ? `, ${entry.lastReason}` : '';
+  return `${entry.symbol}: checked ${formatDateTime(entry.lastCheckedAt)}${reason}`;
+}
+
 function checkedText(status: EarningsStatusResponse): string[] {
-  return status.symbols
-    .filter((entry) => entry.eligible)
-    .map((entry) => (entry.lastCheckedAt ? `${entry.symbol}: checked ${formatDateTime(entry.lastCheckedAt)}${entry.lastReason ? `, ${entry.lastReason}` : ''}` : `${entry.symbol}: not checked yet`));
+  return status.symbols.filter((entry) => entry.eligible).map(checkedLine);
 }
 
 function Empty({ status, selected }: Readonly<{ status: EarningsStatusResponse; selected: string | undefined }>) {
@@ -120,6 +124,11 @@ function Empty({ status, selected }: Readonly<{ status: EarningsStatusResponse; 
   );
 }
 
+/** A retry handler for an error state; a failed refetch shows up in the query's own error state, so nothing is left to handle here. */
+const retryOf = (query: { refetch: () => Promise<unknown> }) => () => {
+  query.refetch().catch(() => undefined);
+};
+
 export function EarningsView() {
   const { symbol: raw } = useParams();
   const symbol = raw === undefined ? undefined : decodeURIComponent(raw).toUpperCase();
@@ -128,7 +137,7 @@ export function EarningsView() {
   const status = statusQuery.data;
 
   let body;
-  if (statusQuery.isError) body = <ErrorState error={statusQuery.error} onRetry={() => void statusQuery.refetch()} title="Could not load earnings" />;
+  if (statusQuery.isError) body = <ErrorState error={statusQuery.error} onRetry={retryOf(statusQuery)} title="Could not load earnings" />;
   else if (status === undefined) {
     body = (
       <LoadingRegion label="Loading earnings">
@@ -138,7 +147,7 @@ export function EarningsView() {
   } else if (!status.available) {
     body = <EmptyState title="Earnings summaries are not available here" description="This deployment does not read quarterly results. They are part of the personal Cloudflare deployment." />;
   } else if (!status.configured) body = <NotConfigured status={status} />;
-  else if (listQuery.isError) body = <ErrorState error={listQuery.error} onRetry={() => void listQuery.refetch()} title="Could not load earnings summaries" />;
+  else if (listQuery.isError) body = <ErrorState error={listQuery.error} onRetry={retryOf(listQuery)} title="Could not load earnings summaries" />;
   else if (listQuery.data === undefined) {
     body = (
       <LoadingRegion label="Loading earnings summaries">

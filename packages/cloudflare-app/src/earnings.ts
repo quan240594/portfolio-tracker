@@ -63,7 +63,11 @@ export function createEarningsInputs(items: ItemStore): EarningsInputs {
       const wanted = holdings.map((holding) => holding.symbol);
       const events = wanted.length === 0 ? { earnings: [] } : await repo.getCalendarEvents(wanted, addDays(today, -CALENDAR_DAYS_BACK), addDays(today, CALENDAR_DAYS_AHEAD));
       const calendar: Record<string, string[]> = {};
-      for (const event of events.earnings) (calendar[event.symbol] ??= []).push(event.date);
+      for (const event of events.earnings) {
+        const dates = calendar[event.symbol] ?? [];
+        dates.push(event.date);
+        calendar[event.symbol] = dates;
+      }
       return { holdings, calendar };
     },
   };

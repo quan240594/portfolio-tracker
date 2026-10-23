@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NumberIndex, nextNumber, normalizeForQuote, parseAmount, wordsOf } from './numbers.js';
+import { NumberIndex, nextNumber, normalizeForQuote, parseAmount, tableScales, wordsOf } from './numbers.js';
 
 describe('nextNumber', () => {
   it('reads thousands separators and one decimal point and stops at the sentence end', () => {
@@ -88,5 +88,74 @@ describe('text helpers', () => {
   it('splits words and normalises quotes', () => {
     expect(wordsOf("Record cloud demand, up 25% — it's $5 billion.")).toEqual(['record', 'cloud', 'demand', 'up', '25%', "it's", '$5', 'billion']);
     expect(normalizeForQuote('“Hello”  — it’s\u00a0fine')).toBe('"hello" - it\'s fine');
+  });
+});
+
+describe('table scales (a linear scanner, no regex)', () => {
+  it.each([
+    ['(in millions, except per share)', [1e6]],
+    ['(In Thousands)', [1e3]],
+    ['Amounts in USD millions', [1e6]],
+    ['(in $ billions)', [1e9]],
+    ['($ thousands)', [1e3]],
+    ['(USD millions)', [1e6]],
+    ['(Millions)', [1e6]],
+    ['(000s)', [1e3]],
+    ["( $ 000's )", [1e3]],
+    ['in thousands, later (in millions)', [1e3, 1e6]],
+    ['within millions of customers', []],
+    ['in several millions', []],
+    ['in millionsx', []],
+    ['(000 s)', []],
+    ['(000s', []],
+    ['in ab millions', []],
+    ['', []],
+  ])('%j gives %j', (text, expected) => {
+    expect([...tableScales(text)].sort((a, b) => a - b)).toEqual(expected);
+  });
+
+  it('keeps thousands separators, parentheses negatives, scale words, percent and ranges working through the index', () => {
+    const index = new NumberIndex('Revenue $1,234.5 million; net loss (295); growth 11.8%; range 5-6 billion; (in millions) 4,303');
+    expect(index.has(parseAmount('$1,234.5 million')!)).toBe(true);
+    expect(index.has(parseAmount('$1.2345 billion')!)).toBe(true);
+    expect(index.has(parseAmount('(295)')!)).toBe(true);
+    expect(index.has(parseAmount('11.8%')!)).toBe(true);
+    expect(index.has(parseAmount('6 billion')!)).toBe(true);
+    expect(index.has(parseAmount('$4.303 billion')!)).toBe(true);
+    expect(parseAmount('5-6 billion')).toBeUndefined();
+    expect(parseAmount('$5 to 6 billion')).toBeUndefined();
+  });
+
+  it('finishes quickly on adversarial runs of digits, spaces, parentheses and punctuation', () => {
+    const size = 50_000;
+    const attacks = [
+      `(${' '.repeat(size)}x`,
+      `in${' '.repeat(size)}x`,
+      `in${' $ '.repeat(size / 3)}`,
+      '('.repeat(size),
+      'in '.repeat(size / 3),
+      `(${' '.repeat(size)}$${' '.repeat(size)}000`,
+      `(in${' '.repeat(size)}USD${' '.repeat(size)}`,
+      '1,'.repeat(size / 2),
+      '1 '.repeat(size / 2),
+      `${'9'.repeat(size)}.`,
+      `$${' '.repeat(size)}5${' '.repeat(size)}%`,
+      "'.-".repeat(size / 3),
+      `a${".'-".repeat(size / 3)}a`,
+    ];
+    const started = performance.now();
+    for (const attack of attacks) {
+      tableScales(attack);
+      new NumberIndex(attack);
+      parseAmount(attack);
+      wordsOf(attack);
+      normalizeForQuote(attack);
+    }
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
+
+  it('trims dots, apostrophes and hyphens at the edges of words only', () => {
+    expect(wordsOf("--up-- ..well.. '5' a-b.c 'x' ---")).toEqual(['up', 'well', 'a-b.c']);
+    expect(normalizeForQuote('a\u00a0\u00a0b\u2003c')).toBe('a b c');
   });
 });

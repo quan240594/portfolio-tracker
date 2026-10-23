@@ -2,7 +2,7 @@
  * One release, end to end: find the press release document of a filing, turn it into text, extract the figures with Workers AI, verify them
  * against the text, add the EPS estimate, and derive the summary. Nothing here stores anything: the job decides what to do with the result.
  */
-import type { EarningsHolding, EarningsSummary, EarningsOrigin } from '@portfolio/shared';
+import { sequentially, type EarningsHolding, type EarningsSummary, type EarningsOrigin } from '@portfolio/shared';
 import type { TextExtractor } from './ai.js';
 import { deriveSummary } from './derive.js';
 import type { EstimateOutcome, EstimateSource } from './estimates.js';
@@ -38,9 +38,10 @@ export type ReleaseOutcome =
 /** The first of the candidate documents that reads like a results release, as text. */
 async function releaseText(deps: PipelineDeps, ref: ReleaseRef): Promise<{ text: string; file: string } | undefined> {
   const names = await deps.sec.fileNames(ref.cik, ref.accession);
-  for (const file of chooseDocuments(names, ref.primaryDocument, ref.form)) {
-    const text = htmlToText(await deps.sec.document(ref.cik, ref.accession, file));
-    if (looksLikeResults(text)) return { text, file };
+  // One document after the other, stopping at the first that is a results release: each one is an SEC request.
+  const read = async (file: string) => ({ file, text: htmlToText(await deps.sec.document(ref.cik, ref.accession, file)) });
+  for await (const document of sequentially(chooseDocuments(names, ref.primaryDocument, ref.form), read)) {
+    if (looksLikeResults(document.text)) return document;
   }
   return undefined;
 }

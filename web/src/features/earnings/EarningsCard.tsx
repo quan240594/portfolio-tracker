@@ -125,11 +125,17 @@ function MetricLine({ summary, metricKey, hideChange = false }: Readonly<{ summa
       <span className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-right">
         <strong className="tabular-nums">{formatMetric(metric.value, metric.unit, summary.reportingCurrency)}</strong>
         {metric.estimate !== undefined && <span className="muted text-xs tabular-nums">Est. {formatMetric(metric.estimate, metric.unit, summary.reportingCurrency)}</span>}
-        {metric.verdict && <VerdictChip verdict={metric.verdict} surprise={metric.surprisePct === undefined ? undefined : `${metric.surprisePct > 0 ? '+' : ''}${Math.round(metric.surprisePct * 10) / 10}%`} />}
+        {metric.verdict && <VerdictChip verdict={metric.verdict} surprise={surpriseText(metric.surprisePct)} />}
         {!hideChange && <Changes metric={metric} />}
       </span>
     </li>
   );
+}
+
+function surpriseText(pct: number | undefined): string | undefined {
+  if (pct === undefined) return undefined;
+  const sign = pct > 0 ? '+' : '';
+  return `${sign}${Math.round(pct * 10) / 10}%`;
 }
 
 function Section({ title, defaultOpen = true, children }: Readonly<{ title: string; defaultOpen?: boolean; children: ReactNode }>) {

@@ -62,7 +62,7 @@ export function classifyBeat(actual: number, estimate: number): { verdict: Earni
 
 /** Percent change from `from` to `to`; absent when `from` is not positive (a growth rate against a loss or zero says nothing). */
 export function changePct(to: number, from: number | undefined): number | undefined {
-  if (from === undefined || !(from > 0)) return undefined;
+  if (from === undefined || Number.isNaN(from) || from <= 0) return undefined;
   return roundTo(((to - from) / from) * 100, 1);
 }
 

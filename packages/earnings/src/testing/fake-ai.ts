@@ -5,7 +5,7 @@ export interface AiCall {
   input: AiRunInput;
 }
 
-export type AiReply = unknown | Error | ((call: AiCall) => unknown);
+export type AiReply = unknown;
 
 /**
  * A fake Workers AI binding: replies in order (the last repeats), each a JSON object (answered as `{ response, usage }`), a raw

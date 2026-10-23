@@ -118,7 +118,9 @@ const direction = (pct: number): string => {
 function lineOf(label: string, pct: number, period: GrowthLine['period']): string {
   const word = direction(pct);
   const size = Math.abs(pct) >= 10 ? Math.round(Math.abs(pct)) : Math.round(Math.abs(pct) * 10) / 10;
-  return word === 'flat' ? `${label} flat ${period === 'yoy' ? 'YoY' : 'QoQ'}` : `${label} ${word} ${formatCount(size, 1)}% ${period === 'yoy' ? 'YoY' : 'QoQ'}`;
+  const against = period === 'yoy' ? 'YoY' : 'QoQ';
+  if (word === 'flat') return `${label} flat ${against}`;
+  return `${label} ${word} ${formatCount(size, 1)}% ${against}`;
 }
 
 /** The keys the growth lines cover: the scorecard rows, then free cash flow and per share where the template shows it. */

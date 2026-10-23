@@ -55,6 +55,7 @@ describe('classifyBeat', () => {
 describe('changePct', () => {
   it('is absent against zero, a loss or nothing', () => {
     expect(changePct(5, 0)).toBeUndefined();
+    expect(changePct(5, Number.NaN)).toBeUndefined();
     expect(changePct(5, -2)).toBeUndefined();
     expect(changePct(5, undefined)).toBeUndefined();
     expect(changePct(110, 100)).toBe(10);

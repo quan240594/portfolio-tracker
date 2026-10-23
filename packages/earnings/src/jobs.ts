@@ -7,7 +7,7 @@
  * the symbol with a back-off, and never loop: SEC refusals (403, 429) stop everything for a long while.
  */
 import { logger, type JobHandler, type JobPayloads, type JobQueue } from '@portfolio/platform';
-import { localDayAndHour, type EarningsHeldCache, type EarningsHolding, type EarningsSecBlock, type EarningsSummary, type EarningsSymbolState } from '@portfolio/shared';
+import { localDayAndHour, sequentially, type EarningsHeldCache, type EarningsHolding, type EarningsSecBlock, type EarningsSummary, type EarningsSymbolState } from '@portfolio/shared';
 import type { TextExtractor } from './ai.js';
 import type { EarningsConfig } from './config.js';
 import type { EstimateSource } from './estimates.js';
@@ -226,8 +226,9 @@ export function createWatchEarningsJob(getDeps: () => EarningsJobDeps): JobHandl
       const step = state.candidates.slice(state.index, state.index + CHECKS_PER_STEP);
       const context: CheckContext = { deps, today: localDayAndHour(now).day, holdings };
       let { checked, queued } = state;
-      for (const candidate of step) {
-        const outcome = await checkSymbol(context, candidate).catch((error: unknown) => failedCheck(deps, candidate, error));
+      // One symbol after the other on purpose: every check calls the SEC, whose fair-access limit the shared token bucket enforces.
+      const check = (candidate: Candidate) => checkSymbol(context, candidate).catch((error: unknown) => failedCheck(deps, candidate, error));
+      for await (const outcome of sequentially(step, check)) {
         if (outcome === 'queued') queued += 1;
         if (outcome !== 'skipped') checked += 1;
       }

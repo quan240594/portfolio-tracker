@@ -119,18 +119,66 @@ export function parseAmount(raw: string): ParsedAmount | undefined {
   return { value: negative ? -magnitude : magnitude, kind: kindOf(text, suffix.percent), ...(scale === undefined ? {} : { scale }), negative };
 }
 
-const TABLE_SCALE = /(?:\bin|\()\s*(?:\$|[A-Za-z]{3}\s)?\s*(thousands|millions|billions)\b|\(\s*\$?\s*(000s|000's)\s*\)/gi;
 const NEGATIVE_WORDS = /\b(?:loss|losses|decrease|decreased|decline|declined|deficit|negative|outflow|used in|down)\b/i;
 const CONTEXT_CHARS = 80;
 
-/** Millions as `1e6`, thousands as `1e3`: the scales a release says its tables use. */
-function tableScales(text: string): number[] {
+const TABLE_SCALE_WORDS = ['thousands', 'millions', 'billions'] as const;
+
+const isAsciiLetter = (char: string | undefined): boolean => char !== undefined && ((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z'));
+const isWordChar = (char: string | undefined): boolean => char !== undefined && (isAsciiLetter(char) || isDigit(char) || char === '_');
+const isSpace = (char: string | undefined): boolean => char !== undefined && char.trim() === '';
+const startsWithIgnoreCase = (text: string, word: string, from: number): boolean => text.slice(from, from + word.length).toLowerCase() === word;
+
+function skipSpaces(text: string, from: number): number {
+  let index = from;
+  while (isSpace(text[index])) index += 1;
+  return index;
+}
+
+/** `thousands`, `millions` or `billions` at `from`, as a whole word. */
+function tableScaleWordAt(text: string, from: number): (typeof TABLE_SCALE_WORDS)[number] | undefined {
+  return TABLE_SCALE_WORDS.find((word) => startsWithIgnoreCase(text, word, from) && !isWordChar(text[from + word.length]));
+}
+
+/** The scale word after `in` or `(`, optionally behind a `$` or a three-letter currency code (`in USD millions`, `($ thousands)`). */
+function tableScaleAfter(text: string, from: number): (typeof TABLE_SCALE_WORDS)[number] | undefined {
+  const start = skipSpaces(text, from);
+  const afterCurrency: number[] = [];
+  if (text[start] === '$') afterCurrency.push(start + 1);
+  if (isAsciiLetter(text[start]) && isAsciiLetter(text[start + 1]) && isAsciiLetter(text[start + 2]) && isSpace(text[start + 3])) afterCurrency.push(start + 4);
+  for (const position of [...afterCurrency, start]) {
+    const word = tableScaleWordAt(text, skipSpaces(text, position));
+    if (word !== undefined) return word;
+  }
+  return undefined;
+}
+
+/** `(000s)` or `(000's)`, also with a `$` inside the parentheses, where `from` is just after the opening parenthesis. */
+function isThousandsMarker(text: string, from: number): boolean {
+  let index = skipSpaces(text, from);
+  if (text[index] === '$') index += 1;
+  index = skipSpaces(text, index);
+  for (const marker of ['000s', "000's"]) {
+    if (startsWithIgnoreCase(text, marker, index)) return text[skipSpaces(text, index + marker.length)] === ')';
+  }
+  return false;
+}
+
+/** Millions as `1e6`, thousands as `1e3`: the scales a release says its tables use ("in millions", "($ thousands)", "(000s)"). One linear pass, no regex. */
+export function tableScales(text: string): number[] {
   const found = new Set<number>();
-  for (const match of text.matchAll(TABLE_SCALE)) {
-    const word = (match[1] ?? match[2] ?? '').toLowerCase();
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    let word: string | undefined;
+    if (char === '(') {
+      word = tableScaleAfter(text, index + 1);
+      if (word === undefined && isThousandsMarker(text, index + 1)) word = 'thousands';
+    } else if ((char === 'i' || char === 'I') && startsWithIgnoreCase(text, 'in', index) && !isWordChar(text[index - 1])) {
+      word = tableScaleAfter(text, index + 2);
+    }
     if (word === 'millions') found.add(1e6);
     else if (word === 'billions') found.add(1e9);
-    else found.add(1e3);
+    else if (word !== undefined) found.add(1e3);
   }
   return [...found];
 }
@@ -183,13 +231,24 @@ export class NumberIndex {
   }
 }
 
+const EDGE_PUNCTUATION = ".'-";
+
+/** `word` without leading and trailing dots, apostrophes and hyphens. */
+function trimEdgePunctuation(word: string): string {
+  let start = 0;
+  let end = word.length;
+  while (start < end && EDGE_PUNCTUATION.includes(word[start]!)) start += 1;
+  while (end > start && EDGE_PUNCTUATION.includes(word[end - 1]!)) end -= 1;
+  return word.slice(start, end);
+}
+
 /** Words of a text for the loose matching of bullets and names: lower case letters and digits, at least two characters. */
 export function wordsOf(text: string): string[] {
   return text
     .toLowerCase()
     .replaceAll(/[’‘`]/g, "'")
     .split(/[^a-z0-9%$.'-]+/)
-    .map((word) => word.replaceAll(/^[.'-]+|[.'-]+$/g, ''))
+    .map(trimEdgePunctuation)
     .filter((word) => word.length >= 2);
 }
 
@@ -199,7 +258,7 @@ export function normalizeForQuote(text: string): string {
     .replaceAll(/[“”„‟«»]/g, '"')
     .replaceAll(/[‘’‚‛`´]/g, "'")
     .replaceAll(/[–—−]/g, '-')
-    .replaceAll(/[\s\u00a0]+/g, ' ')
+    .replaceAll(/\s+/g, ' ')
     .trim()
     .toLowerCase();
 }

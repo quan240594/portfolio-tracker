@@ -35,7 +35,7 @@ const ENTITIES: Readonly<Record<string, string>> = {
 
 const BLOCK_TAGS: ReadonlySet<string> = new Set(['p', 'div', 'br', 'li', 'ul', 'ol', 'tr', 'table', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'section', 'article', 'header', 'footer', 'blockquote', 'pre', 'hr', 'body']);
 const CELL_TAGS: ReadonlySet<string> = new Set(['td', 'th']);
-const SKIPPED_TAGS: readonly string[] = ['script', 'style', 'head', 'noscript', 'template'];
+const SKIPPED_TAGS: ReadonlySet<string> = new Set(['script', 'style', 'head', 'noscript', 'template']);
 
 function decodeEntity(body: string): string | undefined {
   if (body.startsWith('#')) {
@@ -83,6 +83,25 @@ function skipElement(lower: string, name: string, from: number): number {
   return end === -1 ? lower.length : end + 1;
 }
 
+/** What a tag leaves in the text: a cell separator, a line break, or nothing. */
+function tagText(name: string, closing: boolean): string {
+  if (CELL_TAGS.has(name)) return closing ? ' | ' : ' ';
+  return BLOCK_TAGS.has(name) ? '\n' : '';
+}
+
+/** Reads the comment or tag that starts at `open`: the text it leaves and where reading goes on; `undefined` for a tag that never ends. */
+function readTag(html: string, lower: string, open: number): { text: string; next: number } | undefined {
+  if (html.startsWith('<!--', open)) {
+    const end = html.indexOf('-->', open + 4);
+    return { text: '', next: end === -1 ? html.length : end + 3 };
+  }
+  const close = html.indexOf('>', open);
+  if (close === -1) return undefined;
+  const { name, closing } = tagName(html.slice(open + 1, close));
+  if (!closing && SKIPPED_TAGS.has(name)) return { text: '', next: skipElement(lower, name, close + 1) };
+  return { text: tagText(name, closing), next: close + 1 };
+}
+
 /** Tags and entities out, structure kept as line breaks (blocks) and ` | ` (table cells). */
 function flatten(html: string): string {
   const lower = html.toLowerCase();
@@ -95,18 +114,10 @@ function flatten(html: string): string {
       break;
     }
     out += html.slice(index, open);
-    if (html.startsWith('<!--', open)) {
-      const end = html.indexOf('-->', open + 4);
-      index = end === -1 ? html.length : end + 3;
-      continue;
-    }
-    const close = html.indexOf('>', open);
-    if (close === -1) break;
-    const { name, closing } = tagName(html.slice(open + 1, close));
-    index = close + 1;
-    if (!closing && SKIPPED_TAGS.includes(name)) index = skipElement(lower, name, index);
-    else if (CELL_TAGS.has(name)) out += closing ? ' | ' : ' ';
-    else if (BLOCK_TAGS.has(name)) out += '\n';
+    const step = readTag(html, lower, open);
+    if (step === undefined) break;
+    out += step.text;
+    index = step.next;
   }
   return out;
 }
@@ -133,7 +144,10 @@ export function capText(text: string, max = MAX_RELEASE_CHARS): string {
   const headBudget = Math.floor(max * 0.7);
   let head = 0;
   let used = 0;
-  while (head < lines.length && used + lines[head]!.length + 1 <= headBudget) used += lines[head++]!.length + 1;
+  while (head < lines.length && used + lines[head]!.length + 1 <= headBudget) {
+    used += lines[head]!.length + 1;
+    head += 1;
+  }
   const cashFlow = lines.findIndex((line, index) => index >= head && /cash flows?/i.test(line));
   const tail: string[] = [];
   let tailUsed = 0;

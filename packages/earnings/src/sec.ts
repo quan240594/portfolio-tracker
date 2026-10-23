@@ -130,8 +130,8 @@ export function parseIndex(json: unknown): string[] {
 }
 
 const DOCUMENT_EXTENSION = /\.(?:htm|html|txt)$/i;
-const EXHIBIT_99 = /(?:ex|exhibit)[-_ ]?99(?:[-_.]?\d{1,2})?(?![0-9])/i;
-const EXHIBIT_99_1 = /(?:ex|exhibit)[-_ ]?99[-_.]?0?1(?![0-9])/i;
+const EXHIBIT_99 = /(?:ex|exhibit)[-_ ]?99(?:[-_.]?\d{1,2})?(?!\d)/i;
+const EXHIBIT_99_1 = /(?:ex|exhibit)[-_ ]?99[-_.]?0?1(?!\d)/i;
 
 /**
  * The files that can hold the press release, best first: exhibit 99.1, other 99.x exhibits, then the primary document. The file names of
