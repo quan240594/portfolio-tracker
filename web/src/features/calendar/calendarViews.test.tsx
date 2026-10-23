@@ -1,7 +1,11 @@
-import { act, fireEvent, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, within } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
 import { afterEach } from 'vitest';
 import userEvent from '@testing-library/user-event';
-import type { CalendarEvent } from '@portfolio/shared';
+import { sampleSummary, type CalendarEvent } from '@portfolio/shared';
+import { DEMO_EARNINGS_STATUS } from '../../mocks/earningsHandlers';
+import { server } from '../../mocks/server';
+import { api } from '../../mocks/utils';
 import { LogosEnabledProvider, resetLogoSession } from '../../components/CompanyLogo';
 import { renderWithProviders, sp } from '../../test/utils';
 import { EventMarker } from './EventMarker';
@@ -172,6 +176,19 @@ describe('EventDialog', () => {
     renderWithProviders(<EventDialog event={e} baseCurrency="EUR" onClose={onClose} withScope={withScope} />);
     return onClose;
   };
+
+  it('offers "View summary" in the dialog of an earnings event once a summary exists, never in a dividend dialog', async () => {
+    server.use(
+      http.get(api('/earnings/status'), () => HttpResponse.json(DEMO_EARNINGS_STATUS)),
+      http.get(api('/earnings'), () => HttpResponse.json({ available: true, summaries: [sampleSummary({ symbol: 'AAPL', reportDate: '2026-10-21' })], symbols: ['AAPL'] })),
+    );
+    open(event({ type: 'EARNINGS', date: '2026-10-22', expectedAmount: undefined, status: 'ESTIMATED' }));
+    expect(await screen.findByRole('link', { name: 'View summary' })).toHaveAttribute('href', '/earnings/AAPL');
+    cleanup();
+    open(event());
+    await screen.findByRole('dialog');
+    expect(screen.queryByRole('link', { name: 'View summary' })).not.toBeInTheDocument();
+  });
 
   it('renders nothing without an event', () => {
     open(null);

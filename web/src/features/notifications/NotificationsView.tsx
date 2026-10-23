@@ -36,6 +36,7 @@ const TYPE_HINTS: Readonly<Record<NotificationType, string>> = {
   exDividend: 'A reminder shortly before the ex-dividend date of a security you hold.',
   declared: 'A new dividend was announced: amount, dates and how it compares with the last payment and a year ago.',
   received: 'A dividend payment was recorded. The Trading 212 sync runs a few times a day.',
+  earnings: 'A company you hold published quarterly results: the summary with the headline figures. Sent in the morning when the results come in during the night.',
 };
 
 const TEST_RESULT_TEXT: Readonly<Record<TestDeviceResult['result'], string>> = {

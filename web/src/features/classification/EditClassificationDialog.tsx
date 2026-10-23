@@ -1,10 +1,10 @@
 import { useId, useState, type FormEvent, type ReactNode } from 'react';
-import { ASSET_CLASSES, type AssetClass, type ClassificationField, type ClassificationInstrument } from '@portfolio/shared';
+import { ASSET_CLASSES, KPI_TEMPLATE_IDS, KPI_TEMPLATE_LABELS, type AssetClass, type ClassificationField, type ClassificationInstrument } from '@portfolio/shared';
 import { errorMessage } from '../../api/client';
 import { useResetClassification, useSaveClassification } from '../../api/classificationHooks';
 import { Dialog } from '../../components/Dialog';
 import { ASSET_CLASS_LABELS } from '../assets/AssetDialog';
-import { DOMAIN_LABEL, fieldsToSend, initialForm, validateFields, type ClassificationForm } from './classificationForm';
+import { DOMAIN_LABEL, KPI_TEMPLATE_LABEL, fieldsToSend, initialForm, validateFields, type ClassificationForm } from './classificationForm';
 import { BASE_LABELS, FIELD_LABELS, SOURCE_LABELS, valueLabel } from './labels';
 
 const ALERT_CLASS = 'rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200';
@@ -36,6 +36,7 @@ function Field({ field, instrument, children }: Readonly<FieldProps>) {
 /** Edit the owner's classification of one symbol: name, asset class, sector and country, with the automatic values shown beside them. */
 export function EditClassificationDialog({ instrument, onClose }: Readonly<{ instrument: ClassificationInstrument; onClose: () => void }>) {
   const domainId = useId();
+  const templateId = useId();
   const save = useSaveClassification();
   const reset = useResetClassification();
   const [form, setForm] = useState<ClassificationForm>(() => initialForm(instrument));
@@ -119,6 +120,22 @@ export function EditClassificationDialog({ instrument, onClose }: Readonly<{ ins
           />
           <p id={`${domainId}-hint`} className="muted mt-1 text-xs break-words">
             Optional. The company website the logo is looked up by, for when the logo is missing or wrong. Leave it empty to detect it automatically.
+          </p>
+        </div>
+        <div>
+          <label className="label" htmlFor={templateId}>
+            {KPI_TEMPLATE_LABEL}
+          </label>
+          <select id={templateId} className="input" value={form.kpiTemplate} aria-describedby={`${templateId}-hint`} onChange={(e) => set('kpiTemplate', e.target.value as ClassificationForm['kpiTemplate'])}>
+            <option value="">Automatic</option>
+            {KPI_TEMPLATE_IDS.map((id) => (
+              <option key={id} value={id}>
+                {KPI_TEMPLATE_LABELS[id]}
+              </option>
+            ))}
+          </select>
+          <p id={`${templateId}-hint`} className="muted mt-1 text-xs break-words">
+            Optional. Which figures the earnings summary of this company highlights (REITs report AFFO, banks ROTCE and CET1, ...). Applies from its next release.
           </p>
         </div>
         {error !== null && (

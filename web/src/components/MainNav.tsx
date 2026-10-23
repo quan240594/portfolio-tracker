@@ -18,6 +18,8 @@ export const PORTFOLIO_ITEMS: readonly NavItem[] = [
   { to: '/calendar', label: 'Calendar' },
   { to: '/brokers', label: 'Brokers' },
 ];
+/** Shown only where the deployment reads earnings (`GET /earnings/status` says `available`): never on the AWS stack or in the demo of an older build. */
+export const EARNINGS_ITEM: NavItem = { to: '/earnings', label: 'Earnings' };
 
 const ITEM_BASE =
   'flex min-h-11 items-center rounded-lg px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors sm:min-h-0';
@@ -42,14 +44,15 @@ const isWithin = (pathname: string, to: string) => pathname === to || pathname.s
  * Disclosure navigation: a native button toggles a list of links. Closes on navigation, Escape
  * (focus returns to the button), pointer presses outside and focus moving outside.
  */
-function PortfolioMenu({ withScope }: Readonly<{ withScope: WithScope }>) {
+function PortfolioMenu({ withScope, earnings }: Readonly<{ withScope: WithScope; earnings: boolean }>) {
+  const items = earnings ? [...PORTFOLIO_ITEMS, EARNINGS_ITEM] : PORTFOLIO_ITEMS;
   const { pathname } = useLocation();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLLIElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listId = useId();
   const hintId = useId();
-  const active = PORTFOLIO_ITEMS.some((item) => isWithin(pathname, item.to));
+  const active = items.some((item) => isWithin(pathname, item.to));
 
   useEffect(() => {
     setOpen(false);
@@ -114,7 +117,7 @@ function PortfolioMenu({ withScope }: Readonly<{ withScope: WithScope }>) {
         hidden={!open}
         className="absolute inset-x-0 top-full z-40 mt-1 grid max-h-[70vh] grid-cols-2 gap-1 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-800 dark:bg-slate-900 sm:inset-x-auto sm:left-0 sm:w-56 sm:grid-cols-1"
       >
-        {PORTFOLIO_ITEMS.map((item) => (
+        {items.map((item) => (
           <li key={item.to}>
             <NavItemLink item={item} withScope={withScope} onNavigate={() => setOpen(false)} />
           </li>
@@ -125,14 +128,14 @@ function PortfolioMenu({ withScope }: Readonly<{ withScope: WithScope }>) {
 }
 
 /** Header navigation: Dashboard, the Portfolio group and Analytics. */
-export function MainNav({ withScope }: Readonly<{ withScope: WithScope }>) {
+export function MainNav({ withScope, earnings = false }: Readonly<{ withScope: WithScope; earnings?: boolean }>) {
   return (
     <nav aria-label="Main" className="relative order-last w-full sm:order-none sm:w-auto">
       <ul className="flex flex-wrap gap-1">
         <li>
           <NavItemLink item={DASHBOARD} withScope={withScope} />
         </li>
-        <PortfolioMenu withScope={withScope} />
+        <PortfolioMenu withScope={withScope} earnings={earnings} />
         <li>
           <NavItemLink item={ANALYTICS} withScope={withScope} />
         </li>

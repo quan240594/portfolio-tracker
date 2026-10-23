@@ -1,4 +1,4 @@
-import { classificationPutSchema, hasClassification, type AssetClass, type ClassificationFields, type ClassificationInstrument, type ClassificationValues } from '@portfolio/shared';
+import { classificationPutSchema, hasClassification, type AssetClass, type ClassificationFields, type ClassificationInstrument, type ClassificationValues, type KpiTemplateId } from '@portfolio/shared';
 import { FIELD_LABELS } from './labels';
 
 export interface ClassificationForm {
@@ -8,14 +8,18 @@ export interface ClassificationForm {
   country: string;
   /** Website domain the company logo is looked up by; empty = detected automatically. */
   domain: string;
+  /** The earnings summary template; empty = automatic (the table of known tickers, then the sector). */
+  kpiTemplate: KpiTemplateId | '';
 }
 
 /** What the domain input is called in the dialog and in validation messages. */
 export const DOMAIN_LABEL = 'Website domain';
+/** What the template select is called in the dialog and in validation messages. */
+export const KPI_TEMPLATE_LABEL = 'Earnings template';
 
 /** The form starts at what the screens show today (the override where there is one). */
 export function initialForm({ effective, override }: Pick<ClassificationInstrument, 'effective'> & Partial<Pick<ClassificationInstrument, 'override'>>): ClassificationForm {
-  return { name: effective.name, assetClass: effective.assetClass, sector: effective.sector ?? '', country: effective.country ?? '', domain: override?.domain ?? '' };
+  return { name: effective.name, assetClass: effective.assetClass, sector: effective.sector ?? '', country: effective.country ?? '', domain: override?.domain ?? '', kpiTemplate: override?.kpiTemplate ?? '' };
 }
 
 /**
@@ -34,6 +38,7 @@ export function fieldsToSend(form: ClassificationForm, base: ClassificationValue
   // The domain has no automatic counterpart to compare with: what is typed is what is stored, empty means detect it.
   const domain = form.domain.trim();
   if (domain !== '') fields.domain = domain;
+  if (form.kpiTemplate !== '') fields.kpiTemplate = form.kpiTemplate;
   return fields;
 }
 
@@ -52,5 +57,6 @@ export function validateFields(fields: ClassificationFields): string | null {
 
 function fieldLabel(field: unknown): string {
   if (field === 'domain') return DOMAIN_LABEL;
+  if (field === 'kpiTemplate') return KPI_TEMPLATE_LABEL;
   return typeof field === 'string' && field in FIELD_LABELS ? FIELD_LABELS[field as keyof typeof FIELD_LABELS] : 'Classification';
 }

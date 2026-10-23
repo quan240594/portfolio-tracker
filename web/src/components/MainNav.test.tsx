@@ -1,7 +1,7 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { PORTFOLIO_ITEMS } from './MainNav';
-import { gotoViaNav, mainNav, openPortfolioMenu, renderApp } from '../test/utils';
+import { EARNINGS_ITEM, MainNav, PORTFOLIO_ITEMS } from './MainNav';
+import { gotoViaNav, mainNav, openPortfolioMenu, renderApp, renderWithProviders } from '../test/utils';
 
 const trigger = () => within(mainNav()).getByRole('button', { name: 'Portfolio' });
 const menuLinks = () => within(mainNav()).queryAllByRole('link', { name: (name) => PORTFOLIO_ITEMS.some((i) => i.label === name) });
@@ -175,5 +175,21 @@ describe('main navigation', () => {
     renderApp('/?portfolio=trading-212');
     await openPortfolioMenu(user);
     expect(within(mainNav()).getByRole('link', { name: 'Holdings' })).toHaveAttribute('href', '/holdings?portfolio=trading-212');
+  });
+
+  it('adds Earnings at the end of the menu only when asked to, and marks it as the current section on its pages', async () => {
+    const user = userEvent.setup();
+    const { unmount } = renderWithProviders(<MainNav withScope={(to) => to} />, { route: '/earnings/LMT' });
+    expect(within(mainNav()).getByRole('button', { name: 'Portfolio' })).not.toHaveAttribute('aria-describedby');
+    await user.click(trigger());
+    expect(within(mainNav()).queryByRole('link', { name: EARNINGS_ITEM.label })).not.toBeInTheDocument();
+    unmount();
+    renderWithProviders(<MainNav withScope={(to) => to} earnings />, { route: '/earnings/LMT' });
+    await user.click(trigger());
+    const links = within(mainNav()).getAllByRole('link');
+    expect(links.at(-2)).toHaveTextContent('Earnings');
+    expect(links.at(-2)).toHaveAttribute('href', '/earnings');
+    expect(links.at(-2)).toHaveAttribute('aria-current', 'page');
+    expect(trigger()).toHaveAccessibleDescription('Current section');
   });
 });

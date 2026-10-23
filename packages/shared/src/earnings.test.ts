@@ -12,7 +12,7 @@ import {
 } from './earnings.js';
 import { CURATED_TEMPLATE_TICKERS, hasEarnings, kpiTemplateFor } from './earnings-templates.js';
 import { buildEarningsNotification, formatCompactMoney, formatEarningsPct, formatMetricValue } from './earnings-format.js';
-import { sampleDemoSummaries, sampleSummary } from './earnings-sample.js';
+import { sampleDemoSummaries, sampleSummary, sampleTemplateSummaries } from './earnings-sample.js';
 import { baselineEntries, detectDueNotifications, ledgerId, type DetectInput } from './notification-events.js';
 import { defaultNotificationSettings, effectiveNotificationSettings } from './notifications.js';
 import { classificationFieldsOf, classificationPutSchema, hasClassification } from './classification.js';
@@ -216,5 +216,16 @@ describe('the invented samples', () => {
     expect(saas!.origin).toBe('backfill');
     expect(sampleSummary().headline.fcf?.basis).toBe('calculated');
     expect(sampleSummary({ symbol: 'X' }).symbol).toBe('X');
+  });
+});
+
+describe('sampleTemplateSummaries', () => {
+  it('has one summary per template, with every second slot filled and valid keys', () => {
+    const all = sampleTemplateSummaries();
+    expect(all.map((s) => s.template)).toEqual([...KPI_TEMPLATE_IDS]);
+    expect(new Set(all.map((s) => s.symbol)).size).toBe(all.length);
+    const bank = all.find((s) => s.template === 'bank');
+    expect(bank?.kpis.some((k) => k.metric !== undefined)).toBe(true);
+    expect(bank?.kpis.some((k) => k.metric === undefined)).toBe(true);
   });
 });

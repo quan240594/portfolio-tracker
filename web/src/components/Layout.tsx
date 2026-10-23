@@ -5,6 +5,7 @@ import { MainNav } from './MainNav';
 import { DemoBanner } from './DemoBanner';
 import { useStickyOffset } from './useStickyOffset';
 import { USE_MOCKS } from '../config';
+import { useEarningsStatus } from '../api/earningsHooks';
 import { AccountMenu } from '../features/auth/AccountMenu';
 import { UsageBanner } from '../features/usage/UsageBanner';
 import { UsageIndicator } from '../features/usage/UsageIndicator';
@@ -66,6 +67,7 @@ export function Layout() {
   const { withScope } = usePortfolioScope();
   const stickyRef = useRef<HTMLDivElement>(null);
   useStickyOffset(stickyRef);
+  const earnings = useEarningsStatus();
   return (
     <div className="flex min-h-screen flex-col">
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:shadow dark:focus:bg-slate-900">
@@ -87,7 +89,7 @@ export function Layout() {
               <AccountMenu />
               <UsageIndicator />
             </div>
-            <MainNav withScope={withScope} />
+            <MainNav withScope={withScope} earnings={earnings.data?.available === true} />
           </div>
         </header>
       </div>

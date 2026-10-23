@@ -2,7 +2,7 @@
  * INVENTED sample summaries: fictional companies and made-up numbers, for the public demo (mock mode) and for tests. Nothing here is a real
  * company's result.
  */
-import { EARNINGS_SCHEMA_VERSION, KPI_TEMPLATES, type EarningsKpi, type EarningsMetric, type EarningsSummary, type KpiTemplateId } from './earnings.js';
+import { EARNINGS_SCHEMA_VERSION, KPI_TEMPLATES, KPI_TEMPLATE_IDS, type EarningsKpi, type EarningsMetric, type EarningsSummary, type KpiTemplateId } from './earnings.js';
 
 const metric = (value: number, unit: EarningsMetric['unit'], extra: Partial<EarningsMetric> = {}): EarningsMetric => ({ value, unit, ...extra });
 
@@ -111,4 +111,21 @@ export function sampleDemoSummaries(): EarningsSummary[] {
     generatedAt: '2026-10-16T11:05:00.000Z',
   });
   return [bank, saas];
+}
+
+/** One invented summary per KPI template (every second slot filled, the others left empty) for visual checks of all templates. */
+export function sampleTemplateSummaries(): EarningsSummary[] {
+  return KPI_TEMPLATE_IDS.map((template, index) =>
+    sampleSummary({
+      symbol: `TPL${index}`,
+      name: `Template ${template} Company`,
+      template,
+      kpis: KPI_TEMPLATES[template].slots.map((slot, i) => ({
+        key: slot.key,
+        label: slot.label,
+        unit: slot.unit,
+        ...(i % 2 === 0 ? { metric: metric(slot.unit === 'money' ? 1_200_000_000 : 12.5, slot.unit, { yoyPct: 7.5 }) } : {}),
+      })),
+    }),
+  );
 }

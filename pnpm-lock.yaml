@@ -130,6 +130,9 @@ importers:
       '@portfolio/cloudflare':
         specifier: workspace:*
         version: link:../cloudflare
+      '@portfolio/earnings':
+        specifier: workspace:*
+        version: link:../earnings
       '@portfolio/ingest':
         specifier: workspace:*
         version: link:../../services/ingest

@@ -30,6 +30,7 @@ const snapshot = (state: 'ok' | 'warn' | 'blocked', percents: { worker: number; 
     durableObjectGbSeconds: metric(13_000, 1),
     rowsRead: metric(5_000_000, percents.rowsRead),
     rowsWritten: metric(100_000, 1),
+    aiNeurons: metric(10_000, 1),
     storageBytes: metric(1_000_000_000, 1),
   },
 });
