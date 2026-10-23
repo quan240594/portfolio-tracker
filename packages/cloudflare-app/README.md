@@ -123,6 +123,19 @@ You need a Cloudflare account on the Free plan and a GitHub account. Every comma
    The Trading 212 sync also runs three more times on weekdays (12:30, 18:30 and 22:30 Amsterdam time, next to the 06:30 daily run) so a
    booked dividend is noticed within hours; an incremental run is a handful of subrequests (see the cost table in the same section).
 
+9. **Earnings summaries (optional, free).** After a company you hold publishes its quarterly results, the app reads the press release from the SEC (8-K item 2.02, or the
+   6-K of a foreign issuer), asks Cloudflare **Workers AI** to copy the figures out of the text, checks every number against the text and shows a scorecard plus details at
+   `/earnings` (and a push message). **What you have to do: one thing**, pass a contact string when you deploy; the SEC requires every automated client to identify itself:
+   ```bash
+   SEC_CONTACT='PortfolioTracker/1.0 (personal use; you@example.com)' ORIGIN=... OWNER_GITHUB_ID=... GITHUB_CLIENT_ID=... pnpm run deploy:app
+   ```
+   Without `SEC_CONTACT` nothing is sent to the SEC and `/earnings` says "not configured". The `ai` binding (`AI`) is already in `wrangler.jsonc` and needs no key or paid plan
+   (Free plan: 10,000 neurons a day; the app stops at 80 % and never goes past it; a request over the allowance would fail, not bill). Optional: the secret
+   `ALPHAVANTAGE_API_KEY` of step 7 also gives the **expected EPS** and the EPS beat/miss (one call per release, from the 25 a day; without it the cell says "no estimate available");
+   variables `EARNINGS_AI_MODEL` (default `@cf/meta/llama-3.1-8b-instruct-fp8`) and `EARNINGS_AI_DAILY_NEURONS` (default 6000, at most 8000). The first runs after the deploy write the
+   **latest reported quarter of up to 3 held companies per run** (silently, no push) so you can judge the format at once. Only the public release text goes to Workers AI, never your
+   portfolio. Revenue and guidance consensus have no free source and are never shown. Details, cost and limits: `docs/architecture.md`, "Earnings summaries".
+
 Until the variables and secrets are valid, every API and sign-in route answers 503 `NOT_CONFIGURED` naming the missing
 variable (never a value); `/health` and the static app keep working.
 
@@ -159,7 +172,7 @@ Signing in needs GitHub, so offline you can see the app shell and `/health`; the
 |---|---|
 | `dev` | build the web app, `wrangler dev --local` |
 | `build:web` | build `web` for this deployment into `dist/web` (`VITE_AUTH_MODE=github`, `/api` on the same origin, no mocks) |
-| `deploy:app` | `build:web` + `wrangler deploy` with the three variables from the environment (refuses to run without them); `VAPID_PUBLIC_KEY` and `PUSH_ALLOWED_HOSTS` are passed too when set |
+| `deploy:app` | `build:web` + `wrangler deploy` with the three variables from the environment (refuses to run without them); `VAPID_PUBLIC_KEY`, `PUSH_ALLOWED_HOSTS` and `SEC_CONTACT` are passed too when set |
 | `vapid:generate` | prints a fresh VAPID key pair for the push notifications (public key: a variable; private key: the secret `VAPID_PRIVATE_KEY`) |
 | `deploy:dry-run` | `build:web` + `wrangler deploy --dry-run` |
 | `typecheck`, `lint` | as everywhere |
