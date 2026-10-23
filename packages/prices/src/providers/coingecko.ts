@@ -4,7 +4,7 @@ import { silentLogger, type Logger } from '@portfolio/platform';
 import { SymbolNotFoundError } from '../errors.js';
 import type { HttpClient } from '../http.js';
 import type { TokenBucket } from '../limits.js';
-import { makeQuote } from '../models.js';
+import { makeEod, makeQuote } from '../models.js';
 import { asFloat, byText, chunks, isRecord, ownValue, titleCase, type JsonRecord } from '../parse.js';
 import { cryptoParts } from '../symbols.js';
 import { daysBetweenDays, fromEpochSeconds, utcDay } from '../time.js';
@@ -135,7 +135,7 @@ export class CoinGeckoProvider implements PriceSource {
       const price = asFloat(point[1]);
       if (millis !== null && price !== null) lastOfDay.set(utcDay(new Date(Math.trunc(millis))), price);
     }
-    const rows = [...lastOfDay].map(([date, close]) => ({ symbol, date, close, currency: vs.toUpperCase() }));
+    const rows = [...lastOfDay].map(([date, close]) => makeEod({ symbol, date, close, currency: vs.toUpperCase() }));
     return clampRange(rows, start, end);
   }
 

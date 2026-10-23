@@ -9,6 +9,7 @@ import { COINGECKO_MAX_IDS } from '../providers/coingecko.js';
 import { SOURCE_OF_ROUTE, hasExchangeSuffix, providerOf, routeOf, type Route } from '../symbols.js';
 import { addDays, amsterdamHour, utcDay } from '../time.js';
 import { byText, chunks } from '../parse.js';
+import { initialRepair, runMinorUnitRepair } from './repair-minor-units.js';
 import { createStepContext, decodeState, pendingStep, runStep, rethrowBudget, runUnits, whileAffordable, type PriceJobDeps, type StepContext } from './common.js';
 
 /** Exchange-listed quotes older than this are refreshed outside the EU window. */
@@ -32,7 +33,7 @@ const latestSchema = z.object({ base: z.string(), asOf: z.string(), date: z.stri
 const stateSchema = z.object({
   v: z.literal(1),
   now: z.string(),
-  phase: z.enum(['fx', 'history', 'plan', 'quotes', 'details', 'done']),
+  phase: z.enum(['fx', 'history', 'plan', 'quotes', 'details', 'repair', 'done']),
   symbols: z.array(z.string()),
   fx: z.object({ ok: z.boolean(), latest: latestSchema.nullable() }),
   history: z.object({ ranges: z.array(z.tuple([z.string(), z.string()])), written: z.number(), ok: z.boolean(), lastDay: z.string().nullable(), final: z.boolean() }),
@@ -44,6 +45,10 @@ const stateSchema = z.object({
   readyAt: z.record(z.number()),
   detailQueue: z.array(z.string()).nullable(),
   detailsRefreshed: z.number(),
+  // Absent in a cursor stored before the repair existed.
+  repair: z
+    .object({ queue: z.array(z.string()).nullable(), failed: z.number(), rows: z.object({ read: z.number(), written: z.number() }) })
+    .default(() => initialRepair()),
 });
 
 type State = z.infer<typeof stateSchema>;
@@ -65,6 +70,7 @@ function initialState(now: Date, symbols: string[]): State {
     readyAt: {},
     detailQueue: null,
     detailsRefreshed: 0,
+    repair: initialRepair(),
   };
 }
 
@@ -290,7 +296,12 @@ async function runDetails(ctx: StepContext, state: State, now: Date): Promise<vo
       queue.shift();
     },
   );
-  if (queue.length === 0) state.phase = 'done';
+  if (queue.length === 0) state.phase = 'repair';
+}
+
+/** The one-time repair of prices stored in pence: a few symbols per step until done (a no-op once its marker is set). */
+async function runRepair(ctx: StepContext, state: State, now: Date): Promise<void> {
+  if (await runMinorUnitRepair(ctx, state.repair, state.symbols, now)) state.phase = 'done';
 }
 
 // --- the job ---
@@ -320,6 +331,7 @@ async function advance(ctx: StepContext, state: State, now: Date): Promise<numbe
   if (state.phase === 'plan') await planQuotes(ctx, state, now);
   if (state.phase === 'quotes') pause = await runQuotes(ctx, state);
   if (state.phase === 'details') await runDetails(ctx, state, now);
+  if (state.phase === 'repair') await runRepair(ctx, state, now);
   return pause;
 }
 

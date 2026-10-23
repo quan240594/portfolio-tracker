@@ -3,6 +3,9 @@ import {
   ENTITY,
   fromItem,
   keys,
+  majorDividend,
+  majorEod,
+  majorQuote,
   transactionItem,
   type DividendEvent,
   type EodPrice,
@@ -109,7 +112,7 @@ export class ItemRepository implements Repository {
 
   async getQuotes(symbols: string[]): Promise<Record<string, Quote>> {
     const items = await this.store.getMany(symbols.map((s) => keys.quote(s)));
-    return Object.fromEntries(items.map((i) => [String(i.symbol), fromItem<Quote>(i)]));
+    return Object.fromEntries(items.map((i) => [String(i.symbol), majorQuote(fromItem<Quote>(i))]));
   }
 
   async getProfiles(symbols: string[]): Promise<Record<string, InstrumentProfile>> {
@@ -136,11 +139,12 @@ export class ItemRepository implements Repository {
 
   async getEod(symbol: string, from: string, to: string): Promise<EodPrice[]> {
     const items = await queryAll(this.store, { pk: keys.tickerPk(symbol), sk: { between: [keys.eod(symbol, from).SK, keys.eod(symbol, to).SK] } });
-    return items.map((i) => fromItem<EodPrice>(i));
+    return items.map((i) => majorEod(fromItem<EodPrice>(i)));
   }
 
-  getDividendEvents(symbol: string): Promise<DividendEvent[]> {
-    return listByPrefix<DividendEvent>(this.store, keys.tickerPk(symbol), keys.dividendPrefix);
+  async getDividendEvents(symbol: string): Promise<DividendEvent[]> {
+    const events = await listByPrefix<DividendEvent>(this.store, keys.tickerPk(symbol), keys.dividendPrefix);
+    return events.map((event) => majorDividend(event));
   }
 
   async getCalendarEvents(symbols: string[], from: string, to: string): Promise<StoredCalendarEvents> {

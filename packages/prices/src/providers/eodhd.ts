@@ -1,11 +1,11 @@
 import type { DividendEvent, EodPrice, InstrumentProfile, Quote } from '@portfolio/shared';
-import { sequentially } from '@portfolio/shared';
+import { majorCurrencyCode, sequentially } from '@portfolio/shared';
 import { silentLogger, type Logger } from '@portfolio/platform';
 import { z } from 'zod';
 import { ProviderError, RateLimitError, SymbolNotFoundError } from '../errors.js';
 import type { HttpClient } from '../http.js';
 import { resetOf, spendCredits, type DailyQuota, type ProviderGate, type TokenBucket } from '../limits.js';
-import { makeDividend, makeQuote, normalizeCurrency } from '../models.js';
+import { makeDividend, makeEod, makeQuote, normalizeCurrency } from '../models.js';
 import { asFloat, asText, byText, chunks, dayOf, definedOnly, isRecord, nonEmpty, validIsin } from '../parse.js';
 import { baseTicker, countryFor, currencyFor, exchangeFor, exchangeSuffix, EXCHANGES, priceCurrencyFor } from '../symbols.js';
 import { fromEpochSeconds } from '../time.js';
@@ -109,7 +109,7 @@ export class EodhdProvider implements PriceSource {
     const rows: EodPrice[] = [];
     for (const raw of Array.isArray(data) ? data : []) {
       const row = eodRow.safeParse(raw);
-      if (row.success && row.data.close !== null && nonEmpty(row.data.date) !== undefined) rows.push({ symbol, date: dayOf(row.data.date), close: row.data.close, currency });
+      if (row.success && row.data.close !== null && nonEmpty(row.data.date) !== undefined) rows.push(makeEod({ symbol, date: dayOf(row.data.date), close: row.data.close, currency }));
     }
     return clampRange(rows, start, end);
   }
@@ -127,7 +127,7 @@ export class EodhdProvider implements PriceSource {
       symbol,
       name: nonEmpty(match.Name) ?? symbol,
       assetClass: assetClassFromType(match.Type),
-      currency: (nonEmpty(match.Currency) ?? currencyFor(symbol)).toUpperCase(),
+      currency: majorCurrencyCode((nonEmpty(match.Currency) ?? currencyFor(symbol)).toUpperCase()),
       country: country !== undefined && country !== 'USA' ? country : countryFor(symbol),
       exchange: exchangeFor(symbol) ?? nonEmpty(match.Exchange),
       isin: validIsin(match.ISIN),

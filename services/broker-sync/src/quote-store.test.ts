@@ -25,6 +25,16 @@ describe('ItemQuoteStore', () => {
     expect(await store.getStatus('u1')).toEqual({ userId: 'u1', state: 'OK', lastAttemptAt: quote.asOf, failures: 0 });
   });
 
+  it('reads a quote stored in pence in pounds, so the day change of the next quote is computed on pounds', async () => {
+    const items = new MemoryItemStore().load([
+      { PK: 'TICKER#VOD.L', SK: 'QUOTE#LATEST', symbol: 'VOD.L', price: 7260, previousClose: 7250, currency: 'GBX', asOf: quote.asOf, source: 'eodhd-eod' },
+      { PK: 'TICKER#IUKP.L', SK: 'QUOTE#LATEST', symbol: 'IUKP.L', price: 7.26, previousClose: 7.25, currency: 'GBP', asOf: quote.asOf, source: 't212' },
+    ]);
+    const found = await new ItemQuoteStore(items).latest(['VOD.L', 'IUKP.L']);
+    expect(found.get('VOD.L')).toMatchObject({ price: 72.6, previousClose: 72.5, currency: 'GBP' });
+    expect(found.get('IUKP.L')).toMatchObject({ price: 7.26, previousClose: 7.25, currency: 'GBP' });
+  });
+
   it('stores the same item shape as the price service: PK TICKER#symbol, SK QUOTE#LATEST, entityType QUOTE', async () => {
     const items = new MemoryItemStore();
     await new ItemQuoteStore(items).save([quote], { userId: 'u1', state: 'OK', lastAttemptAt: quote.asOf, failures: 0 });
