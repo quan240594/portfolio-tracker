@@ -160,7 +160,7 @@ export function normalizeT212LogoBase(raw: string | undefined, { allowAnyHost = 
   const text = (raw ?? '').trim();
   if (text === '') return undefined;
   const url = parseUrl(text);
-  if (url === undefined || url.username !== '' || url.password !== '' || url.search !== '' || url.hash !== '' || url.pathname !== '/') return undefined;
+  if (url?.username !== '' || url.password !== '' || url.search !== '' || url.hash !== '' || url.pathname !== '/') return undefined;
   if (allowAnyHost) return url.protocol === 'https:' || url.protocol === 'http:' ? url.origin : undefined;
   return url.protocol === 'https:' && url.hostname.endsWith(T212_HOST_SUFFIX) ? url.origin : undefined;
 }
