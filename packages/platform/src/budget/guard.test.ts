@@ -14,6 +14,7 @@ describe('limits table and helpers', () => {
       durableObjectGbSecondsPerDay: 13_000,
       sqliteRowsReadPerDay: 5_000_000,
       sqliteRowsWrittenPerDay: 100_000,
+      workersAiNeuronsPerDay: 10_000,
       durableObjectStorageBytesPerAccount: 5_000_000_000,
       durableObjectStorageBytesPerObject: 1_000_000_000,
       subrequestsPerInvocation: 50,
@@ -75,6 +76,39 @@ describe('BudgetGuard', () => {
     const guard = new BudgetGuard({ store, now: time.now, logger: log.logger, ...extra });
     return { store, time, log, guard };
   };
+
+  it('lists the Workers AI neurons but never lets them pause the app: they gate only the work that spends them', async () => {
+    const { guard } = setup();
+    await guard.record({ aiNeurons: 9500 });
+    const snapshot = await guard.snapshot();
+    expect(snapshot.metrics.aiNeurons).toEqual({ used: 9500, limit: 10_000, percent: 95, state: 'blocked' });
+    expect(snapshot.state).toBe('ok');
+    expect(await guard.check('write')).toMatchObject({ allowed: true, state: 'ok', blockedMetrics: [] });
+    expect(await guard.check('job')).toMatchObject({ allowed: true });
+  });
+
+  it('reports the AI allowance with the 60 % and 80 % thresholds and the reset', async () => {
+    const { guard, store } = setup();
+    expect(await guard.aiAllowance()).toEqual({ state: 'ok', used: 0, limit: 10_000, resetsAt: '2026-10-20T00:00:00.000Z' });
+    await guard.record({ aiNeurons: 5999 });
+    expect((await guard.aiAllowance()).state).toBe('ok');
+    await guard.record({ aiNeurons: 1 });
+    expect((await guard.aiAllowance()).state).toBe('warn');
+    await guard.record({ aiNeurons: 1999 });
+    expect((await guard.aiAllowance()).state).toBe('warn');
+    await guard.record({ aiNeurons: 1 });
+    expect(await guard.aiAllowance()).toMatchObject({ state: 'blocked', used: 8000 });
+    store.failing = true;
+    await guard.flush();
+    expect((await guard.aiAllowance()).state).toBe('unavailable');
+  });
+
+  it('starts the AI counter again on the next UTC day', async () => {
+    const { guard, time } = setup('2026-10-19T23:59:00Z', { flushAfter: 1 });
+    await guard.record({ aiNeurons: 9000 });
+    time.set('2026-10-20T00:00:30Z');
+    expect(await guard.aiAllowance()).toMatchObject({ state: 'ok', used: 0 });
+  });
 
   it('starts ok with everything at zero and a snapshot that matches the contract', async () => {
     const { guard } = setup();

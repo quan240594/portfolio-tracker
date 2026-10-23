@@ -1,4 +1,4 @@
-import { USAGE_COUNTER_METRICS, USAGE_METRICS, type UsageMetric, type UsageMetricSnapshot, type UsageSnapshot, type UsageState } from '@portfolio/shared';
+import { USAGE_COUNTER_METRICS, USAGE_METRICS, USAGE_SCOPED_METRICS, type UsageMetric, type UsageMetricSnapshot, type UsageSnapshot, type UsageState } from '@portfolio/shared';
 import { logger as defaultLogger, type Logger } from '../logger.js';
 import { BUDGET_THRESHOLDS, METRIC_LIMITS, classifyUsage, isCounterMetric, nextUtcMidnight, secondsUntilReset, usagePercent, utcDay, utcDayBefore, type MetricLimits } from './limits.js';
 import type { UsageCounters, UsageDelta, UsageStore } from './usage-store.js';
@@ -36,7 +36,7 @@ const UNAVAILABLE_RETRY_SECONDS = 60;
 const STORAGE_RETRY_SECONDS = 3600;
 const DEFAULT_RETAIN_DAYS = 7;
 
-const zeroCounters = (): UsageCounters => ({ workerRequests: 0, durableObjectRequests: 0, durableObjectGbSeconds: 0, rowsRead: 0, rowsWritten: 0 });
+const zeroCounters = (): UsageCounters => ({ workerRequests: 0, durableObjectRequests: 0, durableObjectGbSeconds: 0, rowsRead: 0, rowsWritten: 0, aiNeurons: 0 });
 
 /** Keeps only finite, positive amounts of known counters. */
 function sanitize(delta: UsageDelta): UsageDelta {
@@ -53,6 +53,16 @@ function addInto(target: UsageCounters, delta: UsageDelta): void {
 }
 
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+const SCOPED: readonly string[] = USAGE_SCOPED_METRICS;
+
+export interface AiAllowance {
+  /** `unavailable` when the ledger cannot be read: no AI call is made then. */
+  state: UsageState;
+  used: number;
+  limit: number;
+  resetsAt: string;
+}
 
 interface Evaluation {
   day: string;
@@ -139,6 +149,16 @@ export class BudgetGuard {
     return { allowed, state: evaluation.state, blockedMetrics: evaluation.blockedMetrics, retryAfterSeconds: this.#retryAfter(evaluation) };
   }
 
+  /**
+   * The Workers AI allowance of today (`aiNeurons`): `ok` below 60 %, `warn` from 60 %, `blocked` from 80 % of the 10,000 neurons of the
+   * Free plan. It gates only the work that spends neurons and never pauses the app, so it is not part of `check` or the overall state.
+   */
+  async aiAllowance(): Promise<AiAllowance> {
+    const evaluation = await this.#evaluate();
+    const { used, limit, state } = evaluation.metrics.aiNeurons;
+    return { state: evaluation.available ? state : 'unavailable', used, limit, resetsAt: nextUtcMidnight(evaluation.now).toISOString() };
+  }
+
   /** Usage of today against every cap: the payload of `GET /usage`. Never rejects. */
   async snapshot(): Promise<UsageSnapshot> {
     const evaluation = await this.#evaluate();
@@ -210,6 +230,7 @@ export class BudgetGuard {
       const limit = this.#limits[metric];
       const metricState = classifyUsage(used[metric], limit);
       metrics[metric] = { used: used[metric], limit, percent: usagePercent(used[metric], limit), state: metricState };
+      if (SCOPED.includes(metric)) continue;
       if (metricState === 'blocked') blockedMetrics.push(metric);
       if (metricState === 'blocked' || (metricState === 'warn' && state === 'ok')) state = metricState;
     }

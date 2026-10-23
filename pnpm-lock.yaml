@@ -180,6 +180,40 @@ importers:
         specifier: ^4.116.0
         version: 4.116.0
 
+  packages/earnings:
+    dependencies:
+      '@portfolio/platform':
+        specifier: workspace:*
+        version: link:../platform
+      '@portfolio/prices':
+        specifier: workspace:*
+        version: link:../prices
+      '@portfolio/shared':
+        specifier: workspace:*
+        version: link:../shared
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
+    devDependencies:
+      '@eslint/js':
+        specifier: ^9.39.5
+        version: 9.39.5
+      '@types/node':
+        specifier: ^20.19.43
+        version: 20.19.43
+      eslint:
+        specifier: ^9.39.5
+        version: 9.39.5(jiti@2.7.0)
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      typescript-eslint:
+        specifier: ^8.71.2
+        version: 8.71.2(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@20.19.43)(jsdom@25.0.1)(lightningcss@1.32.0)(msw@2.15.0(@types/node@20.19.43)(typescript@5.9.3))
+
   packages/platform:
     dependencies:
       '@portfolio/shared':

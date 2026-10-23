@@ -20,6 +20,8 @@ export const FREE_PLAN_LIMITS = {
   sqliteRowsReadPerDay: 5_000_000,
   /** SQLite rows written per UTC day. */
   sqliteRowsWrittenPerDay: 100_000,
+  /** Workers AI neurons per UTC day on the Workers Free plan; requests beyond it fail (docs: Workers AI > Platform > Pricing). Resets at 00:00 UTC. */
+  workersAiNeuronsPerDay: 10_000,
   /** Durable Object storage of the whole account, in bytes. */
   durableObjectStorageBytesPerAccount: 5_000_000_000,
   /** Durable Object storage of one object, in bytes. */
@@ -37,6 +39,7 @@ export const METRIC_LIMITS: MetricLimits = {
   durableObjectGbSeconds: FREE_PLAN_LIMITS.durableObjectGbSecondsPerDay,
   rowsRead: FREE_PLAN_LIMITS.sqliteRowsReadPerDay,
   rowsWritten: FREE_PLAN_LIMITS.sqliteRowsWrittenPerDay,
+  aiNeurons: FREE_PLAN_LIMITS.workersAiNeuronsPerDay,
   storageBytes: FREE_PLAN_LIMITS.durableObjectStorageBytesPerObject,
 };
 

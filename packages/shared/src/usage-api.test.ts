@@ -15,6 +15,7 @@ const snapshot = (): UsageSnapshot => ({
     durableObjectGbSeconds: metric(1.5, 13_000),
     rowsRead: metric(100, 5_000_000),
     rowsWritten: metric(5, 100_000),
+    aiNeurons: metric(120, 10_000),
     storageBytes: metric(2048, 1_000_000_000),
   },
 });

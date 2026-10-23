@@ -13,6 +13,7 @@
  * - POST   /classification/import     body = ClassificationImportRequest (max 1 MB); `dryRun` only reports what would change
  */
 import { z } from 'zod';
+import { KPI_TEMPLATE_IDS, type KpiTemplateId } from './earnings.js';
 import { normalizeDomain } from './logo-domains.js';
 import { isT212Ticker } from './t212-ticker.js';
 import { ASSET_CLASSES, PROFILE_SOURCES, type AssetClass, type InstrumentProfile, type ProfileSource } from './types.js';
@@ -44,6 +45,8 @@ export interface ClassificationFields {
   sector?: string;
   country?: string;
   domain?: string;
+  /** The earnings summary template of the company (see earnings.ts); not a profile field either. */
+  kpiTemplate?: KpiTemplateId;
 }
 
 export const CLASSIFICATION_FIELDS = ['name', 'assetClass', 'sector', 'country'] as const;
@@ -75,10 +78,10 @@ const domainField = z
     return domain ?? z.NEVER;
   });
 
-export const classificationFieldsSchema = z.object({ ...fieldShape, domain: domainField.optional() }).strict();
+export const classificationFieldsSchema = z.object({ ...fieldShape, domain: domainField.optional(), kpiTemplate: z.enum(KPI_TEMPLATE_IDS).optional() }).strict();
 
 /** `PUT` body: the fields to store, at least one. */
-export const classificationPutSchema = classificationFieldsSchema.refine((fields) => hasClassification(fields), 'Give at least one of name, assetClass, sector, country or website domain');
+export const classificationPutSchema = classificationFieldsSchema.refine((fields) => hasClassification(fields), 'Give at least one of name, assetClass, sector, country, website domain or earnings template');
 
 const isin = z
   .string()
@@ -107,7 +110,7 @@ export const classificationImportSchema = z
   .strict();
 export type ClassificationImportRequest = z.input<typeof classificationImportSchema>;
 
-export const hasClassification = (fields: ClassificationFields): boolean => CLASSIFICATION_FIELDS.some((field) => fields[field] !== undefined) || fields.domain !== undefined;
+export const hasClassification = (fields: ClassificationFields): boolean => CLASSIFICATION_FIELDS.some((field) => fields[field] !== undefined) || fields.domain !== undefined || fields.kpiTemplate !== undefined;
 
 /** The fields that are set, nothing else (a stored item or a request body may carry other attributes). */
 export function classificationFieldsOf(source: ClassificationFields): ClassificationFields {
@@ -117,6 +120,7 @@ export function classificationFieldsOf(source: ClassificationFields): Classifica
   if (source.sector !== undefined) out.sector = source.sector;
   if (source.country !== undefined) out.country = source.country;
   if (source.domain !== undefined) out.domain = source.domain;
+  if (source.kpiTemplate !== undefined) out.kpiTemplate = source.kpiTemplate;
   return out;
 }
 
@@ -238,8 +242,8 @@ export function applyClassificationOverrides(
 ): Record<string, InstrumentProfile> {
   const out: Record<string, InstrumentProfile> = { ...profiles };
   for (const [symbol, override] of Object.entries(overrides)) {
-    // The logo domain is not a profile field: only the four allocation fields are laid over the profile.
-    const { domain: _logoDomain, ...fields } = classificationFieldsOf(override);
+    // The logo domain and the earnings template are not profile fields: only the four allocation fields are laid over the profile.
+    const { domain: _logoDomain, kpiTemplate: _kpiTemplate, ...fields } = classificationFieldsOf(override);
     if (!CLASSIFICATION_FIELDS.some((field) => fields[field] !== undefined)) continue;
     const profile = profiles[symbol];
     if (profile !== undefined) out[symbol] = { ...profile, ...fields };

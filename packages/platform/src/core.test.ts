@@ -130,7 +130,7 @@ describe('schedule', () => {
 
   it('declares one schedule per job with unique names', () => {
     expect(new Set(SCHEDULED_JOBS.map((s) => s.name)).size).toBe(SCHEDULED_JOBS.length);
-    expect(SCHEDULED_JOBS.map((s) => s.job)).toEqual(['refreshPrices', 'refreshCalendar', 'syncBroker', 'syncBroker', 'notifyDividends', 'refreshT212Quotes', 'refreshT212Quotes']);
+    expect(SCHEDULED_JOBS.map((s) => s.job)).toEqual(['refreshPrices', 'refreshCalendar', 'syncBroker', 'syncBroker', 'notifyDividends', 'refreshT212Quotes', 'refreshT212Quotes', 'watchEarnings', 'watchEarnings']);
   });
 
   it('adds the intraday sync and the notification run on Cloudflare only, leaving the AWS schedules as they were', () => {
@@ -142,6 +142,12 @@ describe('schedule', () => {
     expect(toUnixCron(notify)).toBe('0 9 * * *');
     const daily = SCHEDULED_JOBS.find((s) => s.name === 'broker-sync')!;
     expect([daily.hours, daily.weekdaysOnly, daily.cloudflareOnly]).toEqual([[6], false, undefined]);
+    const watch = SCHEDULED_JOBS.find((s) => s.name === 'earnings-watch')!;
+    expect(watch).toMatchObject({ job: 'watchEarnings', timezone: 'Europe/Amsterdam', minute: [0, 30], weekdaysOnly: true, cloudflareOnly: true });
+    expect(watch.hours).toEqual([13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]);
+    expect(toUnixCron(watch)).toBe('0,30 13,14,15,16,17,18,19,20,21,22,23 * * MON-FRI');
+    const morning = SCHEDULED_JOBS.find((s) => s.name === 'earnings-watch-morning')!;
+    expect(toUnixCron(morning)).toBe('30 7 * * *');
     expect(SCHEDULED_JOBS.filter((s) => s.cloudflareOnly !== true).map((s) => s.name)).toEqual(['prices-refresh', 'prices-calendar', 'broker-sync']);
   });
 });

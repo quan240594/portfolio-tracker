@@ -174,12 +174,12 @@ export function buildReceivedNotification(notice: ReceivedNotice): NotificationM
   return build('received', notice.symbol, `${notice.paidDate}:${notice.transactionId}`, `${label} dividend received: ${received}`, body, withPct(`${label} received ${received}`, notice.comparison));
 }
 
-/** One notification for many due items: the title counts them, the body lists the first three, a tap opens the calendar. */
-export function buildSummaryNotification(lines: readonly string[], today: string): PushNotificationPayload {
+/** One notification for many due items: the title counts them (`noun` says what kind: dividend, earnings or portfolio updates), the body lists the first three, a tap opens the calendar. */
+export function buildSummaryNotification(lines: readonly string[], today: string, noun = 'dividend'): PushNotificationPayload {
   const listed = lines.slice(0, MAX_SEPARATE_NOTIFICATIONS);
   const rest = lines.length - listed.length;
   const body = [...listed, ...(rest > 0 ? [`and ${rest} more`] : [])].join(' · ');
-  return { type: 'summary', symbol: '', title: `${lines.length} dividend updates`, body: truncate(body, MAX_BODY_LENGTH), url: '/calendar', tag: `summary:${today}:${lines.length}` };
+  return { type: 'summary', symbol: '', title: `${lines.length} ${noun} updates`, body: truncate(body, MAX_BODY_LENGTH), url: '/calendar', tag: `summary:${today}:${lines.length}` };
 }
 
 /** The payload of the "Send a test notification" button. */

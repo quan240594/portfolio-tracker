@@ -14,9 +14,13 @@ export const USAGE_SCHEMAS = [
     durable_object_requests INTEGER NOT NULL DEFAULT 0,
     durable_object_gb_seconds REAL NOT NULL DEFAULT 0,
     rows_read INTEGER NOT NULL DEFAULT 0,
-    rows_written INTEGER NOT NULL DEFAULT 0
+    rows_written INTEGER NOT NULL DEFAULT 0,
+    ai_neurons REAL NOT NULL DEFAULT 0
   ) WITHOUT ROWID`,
 ] as const;
+
+/** A ledger created before a counter existed lacks its column: SQLite has no `ADD COLUMN IF NOT EXISTS`, so the column list decides. */
+const ADDED_COLUMNS: readonly { column: string; definition: string }[] = [{ column: 'ai_neurons', definition: 'REAL NOT NULL DEFAULT 0' }];
 
 const COLUMNS: Readonly<Record<UsageCounterMetric, string>> = {
   workerRequests: 'worker_requests',
@@ -24,6 +28,7 @@ const COLUMNS: Readonly<Record<UsageCounterMetric, string>> = {
   durableObjectGbSeconds: 'durable_object_gb_seconds',
   rowsRead: 'rows_read',
   rowsWritten: 'rows_written',
+  aiNeurons: 'ai_neurons',
 };
 
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -49,6 +54,9 @@ export class SqlUsageStore implements UsageStore {
   constructor(storage: SqlStorageHost, options: UsageOptions = {}) {
     this.db = new MeteredSql(storage.sql, options.onUsage);
     for (const schema of USAGE_SCHEMAS) this.db.rows(schema);
+    // The column list is read straight from the storage: it is schema bookkeeping, not data, and is not metered.
+    const existing = new Set(storage.sql.exec<{ name: string }>('PRAGMA table_info(usage)').toArray().map((row) => row.name));
+    for (const { column, definition } of ADDED_COLUMNS) if (!existing.has(column)) this.db.rows(`ALTER TABLE usage ADD COLUMN ${column} ${definition}`);
   }
 
   add(day: string, delta: UsageDelta): Promise<void> {

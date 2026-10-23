@@ -106,10 +106,10 @@ describe('declared and ex-dividend', () => {
   });
 
   it('respects the type switches', () => {
-    const off = (type: 'exDividend' | 'declared' | 'received') => ({ ...defaultNotificationSettings(), types: { ...defaultNotificationSettings().types, [type]: false } });
+    const off = (type: 'exDividend' | 'declared' | 'received' | 'earnings') => ({ ...defaultNotificationSettings(), types: { ...defaultNotificationSettings().types, [type]: false } });
     expect(detectDueNotifications(base({ settings: off('exDividend') })).due.map((d) => d.type)).toEqual(['declared']);
     expect(detectDueNotifications(base({ settings: off('declared') })).due.map((d) => d.type)).toEqual(['exDividend']);
-    const none = { ...defaultNotificationSettings(), types: { exDividend: false, declared: false, received: false } };
+    const none = { ...defaultNotificationSettings(), types: { exDividend: false, declared: false, received: false, earnings: false } };
     expect(detectDueNotifications(base({ settings: none })).due).toEqual([]);
   });
 
@@ -123,7 +123,7 @@ describe('declared and ex-dividend', () => {
   });
 
   it('values the shares directly when the dividend is in the base currency', () => {
-    const body = detectDueNotifications(base({ fx: null, dividendEvents: [event({ currency: 'EUR' })], settings: { ...defaultNotificationSettings(), types: { exDividend: false, declared: true, received: false } } })).due[0]!.message.payload.body;
+    const body = detectDueNotifications(base({ fx: null, dividendEvents: [event({ currency: 'EUR' })], settings: { ...defaultNotificationSettings(), types: { exDividend: false, declared: true, received: false, earnings: false } } })).due[0]!.message.payload.body;
     expect(body).toContain('about EUR 8.19 for your 6.4 shares');
   });
 
@@ -206,7 +206,7 @@ describe('received', () => {
   });
 
   it('does nothing when the type is off', () => {
-    const settings = { ...defaultNotificationSettings(), types: { exDividend: true, declared: true, received: false } };
+    const settings = { ...defaultNotificationSettings(), types: { exDividend: true, declared: true, received: false, earnings: false } };
     expect(detectDueNotifications({ ...received(paid()), settings }).due).toEqual([]);
   });
 });
@@ -215,7 +215,7 @@ describe('ordering and failure', () => {
   it('orders by date, then symbol', () => {
     const events = [event({ symbol: 'AAA', exDate: '2026-11-08', payDate: undefined }), event({ symbol: 'ZZZ', exDate: '2026-11-05' }), event({ symbol: 'BBB', exDate: '2026-11-05' })];
     const transactions = ['AAA', 'ZZZ', 'BBB'].map((symbol) => tx({ symbol }));
-    const { due } = detectDueNotifications(base({ dividendEvents: events, transactions, settings: { ...defaultNotificationSettings(), types: { exDividend: false, declared: true, received: false } } }));
+    const { due } = detectDueNotifications(base({ dividendEvents: events, transactions, settings: { ...defaultNotificationSettings(), types: { exDividend: false, declared: true, received: false, earnings: false } } }));
     expect(due.map((d) => d.symbol)).toEqual(['BBB', 'ZZZ', 'AAA']);
   });
 

@@ -8,6 +8,19 @@ import type { SqlUsage } from './sql.js';
 runUsageStoreContract('SqlUsageStore (SQLite in Node)', async () => new SqlUsageStore(await SqlJsStorage.create()));
 
 describe('SqlUsageStore', () => {
+  it('adds the AI neurons column to a ledger created before it existed, keeping the old days', async () => {
+    const storage = await SqlJsStorage.create();
+    storage.sql.exec(`CREATE TABLE usage (day TEXT PRIMARY KEY, worker_requests INTEGER NOT NULL DEFAULT 0, durable_object_requests INTEGER NOT NULL DEFAULT 0,
+      durable_object_gb_seconds REAL NOT NULL DEFAULT 0, rows_read INTEGER NOT NULL DEFAULT 0, rows_written INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID`);
+    storage.sql.exec("INSERT INTO usage (day, worker_requests) VALUES ('2026-01-04', 7)");
+    const store = new SqlUsageStore(storage);
+    expect(await store.read('2026-01-04')).toMatchObject({ workerRequests: 7, aiNeurons: 0 });
+    await store.add('2026-01-04', { aiNeurons: 12.5 });
+    expect(await store.read('2026-01-04')).toMatchObject({ workerRequests: 7, aiNeurons: 12.5 });
+    // A second start finds the column and leaves the table alone.
+    expect(await new SqlUsageStore(storage).read('2026-01-04')).toMatchObject({ aiNeurons: 12.5 });
+  });
+
   it('keeps one row per day, whatever the number of adds', async () => {
     const storage = await SqlJsStorage.create();
     const store = new SqlUsageStore(storage);
