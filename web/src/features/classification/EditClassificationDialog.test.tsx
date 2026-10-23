@@ -104,6 +104,24 @@ describe('EditClassificationDialog', () => {
     expect(puts[1]!.body).toEqual({ assetClass: 'COMMODITY', country: 'Invented Land' });
   });
 
+  it('chooses the earnings template: automatic by default, saved with the other fields, and shown again for an override', async () => {
+    const puts = recordPuts();
+    const { user, dialog } = open(AAPL);
+    const select = dialog.getByLabelText('Earnings template');
+    expect(select).toHaveValue('');
+    expect(within(select).getAllByRole('option').map((option) => option.textContent)).toEqual(['Automatic', 'General company', 'REIT (real estate)', 'Bank', 'Software as a service', 'Tech infrastructure and cloud']);
+    expect(select).toHaveAccessibleDescription(/Which figures the earnings summary of this company highlights/);
+    await user.selectOptions(select, 'bank');
+    await user.click(dialog.getByRole('button', { name: 'Save classification' }));
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]!.body).toEqual({ kpiTemplate: 'bank' });
+  });
+
+  it('prefills the template of an existing override', () => {
+    const { dialog } = open({ ...OVERRIDDEN, override: { ...OVERRIDDEN.override, kpiTemplate: 'saas' } });
+    expect(dialog.getByLabelText('Earnings template')).toHaveValue('saas');
+  });
+
   it('saves the website domain of the logo alone, and keeps it when another field changes', async () => {
     const puts = recordPuts();
     const { user, dialog, onClose } = open(AAPL);

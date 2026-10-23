@@ -156,3 +156,34 @@ describe('the Trading 212 quote schedules on Amsterdam time', () => {
     expect(slots).toBe(60);
   });
 });
+
+describe('the earnings watch schedule in Amsterdam time', () => {
+  const watch = toUnixCron(SCHEDULED_JOBS.find((job) => job.name === 'earnings-watch')!);
+  const morning = toUnixCron(SCHEDULED_JOBS.find((job) => job.name === 'earnings-watch-morning')!);
+  const next = (cron: string, from: number) => iso(nextCronRun(cron, from, 'Europe/Amsterdam'));
+
+  it('runs every 30 minutes from 13:00 to 23:30 on weekdays (summer time)', () => {
+    expect(next(watch, utc(2026, 10, 21, 10, 0))).toBe('2026-10-21T11:00:00.000Z');
+    expect(next(watch, utc(2026, 10, 21, 11, 0))).toBe('2026-10-21T11:30:00.000Z');
+    expect(next(watch, utc(2026, 10, 21, 21, 0))).toBe('2026-10-21T21:30:00.000Z');
+    // 23:30 CEST is the last run of the day; the next one is the following weekday at 13:00 CEST.
+    expect(next(watch, utc(2026, 10, 21, 21, 30))).toBe('2026-10-22T11:00:00.000Z');
+  });
+
+  it('skips the weekend and follows the clock change of Sunday 25 October 2026 (CEST to CET)', () => {
+    expect(next(watch, utc(2026, 10, 23, 21, 30))).toBe('2026-10-26T12:00:00.000Z');
+    expect(next(watch, utc(2026, 10, 26, 12, 0))).toBe('2026-10-26T12:30:00.000Z');
+    expect(next(watch, utc(2026, 10, 26, 22, 30))).toBe('2026-10-27T12:00:00.000Z');
+  });
+
+  it('keeps the morning run at 07:30 local time every day, before and after the clock change', () => {
+    expect(next(morning, utc(2026, 10, 24, 5, 0))).toBe('2026-10-24T05:30:00.000Z');
+    expect(next(morning, utc(2026, 10, 24, 5, 30))).toBe('2026-10-25T06:30:00.000Z');
+    expect(next(morning, utc(2026, 10, 25, 6, 30))).toBe('2026-10-26T06:30:00.000Z');
+  });
+
+  it('follows the spring change (CET to CEST) of Sunday 29 March 2026 too', () => {
+    expect(next(watch, utc(2026, 3, 27, 22, 30))).toBe('2026-03-30T11:00:00.000Z');
+    expect(next(morning, utc(2026, 3, 28, 6, 30))).toBe('2026-03-29T05:30:00.000Z');
+  });
+});

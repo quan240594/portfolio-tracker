@@ -1,4 +1,5 @@
 import type { AlarmStorageHost, SqlStorageLike } from '@portfolio/cloudflare';
+import type { AiLike } from '@portfolio/earnings';
 
 /** The structural slice of the Workers runtime this package uses: no Cloudflare type package, so everything runs in Node too. */
 export interface HubStorage extends AlarmStorageHost {
@@ -53,6 +54,15 @@ export interface HubEnv {
   VAPID_PRIVATE_KEY?: string;
   /** Optional, comma separated: push-service hosts a subscription endpoint may use (`*.` = subdomains); defaults to the browsers' push services. */
   PUSH_ALLOWED_HOSTS?: string;
+  /**
+   * Earnings summaries (all optional; the feature is off until both exist): `SEC_CONTACT` is the complete User-Agent every SEC request declares
+   * (name and contact information, passed at deploy time like ORIGIN, never committed), `AI` is the Workers AI binding (`"ai": { "binding": "AI" }`),
+   * `EARNINGS_AI_MODEL` a Workers AI text model (default `@cf/meta/llama-3.1-8b-instruct-fp8`), `EARNINGS_AI_DAILY_NEURONS` the daily cap (default 6000, at most 8000).
+   */
+  SEC_CONTACT?: string;
+  EARNINGS_AI_MODEL?: string;
+  EARNINGS_AI_DAILY_NEURONS?: string;
+  AI?: AiLike;
   /** Plain variables of the price service: `TICKER=coingecko-id` pairs, daily call budgets, EU refresh hours, FX back-fill start, calendar tuning. */
   COINGECKO_COIN_IDS?: string;
   EODHD_DAILY_LIMIT?: string;

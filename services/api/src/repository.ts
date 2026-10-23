@@ -1,5 +1,6 @@
 import {
   calendarKeys,
+  earningsKeys,
   ENTITY,
   fromItem,
   keys,
@@ -8,6 +9,7 @@ import {
   majorQuote,
   transactionItem,
   type DividendEvent,
+  type EarningsSummary,
   type EodPrice,
   type FxDay,
   type FxRates,
@@ -49,6 +51,9 @@ export interface Repository {
   getDividendEvents(symbol: string): Promise<DividendEvent[]>;
   /** Stored earnings and split events of `symbols` dated `from`..`to` (inclusive, YYYY-MM-DD); see calendarKeys. */
   getCalendarEvents(symbols: string[], from: string, to: string): Promise<StoredCalendarEvents>;
+  /** The newest stored earnings summaries of a symbol, newest first (see earningsKeys). */
+  getEarningsSummaries(symbol: string, limit: number): Promise<EarningsSummary[]>;
+  getEarningsSummary(symbol: string, reportDate: string): Promise<EarningsSummary | null>;
   registerUser(userId: string): Promise<void>;
   /** `currency` may be omitted when unknown (watchlist symbols). */
   trackTickers(tickers: { symbol: string; currency?: string }[]): Promise<void>;
@@ -158,6 +163,16 @@ export class ItemRepository implements Repository {
       earnings: earnings.flat().map((i) => fromItem<StoredEarningsEvent>(i)),
       splits: splits.flat().map((i) => fromItem<StoredSplitEvent>(i)),
     };
+  }
+
+  async getEarningsSummaries(symbol: string, limit: number): Promise<EarningsSummary[]> {
+    const page = await this.store.query({ pk: earningsKeys.tickerPk(symbol), sk: { beginsWith: earningsKeys.summaryPrefix }, reverse: true, limit });
+    return page.items.map((item) => fromItem<EarningsSummary>(item));
+  }
+
+  async getEarningsSummary(symbol: string, reportDate: string): Promise<EarningsSummary | null> {
+    const item = await this.store.get(earningsKeys.summary(symbol, reportDate));
+    return item ? fromItem<EarningsSummary>(item) : null;
   }
 
   registerUser(userId: string): Promise<void> {

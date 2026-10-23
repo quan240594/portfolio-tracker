@@ -1,4 +1,4 @@
-import { ANALYTICS_ROUTES, API_ROUTES, ASSET_DETAIL_ROUTES, CALENDAR_ROUTES, CLASSIFICATION_ROUTES, DIVIDENDS_ROUTES, GOALS_ROUTES, GROWTH_ROUTES, MANAGEMENT_ROUTES, METRICS_ROUTES, NOTIFICATIONS_ROUTES } from '@portfolio/shared';
+import { ANALYTICS_ROUTES, API_ROUTES, ASSET_DETAIL_ROUTES, CALENDAR_ROUTES, CLASSIFICATION_ROUTES, DIVIDENDS_ROUTES, EARNINGS_ROUTES, GOALS_ROUTES, GROWTH_ROUTES, MANAGEMENT_ROUTES, METRICS_ROUTES, NOTIFICATIONS_ROUTES } from '@portfolio/shared';
 import { HttpError, type RouteResult } from './lib/http.js';
 import type { RouteContext } from './deps.js';
 import * as portfolio from './routes/portfolio.js';
@@ -15,10 +15,11 @@ import { goalsHandlers } from './routes/goals.js';
 import { assetDetailHandlers } from './routes/securities.js';
 import { classificationHandlers } from './routes/classification.js';
 import { notificationsHandlers } from './routes/notifications.js';
+import { earningsHandlers } from './routes/earnings.js';
 import * as brokers from './routes/brokers.js';
 
 export type RouteHandler = (ctx: RouteContext) => Promise<RouteResult>;
-const ROUTES = { ...API_ROUTES, ...ANALYTICS_ROUTES, ...GROWTH_ROUTES, ...METRICS_ROUTES, ...GOALS_ROUTES, ...CALENDAR_ROUTES, ...MANAGEMENT_ROUTES, ...DIVIDENDS_ROUTES, ...ASSET_DETAIL_ROUTES, ...CLASSIFICATION_ROUTES, ...NOTIFICATIONS_ROUTES };
+const ROUTES = { ...API_ROUTES, ...ANALYTICS_ROUTES, ...GROWTH_ROUTES, ...METRICS_ROUTES, ...GOALS_ROUTES, ...CALENDAR_ROUTES, ...MANAGEMENT_ROUTES, ...DIVIDENDS_ROUTES, ...ASSET_DETAIL_ROUTES, ...CLASSIFICATION_ROUTES, ...NOTIFICATIONS_ROUTES, ...EARNINGS_ROUTES };
 type RouteName = keyof typeof ROUTES;
 
 const handlers: Record<RouteName, RouteHandler> = {
@@ -32,6 +33,7 @@ const handlers: Record<RouteName, RouteHandler> = {
   ...assetDetailHandlers,
   ...classificationHandlers,
   ...notificationsHandlers,
+  ...earningsHandlers,
   health: () => Promise.resolve({ statusCode: 200, body: { status: 'ok' } }),
   listPortfolios: portfolios.listPortfolios,
   createPortfolio: portfolios.createPortfolio,

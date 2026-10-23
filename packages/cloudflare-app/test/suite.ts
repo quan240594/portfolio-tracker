@@ -1,6 +1,7 @@
 import { MAX_FILE_BYTES } from '@portfolio/cloudflare';
 import { METRIC_LIMITS, type MetricLimits } from '@portfolio/platform';
 import { createTestSubscriber, verifyVapidAuthorization } from '@portfolio/platform/testing';
+import type { FixtureRelease } from '@portfolio/earnings/testing';
 import { alarmDiagnosticsSchema, usageSnapshotSchema, type AlarmDiagnosticsReport } from '@portfolio/shared';
 import { defineApiScenarios } from '@portfolio/api/testing';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
@@ -16,6 +17,16 @@ export interface SuiteStartOptions {
   logos?: Record<string, string>;
   /** Leaves the VAPID keys out: the notification feature is off. */
   noVapid?: boolean;
+  /** Earnings summaries: the invented releases the fake SEC serves, the `SEC_CONTACT` of the Worker and whether the Workers AI binding exists (a fake that extracts them). */
+  earnings?: EarningsStartOptions;
+}
+
+export interface EarningsStartOptions {
+  releases?: readonly FixtureRelease[];
+  /** The `SEC_CONTACT` variable; absent = the feature reports "not configured". */
+  contact?: string;
+  /** Adds the fake Workers AI binding. */
+  ai?: boolean;
 }
 
 export type StartStack = (options?: SuiteStartOptions) => Promise<Stack>;

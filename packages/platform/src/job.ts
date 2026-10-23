@@ -12,6 +12,8 @@ export const JOBS = {
   refreshCalendar: 'refreshCalendar',
   refreshT212Quotes: 'refreshT212Quotes',
   notifyDividends: 'notifyDividends',
+  watchEarnings: 'watchEarnings',
+  fetchEarningsSummary: 'fetchEarningsSummary',
 } as const;
 
 export type JobName = (typeof JOBS)[keyof typeof JOBS];
@@ -29,6 +31,13 @@ export interface JobPayloads {
   refreshT212Quotes: { trigger: 'scheduled' | 'sync'; userId?: string };
   /** Send the dividend push notifications that are due (`scheduled` for everyone, `sync` after a broker sync for `userId`). */
   notifyDividends: { trigger: 'scheduled' | 'sync'; userId?: string };
+  /**
+   * Look for newly published quarterly results of the held companies (`scheduled`), or re-check one symbol the owner asked for (`manual`, with `symbol`).
+   * Cheap: one SEC request per candidate symbol; a found release becomes a `fetchEarningsSummary` job.
+   */
+  watchEarnings: { trigger: 'scheduled' | 'manual'; symbol?: string };
+  /** Read one release (an SEC filing of `symbol`), extract and verify its figures and store the summary. */
+  fetchEarningsSummary: { symbol: string; cik: string; accession: string; form: '8-K' | '6-K'; filingDate: string; primaryDocument: string; origin: 'live' | 'backfill' };
 }
 
 /**

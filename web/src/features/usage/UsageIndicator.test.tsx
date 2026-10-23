@@ -50,7 +50,7 @@ describe('UsageIndicator panel', () => {
 
     const panel = screen.getByRole('region', { name: 'Free-plan usage' });
     expect(screen.getByRole('button', { name: 'Usage high' })).toHaveAttribute('aria-expanded', 'true');
-    expect(within(panel).getAllByRole('listitem')).toHaveLength(6);
+    expect(within(panel).getAllByRole('listitem')).toHaveLength(7);
 
     const worker = within(panel).getByRole('meter', { name: 'Worker requests' });
     expect(worker.tagName).toBe('METER');
@@ -64,6 +64,16 @@ describe('UsageIndicator panel', () => {
     expect(within(panel).getByRole('meter', { name: 'Database rows read' }).closest('li')).toHaveTextContent('3.625.000 of 5.000.000 (72,5%)');
     expect(within(panel).getByRole('meter', { name: 'Database rows written' }).closest('li')).toHaveTextContent('OK');
     expect(within(panel).getByRole('meter', { name: 'Durable Object duration (GB-s)' })).toBeInTheDocument();
+    expect(within(panel).getByRole('meter', { name: 'Workers AI neurons' }).closest('li')).toHaveTextContent('0 of 10.000 (0,0%)');
+  });
+
+  it('lists the Workers AI allowance as a metric: its state does not pause the app (the overall chip follows the other metrics)', async () => {
+    serveUsage(usageSnapshot({ aiNeurons: 85 }));
+    renderWithProviders(<UsageIndicator />);
+    await userEvent.setup().click(await chip('Usage OK'));
+    const row = within(screen.getByRole('region', { name: 'Free-plan usage' })).getByRole('meter', { name: 'Workers AI neurons' }).closest('li')!;
+    expect(row).toHaveTextContent('Paused');
+    expect(row).toHaveTextContent('8.500 of 10.000 (85,0%)');
   });
 
   it('explains the cap policy and when the counters reset, in local time next to 00:00 UTC', async () => {

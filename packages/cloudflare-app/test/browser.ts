@@ -1,4 +1,5 @@
-import type { FakeGithub, FakeLogos, FakePrices, FakePush, FakeTrading212 } from './fakes.js';
+import type { Item } from '@portfolio/platform';
+import type { FakeGithub, FakeLogos, FakePrices, FakePush, FakeSecService, FakeTrading212 } from './fakes.js';
 
 export interface DrainOptions {
   /**
@@ -16,12 +17,15 @@ export interface Stack {
   readonly prices: FakePrices;
   readonly logos: FakeLogos;
   readonly push: FakePush;
+  readonly sec: FakeSecService;
   /** Sends a request to the Worker exactly as a browser would reach it. */
   send(path: string, init?: RequestInit): Promise<Response>;
   /** Runs the Hub's alarm until no job is left (Node), or waits until the Hub reports no pending job (workerd). */
   drain(options?: DrainOptions): Promise<void>;
   /** Enqueues a job on the Hub as the schedule or an event would (the tests cannot wait for a real cron slot). */
   enqueue(job: string, payload: unknown): Promise<void>;
+  /** Writes items straight into the Hub's store (profiles and calendar dates the price service would have stored). */
+  seed(items: readonly Item[]): Promise<void>;
   /** Jobs that ran out of attempts (must stay empty: a denied or unconfigured job is skipped or deferred, not failed). */
   failedJobs(): Promise<{ job: string; error: string | null }[]>;
   /** Names of the cron schedules the Hub keeps. */

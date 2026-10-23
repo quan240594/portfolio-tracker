@@ -4,6 +4,7 @@ import type { CalendarEvent } from '@portfolio/shared';
 import { CompanyLogo } from '../../components/CompanyLogo';
 import { Dialog } from '../../components/Dialog';
 import { formatDate, formatMoney, formatQuantity, formatWeekdayDate } from '../../lib/format';
+import { SummaryLink } from '../earnings/SummaryLink';
 import { EVENT_META, STATUS_LABELS, isDividend, sourceLabel } from './calendarModel';
 import { EventMarker } from './EventMarker';
 import { EventRow } from './EventList';
@@ -83,6 +84,7 @@ export function EventDialog({ event, baseCurrency, onClose, withScope }: Readonl
       description={formatWeekdayDate(event.date)}
       footer={
         <>
+          {event.type === 'EARNINGS' && <SummaryLink symbol={event.symbol} date={event.date} onNavigate={onClose} />}
           <Link to={link.to} className="btn-secondary" onClick={onClose}>
             {link.label}
           </Link>

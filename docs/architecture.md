@@ -2009,6 +2009,7 @@ pricing" pages, cross-checked with the probe above). Daily counters reset at **0
 | `rowsRead` | 5,000,000 / day | counter |
 | `rowsWritten` | 100,000 / day | counter |
 | `storageBytes` | 1 GB per object (5 GB per account; one object here, so 1 GB binds, decimal GB) | gauge |
+| `aiNeurons` | 10,000 Workers AI neurons / day (Free plan, reset 00:00 UTC, a call over the allowance fails) | counter, **scoped**: warn 60 % / block 80 % like the others, but it only gates the earnings AI work (`BudgetGuard.aiAllowance()`), it never changes the overall state or pauses the app |
 | subrequests | 50 per invocation | per invocation, not tracked by the guard (the job handlers already chunk to it) |
 
 ### States and thresholds
@@ -2076,7 +2077,8 @@ the Worker-side counters the app cannot see. The overall state is the worst metr
     "durableObjectGbSeconds": { "used": 0, "limit": 13000, "percent": 0, "state": "ok" },
     "rowsRead": { "used": 0, "limit": 5000000, "percent": 0, "state": "ok" },
     "rowsWritten": { "used": 0, "limit": 100000, "percent": 0, "state": "ok" },
-    "storageBytes": { "used": 0, "limit": 1000000000, "percent": 0, "state": "ok" }
+    "storageBytes": { "used": 0, "limit": 1000000000, "percent": 0, "state": "ok" },
+    "aiNeurons": { "used": 0, "limit": 10000, "percent": 0, "state": "ok" }
   }
 }
 ```
@@ -2493,6 +2495,9 @@ bindings are ignored). Consequences, all through existing mechanisms:
 | `GITHUB_CLIENT_ID`, `OWNER_GITHUB_ID`, `ORIGIN` | vars (placeholders in the file, `--var` at deploy) | OAuth client id, the one allowed numeric GitHub id, the public `https` origin |
 | `BASE_CURRENCY` (default EUR), `T212_SYMBOL_OVERRIDES` (optional JSON) | vars | as on AWS |
 | `TWELVEDATA_API_KEY`, `EODHD_API_KEY`, `COINGECKO_API_KEY`, `ALPHAVANTAGE_API_KEY` | optional secrets | provider keys of the price service; a missing one switches that source off (see `GET /api/prices/status`) |
+| `AI` | Workers AI binding (`"ai": { "binding": "AI" }`, free-plan compatible, no key) | the earnings extraction, see "Earnings summaries" |
+| `SEC_CONTACT` | var, passed by `deploy:app` when set, never committed | the declared contact in the SEC `User-Agent`; without it the earnings feature makes no SEC call |
+| `EARNINGS_AI_MODEL`, `EARNINGS_AI_DAILY_NEURONS` | optional vars | Workers AI model id (default `@cf/meta/llama-3.1-8b-instruct-fp8`), daily neuron cap of the feature (default 6000, at most 8000) |
 | `COINGECKO_COIN_IDS`, `EODHD_DAILY_LIMIT`, `ALPHAVANTAGE_DAILY_LIMIT`, `EU_REFRESH_HOURS`, `FX_HISTORY_START`, `CALENDAR_EARNINGS_HORIZON`, `CALENDAR_ALPHAVANTAGE_DAILY_CALLS`, `CALENDAR_EODHD_DAILY_CALLS`, `CALENDAR_RECHECK_DAYS`, `CALENDAR_REFRESH_DIVIDENDS`, `CALENDAR_SPLIT_LOOKBACK_DAYS` | optional vars (defaults in `parsePricesConfig`) | tuning of the price service |
 
 No `[limits]`, routes, custom domains, R2, KV, Queues or D1; `compatibility_flags: ["nodejs_compat"]` (CSV parsing uses `Buffer`);
@@ -3014,7 +3019,7 @@ meaning of `fallback=404`, and every domain of the curated table against the liv
 
 ## Dividend push notifications
 
-The owner's phone gets a Web Push message for three events of **held** securities, each already saying how the dividend per share
+The owner's phone gets a Web Push message for three events of **held** securities (and a fourth, `earnings`, see "Earnings summaries"), each already saying how the dividend per share
 changed against the previous payment and against a year ago. It works from Chrome on Android in the browser (no home-screen install). The
 sender (WebCrypto and an injected `fetch`, no Node APIs) and all rules are platform-neutral; only the Cloudflare app wires a sender and
 a schedule, so on AWS the feature is intentionally not wired: `GET /notifications` answers `available: false` and the web app hides it.
@@ -3093,7 +3098,7 @@ broker's rate when it booked one).
 | Item | SK | Shape |
 |---|---|---|
 | `PUSH_SUBSCRIPTION` | `PUSHSUB#<sha-256 hex (32) of the endpoint>` | `{ userId, id, endpoint, keys: { p256dh, auth }, label, createdAt, lastSuccessAt?, failures, lastFailureAt? }` |
-| `NOTIFICATION_SETTINGS` | `NOTIFYSETTINGS` | `{ userId, types: { exDividend, declared, received }, exDividendDaysBefore (1..5, default 2), createdAt, updatedAt }`; quiet hours are fixed |
+| `NOTIFICATION_SETTINGS` | `NOTIFYSETTINGS` | `{ userId, types: { exDividend, declared, received, earnings }, exDividendDaysBefore (1..5, default 2), createdAt, updatedAt }`; quiet hours are fixed |
 | `NOTIFIED` | `NOTIFIED#<type>#<symbol>#<eventKey>` | `{ userId, type, symbol, eventKey (ex-date, or the transaction id), notifiedAt, silent? }` |
 
 | Route (authenticated, same-origin) | Result |
@@ -3287,3 +3292,160 @@ Tests: `pnpm --filter @portfolio/prices test` (every provider for GBX/GBp/ZAc/IL
 `eodhd-eod-london-pence` and `twelvedata-time-series-minor-units`), `pnpm --filter @portfolio/shared test`, `pnpm --filter @portfolio/api test` (stored pence rows read in pounds by
 history, holdings, asset detail, benchmark and dividends) and `pnpm --filter @portfolio/cloudflare-app test` (Node and real workerd: pence from an EODHD fake through the real job path
 give a sane history; Node: stored pence rows are healed at read time, repaired once by the refresh job, and a second refresh rewrites nothing).
+
+## Earnings summaries
+
+After a **held** company publishes its quarterly results, the personal Cloudflare deployment shows an automatic summary in two layers: a compact
+**scorecard** (EPS and revenue against the estimate, year-over-year and quarter-over-quarter lines, free cash flow and FCF per share) and a **detailed
+summary** (operating profit and margin, guidance, cash flow, segments, other metrics, key updates, one management quote). Everything comes from
+public, free sources: the SEC (the press release) and Cloudflare Workers AI (reads the text); one optional free source (Alpha Vantage) gives the EPS
+estimate. A figure the company does not publish is absent or "not disclosed", **never invented**. On AWS the feature is not wired: `GET /earnings/status`
+answers `available: false` and the web app hides the menu entry. Code: `packages/earnings` (pipeline, SEC client, jobs, fakes), contracts in
+`packages/shared/src/earnings*.ts`, routes in `services/api/src/routes/earnings.ts`, wiring in `packages/cloudflare-app/src/earnings.ts`, UI in `web/src/features/earnings`.
+
+### Flow
+
+```mermaid
+flowchart LR
+  subgraph Hub["Hub Durable Object (alarm steps)"]
+    W["watchEarnings: weekdays every 30 min 13:00-23:30 + 07:30 daily (Amsterdam)"] -->|"calendar date in [today-3, today], no summary yet; or daily discovery; or backfill"| Q["fetchEarningsSummary (one symbol)"]
+    Q --> T["strip HTML to text (<= 60,000 chars)"]
+    T --> X["Workers AI: extract values as printed, strict JSON (<= 2 calls)"]
+    X --> V["verify: every number, quote and bullet must be in the text, else dropped"]
+    V --> D["derive in code: YoY, QoQ, beat/miss, FCF, FCF per share, margins"]
+    D --> S[("TICKER#sym / EARNSUM#date (keep 8)")]
+    S -->|"notifyDividends trigger"| P["Web Push: earnings"]
+  end
+  C[("calendar EARN# events")] --> W
+  Q -->|"1 + 1 + 1 requests, 4 req/s bucket, declared User-Agent"| SEC[("sec.gov / data.sec.gov")]
+  X -->|"only the public release text"| AI[("Workers AI binding AI")]
+  D -->|"EPS estimate, 1 call per release, key optional"| AV[("Alpha Vantage EARNINGS")]
+  S --> API["GET /earnings, /earnings/status, /earnings/{symbol}/{period}, POST /earnings/{symbol}/refresh"] --> UI["/earnings, asset detail, calendar"]
+```
+
+### Sources, terms and limits
+
+| Source | What | Terms and limits | Handling |
+|---|---|---|---|
+| SEC `company_tickers.json` | ticker to CIK | free, keyless; fair access: declared `User-Agent` with contact, at most 10 requests/s | fetched once, cached per symbol in the symbol state; the CIK is looked up again after 30 days when it was missing |
+| SEC `data.sec.gov/submissions/CIK##########.json` | newest 8-K with item 2.02 (US issuers) or 6-K (foreign private issuers: ASML, Novo Nordisk, TSMC) | as above | 1 request per candidate symbol per check |
+| SEC `Archives/edgar/data/<cik>/<accession>/index.json` and the exhibit (EX-99.x, else the primary document) | the press release | as above | 1 + 1 requests per release; the filing URL is stored and shown ("Source: SEC filing") |
+| Cloudflare Workers AI (`env.AI.run`) | copies figures out of the text into JSON | Free plan: 10,000 neurons per day, reset 00:00 UTC, a call over the allowance **fails** (no billing without a paid plan) | `ai` binding; model `@cf/meta/llama-3.1-8b-instruct-fp8` (13,778 neurons per million input tokens, 26,128 per million output tokens; 32k context), JSON mode via `response_format: json_schema` |
+| Alpha Vantage `EARNINGS` | quarterly `reportedEPS` / `estimatedEPS` | optional secret `ALPHAVANTAGE_API_KEY`; 25 calls per day, shared with the price service (`DailyQuota('alphavantage')`) | one call per symbol per release, only when the quota allows |
+
+**SEC fair-access compliance.** Every request carries `User-Agent: <SEC_CONTACT>` (for example `PortfolioTracker/1.0 (personal use; you@example.com)`, set at
+deploy, never committed) and `Accept-Encoding: gzip`. Without `SEC_CONTACT` the feature reports `configured: false` (missing `sec-contact`) and makes **no** SEC call.
+A token bucket allows 4 requests per second (capacity 3) against the SEC's 10; a personal app does a handful of requests per day. A **403 or 429** blocks all SEC calls
+(shared `EARNINGS/SEC` row) for an hour, doubling to a day (or the `Retry-After`), and the status says "blocked by the SEC". Per symbol: at most one
+check per 30 minutes (doubling to 24 h after failures), 30 checks and 3 extraction attempts per UTC day.
+
+**Not used:** no real-time or paid data, no scraping of any estimate site. **Revenue, free cash flow and guidance consensus have no free legitimate source**: those cells
+say "no estimate available". If a release prints a comparison to analysts' expectations, it is not extracted.
+
+### When a symbol is checked (`watchEarnings`, `packages/earnings/src/jobs.ts`)
+
+Schedules (cloudflareOnly): `earnings-watch` weekdays at minutes 00 and 30 of hours 13 to 23 and `earnings-watch-morning` daily at 07:30, all Europe/Amsterdam (DST-safe:
+pinned-clock tests around both changes). Each run looks at the held symbols (cache `EARNINGS/HELD`, rebuilt every 6 hours from the transactions, one row) and queues
+`fetchEarningsSummary` for at most 10 of them:
+
+| Mode | Condition |
+|---|---|
+| calendar | a calendar earnings date in [today - 3, today] and no summary stored for that release |
+| discovery | once a day, when the calendar has no future date for the symbol and the newest stored release is 60 days old or older (or none): is there a newer 8-K 2.02 / 6-K? |
+| backfill | first run after deploy: the **most recent reported quarter** of up to 3 eligible symbols per run (`origin: 'backfill'`, silent) |
+| manual | `POST /earnings/{symbol}/refresh`, at most once per symbol per hour |
+
+ETFs, ETCs, commodities and crypto have no earnings and are skipped; an exchange-suffixed symbol (`ASML.AS`) is matched to its SEC ADR only when the SEC title shares a
+word with the holding's name (otherwise `not-in-sec`).
+
+### Text, extraction and verification (the core safety rule)
+
+1. **Text** (`text.ts`, pure): scripts and styles dropped, tables become pipe-separated rows, whitespace collapsed, capped at 60,000 characters (headline and financial tables first).
+2. **Extraction** (`ai.ts`): the release is *data* between delimiters; the prompt says to ignore any instruction inside it, to copy values **as printed** (with units), never to
+   compute, and to answer in the strict schema. No tools, no URLs from the output. At most **2 calls per release** (second attempt: a different prompt after invalid JSON),
+   `max_tokens` 1,800. The output is validated with a strict zod schema with length caps.
+3. **Verification** (`verify.ts`, `numbers.ts`): every number must be found in the text after normalisation (`$`, commas, million/billion/M/B and table scales such as "in millions",
+   percent, parentheses or a minus for negatives, decimals); otherwise the field is **dropped** and counted in `verification.dropped` (the names go to `droppedFields`, never the values).
+   The quote must appear verbatim (whitespace and quote characters normalised); a key-update bullet must share at least 60 % of its words with one sentence of the release and every number in it
+   must be printed. A summary without a verified headline number is **not stored** (`unreadable`, retried once after 6 hours, then given up with the reason).
+4. **Derived in code only** (`derive.ts`): YoY from the prior-year figure printed in the same release; QoQ from the previously stored summary of the symbol (same basis and currency; absent
+   for the first one: "n/a, first stored quarter"); margins when not printed; **FCF** = the reported figure (`basis: 'reported'`) else operating cash flow minus capex (`'calculated'`);
+   **FCF per share** = FCF / diluted weighted-average shares of the same release. Currencies are never converted: the reporting currency is shown.
+5. **Beat/miss** (`estimates.ts`): beat when actual is at least 0.5 % above the estimate, miss when at least 0.5 % below, otherwise in line (text, icon and pastel colour, never colour alone).
+   Only the EPS estimate exists (Alpha Vantage, when the key is set and the basis matches); everything else says "no estimate available".
+
+Privacy: **only the public release text** goes to Workers AI, never a holding, quantity, price or user id.
+
+### KPI templates
+
+| Template | Scorecard | Template KPI slots (empty = "not disclosed") | FCF |
+|---|---|---|---|
+| `generic` | EPS, revenue | operating profit and margin, guidance | yes |
+| `reit` | AFFO per share (headline), revenue | AFFO per share, FFO per share, occupancy, same-store NOI growth | no |
+| `bank` | EPS, revenue | ROTCE, tangible book value per share, CET1 ratio, net interest income (+ YoY), efficiency ratio, provision for credit losses | no |
+| `saas` | EPS, revenue | RPO, cRPO growth, ARR, net revenue retention, seats / subscribers growth | yes |
+| `infra` | EPS, revenue | RPO / committed revenue / backlog, cloud revenue, cloud revenue growth, capex | yes |
+
+Selection (`kpiTemplateFor`, `packages/shared/src/earnings-templates.ts`): the owner override (`kpiTemplate` on the classification override, a select in "Edit classification"), else a curated
+ticker table (about 90 well-known tickers: REITs, banks, SaaS, infrastructure/cloud/semis; uncertain ones stay generic), else the stored profile sector (only a Real Estate / REIT sector maps to `reit`: "Financial Services" also holds insurers and brokers and "Technology" everything from chips to hardware, so those stay generic), else generic. ETFs, ETCs, commodities and crypto have no template (skipped).
+
+### Storage (public data, keyed by ticker)
+
+A release is public and per company, so summaries are **not** under `USER#`: `PK = TICKER#<symbol>`, `SK = EARNSUM#<reportDate>` (does not start with the calendar's `EARN#`, so calendar queries
+are unaffected). `TICKER#<symbol>` / `EARNSTATE` is the watcher state (CIK, last check and result, a sanitised reason, back-off, attempts; never a figure). The newest **8** summaries per symbol are
+kept (older ones pruned in the same step). Global rows: `EARNINGS/HELD` (held cache), `EARNINGS/SEC` (block). The summary shape is `EarningsSummary` in `packages/shared/src/earnings.ts`:
+`schemaVersion, symbol, name, period, reportDate, filingUrl, accession, form, reportingCurrency, template, origin ('live' | 'backfill'), headline { eps, revenue, operatingIncome,
+operatingMargin, operatingCashFlow, capex, fcf, fcfPerShare, dilutedShares } (each metric: value, unit, raw, yearAgo, yoyPct, qoqPct, estimate, surprisePct, verdict, basis), kpis [{ key, label,
+unit, metric? }], guidance [{ label, period, low, high, point, raw, direction }], segments, keyUpdates, quote, previousReportDate, verification { dropped, droppedFields, model, neuronsEstimate, calls },
+generatedAt, status`. Writes are idempotent (same key).
+
+### API (additive, owner only, only symbols the user holds or held)
+
+| Route | Result |
+|---|---|
+| `GET /earnings?symbol=&limit=` | `{ available, summaries (newest first, limit 1 to 24, default 12), symbols }` |
+| `GET /earnings/{symbol}/{period}` | one summary (`period` = the report date, `YYYY-MM-DD`); 404 otherwise |
+| `GET /earnings/status` | `{ available, configured, missing: ('sec-contact' \| 'ai-binding')[], estimatesConfigured, secBlockedUntil?, neurons { used, dailyCap, allowance, state, resetsAt }, symbols [{ eligible, lastCheckedAt, lastResult, lastReason, retryAfter, latestReportDate }] }`, sanitised |
+| `POST /earnings/{symbol}/refresh` | `202 { accepted: true }`; `429 RATE_LIMITED` with `retry-after` and `details.retryAfterSeconds` (1 per symbol per hour); 404 for a symbol the user never held, 503 `NOT_CONFIGURED`, 422 `NOT_ELIGIBLE` (ETF, crypto) |
+
+### Push
+
+A fourth notification type `earnings` (default **on**, also for users who saved their settings before it existed: `effectiveNotificationSettings` fills the missing type; the Notifications page has the toggle).
+When a live summary is stored the job enqueues `notifyDividends { trigger: 'sync' }`; the existing machinery applies: ledger `NOTIFIED#earnings#<symbol>#<reportDate>`, quiet hours 22:00 to 08:00 Amsterdam (US
+releases land late and go out in the 09:00 run), grouping above 3 items. Example: title `Lockheed Martin reported Q3 2026: EPS beat by 7 %`, body `Revenue $20.71B +11 % YoY · FCF/share $12.9 · guidance raised`
+(unavailable parts omitted; the template's key KPI is used); a tap opens `/earnings/<symbol>`. **Backfilled** summaries and ones older than 5 days are written to the ledger silently, so the owner is not flooded; the baseline
+(first device) records existing summaries the same way. The summary notification title noun is now "dividend updates", "earnings updates" or "portfolio updates" depending on what is in it.
+
+### Budget, cost per summary and daily worst case
+
+`aiNeurons` is a new usage metric (limit 10,000 per day, warn 60 %, block 80 % like the others) listed in `GET /usage` and the usage panel. It is **scoped**: it never changes the overall state, never pauses the app, and only
+gates this feature (`BudgetGuard.aiAllowance()`). The extractor may spend `min(EARNINGS_AI_DAILY_NEURONS (default 6000, at most 8000), 80 % of 10,000) - used today` and never starts a call it cannot afford
+(neurons estimated from characters / 3 tokens, leaning high; recorded in the ledger). A release with no allowance left waits until 00:05 UTC. `guardJob` ceilings: `watchEarnings` and `fetchEarningsSummary` run only below 60 % of the overall budget (`ok`).
+
+| Per summary | Typical release (about 12,000 characters) | Worst case (60,000 characters, 2 calls) |
+|---|---|---|
+| Workers AI neurons | about 70 per call, 70 to 140 per summary | about 320 per call, about 650 per summary |
+| Subrequests | CIK map (once) + submissions + index + exhibit + 1 Alpha Vantage = 4 to 5 | 5 (watch step reserves 14, fetch step 8, below the 45 per alarm) |
+| Rows written | 1 summary + 1 state + up to 1 prune delete + ledger rows, about 5 | about 8 |
+
+Daily worst case: 6,000 neurons is at least 9 worst-case summaries or about 40 to 80 typical ones, far above what one portfolio produces (a results season is a few releases a day; the backfill spreads 3 per run);
+the watcher itself costs 1 row read per run and no subrequest when nothing is due (about 25 runs a day).
+
+### Web
+
+`/earnings` (Portfolio menu, shown only when `GET /earnings/status` says `available`): cards newest first with company filter chips, each card = scorecard table (Expected | Actual | Beat/Miss, stacked rows below 640 px), growth
+lines, FCF with a `reported` / `calculated` badge, EPS basis badge (`GAAP` / `adjusted`), template KPI rows, collapsible native `details` sections (operating, guidance, cash flow, segments, key updates, quote), the source link
+(`rel="noopener noreferrer"`) and the disclaimer "Auto-generated from the company's press release; every number was checked against the text. Check the source before acting." Dates are dd-mm-yyyy (`web/src/lib/format.ts`),
+numbers nl-NL, compact amounts English (`$20.71B`). States: not configured (explains `SEC_CONTACT` and the AI binding), none yet, blocked by the SEC, AI allowance used up (resumes at 00:00 UTC). The asset detail page has a
+"Latest earnings" section, the calendar's earnings dialog a "View summary" link. The GitHub Pages demo (MSW) has two **invented** summaries (a bank and a software company, fictional).
+
+### Tests and how to run them
+
+`pnpm --filter @portfolio/earnings test` (text, numbers, schema, verification incl. hallucinated numbers/quotes, injection text, invalid JSON then valid retry, over-cap neurons, derive maths, thresholds, FCF, templates, SEC client with 403/429,
+token bucket, jobs windows with a pinned clock and DST, back-off, backfill, prune; six **invented** release fixtures incl. a REIT, a bank, a SaaS, an infra company and a 6-K), `@portfolio/shared`, `@portfolio/platform` (guard at 60 / 80 %),
+`@portfolio/api` (routes, auth, scenario on every stack; AWS returns `available: false`, notification detection), `@portfolio/cloudflare-app` (`test/earnings-suite.ts` in Node and in real workerd: calendar date passes, fake SEC, fake AI, stored, API,
+push decrypted by the fake subscriber), `@portfolio/web` (unit tests and `e2e/earnings.spec.ts` in the mock suite at 320 and 1280 px, every template).
+
+**Not verified (cannot be here):** real SEC access from the Worker (the SEC blocks the developer's laptop; the exhibit file-name heuristic is only tested with fakes), real Workers AI output quality and JSON-mode behaviour of the fp8 model
+(the schema lists `response_format`; a failure is retried once and then reported as `unreadable`), the neuron estimate against the real dashboard, Alpha Vantage `EARNINGS` field names beyond the documented ones, and the push on a real phone.
+The owner judges the format on the phone after the first backfill.

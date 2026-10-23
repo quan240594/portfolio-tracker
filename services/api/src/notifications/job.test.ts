@@ -1,5 +1,5 @@
 import { MemoryItemStore, registerUser, silentLogger, setLogger, type PushResult } from '@portfolio/platform';
-import { notificationKeys, type DividendEvent, type InstrumentProfile, type PushSubscriptionItem, type Transaction } from '@portfolio/shared';
+import { notificationKeys, sampleSummary, type DividendEvent, type InstrumentProfile, type PushSubscriptionItem, type Transaction } from '@portfolio/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { baselineUser } from './data.js';
 import { MAX_PUSHES_PER_USER_STEP, backedOff, notifyDividendsJob, planNotifications, type NotifyJobDeps, type NotifyResult } from './job.js';
@@ -85,8 +85,8 @@ function harness(): Harness {
   return { repo, store, notifications, sent, results, clock, deps, run, addDevice, ledger };
 }
 
-async function enable(h: Harness, settings: Partial<{ received: boolean; declared: boolean; exDividend: boolean }> = {}): Promise<void> {
-  await h.notifications.putSettings({ userId: USER, types: { exDividend: true, declared: true, received: true, ...settings }, exDividendDaysBefore: 2, createdAt: 'x', updatedAt: 'x' });
+async function enable(h: Harness, settings: Partial<{ received: boolean; declared: boolean; exDividend: boolean; earnings: boolean }> = {}): Promise<void> {
+  await h.notifications.putSettings({ userId: USER, types: { exDividend: true, declared: true, received: true, earnings: true, ...settings }, exDividendDaysBefore: 2, createdAt: 'x', updatedAt: 'x' });
   await registerUser(h.store, USER, '2026-10-01T00:00:00Z');
 }
 
@@ -198,6 +198,100 @@ describe('notifyDividendsJob', () => {
       expect(await h.run()).toMatchObject({ notifications: 0 });
       expect(h.sent).toEqual([]);
       expect(await h.ledger()).toEqual([`received#KMB#${old.id}`]);
+    });
+  });
+
+  describe('earnings summaries', () => {
+    const hold = (h: Harness, ...symbols: string[]): void => {
+      h.repo.transactions = symbols.map((symbol) => tx({ symbol }));
+    };
+
+    it('announces a fresh live summary of a held symbol once, with the template key figure', async () => {
+      const h = harness();
+      await enable(h);
+      await h.addDevice('phone');
+      hold(h, 'NWND');
+      h.repo.earningsSummaries = [sampleSummary({ symbol: 'NWND', name: 'Northwind Aerospace Corporation', reportDate: '2026-11-03', period: 'Q3 2026' })];
+      expect(await h.run()).toEqual({ users: 1, notifications: 1, pushes: 1 });
+      expect(h.sent[0]!.payload).toEqual({
+        type: 'earnings',
+        symbol: 'NWND',
+        title: 'Northwind Aerospace reported Q3 2026: EPS beat by 7.3 %',
+        body: 'Revenue $20.71B +11 % YoY · FCF/share $10.67 · guidance raised',
+        url: '/earnings/NWND',
+        tag: 'earnings:NWND:2026-11-03',
+      });
+      expect(await h.ledger()).toEqual(['earnings#NWND#2026-11-03']);
+      expect(await h.run()).toMatchObject({ notifications: 0 });
+      expect(h.sent).toHaveLength(1);
+    });
+
+    it('records a backfilled or older summary silently so the first run after deploy sends nothing', async () => {
+      const h = harness();
+      await enable(h);
+      await h.addDevice('phone');
+      hold(h, 'NWND', 'CLDV', 'GONE');
+      h.repo.earningsSummaries = [
+        sampleSummary({ symbol: 'NWND', reportDate: '2026-11-03', origin: 'backfill' }),
+        sampleSummary({ symbol: 'CLDV', reportDate: '2026-10-20' }),
+      ];
+      expect(await h.run()).toMatchObject({ notifications: 0, pushes: 0 });
+      expect(h.sent).toEqual([]);
+      expect(await h.ledger()).toEqual(['earnings#CLDV#2026-10-20', 'earnings#NWND#2026-11-03']);
+    });
+
+    it('waits for the morning when the release arrives in quiet hours, and only if the type is on', async () => {
+      const h = harness();
+      await enable(h);
+      await h.addDevice('phone');
+      hold(h, 'NWND');
+      h.repo.earningsSummaries = [sampleSummary({ symbol: 'NWND', reportDate: '2026-11-03' })];
+      h.clock.now = NIGHT;
+      expect(await h.run()).toMatchObject({ skipped: 'quiet-hours' });
+      h.clock.now = MORNING;
+      expect(await h.run()).toMatchObject({ notifications: 1 });
+      const off = harness();
+      await enable(off, { earnings: false });
+      await off.addDevice('phone');
+      hold(off, 'NWND');
+      off.repo.earningsSummaries = [sampleSummary({ symbol: 'NWND', reportDate: '2026-11-03' })];
+      expect(await off.run()).toMatchObject({ notifications: 0 });
+      expect(off.sent).toEqual([]);
+    });
+
+    it('names a summary of several earnings "earnings updates" and a mixed one "portfolio updates"', async () => {
+      const h = harness();
+      await enable(h, { exDividend: false });
+      await h.addDevice('phone');
+      const symbols = ['AAA', 'BBB', 'CCC', 'DDD'];
+      hold(h, ...symbols);
+      h.repo.earningsSummaries = symbols.map((symbol) => sampleSummary({ symbol, name: symbol, reportDate: '2026-11-03' }));
+      expect(await h.run()).toMatchObject({ notifications: 1 });
+      expect(h.sent[0]!.payload).toMatchObject({ type: 'summary', title: '4 earnings updates' });
+      const mixed = harness();
+      await enable(mixed, { exDividend: false });
+      await mixed.addDevice('phone');
+      hold(mixed, ...symbols);
+      mixed.repo.earningsSummaries = [sampleSummary({ symbol: 'AAA', name: 'AAA', reportDate: '2026-11-03' }), sampleSummary({ symbol: 'BBB', name: 'BBB', reportDate: '2026-11-03' })];
+      mixed.repo.dividendEvents = [event({ symbol: 'CCC' }), event({ symbol: 'DDD' })];
+      expect(await mixed.run()).toMatchObject({ notifications: 1 });
+      expect(mixed.sent[0]!.payload.title).toBe('4 portfolio updates');
+    });
+
+    it('works for settings saved before the type existed (it is on by default) and baselines the stored summaries when it is switched on', async () => {
+      const h = harness();
+      await h.notifications.putSettings({ userId: USER, types: { exDividend: false, declared: false, received: false } as never, exDividendDaysBefore: 2, createdAt: 'x', updatedAt: 'x' });
+      await registerUser(h.store, USER, 'x');
+      await h.addDevice('phone');
+      hold(h, 'NWND');
+      h.repo.earningsSummaries = [sampleSummary({ symbol: 'NWND', reportDate: '2026-11-03' })];
+      expect(await h.run()).toMatchObject({ notifications: 1 });
+      const fresh = harness();
+      hold(fresh, 'NWND');
+      fresh.repo.earningsSummaries = [sampleSummary({ symbol: 'NWND', reportDate: '2026-11-03' })];
+      await baselineUser(fresh.repo, fresh.notifications, USER, MORNING, ['earnings']);
+      expect(await fresh.ledger()).toEqual(['earnings#NWND#2026-11-03']);
+      expect([...(await fresh.store.query({ pk: `USER#${USER}`, sk: { beginsWith: 'NOTIFIED#' } })).items][0]).toMatchObject({ silent: true });
     });
   });
 
@@ -344,7 +438,7 @@ describe('notifyDividendsJob', () => {
       await enable(h);
       expect(await h.run()).toEqual({ users: 0, notifications: 0, pushes: 0 });
       await h.addDevice('phone');
-      await enable(h, { exDividend: false, declared: false, received: false });
+      await enable(h, { exDividend: false, declared: false, received: false, earnings: false });
       expect(await h.run()).toEqual({ users: 0, notifications: 0, pushes: 0 });
       expect(h.sent).toEqual([]);
     });
@@ -356,7 +450,7 @@ describe('notifyDividendsJob', () => {
       await h.addDevice('phone');
       const other = 'github-2';
       await registerUser(h.store, other, 'x');
-      await h.notifications.putSettings({ userId: other, types: { exDividend: true, declared: true, received: true }, exDividendDaysBefore: 2, createdAt: 'x', updatedAt: 'x' });
+      await h.notifications.putSettings({ userId: other, types: { exDividend: true, declared: true, received: true, earnings: true }, exDividendDaysBefore: 2, createdAt: 'x', updatedAt: 'x' });
       await h.notifications.putSubscription({ userId: other, id: 'b'.repeat(32), endpoint: 'https://fcm.googleapis.com/fcm/send/other', keys: { p256dh: 'p', auth: 'a' }, label: 'other', createdAt: 'x', failures: 0 });
       h.repo.transactions = [tx({}), tx({ userId: other, type: 'SELL', quantity: 99 })];
       const job = notifyDividendsJob(() => h.deps);

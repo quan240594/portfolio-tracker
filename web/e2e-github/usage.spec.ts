@@ -30,6 +30,7 @@ const snapshot = (state: 'ok' | 'warn' | 'blocked', percents: { worker: number; 
     durableObjectGbSeconds: metric(13_000, 1),
     rowsRead: metric(5_000_000, percents.rowsRead),
     rowsWritten: metric(100_000, 1),
+    aiNeurons: metric(10_000, 1),
     storageBytes: metric(1_000_000_000, 1),
   },
 });
@@ -147,7 +148,7 @@ test.describe('free-plan usage indicator (GitHub sign-in build)', () => {
     await trigger.focus();
     await page.keyboard.press('Enter');
     await expect(panel(page)).toBeFocused();
-    await expect(panel(page).getByRole('meter')).toHaveCount(6);
+    await expect(panel(page).getByRole('meter')).toHaveCount(7);
     const workers = panel(page).getByRole('meter', { name: 'Worker requests' });
     await expect(workers).toHaveAttribute('value', '12.5');
     await expect(workers.locator('xpath=ancestor::li')).toContainText('12.500 of 100.000 (12,5%)');

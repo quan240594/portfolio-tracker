@@ -15,7 +15,9 @@ export const USAGE_ROUTES = {
 } as const;
 
 /** Metrics that accumulate during a UTC day and start again at 0 at 00:00 UTC. */
-export const USAGE_COUNTER_METRICS = ['workerRequests', 'durableObjectRequests', 'durableObjectGbSeconds', 'rowsRead', 'rowsWritten'] as const;
+export const USAGE_COUNTER_METRICS = ['workerRequests', 'durableObjectRequests', 'durableObjectGbSeconds', 'rowsRead', 'rowsWritten', 'aiNeurons'] as const;
+/** Counters that only gate the work that uses them (the Workers AI allowance): they are listed in the snapshot but never pause the whole app. */
+export const USAGE_SCOPED_METRICS = ['aiNeurons'] as const;
 /** Metrics that are a level, not a sum: they do not reset. */
 export const USAGE_GAUGE_METRICS = ['storageBytes'] as const;
 export const USAGE_METRICS = [...USAGE_COUNTER_METRICS, ...USAGE_GAUGE_METRICS] as const;
@@ -30,6 +32,7 @@ export const USAGE_METRIC_LABELS: Record<UsageMetric, string> = {
   durableObjectGbSeconds: 'Durable Object duration (GB-s)',
   rowsRead: 'Database rows read',
   rowsWritten: 'Database rows written',
+  aiNeurons: 'Workers AI neurons',
   storageBytes: 'Stored data (bytes)',
 };
 
@@ -82,6 +85,7 @@ export const usageSnapshotSchema = z.object({
     durableObjectGbSeconds: metricSnapshotSchema,
     rowsRead: metricSnapshotSchema,
     rowsWritten: metricSnapshotSchema,
+    aiNeurons: metricSnapshotSchema,
     storageBytes: metricSnapshotSchema,
   }),
 });

@@ -137,6 +137,26 @@ export function defineApiScenarios(label: string, target: ApiScenarioTarget): vo
       expect((await call('DELETE', `/portfolios/${id}`, { query: { force: 'true' } })).status).toBe(204);
     });
 
+    it('serves earnings summaries, or reports the feature unavailable', async () => {
+      const list = await call('GET', '/earnings');
+      const status = await call('GET', '/earnings/status');
+      expect([list.status, status.status]).toEqual([200, 200]);
+      if (!list.body.available) {
+        // A deployment without the feature (the AWS demo): the web app hides it and every other route is 404.
+        expect(list.body).toEqual({ available: false, summaries: [], symbols: [] });
+        expect(status.body).toMatchObject({ available: false, configured: false, symbols: [] });
+        expect((await call('GET', '/earnings/SAP.DE/2026-10-21')).status).toBe(404);
+        expect((await call('POST', '/earnings/SAP.DE/refresh')).status).toBe(404);
+        return;
+      }
+      expect(Array.isArray(list.body.summaries)).toBe(true);
+      expect(typeof status.body.configured).toBe('boolean');
+      expect(status.body.neurons).toMatchObject({ allowance: 10_000 });
+      expect((await call('GET', '/earnings', { query: { limit: '0' } })).status).toBe(400);
+      expect((await call('GET', '/earnings/NOT-HELD/2026-10-21')).status).toBe(404);
+      expect((await call('POST', '/earnings/NOT-HELD/refresh')).status).toBe(404);
+    });
+
     it('manages dividend notifications: settings, devices and a test push, or reports the feature unavailable', async () => {
       const state = await call('GET', '/notifications');
       expect(state.status).toBe(200);
@@ -147,7 +167,7 @@ export function defineApiScenarios(label: string, target: ApiScenarioTarget): vo
         expect((await call('POST', '/notifications/test')).status).toBe(404);
         return;
       }
-      expect(state.body.settings).toMatchObject({ types: { exDividend: true, declared: true, received: true }, exDividendDaysBefore: 2 });
+      expect(state.body.settings).toMatchObject({ types: { exDividend: true, declared: true, received: true, earnings: true }, exDividendDaysBefore: 2 });
       expect(state.body.maxDevices).toBe(MAX_PUSH_DEVICES);
       if (!state.body.configured) {
         const unsigned = await call('POST', '/notifications/subscriptions', { body: {} });
@@ -160,7 +180,7 @@ export function defineApiScenarios(label: string, target: ApiScenarioTarget): vo
       // Settings: partial updates, validated.
       const updated = await call('PUT', '/notifications/settings', { body: { types: { received: false }, exDividendDaysBefore: 4 } });
       expect(updated.status).toBe(200);
-      expect(updated.body).toEqual({ types: { exDividend: true, declared: true, received: false }, exDividendDaysBefore: 4 });
+      expect(updated.body).toEqual({ types: { exDividend: true, declared: true, received: false, earnings: true }, exDividendDaysBefore: 4 });
       expect((await call('GET', '/notifications')).body.settings).toEqual(updated.body);
       const invalidSettings = [{ exDividendDaysBefore: 9 }, { types: { other: true } }, { quietHours: false }];
       expect(await Promise.all(invalidSettings.map(async (bad) => (await call('PUT', '/notifications/settings', { body: bad })).status))).toEqual([400, 400, 400]);

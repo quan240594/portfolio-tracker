@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { gotoViaNav, mainNav, openPortfolioMenu, portfolioTrigger } from './nav';
 
-const MENU_LABELS = ['Holdings', 'Transactions', 'Dividends', 'Rebalance', 'Assets', 'Watchlist', 'Goals', 'Calendar', 'Brokers'];
+const MENU_LABELS = ['Holdings', 'Transactions', 'Dividends', 'Rebalance', 'Assets', 'Watchlist', 'Goals', 'Calendar', 'Brokers', 'Earnings'];
 
 /** True when the page itself (not an inner scroller) scrolls horizontally. */
 // Names the elements that push the page wider than the viewport (anything clipped by a scrolling ancestor cannot), so a failure says what overflowed.
@@ -70,7 +70,7 @@ test.describe('Header navigation (mock mode)', () => {
     await expect(trigger).toHaveAttribute('aria-expanded', 'false');
 
     await openPortfolioMenu(page);
-    await mainNav(page).getByRole('link', { name: 'Brokers' }).focus();
+    await mainNav(page).getByRole('link', { name: 'Earnings' }).focus();
     await page.keyboard.press('Tab');
     await expect(mainNav(page).getByRole('link', { name: 'Analytics' })).toBeFocused();
     await expect(trigger).toHaveAttribute('aria-expanded', 'false');

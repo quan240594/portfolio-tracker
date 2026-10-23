@@ -95,6 +95,28 @@ export const SCHEDULED_JOBS = [
     weekdaysOnly: true,
     cloudflareOnly: true,
   }),
+  // US results arrive after the close (22:00 Amsterdam and later): look every 30 minutes from 13:00 to 23:30 on weekdays, and once at 07:30 for
+  // what came in overnight and for the symbols without a calendar date. Each look costs one SEC request per candidate symbol.
+  scheduled({
+    name: 'earnings-watch',
+    job: JOBS.watchEarnings,
+    payload: { trigger: 'scheduled' },
+    timezone: 'Europe/Amsterdam',
+    minute: [0, 30],
+    hours: [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
+    weekdaysOnly: true,
+    cloudflareOnly: true,
+  }),
+  scheduled({
+    name: 'earnings-watch-morning',
+    job: JOBS.watchEarnings,
+    payload: { trigger: 'scheduled' },
+    timezone: 'Europe/Amsterdam',
+    minute: 30,
+    hours: [7],
+    weekdaysOnly: false,
+    cloudflareOnly: true,
+  }),
 ] as const satisfies readonly ScheduledJob[];
 
 const minutesOf = ({ minute }: ScheduledJob): string => (typeof minute === 'number' ? String(minute) : minute.join(','));

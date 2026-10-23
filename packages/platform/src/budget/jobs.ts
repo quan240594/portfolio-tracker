@@ -28,6 +28,10 @@ export const JOB_CEILINGS: Readonly<Record<JobName, JobCeiling>> = {
   importUploaded: 'warn',
   /** A push costs one subrequest and a few rows; it runs until the budget is blocked (80 %) and is dropped, not deferred, above it: the next run sends what is due. */
   notifyDividends: 'warn',
+  /** Looking for a release is a convenience (one cheap request per candidate): only below 60 %. */
+  watchEarnings: 'ok',
+  /** Reading a release costs a few requests and rows plus Workers AI neurons (which have their own cap): only below 60 %; a skipped run is simply tried again by the next watch. */
+  fetchEarningsSummary: 'ok',
 };
 
 /** A job this table does not know is treated as non-essential. */

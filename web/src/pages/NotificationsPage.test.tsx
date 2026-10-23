@@ -10,7 +10,7 @@ import { installPushEnvironment, TEST_ENDPOINT, type PushEnvironment } from '../
 import { NotificationsView } from '../features/notifications/NotificationsView';
 import { renderApp, renderWithProviders } from '../test/utils';
 
-const SETTINGS = { types: { exDividend: true, declared: true, received: true }, exDividendDaysBefore: 2 };
+const SETTINGS = { types: { exDividend: true, declared: true, received: true, earnings: true }, exDividendDaysBefore: 2 };
 const device = (overrides: Partial<PushDeviceSummary> = {}): PushDeviceSummary => ({ id: 'a'.repeat(32), label: 'Chrome on Android', service: 'fcm.googleapis.com', createdAt: '2026-10-01T08:00:00.000Z', failures: 0, ...overrides });
 const state = (overrides: Partial<NotificationsResponse> = {}): NotificationsResponse => ({ available: true, configured: true, publicKey: 'B'.repeat(87), settings: SETTINGS, devices: [], maxDevices: 10, ...overrides });
 

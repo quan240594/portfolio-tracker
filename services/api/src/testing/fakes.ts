@@ -1,5 +1,6 @@
 import type {
   DividendEvent,
+  EarningsSummary,
   EodPrice,
   FxDay,
   FxRates,
@@ -13,7 +14,7 @@ import type {
 } from '@portfolio/shared';
 import { MemoryFileStore, MemoryItemStore, RecordingEventPublisher, type PushResult, type PushSender, type PushSubscriptionData } from '@portfolio/platform';
 import type { APIGatewayProxyEventV2 } from 'aws-lambda';
-import type { Deps } from '../deps.js';
+import type { Deps, EarningsDeps } from '../deps.js';
 import type { NotifyDeps } from '../notifications/deps.js';
 import { ItemNotificationRepository } from '../notifications/repository.js';
 import type { Repository } from '../repository.js';
@@ -29,6 +30,7 @@ export class InMemoryRepository implements Repository {
   eod: EodPrice[] = [];
   dividendEvents: DividendEvent[] = [];
   earningsEvents: StoredEarningsEvent[] = [];
+  earningsSummaries: EarningsSummary[] = [];
   splitEvents: StoredSplitEvent[] = [];
   users = new Set<string>();
   tracked = new Map<string, string>();
@@ -102,6 +104,13 @@ export class InMemoryRepository implements Repository {
   getCalendarEvents(symbols: string[], from: string, to: string) {
     const inRange = (e: { symbol: string; date: string }) => symbols.includes(e.symbol) && e.date >= from && e.date <= to;
     return Promise.resolve({ earnings: this.earningsEvents.filter(inRange), splits: this.splitEvents.filter(inRange) });
+  }
+  getEarningsSummaries(symbol: string, limit: number) {
+    const own = this.earningsSummaries.filter((summary) => summary.symbol === symbol);
+    return Promise.resolve([...own].sort((a, b) => b.reportDate.localeCompare(a.reportDate)).slice(0, limit));
+  }
+  getEarningsSummary(symbol: string, reportDate: string) {
+    return Promise.resolve(this.earningsSummaries.find((summary) => summary.symbol === symbol && summary.reportDate === reportDate) ?? null);
   }
   registerUser(userId: string) {
     this.users.add(userId);
@@ -212,4 +221,29 @@ export function fakeNotifyDeps(options: { configured?: boolean; result?: PushRes
   };
   const notify: NotifyDeps = { repo, push: configured ? { configured: true, publicKey: 'B'.repeat(87), send } : { configured: false } };
   return { notify, repo, store, sent, answer };
+}
+
+/** The earnings dependencies: a recording stand-in for the feature (status and refresh) over in-memory answers. */
+export function fakeEarningsDeps(options: { configured?: boolean; refusal?: 'rate-limited' | 'not-configured' } = {}) {
+  const { configured = true, refusal } = options;
+  const refreshed: { symbol: string; eligible: boolean }[] = [];
+  const earnings: EarningsDeps = {
+    status: (symbols) =>
+      Promise.resolve({
+        available: true,
+        configured,
+        missing: configured ? [] : ['sec-contact', 'ai-binding'],
+        estimatesConfigured: false,
+        neurons: { used: 120, dailyCap: 6000, allowance: 10_000, state: 'ok', resetsAt: '2026-06-16T00:00:00.000Z' },
+        symbols: symbols.map((entry) => ({ symbol: entry.symbol, eligible: entry.eligible })),
+      }),
+    refresh: (symbol, eligible) => {
+      refreshed.push({ symbol, eligible });
+      if (!eligible) return Promise.resolve({ accepted: false, reason: 'not-eligible' });
+      if (refusal === 'rate-limited') return Promise.resolve({ accepted: false, reason: 'rate-limited', retryAfterSeconds: 1800 });
+      if (refusal === 'not-configured') return Promise.resolve({ accepted: false, reason: 'not-configured' });
+      return Promise.resolve({ accepted: true });
+    },
+  };
+  return { earnings, refreshed };
 }

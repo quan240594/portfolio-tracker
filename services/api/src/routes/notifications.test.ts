@@ -45,7 +45,7 @@ describe('GET /notifications', () => {
       available: true,
       configured: true,
       publicKey: 'B'.repeat(87),
-      settings: { types: { exDividend: true, declared: true, received: true }, exDividendDaysBefore: 2 },
+      settings: { types: { exDividend: true, declared: true, received: true, earnings: true }, exDividendDaysBefore: 2 },
       devices: [],
       maxDevices: MAX_PUSH_DEVICES,
     });
@@ -89,10 +89,10 @@ describe('PUT /notifications/settings', () => {
   it('merges partial updates and persists them', async () => {
     const { call, notify } = setup();
     const response = await call('PUT', '/notifications/settings', { types: { declared: false }, exDividendDaysBefore: 5 });
-    expect(response.body).toEqual({ types: { exDividend: true, declared: false, received: true }, exDividendDaysBefore: 5 });
-    expect((await call('PUT', '/notifications/settings', { types: { received: false } })).body).toEqual({ types: { exDividend: true, declared: false, received: false }, exDividendDaysBefore: 5 });
+    expect(response.body).toEqual({ types: { exDividend: true, declared: false, received: true, earnings: true }, exDividendDaysBefore: 5 });
+    expect((await call('PUT', '/notifications/settings', { types: { received: false } })).body).toEqual({ types: { exDividend: true, declared: false, received: false, earnings: true }, exDividendDaysBefore: 5 });
     expect(await notify!.repo.getSettings(USER)).toMatchObject({ userId: USER, exDividendDaysBefore: 5, createdAt: '2026-06-15T12:00:00.000Z', updatedAt: '2026-06-15T12:00:00.000Z' });
-    expect((await call('GET', '/notifications')).body.settings).toEqual({ types: { exDividend: true, declared: false, received: false }, exDividendDaysBefore: 5 });
+    expect((await call('GET', '/notifications')).body.settings).toEqual({ types: { exDividend: true, declared: false, received: false, earnings: true }, exDividendDaysBefore: 5 });
   });
 
   it.each([[{ exDividendDaysBefore: 0 }], [{ exDividendDaysBefore: 6 }], [{ types: { received: 'yes' } }], [{ quietHours: { start: 1 } }], [{ types: { unknown: true } }]])('rejects %j', async (body) => {
@@ -215,7 +215,7 @@ describe('POST /notifications/subscriptions', () => {
     ];
     expect(await notify!.repo.getSettings(USER)).toBeNull();
     await subscribe('phone');
-    expect(await notify!.repo.getSettings(USER)).toMatchObject({ types: { exDividend: true, declared: true, received: true }, exDividendDaysBefore: 2 });
+    expect(await notify!.repo.getSettings(USER)).toMatchObject({ types: { exDividend: true, declared: true, received: true, earnings: true }, exDividendDaysBefore: 2 });
     expect(repo.users.has(USER)).toBe(true);
     expect([...(await notify!.repo.listNotified(USER))].sort((a, b) => a.localeCompare(b))).toEqual(['declared#KMB#2026-06-17', 'received#KMB#old-div']);
     await subscribe('tablet');
@@ -228,7 +228,7 @@ describe('POST /notifications/subscriptions', () => {
     await call('PUT', '/notifications/settings', { types: { received: false, declared: false } });
     await subscribe('phone');
     expect([...(await notify!.repo.listNotified(USER))]).toEqual([]);
-    expect((await notify!.repo.getSettings(USER))!.types).toEqual({ exDividend: true, declared: false, received: false });
+    expect((await notify!.repo.getSettings(USER))!.types).toEqual({ exDividend: true, declared: false, received: false, earnings: true });
   });
 });
 

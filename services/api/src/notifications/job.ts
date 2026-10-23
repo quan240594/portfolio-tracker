@@ -3,7 +3,7 @@ import {
   MAX_SEPARATE_NOTIFICATIONS,
   NOTIFICATION_TYPES,
   buildSummaryNotification,
-  defaultNotificationSettings,
+  effectiveNotificationSettings,
   detectDueNotifications,
   isQuietHour,
   localDayAndHour,
@@ -66,7 +66,9 @@ export interface PlannedNotification {
 export function planNotifications(due: readonly DueNotification[], today: string): PlannedNotification[] {
   const toRef = ({ type, symbol, eventKey }: DueNotification): LedgerRef => ({ type, symbol, eventKey });
   if (due.length <= MAX_SEPARATE_NOTIFICATIONS) return due.map((item) => ({ payload: item.message.payload, refs: [toRef(item)] }));
-  return [{ payload: buildSummaryNotification(due.map((item) => item.message.line), today), refs: due.map(toRef) }];
+  const kinds = new Set(due.map((item) => (item.type === 'earnings' ? 'earnings' : 'dividend')));
+  const noun = kinds.size === 1 ? [...kinds][0]! : 'portfolio';
+  return [{ payload: buildSummaryNotification(due.map((item) => item.message.line), today, noun), refs: due.map(toRef) }];
 }
 
 /** Sends `payload` to every device and keeps their records straight: gone devices are deleted, failing ones back off. Resolves the devices that accepted it. */
@@ -86,8 +88,10 @@ async function deliver(deps: NotifyJobDeps, userId: string, devices: PushSubscri
 
 async function processUser(deps: NotifyJobDeps, userId: string, trigger: NotifyPayload['trigger']): Promise<NotifyTotals> {
   const { notifications } = deps;
-  const settings = await notifications.getSettings(userId);
-  if (settings === null || !NOTIFICATION_TYPES.some((type) => settings.types[type])) return NO_TOTALS;
+  const stored = await notifications.getSettings(userId);
+  if (stored === null) return NO_TOTALS;
+  const settings = effectiveNotificationSettings(stored);
+  if (!NOTIFICATION_TYPES.some((type) => settings.types[type])) return NO_TOTALS;
   const devices = await notifications.listSubscriptions(userId);
   if (devices.length === 0) return NO_TOTALS;
   const now = deps.now();
@@ -95,7 +99,7 @@ async function processUser(deps: NotifyJobDeps, userId: string, trigger: NotifyP
   // The daily run also forgets what is older than the ledger's retention.
   if (trigger === 'scheduled') await notifications.pruneNotified(userId, now);
   const [ledger, data] = await Promise.all([notifications.listNotified(userId), loadDividendData(deps.repo, userId, day, deps.baseCurrency)]);
-  const { due, silent } = detectDueNotifications({ today: day, settings: { ...defaultNotificationSettings(), ...settings }, baseCurrency: deps.baseCurrency, ...data, notified: ledger });
+  const { due, silent } = detectDueNotifications({ today: day, settings, baseCurrency: deps.baseCurrency, ...data, notified: ledger });
   if (silent.length > 0) await notifications.recordNotified(userId, silent, now.toISOString(), true);
   const active = devices.filter((device) => !backedOff(device, now));
   if (due.length === 0 || active.length === 0) return { users: 1, notifications: 0, pushes: 0 };

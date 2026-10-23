@@ -29,7 +29,7 @@ describe('keys and routes', () => {
   });
 
   it('defaults to every type on and two days before', () => {
-    expect(defaultNotificationSettings()).toEqual({ types: { exDividend: true, declared: true, received: true }, exDividendDaysBefore: 2 });
+    expect(defaultNotificationSettings()).toEqual({ types: { exDividend: true, declared: true, received: true, earnings: true }, exDividendDaysBefore: 2 });
     expect(defaultNotificationSettings()).not.toBe(defaultNotificationSettings());
   });
 });

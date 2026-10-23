@@ -7,8 +7,11 @@
  * - `exDividend`: a held symbol whose ex-date is in (today, today + daysBefore], once per ex-date.
  * - `declared`: a stored event of a held symbol whose ex-date or pay date is today or later, once per ex-date.
  * - `received`: a DIVIDEND transaction, once per transaction id; one older than 14 days is recorded silently (a back-dated import).
+ * - `earnings`: a stored earnings summary of a held symbol, once per report date; backfilled and stale ones are recorded silently.
  */
 import { addIsoDays, daysBetween } from './analytics.js';
+import { EARNINGS_FRESH_DAYS, type EarningsSummary } from './earnings.js';
+import { buildEarningsNotification } from './earnings-format.js';
 import { dividendComparison, type PerSharePayment } from './dividend-comparison.js';
 import { FxTimeline } from './fx.js';
 import {
@@ -50,6 +53,8 @@ export interface DetectInput {
   fx: FxRates | null;
   /** `ledgerId`s that were already notified. */
   notified: ReadonlySet<string>;
+  /** The newest stored earnings summaries of (at least) the held symbols. */
+  earnings?: readonly EarningsSummary[];
 }
 
 export interface Detection {
@@ -215,6 +220,23 @@ function receivedDue(ctx: Context): { due: DueNotification[]; silent: LedgerRef[
   return { due, silent };
 }
 
+/**
+ * An earnings summary of a held symbol is due once (`earnings#symbol#reportDate`). A backfilled one, or one older than five days, is recorded
+ * silently: the first run after deploy produces the latest quarter of every holding, and that must not flood the phone.
+ */
+function earningsDue(ctx: Context): { due: DueNotification[]; silent: LedgerRef[] } {
+  const { today, notified, earnings = [] } = ctx.input;
+  const freshSince = addIsoDays(today, -EARNINGS_FRESH_DAYS);
+  const due: DueNotification[] = [];
+  const silent: LedgerRef[] = [];
+  for (const summary of earnings) {
+    if (!ctx.held.has(summary.symbol) || notified.has(ledgerId('earnings', summary.symbol, summary.reportDate))) continue;
+    if (summary.origin === 'backfill' || summary.reportDate < freshSince) silent.push({ type: 'earnings', symbol: summary.symbol, eventKey: summary.reportDate });
+    else due.push(dueOf('earnings', summary.symbol, summary.reportDate, summary.reportDate, buildEarningsNotification(summary)));
+  }
+  return { due, silent };
+}
+
 const byDueOrder = (a: DueNotification, b: DueNotification): number => a.sortKey.localeCompare(b.sortKey) || a.symbol.localeCompare(b.symbol) || a.id.localeCompare(b.id);
 
 /** Everything that is due now for one user, in the order it should be told. Throws when the transactions cannot be replayed (an oversold position). */
@@ -222,8 +244,9 @@ export function detectDueNotifications(input: DetectInput): Detection {
   const ctx = createContext(input);
   const { types } = input.settings;
   const received = types.received ? receivedDue(ctx) : { due: [], silent: [] };
-  const due = [...(types.exDividend ? exDividendDue(ctx) : []), ...(types.declared ? declaredDue(ctx) : []), ...received.due];
-  return { due: [...due].sort(byDueOrder), silent: received.silent };
+  const earnings = types.earnings ? earningsDue(ctx) : { due: [], silent: [] };
+  const due = [...(types.exDividend ? exDividendDue(ctx) : []), ...(types.declared ? declaredDue(ctx) : []), ...received.due, ...earnings.due];
+  return { due: [...due].sort(byDueOrder), silent: [...received.silent, ...earnings.silent] };
 }
 
 export interface BaselineInput {
@@ -231,6 +254,7 @@ export interface BaselineInput {
   transactions: readonly Transaction[];
   dividendEvents: readonly DividendEvent[];
   types: readonly NotificationType[];
+  earnings?: readonly EarningsSummary[];
 }
 
 /**
@@ -241,7 +265,14 @@ export interface BaselineInput {
 export function baselineEntries(input: BaselineInput): LedgerRef[] {
   const received = input.types.includes('received') ? receivedBaseline(input.transactions) : [];
   const declared = input.types.includes('declared') ? declaredBaseline(input) : [];
-  return [...received, ...declared];
+  const earnings = input.types.includes('earnings') ? earningsBaseline(input) : [];
+  return [...received, ...declared, ...earnings];
+}
+
+/** Every stored summary of a held symbol: switching the type on never announces what was already there. */
+function earningsBaseline({ transactions, earnings = [], today }: BaselineInput): LedgerRef[] {
+  const held = heldQuantities(transactions, today);
+  return earnings.filter((summary) => held.has(summary.symbol)).map((summary) => ({ type: 'earnings', symbol: summary.symbol, eventKey: summary.reportDate }));
 }
 
 const receivedBaseline = (transactions: readonly Transaction[]): LedgerRef[] =>

@@ -19,10 +19,12 @@ import {
 import { ItemManagementRepository, ItemNotificationRepository, ItemRepository, createApp, type Deps } from '@portfolio/api';
 import { ItemBrokerStore, ItemQuoteStore, SecretCredentialStore, Trading212Client } from '@portfolio/broker-sync';
 import { AlarmDiagnostics, MAX_FILE_BYTES, createDurableObjectPlatform, describeDiagnosticError, uploadTokenFromUrl, type AlarmJobQueueOptions, type ArmEvent, type DurableObjectPlatform } from '@portfolio/cloudflare';
+import type { AiLike } from '@portfolio/earnings';
 import { createMarketDataService } from '@portfolio/prices';
 import { parseImportObjectKey } from '@portfolio/shared';
 import { readBodyBounded } from './body.js';
 import type { HubConfig } from './config.js';
+import { createEarningsApi, earningsConfigured, neuronMeter } from './earnings.js';
 import { createHubLogoRoute, logoLookupGate } from './logos.js';
 import { alarmReport, finishOf, limitOf, triggerOf, type AlarmInfo } from './diagnostics.js';
 import { ALL_JOB_FACTORIES, createJobRegistry, eventsFor, priceJobDeps, schedulesFor, type JobContext, type JobFactories } from './jobs.js';
@@ -47,6 +49,8 @@ export interface HubOptions {
   fetch?: typeof fetch;
   /** Pause used by the price service's HTTP client (backoff). Defaults to `setTimeout`. */
   sleep?: (ms: number) => Promise<void>;
+  /** The Workers AI binding (`env.AI`); without it the earnings feature is off. */
+  ai?: AiLike;
   /** Retry policy of the alarm queue (tests shorten the backoff). */
   queue?: Pick<AlarmJobQueueOptions, 'baseBackoffMs' | 'maxAttempts' | 'maxStepsPerRun' | 'maxRunMs'>;
 }
@@ -74,6 +78,7 @@ export class HubCore {
   private readonly fetchImpl: typeof fetch;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly logger: Logger | undefined;
+  private readonly ai: AiLike | undefined;
   private readonly storage: HubState['storage'];
   /** Id of the diagnostics row of the alarm run in progress (arms made meanwhile point at it). */
   private currentRun: number | undefined;
@@ -87,6 +92,7 @@ export class HubCore {
   ) {
     this.now = options.now ?? (() => new Date());
     this.logger = options.logger;
+    this.ai = options.ai;
     this.storage = ctx.storage;
     this.factories = options.jobFactories ?? ALL_JOB_FACTORIES;
     this.fetchImpl = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
@@ -99,7 +105,7 @@ export class HubCore {
       now: this.now,
       uploadBaseUrl: config.origin,
       // A schedule whose job has no handler would only fail and retry, so it is not kept.
-      schedules: schedulesFor(this.factories),
+      schedules: schedulesFor(this.factories, earningsConfigured(config, options.ai)),
       onUsage: ({ rowsRead, rowsWritten }) => {
         void guardRef.current?.recordRows({ read: rowsRead, written: rowsWritten });
       },
@@ -241,6 +247,8 @@ export class HubCore {
       budget,
       fetch: budget.wrap(this.fetchImpl),
       sleep: this.sleep,
+      ...(this.ai === undefined ? {} : { ai: this.ai }),
+      neurons: neuronMeter(this.guard, this.config.earnings.dailyNeurons),
     };
   }
 
@@ -346,6 +354,7 @@ export class HubCore {
       events: eventsFor(jobs, this.factories),
       files,
       notify: { repo: new ItemNotificationRepository(items), push: pushConfig(this.config, this.fetchImpl) },
+      earnings: createEarningsApi({ items, config: this.config, ai: this.ai, queue: jobs, now: this.now, guard: this.guard }),
       broker: {
         store: new ItemBrokerStore(items),
         credentials: new SecretCredentialStore(secrets, this.config.brokerSecretPrefix),

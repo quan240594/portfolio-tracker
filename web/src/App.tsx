@@ -24,6 +24,7 @@ const GoalsPage = lazy(() => import('./pages/GoalsPage'));
 const CalendarPage = lazy(() => import('./pages/CalendarPage').then((m) => ({ default: m.CalendarPage })));
 const AssetDetailPage = lazy(() => import('./pages/AssetDetailPage'));
 const NotificationsPage = lazy(() => import('./pages/NotificationsPage'));
+const EarningsPage = lazy(() => import('./pages/EarningsPage'));
 const DiagnosticsPage = lazy(() => import('./pages/DiagnosticsPage'));
 
 const TITLES: Record<string, string> = {
@@ -31,6 +32,7 @@ const TITLES: Record<string, string> = {
   '/holdings': 'Holdings',
   '/dividends': 'Dividends',
   '/calendar': 'Calendar',
+  '/earnings': 'Earnings',
   '/transactions': 'Transactions',
   '/analytics': 'Analytics',
   '/goals': 'Goals',
@@ -43,6 +45,7 @@ const TITLES: Record<string, string> = {
 };
 
 const ASSET_DETAIL_PREFIX = '/assets/';
+const EARNINGS_PREFIX = '/earnings/';
 
 /** Title of a route: `/assets/<symbol>` shows the (decoded) symbol, unknown paths are "Not found". */
 export function titleFor(pathname: string): string {
@@ -51,6 +54,13 @@ export function titleFor(pathname: string): string {
       return `${decodeURIComponent(pathname.slice(ASSET_DETAIL_PREFIX.length))} · Asset detail`;
     } catch {
       return 'Asset detail';
+    }
+  }
+  if (pathname.startsWith(EARNINGS_PREFIX) && pathname.length > EARNINGS_PREFIX.length) {
+    try {
+      return `${decodeURIComponent(pathname.slice(EARNINGS_PREFIX.length))} · Earnings`;
+    } catch {
+      return 'Earnings';
     }
   }
   return TITLES[pathname] ?? 'Not found';
@@ -91,6 +101,22 @@ export const routes: RouteObject[] = [
         element: (
           <Suspense fallback={<LoadingRegion label="Loading calendar"><Skeleton className="h-96 w-full" /></LoadingRegion>}>
             <CalendarPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'earnings',
+        element: (
+          <Suspense fallback={<LoadingRegion label="Loading earnings"><Skeleton className="h-96 w-full" /></LoadingRegion>}>
+            <EarningsPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'earnings/:symbol',
+        element: (
+          <Suspense fallback={<LoadingRegion label="Loading earnings"><Skeleton className="h-96 w-full" /></LoadingRegion>}>
+            <EarningsPage />
           </Suspense>
         ),
       },

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { DEFAULT_GROWTH_RANGE, type AssetDetailResponse, type AssetPositionsResponse, type GrowthRange } from '@portfolio/shared';
 import { useAssetHistory } from '../../api/assetHooks';
+import { LatestEarnings } from '../earnings/LatestEarnings';
 import { BenchmarksBar } from '../growth/BenchmarksBar';
 import { useBenchmarkSelection } from '../growth/benchmarkSelection';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
@@ -28,6 +29,7 @@ export function OverviewTab({ detail, positions }: Readonly<{ detail: AssetDetai
         </div>
         <StatsSidebar detail={detail} />
       </div>
+      <LatestEarnings symbol={detail.symbol} />
       <PositionsSection query={positions} symbol={detail.symbol} />
       <AboutCard detail={detail} />
     </div>

@@ -1,0 +1,141 @@
+import { screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
+import { sampleDemoSummaries, sampleSummary, type EarningsListResponse, type EarningsStatusResponse } from '@portfolio/shared';
+import { DEMO_EARNINGS_STATUS, earningsHandlers } from '../mocks/earningsHandlers';
+import { api } from '../mocks/utils';
+import { server } from '../mocks/server';
+import { mainNav, openPortfolioMenu, renderApp } from '../test/utils';
+import { titleFor } from '../App';
+import { formatDateTime } from '../lib/format';
+
+const status = (patch: Partial<EarningsStatusResponse> = {}): EarningsStatusResponse => ({ ...DEMO_EARNINGS_STATUS, ...patch });
+const serveStatus = (value: EarningsStatusResponse) => server.use(http.get(api('/earnings/status'), () => HttpResponse.json(value)));
+const serveList = (value: EarningsListResponse) => server.use(http.get(api('/earnings'), () => HttpResponse.json(value)));
+const demo = () => server.use(...earningsHandlers);
+
+describe('the Earnings menu entry', () => {
+  it('is hidden where the deployment has no earnings (AWS, the default of the tests)', async () => {
+    const user = userEvent.setup();
+    renderApp('/');
+    await screen.findByRole('heading', { level: 1, name: 'Dashboard' });
+    await openPortfolioMenu(user);
+    expect(within(mainNav()).queryByRole('link', { name: 'Earnings' })).not.toBeInTheDocument();
+  });
+
+  it('is in the Portfolio menu when the status says available, and opens the page', async () => {
+    demo();
+    const user = userEvent.setup();
+    renderApp('/');
+    await screen.findByRole('heading', { level: 1, name: 'Dashboard' });
+    await openPortfolioMenu(user);
+    const link = await within(mainNav()).findByRole('link', { name: 'Earnings' });
+    await user.click(link);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Earnings' })).toBeInTheDocument();
+    expect(await screen.findAllByRole('article')).toHaveLength(2);
+  });
+
+  it('stays hidden when the status request fails', async () => {
+    server.use(http.get(api('/earnings/status'), () => HttpResponse.json({ error: { code: 'X', message: 'x' } }, { status: 500 })));
+    const user = userEvent.setup();
+    renderApp('/');
+    await screen.findByRole('heading', { level: 1, name: 'Dashboard' });
+    await openPortfolioMenu(user);
+    expect(within(mainNav()).queryByRole('link', { name: 'Earnings' })).not.toBeInTheDocument();
+  });
+});
+
+describe('the page', () => {
+  it('lists the cards newest first with a chip per company and filters by symbol', async () => {
+    demo();
+    const user = userEvent.setup();
+    renderApp('/earnings');
+    const cards = await screen.findAllByRole('article');
+    expect(cards.map((card) => within(card).getByRole('heading', { level: 2 }).textContent)).toEqual(['Harbor Bancorp · Q3 2026', 'Cloudvale Software Inc. · Q2 FY2027']);
+    const chips = screen.getByRole('navigation', { name: 'Filter by company' });
+    expect(within(chips).getAllByRole('link').map((link) => link.textContent)).toEqual(['All', 'CLDV', 'HBRB']);
+    expect(within(chips).getByRole('link', { name: 'All' })).toHaveAttribute('aria-current', 'page');
+    await user.click(within(chips).getByRole('link', { name: 'CLDV' }));
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(1));
+    expect(screen.getByRole('heading', { level: 2, name: /Cloudvale/ })).toBeInTheDocument();
+    expect(within(screen.getByRole('navigation', { name: 'Filter by company' })).getByRole('link', { name: 'CLDV' })).toHaveAttribute('aria-current', 'page');
+    expect(document.title).toContain('Earnings');
+  });
+
+  it('asks for an immediate check of the filtered symbol, at most once an hour', async () => {
+    demo();
+    const user = userEvent.setup();
+    renderApp('/earnings/CLDV');
+    await screen.findAllByRole('article');
+    await user.click(screen.getByRole('button', { name: 'Check CLDV now' }));
+    expect(await screen.findByText(/Checking the SEC now/)).toBeInTheDocument();
+    server.use(http.post(api('/earnings/:symbol/refresh'), () => HttpResponse.json({ accepted: false, reason: 'rate-limited', retryAfterSeconds: 100 })));
+    await user.click(screen.getByRole('button', { name: 'Check CLDV now' }));
+    expect(await screen.findByText(/Checked less than an hour ago/)).toBeInTheDocument();
+    server.use(http.post(api('/earnings/:symbol/refresh'), () => HttpResponse.json({ error: { code: 'X', message: 'Nope' } }, { status: 500 })));
+    await user.click(screen.getByRole('button', { name: 'Check CLDV now' }));
+    expect(await screen.findByText('Nope')).toBeInTheDocument();
+  });
+
+  it('explains what is missing when the feature is not configured, and nothing else', async () => {
+    serveStatus(status({ configured: false, missing: ['sec-contact', 'ai-binding'] }));
+    renderApp('/earnings');
+    expect(await screen.findByRole('heading', { name: 'Earnings summaries are not switched on yet' })).toBeInTheDocument();
+    expect(screen.getByText(/SEC_CONTACT/)).toBeInTheDocument();
+    expect(screen.getByText(/Workers AI binding/)).toBeInTheDocument();
+    expect(screen.queryByRole('article')).not.toBeInTheDocument();
+  });
+
+  it('says the deployment has none (AWS, direct link)', async () => {
+    renderApp('/earnings');
+    expect(await screen.findByRole('heading', { name: 'Earnings summaries are not available here' })).toBeInTheDocument();
+  });
+
+  it('says when nothing was published yet and what was checked', async () => {
+    demo();
+    serveList({ available: true, summaries: [], symbols: [] });
+    serveStatus(status({ symbols: [{ symbol: 'LMFG', eligible: true, lastCheckedAt: '2026-10-21T19:30:00.000Z', lastReason: 'no new release' }, { symbol: 'NEW', eligible: true }, { symbol: 'VWRL', eligible: false }] }));
+    const user = userEvent.setup();
+    renderApp('/earnings');
+    expect(await screen.findByRole('heading', { name: 'No earnings summaries yet' })).toBeInTheDocument();
+    await user.click(screen.getByText('What was checked'));
+    expect(screen.getByText(`LMFG: checked ${formatDateTime('2026-10-21T19:30:00.000Z')}, no new release`)).toBeInTheDocument();
+    expect(screen.getByText('NEW: not checked yet')).toBeInTheDocument();
+    expect(screen.queryByText(/VWRL/)).not.toBeInTheDocument();
+  });
+
+  it('says when the SEC asked to slow down and when the AI allowance is used up, above the cards', async () => {
+    demo();
+    serveStatus(status({ secBlockedUntil: '2026-10-21T21:00:00.000Z', neurons: { used: 6100, dailyCap: 6000, allowance: 10_000, state: 'warn', resetsAt: '2026-10-22T00:00:00.000Z' } }));
+    renderApp('/earnings');
+    expect(await screen.findAllByRole('article')).toHaveLength(2);
+    const notes = screen.getAllByRole('status');
+    expect(notes[0]).toHaveTextContent(`The SEC asked us to slow down, so lookups are paused until ${formatDateTime('2026-10-21T21:00:00.000Z')}.`);
+    expect(notes[1]).toHaveTextContent(/free Workers AI allowance.*used up \(6100 of 6000 neurons\).*after 00:00 UTC/);
+  });
+
+  it('shows an error with a retry for the list and for the status', async () => {
+    demo();
+    server.use(http.get(api('/earnings'), () => HttpResponse.json({ error: { code: 'X', message: 'List broke' } }, { status: 500 })));
+    renderApp('/earnings');
+    expect(await screen.findByText('List broke')).toBeInTheDocument();
+    server.use(http.get(api('/earnings/status'), () => HttpResponse.json({ error: { code: 'X', message: 'Status broke' } }, { status: 500 })));
+    renderApp('/earnings');
+    expect((await screen.findAllByText('Status broke')).length).toBeGreaterThan(0);
+  });
+
+  it('titles the route of a symbol', () => {
+    expect(titleFor('/earnings')).toBe('Earnings');
+    expect(titleFor('/earnings/LMT')).toBe('LMT · Earnings');
+    expect(titleFor('/earnings/%E0%A4%A')).toBe('Earnings');
+    expect(titleFor('/earnings/')).toBe('Not found');
+  });
+
+  it('renders a symbol with a dot in its route', async () => {
+    demo();
+    serveList({ available: true, summaries: [sampleSummary({ symbol: 'NRDV.AS', name: 'Nordvik', reportingCurrency: 'EUR' })], symbols: ['NRDV.AS'] });
+    renderApp('/earnings/NRDV.AS');
+    expect(await screen.findByRole('heading', { level: 2, name: /Nordvik/ })).toBeInTheDocument();
+    expect(sampleDemoSummaries()).toHaveLength(2);
+  });
+});

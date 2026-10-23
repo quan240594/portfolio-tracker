@@ -1,7 +1,7 @@
 import { USAGE_COUNTER_METRICS } from '@portfolio/shared';
 import type { UsageCounters, UsageDelta, UsageStore } from '../budget/usage-store.js';
 
-const zeroCounters = (): UsageCounters => ({ workerRequests: 0, durableObjectRequests: 0, durableObjectGbSeconds: 0, rowsRead: 0, rowsWritten: 0 });
+const zeroCounters = (): UsageCounters => ({ workerRequests: 0, durableObjectRequests: 0, durableObjectGbSeconds: 0, rowsRead: 0, rowsWritten: 0, aiNeurons: 0 });
 
 /** In-memory UsageStore (reference implementation and test double). */
 export class MemoryUsageStore implements UsageStore {

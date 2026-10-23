@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw';
-import { USAGE_METRICS, type UsageMetric, type UsageMetricSnapshot, type UsageMetricState, type UsageSnapshot, type UsageState } from '@portfolio/shared';
+import { USAGE_METRICS, USAGE_SCOPED_METRICS, type UsageMetric, type UsageMetricSnapshot, type UsageMetricState, type UsageSnapshot, type UsageState } from '@portfolio/shared';
 import { server } from '../mocks/server';
 import { api } from '../mocks/utils';
 
@@ -9,6 +9,7 @@ const LIMITS: Record<UsageMetric, number> = {
   durableObjectGbSeconds: 13_000,
   rowsRead: 5_000_000,
   rowsWritten: 100_000,
+  aiNeurons: 10_000,
   storageBytes: 1_000_000_000,
 };
 
@@ -29,7 +30,7 @@ export const metric = (metricName: UsageMetric, percent: number): UsageMetricSna
 /** A pinned snapshot (day 2026-10-19, reset 2026-10-20T00:00Z); `percents` sets the usage of single metrics, the overall state follows. */
 export function usageSnapshot(percents: Partial<Record<UsageMetric, number>> = {}, state?: UsageState): UsageSnapshot {
   const metrics = Object.fromEntries(USAGE_METRICS.map((name) => [name, metric(name, percents[name] ?? 0)])) as Record<UsageMetric, UsageMetricSnapshot>;
-  const worst = USAGE_METRICS.map((name) => metrics[name].state).reduce((a, b) => (RANK[b] > RANK[a] ? b : a), 'ok' as UsageMetricState);
+  const worst = USAGE_METRICS.filter((name) => !(USAGE_SCOPED_METRICS as readonly string[]).includes(name)).map((name) => metrics[name].state).reduce((a, b) => (RANK[b] > RANK[a] ? b : a), 'ok' as UsageMetricState);
   return {
     day: '2026-10-19',
     generatedAt: '2026-10-19T10:00:00.000Z',

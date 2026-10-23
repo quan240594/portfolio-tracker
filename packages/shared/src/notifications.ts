@@ -1,5 +1,5 @@
 /**
- * Dividend push notifications: contracts shared by the API, the notification job and the web app.
+ * Push notifications (dividends and earnings summaries): contracts shared by the API, the notification job and the web app.
  *
  * Items (all under `PK = USER#{userId}`, like every per-user entity):
  *
@@ -29,13 +29,14 @@ export const NOTIFICATIONS_ROUTES = {
 
 export const NOTIFICATION_ENTITY = { subscription: 'PUSH_SUBSCRIPTION', settings: 'NOTIFICATION_SETTINGS', notified: 'NOTIFIED' } as const;
 
-export const NOTIFICATION_TYPES = ['exDividend', 'declared', 'received'] as const;
+export const NOTIFICATION_TYPES = ['exDividend', 'declared', 'received', 'earnings'] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
 export const NOTIFICATION_TYPE_LABELS: Readonly<Record<NotificationType, string>> = {
   exDividend: 'Ex-dividend reminders',
   declared: 'New dividend declared',
   received: 'Dividend received',
+  earnings: 'Earnings summary',
 };
 
 export const notificationKeys = {
@@ -69,9 +70,15 @@ export interface NotificationSettings {
 }
 
 export const defaultNotificationSettings = (): NotificationSettings => ({
-  types: { exDividend: true, declared: true, received: true },
+  types: { exDividend: true, declared: true, received: true, earnings: true },
   exDividendDaysBefore: DEFAULT_EX_DIVIDEND_DAYS,
 });
+
+/** The settings in force: stored ones over the defaults, so a type added later (earnings) is on for users who saved their settings before it existed. */
+export function effectiveNotificationSettings(stored: Partial<{ types: Partial<Record<NotificationType, boolean>>; exDividendDaysBefore: number }> | null | undefined): NotificationSettings {
+  const defaults = defaultNotificationSettings();
+  return { types: { ...defaults.types, ...stored?.types }, exDividendDaysBefore: stored?.exDividendDaysBefore ?? defaults.exDividendDaysBefore };
+}
 
 export interface NotificationSettingsItem extends NotificationSettings {
   userId: string;
@@ -138,7 +145,7 @@ export type SubscribeBody = z.infer<typeof subscribeBodySchema>;
 
 export const settingsPatchSchema = z
   .object({
-    types: z.object({ exDividend: z.boolean(), declared: z.boolean(), received: z.boolean() }).partial().strict().optional(),
+    types: z.object({ exDividend: z.boolean(), declared: z.boolean(), received: z.boolean(), earnings: z.boolean() }).partial().strict().optional(),
     exDividendDaysBefore: z.number().int().min(MIN_EX_DIVIDEND_DAYS).max(MAX_EX_DIVIDEND_DAYS).optional(),
   })
   .strict();

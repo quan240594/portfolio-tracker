@@ -1,0 +1,102 @@
+import { expect, test, type Page } from '@playwright/test';
+import { KPI_TEMPLATES, KPI_TEMPLATE_IDS } from '@portfolio/shared';
+import { gotoViaNav } from './nav';
+
+/** Names the elements that push the page wider than the viewport, so a failure says what overflowed. */
+const overflowing = (page: Page) =>
+  page.evaluate(() => {
+    if (document.documentElement.scrollWidth <= window.innerWidth) return [];
+    return [...document.querySelectorAll('body *')]
+      .filter((el) => {
+        if (el.getBoundingClientRect().right <= window.innerWidth + 0.5) return false;
+        for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+          if (getComputedStyle(p).overflowX !== 'visible') return false;
+        }
+        return true;
+      })
+      .slice(0, 8)
+      .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 70)} right=${Math.round(el.getBoundingClientRect().right)}`);
+  });
+
+for (const viewport of [
+  { name: '1280 px', width: 1280, height: 900 },
+  { name: '320 px', width: 320, height: 800 },
+]) {
+  test.describe(`Earnings summaries (mock mode, ${viewport.name})`, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test('shows the invented bank and software summaries with scorecard, growth and details, without horizontal overflow', async ({ page }) => {
+      await page.goto('/');
+      await gotoViaNav(page, 'Earnings');
+      await expect(page).toHaveURL(/\/earnings$/);
+      await expect(page.getByRole('heading', { level: 1, name: 'Earnings' })).toBeVisible();
+      await expect(page).toHaveTitle(/Earnings · Portfolio Tracker/);
+
+      const cards = page.getByRole('article');
+      await expect(cards).toHaveCount(2);
+      await expect(cards.nth(0).getByRole('heading', { level: 2 })).toContainText('Harbor Bancorp');
+      await expect(cards.nth(1).getByRole('heading', { level: 2 })).toContainText('Cloudvale Software');
+
+      // The scorecard is a table (stacked rows below 640 px), with the verdict as text and the missing estimate said in words.
+      const bank = cards.nth(0);
+      await expect(bank.getByRole('table')).toBeVisible();
+      await expect(bank.getByText('In line').first()).toBeVisible();
+      await expect(bank.getByText('no estimate available').first()).toBeVisible();
+      await expect(bank.getByRole('list', { name: 'Growth' })).toContainText('EPS up 12%');
+      await expect(bank.getByText('Source: SEC filing')).toBeVisible();
+      await expect(bank.getByRole('link', { name: /Source: SEC filing/ })).toHaveAttribute('rel', 'noopener noreferrer');
+      await expect(bank.getByText('Bank figures')).toBeVisible();
+      await expect(bank.getByText('Return on tangible common equity').or(bank.getByText('ROTCE')).first()).toBeVisible();
+      await expect(bank.getByText('Cash flow')).toHaveCount(0);
+
+      // The software template: RPO and retention, free cash flow with its basis, and the first-quarter note.
+      const saas = cards.nth(1);
+      await expect(saas.getByText('Software as a service figures')).toBeVisible();
+      await expect(saas.getByText('Net revenue retention')).toBeVisible();
+      await expect(saas.getByText('Annual recurring revenue').locator('xpath=ancestor::li')).toContainText('not disclosed');
+      await expect(saas.getByText('reported', { exact: true }).first()).toBeVisible();
+      await expect(saas.getByText(/first stored quarter/)).toBeVisible();
+      await expect(saas.getByText('Beat/Miss').first()).toBeAttached();
+
+      // Native details: a closed section opens on click.
+      const updates = bank.locator('details', { hasText: 'Key updates' });
+      await expect(updates).not.toHaveAttribute('open', '');
+      await updates.locator('summary').click();
+      await expect(updates).toHaveAttribute('open', '');
+      await expect(updates.getByText('Repurchased $1.5 billion of common stock')).toBeVisible();
+
+      expect(await overflowing(page)).toEqual([]);
+    });
+
+    test('filters by company with the chips and opens the page of one company', async ({ page }) => {
+      await page.goto('/earnings');
+      await expect(page.getByRole('article')).toHaveCount(2);
+      await page.getByRole('navigation', { name: 'Filter by company' }).getByRole('link', { name: 'CLDV' }).click();
+      await expect(page).toHaveURL(/\/earnings\/CLDV$/);
+      await expect(page.getByRole('article')).toHaveCount(1);
+      await expect(page.getByRole('button', { name: 'Check CLDV now' })).toBeVisible();
+      await expect(page).toHaveTitle(/CLDV · Earnings/);
+      expect(await overflowing(page)).toEqual([]);
+    });
+  });
+}
+
+test.describe('Earnings summaries: every KPI template', () => {
+  for (const viewport of [320, 1280]) {
+    test(`renders the slots of each template without overflow at ${viewport} px`, async ({ page }) => {
+      await page.setViewportSize({ width: viewport, height: 900 });
+      await page.addInitScript(() => sessionStorage.setItem('earnings-demo-templates', 'on'));
+      await page.goto('/earnings');
+      const cards = page.getByRole('article');
+      await expect(cards).toHaveCount(KPI_TEMPLATE_IDS.length);
+      for (const [index, template] of KPI_TEMPLATE_IDS.entries()) {
+        const card = cards.nth(index);
+        await expect(card.getByRole('heading', { level: 2 })).toContainText(`Template ${template} Company`);
+        await expect(card.getByRole('table').first()).toBeVisible();
+        for (const slot of KPI_TEMPLATES[template].slots) await expect(card.getByText(slot.label, { exact: true }).first()).toBeAttached();
+        if (KPI_TEMPLATES[template].slots.length > 1) await expect(card.getByText('not disclosed').first()).toBeAttached();
+      }
+      expect(await overflowing(page)).toEqual([]);
+    });
+  }
+});

@@ -17,8 +17,8 @@ const instrument = (patch: Partial<ClassificationInstrument> = {}): Classificati
 
 describe('initialForm', () => {
   it('starts at the effective values, a missing sector or country as an empty field', () => {
-    expect(initialForm(instrument())).toEqual({ name: 'Acme Corp', assetClass: 'STOCK', sector: 'Industrials', country: 'Germany', domain: '' });
-    expect(initialForm({ effective: { name: 'X', assetClass: 'ETF', sector: null, country: null } })).toEqual({ name: 'X', assetClass: 'ETF', sector: '', country: '', domain: '' });
+    expect(initialForm(instrument())).toEqual({ name: 'Acme Corp', assetClass: 'STOCK', sector: 'Industrials', country: 'Germany', domain: '', kpiTemplate: '' });
+    expect(initialForm({ effective: { name: 'X', assetClass: 'ETF', sector: null, country: null } })).toEqual({ name: 'X', assetClass: 'ETF', sector: '', country: '', domain: '', kpiTemplate: '' });
     expect(initialForm(instrument({ override: { domain: 'acme.example.com' } })).domain).toBe('acme.example.com');
   });
 });
@@ -31,11 +31,11 @@ describe('fieldsToSend', () => {
   });
 
   it('sends only the fields that differ from the automatic value, trimmed', () => {
-    expect(fieldsToSend({ name: ' Acme Group ', assetClass: 'ETF', sector: 'Industrials', country: ' France', domain: '' }, base)).toEqual({ name: 'Acme Group', assetClass: 'ETF', country: 'France' });
+    expect(fieldsToSend({ name: ' Acme Group ', assetClass: 'ETF', sector: 'Industrials', country: ' France', domain: '', kpiTemplate: '' }, base)).toEqual({ name: 'Acme Group', assetClass: 'ETF', country: 'France' });
   });
 
   it('does not override a field that was emptied or typed back to the automatic value', () => {
-    expect(fieldsToSend({ name: '  ', assetClass: 'STOCK', sector: '', country: 'Germany', domain: '   ' }, base)).toEqual({});
+    expect(fieldsToSend({ name: '  ', assetClass: 'STOCK', sector: '', country: 'Germany', domain: '   ', kpiTemplate: '' }, base)).toEqual({});
   });
 
   it('sends the website domain as typed, trimmed, and nothing when it is empty', () => {
@@ -43,8 +43,17 @@ describe('fieldsToSend', () => {
     expect(fieldsToSend({ ...initialForm(instrument()), domain: '' }, base)).toEqual({});
   });
 
+  it('sends the earnings template when one is chosen and nothing for automatic', () => {
+    expect(fieldsToSend({ ...initialForm(instrument()), kpiTemplate: 'bank' }, base)).toEqual({ kpiTemplate: 'bank' });
+    expect(fieldsToSend({ ...initialForm(instrument()), kpiTemplate: '' }, base)).toEqual({});
+    expect(initialForm({ ...instrument(), override: { kpiTemplate: 'reit' } }).kpiTemplate).toBe('reit');
+    expect(initialForm(instrument()).kpiTemplate).toBe('');
+    expect(validateFields({ kpiTemplate: 'saas' })).toBeNull();
+    expect(validateFields({ kpiTemplate: 'nonsense' as never })).toBe('Earnings template: Invalid enum value. Expected \'generic\' | \'reit\' | \'bank\' | \'saas\' | \'infra\', received \'nonsense\'');
+  });
+
   it('overrides a field the profile has no value for', () => {
-    expect(fieldsToSend({ name: 'Acme Corp', assetClass: 'STOCK', sector: 'Mining', country: '', domain: '' }, { ...base, sector: null, country: null })).toEqual({ sector: 'Mining' });
+    expect(fieldsToSend({ name: 'Acme Corp', assetClass: 'STOCK', sector: 'Mining', country: '', domain: '', kpiTemplate: '' }, { ...base, sector: null, country: null })).toEqual({ sector: 'Mining' });
   });
 });
 

@@ -155,6 +155,13 @@ describe('guardJob', () => {
     }
   });
 
+  it('runs the earnings jobs only below 60 % (they are a convenience: the next watch tries again)', async () => {
+    const { guard } = await guardWith({ rowsRead: 3_000_000 });
+    for (const job of [JOBS.watchEarnings, JOBS.fetchEarningsSummary]) expect(await guardJob(guard, job)).toEqual({ allowed: false, state: 'warn', reason: 'deferred-by-priority' });
+    const calm = await guardWith({ rowsRead: 100 });
+    expect((await guardJob(calm.guard, JOBS.fetchEarningsSummary)).allowed).toBe(true);
+  });
+
   it('stops every job at 80 %', async () => {
     const { guard } = await guardWith({ rowsRead: 4_000_000 });
     for (const job of Object.values(JOBS)) expect(await guardJob(guard, job)).toEqual({ allowed: false, state: 'blocked', reason: 'blocked' });

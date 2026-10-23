@@ -1,0 +1,389 @@
+/**
+ * Earnings summaries: contracts shared by the extraction pipeline (`@portfolio/earnings`), the API, the notification job and the web app.
+ *
+ * A summary is derived from a company's own public quarterly press release (SEC 8-K item 2.02 / 6-K exhibit). The release text is the only
+ * source of the figures; every number was located verbatim in that text, all derived numbers (growth, beat or miss, free cash flow) are
+ * computed by code. Nothing is invented: a value that is not in the release is absent.
+ *
+ * | Entity                 | PK               | SK                      | entityType         |
+ * |------------------------|------------------|-------------------------|--------------------|
+ * | Summary (one release)  | TICKER#{symbol}  | EARNSUM#{reportDate}    | EARNINGS_SUMMARY   |
+ * | Per-symbol watch state | TICKER#{symbol}  | EARNSTATE               | EARNINGS_STATE     |
+ * | SEC block (global)     | EARNINGS         | SEC                     | EARNINGS_SEC       |
+ * | Held-symbol cache      | EARNINGS         | HELD                    | EARNINGS_HELD      |
+ *
+ * The release is public and the same for every user, so summaries live next to the other per-symbol data (`TICKER#`), not under a user.
+ * `EARNSUM#` does not start with the calendar's `EARN#`, so the two prefixes never meet.
+ *
+ * Routes (authenticated, same-origin; `available: false` on a deployment without the feature, e.g. the AWS demo):
+ * - GET  /earnings?symbol=&limit=      latest summaries, newest first, only for symbols the user holds or held
+ * - GET  /earnings/status              is the feature configured, per-symbol checks, neurons used today
+ * - GET  /earnings/{symbol}/{period}   one summary (`period` = the report date, YYYY-MM-DD)
+ * - POST /earnings/{symbol}/refresh    owner-triggered re-check, at most once per symbol per hour
+ */
+import { z } from 'zod';
+
+export const EARNINGS_ROUTES = {
+  earningsList: 'GET /earnings',
+  earningsStatus: 'GET /earnings/status',
+  earningsGet: 'GET /earnings/{symbol}/{period}',
+  earningsRefresh: 'POST /earnings/{symbol}/refresh',
+} as const;
+
+export const EARNINGS_ENTITY = { summary: 'EARNINGS_SUMMARY', state: 'EARNINGS_STATE', sec: 'EARNINGS_SEC', held: 'EARNINGS_HELD' } as const;
+
+export const earningsKeys = {
+  summary: (symbol: string, reportDate: string) => ({ PK: `TICKER#${symbol}`, SK: `EARNSUM#${reportDate}` }),
+  summaryPrefix: 'EARNSUM#',
+  state: (symbol: string) => ({ PK: `TICKER#${symbol}`, SK: 'EARNSTATE' }),
+  tickerPk: (symbol: string) => `TICKER#${symbol}`,
+  sec: { PK: 'EARNINGS', SK: 'SEC' },
+  held: { PK: 'EARNINGS', SK: 'HELD' },
+} as const;
+
+/** The newest quarters kept per symbol. */
+export const EARNINGS_KEEP_QUARTERS = 8;
+export const EARNINGS_SCHEMA_VERSION = 1;
+/** Responses carry at most this many summaries. */
+export const EARNINGS_MAX_LIMIT = 24;
+export const EARNINGS_DEFAULT_LIMIT = 12;
+/** A summary older than this many days is never announced by a push (it is recorded silently). */
+export const EARNINGS_FRESH_DAYS = 5;
+/** `POST /earnings/{symbol}/refresh` is accepted once per symbol per this many milliseconds. */
+export const EARNINGS_REFRESH_INTERVAL_MS = 3_600_000;
+
+export const EARNINGS_DISCLAIMER = "Auto-generated from the company's press release; every number was checked against the text. Check the source before acting.";
+
+// --- Templates -----------------------------------------------------------------------------------------------------------
+
+export const KPI_TEMPLATE_IDS = ['generic', 'reit', 'bank', 'saas', 'infra'] as const;
+export type KpiTemplateId = (typeof KPI_TEMPLATE_IDS)[number];
+
+export const KPI_TEMPLATE_LABELS: Readonly<Record<KpiTemplateId, string>> = {
+  generic: 'General company',
+  reit: 'REIT (real estate)',
+  bank: 'Bank',
+  saas: 'Software as a service',
+  infra: 'Tech infrastructure and cloud',
+};
+
+export const METRIC_UNITS = ['money', 'perShare', 'percent', 'count', 'ratio'] as const;
+export type MetricUnit = (typeof METRIC_UNITS)[number];
+
+/** The figures every template can carry (extracted or computed); `dilutedShares` only feeds the per-share free cash flow. */
+export const CORE_METRIC_KEYS = ['eps', 'revenue', 'operatingIncome', 'operatingMargin', 'netIncome', 'operatingCashFlow', 'capex', 'fcf', 'fcfPerShare', 'dilutedShares'] as const;
+export type CoreMetricKey = (typeof CORE_METRIC_KEYS)[number];
+
+export const CORE_METRIC_META: Readonly<Record<CoreMetricKey, { label: string; unit: MetricUnit }>> = {
+  eps: { label: 'EPS', unit: 'perShare' },
+  revenue: { label: 'Revenue', unit: 'money' },
+  operatingIncome: { label: 'Operating profit', unit: 'money' },
+  operatingMargin: { label: 'Operating margin', unit: 'percent' },
+  netIncome: { label: 'Net income', unit: 'money' },
+  operatingCashFlow: { label: 'Cash from operations', unit: 'money' },
+  capex: { label: 'Capital expenditure', unit: 'money' },
+  fcf: { label: 'Free cash flow', unit: 'money' },
+  fcfPerShare: { label: 'FCF per share', unit: 'perShare' },
+  dilutedShares: { label: 'Diluted shares', unit: 'count' },
+};
+
+export interface KpiSlot {
+  key: string;
+  label: string;
+  unit: MetricUnit;
+  /** What the extraction asks for (shown to the model: the value exactly as printed in the release). */
+  hint: string;
+}
+
+export interface KpiTemplate {
+  id: KpiTemplateId;
+  label: string;
+  /** The two scorecard rows (keys of the headline metrics or of `slots`): the per-share result and revenue. */
+  scorecard: readonly string[];
+  /** Whether the template shows free cash flow (banks and REITs do not). */
+  showFcf: boolean;
+  /** Template specific figures, in display order. A slot the release does not state is shown as "not disclosed". */
+  slots: readonly KpiSlot[];
+}
+
+const slot = (key: string, label: string, unit: MetricUnit, hint: string): KpiSlot => ({ key, label, unit, hint });
+
+export const KPI_TEMPLATES: Readonly<Record<KpiTemplateId, KpiTemplate>> = {
+  generic: { id: 'generic', label: KPI_TEMPLATE_LABELS.generic, scorecard: ['eps', 'revenue'], showFcf: true, slots: [] },
+  reit: {
+    id: 'reit',
+    label: KPI_TEMPLATE_LABELS.reit,
+    scorecard: ['affoPerShare', 'revenue'],
+    showFcf: false,
+    slots: [
+      slot('affoPerShare', 'AFFO per share', 'perShare', 'Adjusted funds from operations (AFFO) per diluted share'),
+      slot('ffoPerShare', 'FFO per share', 'perShare', 'Funds from operations (FFO or Nareit FFO) per diluted share'),
+      slot('occupancy', 'Occupancy', 'percent', 'Portfolio occupancy or leased percentage'),
+      slot('sameStoreNoi', 'Same-store NOI growth', 'percent', 'Same-store (same-property) net operating income growth'),
+    ],
+  },
+  bank: {
+    id: 'bank',
+    label: KPI_TEMPLATE_LABELS.bank,
+    scorecard: ['eps', 'revenue'],
+    showFcf: false,
+    slots: [
+      slot('rotce', 'ROTCE', 'percent', 'Return on tangible common equity (ROTCE)'),
+      slot('tbvps', 'Tangible book value per share', 'perShare', 'Tangible book value per common share (TBVPS)'),
+      slot('cet1', 'CET1 capital ratio', 'percent', 'Common equity tier 1 (CET1) capital ratio'),
+      slot('netInterestIncome', 'Net interest income', 'money', 'Net interest income (NII)'),
+      slot('efficiencyRatio', 'Efficiency ratio', 'percent', 'Efficiency ratio'),
+      slot('provisionForCreditLosses', 'Provision for credit losses', 'money', 'Provision for credit losses'),
+    ],
+  },
+  saas: {
+    id: 'saas',
+    label: KPI_TEMPLATE_LABELS.saas,
+    scorecard: ['eps', 'revenue'],
+    showFcf: true,
+    slots: [
+      slot('rpo', 'Remaining performance obligations', 'money', 'Remaining performance obligations (RPO) or backlog in currency'),
+      slot('crpo', 'Current RPO growth', 'percent', 'Current remaining performance obligations (cRPO) growth, as a percentage'),
+      slot('arr', 'Annual recurring revenue', 'money', 'Annual recurring revenue (ARR) in currency'),
+      slot('nrr', 'Net revenue retention', 'percent', 'Net revenue retention or dollar-based net expansion rate'),
+      slot('seats', 'Seats or subscribers growth', 'percent', 'Growth in seats, subscribers or paid customers, as a percentage'),
+    ],
+  },
+  infra: {
+    id: 'infra',
+    label: KPI_TEMPLATE_LABELS.infra,
+    scorecard: ['eps', 'revenue'],
+    showFcf: true,
+    slots: [
+      slot('rpo', 'RPO, committed revenue or backlog', 'money', 'Remaining performance obligations, committed revenue, backlog or bookings in currency'),
+      slot('cloudRevenue', 'Cloud revenue', 'money', 'Cloud (or data center, or infrastructure) segment revenue in currency'),
+      slot('cloudGrowth', 'Cloud revenue growth', 'percent', 'Growth of cloud (or data center) revenue, as a percentage'),
+      slot('capexKpi', 'Capital expenditure', 'money', 'Capital expenditures (purchases of property and equipment) in currency'),
+    ],
+  },
+};
+
+export const isKpiTemplateId = (value: unknown): value is KpiTemplateId => typeof value === 'string' && (KPI_TEMPLATE_IDS as readonly string[]).includes(value);
+
+// --- Stored shapes -------------------------------------------------------------------------------------------------------
+
+export type EarningsBasis = 'GAAP' | 'adjusted' | 'reported' | 'calculated';
+export type EarningsVerdict = 'beat' | 'miss' | 'inline';
+
+/** One verified figure. Money is in whole currency units, percentages in percent points, shares as counts. */
+export interface EarningsMetric {
+  value: number;
+  unit: MetricUnit;
+  /** The figure as printed in the release (with its unit), for display next to the source. */
+  raw?: string;
+  /** The same figure a year earlier, as printed in the same release. */
+  yearAgo?: number;
+  /** Year over year, computed from `yearAgo` (percent change; absent when `yearAgo` is zero or negative). */
+  yoyPct?: number;
+  /** Year over year in percentage points, for metrics that are themselves percentages. */
+  yoyPoints?: number;
+  /** Quarter over quarter against the previously stored summary of the symbol (same basis and currency only). */
+  qoqPct?: number;
+  qoqPoints?: number;
+  /** Consensus estimate (EPS only, from Alpha Vantage when a key is configured). */
+  estimate?: number;
+  surprisePct?: number;
+  verdict?: EarningsVerdict;
+  basis?: EarningsBasis;
+}
+
+export interface EarningsKpi {
+  key: string;
+  label: string;
+  unit: MetricUnit;
+  /** Absent when the release does not state the figure ("not disclosed"). */
+  metric?: EarningsMetric;
+}
+
+export type GuidanceDirection = 'raised' | 'lowered' | 'maintained' | 'new';
+
+export interface EarningsGuidance {
+  label: string;
+  /** For example "full year 2026". */
+  period?: string;
+  unit: MetricUnit;
+  low?: number;
+  high?: number;
+  /** A single figure instead of a range. */
+  point?: number;
+  raw: string;
+  /** Against the guidance with the same label in the previous stored summary (code-computed). */
+  direction?: GuidanceDirection;
+}
+
+export interface EarningsSegment {
+  name: string;
+  value: number;
+  raw?: string;
+  yearAgo?: number;
+  yoyPct?: number;
+}
+
+export interface EarningsQuote {
+  text: string;
+  speaker?: string;
+}
+
+export interface EarningsVerification {
+  /** Extracted values (numbers, quotes, bullets) that could not be found in the release text and were removed. */
+  dropped: number;
+  /** What was dropped, e.g. `revenue.actual`, `quote`: names only, never values. */
+  droppedFields: string[];
+  model: string;
+  /** Workers AI neurons spent (an estimate from the documented per-token rates). */
+  neuronsEstimate: number;
+  /** Model calls made (1 or 2). */
+  calls: number;
+}
+
+export type EarningsOrigin = 'live' | 'backfill';
+
+export interface EarningsSummary {
+  schemaVersion: number;
+  symbol: string;
+  name: string;
+  /** Fiscal period as the release calls it ("Q3 2026", "third quarter 2026"). */
+  period: string;
+  /** Release date (YYYY-MM-DD): also the sort key. */
+  reportDate: string;
+  filingUrl: string;
+  accession: string;
+  form: '8-K' | '6-K';
+  reportingCurrency: string;
+  template: KpiTemplateId;
+  /** Backfilled summaries (the first run after deploy) are recorded silently: no push. */
+  origin: EarningsOrigin;
+  headline: Partial<Record<CoreMetricKey, EarningsMetric>>;
+  kpis: EarningsKpi[];
+  guidance: EarningsGuidance[];
+  segments: EarningsSegment[];
+  keyUpdates: string[];
+  quote?: EarningsQuote;
+  /** The report date of the stored summary used for the quarter-over-quarter figures; absent for the first stored quarter. */
+  previousReportDate?: string;
+  verification: EarningsVerification;
+  generatedAt: string;
+  status: 'ok';
+}
+
+export type EarningsCheckResult = 'ok' | 'no-filing' | 'not-in-sec' | 'blocked' | 'failed' | 'unreadable' | 'ai-allowance' | 'not-configured' | 'skipped';
+
+/** What the watcher knows about a symbol (`TICKER#{symbol}` / `EARNSTATE`). Never holds a figure from a release. */
+export interface EarningsSymbolState {
+  symbol: string;
+  cik?: string;
+  /** When the CIK lookup last failed to find the symbol (retried after 30 days). */
+  cikMissingAt?: string;
+  lastCheckedAt?: string;
+  lastResult?: EarningsCheckResult;
+  /** Short, sanitised reason of the last failure. */
+  lastReason?: string;
+  /** Checks made on `checksDay` (UTC). */
+  checksDay?: string;
+  checks?: number;
+  /** Extraction attempts made on `attemptsDay` (UTC). */
+  attemptsDay?: string;
+  attempts?: number;
+  /** Failures in a row (drives the back-off). */
+  failures?: number;
+  retryAfter?: string;
+  lastSuccessAt?: string;
+  /** The newest release a summary was produced for. */
+  lastAccession?: string;
+  /** Filings looked at and found not to be a results release (6-K), newest last, at most 12. */
+  seenAccessions?: string[];
+  /** Set once the first (backfill) attempt has been made, so it is made only once. */
+  backfillDone?: true;
+  /** Unreadable releases are retried once, later. */
+  unreadableCount?: number;
+  /** A release found by the watcher whose summary job was queued (not queued again for six hours). */
+  pendingAccession?: string;
+  pendingAt?: string;
+  lastManualRefreshAt?: string;
+  updatedAt: string;
+}
+
+// --- API -----------------------------------------------------------------------------------------------------------------
+
+/** The held-symbol cache (`EARNINGS` / `HELD`): rebuilt every few hours from the transactions, so a watcher run reads one row. */
+export interface EarningsHeldCache {
+  builtAt: string;
+  holdings: EarningsHolding[];
+  /** Expected report dates (YYYY-MM-DD) from the calendar, per symbol. */
+  calendar: Record<string, string[]>;
+}
+
+/** A held company the watcher looks at (never carries amounts or quantities). */
+export interface EarningsHolding {
+  symbol: string;
+  name: string;
+  template: KpiTemplateId;
+  /** The currency of the stored profile (a fallback when a release does not name its currency). */
+  currency?: string;
+}
+
+/** Whether the SEC refused requests (403 or 429): nothing is sent before `blockedUntil`. */
+export interface EarningsSecBlock {
+  blockedUntil?: string;
+  failures: number;
+  lastStatus?: number;
+  updatedAt: string;
+}
+
+export interface EarningsListResponse {
+  available: boolean;
+  summaries: EarningsSummary[];
+  /** The held (or formerly held) symbols that have at least one summary, for the filter chips. */
+  symbols: string[];
+}
+
+export interface EarningsSymbolStatus {
+  symbol: string;
+  eligible: boolean;
+  lastCheckedAt?: string;
+  lastResult?: EarningsCheckResult;
+  lastReason?: string;
+  retryAfter?: string;
+  latestReportDate?: string;
+}
+
+export type EarningsNotReady = 'sec-contact' | 'ai-binding';
+
+export interface EarningsStatusResponse {
+  available: boolean;
+  /** True when the SEC contact and the AI binding are both present. */
+  configured: boolean;
+  /** What is missing (`sec-contact`: the SEC_CONTACT variable, `ai-binding`: the Workers AI binding). */
+  missing: EarningsNotReady[];
+  /** Estimates of EPS need the optional Alpha Vantage key. */
+  estimatesConfigured: boolean;
+  secBlockedUntil?: string;
+  neurons?: { used: number; dailyCap: number; allowance: number; state: 'ok' | 'warn' | 'blocked' | 'unavailable'; resetsAt: string };
+  symbols: EarningsSymbolStatus[];
+}
+
+export interface EarningsRefreshResponse {
+  accepted: boolean;
+  /** When refused: `rate-limited` (once per hour), `not-configured`, `not-eligible`, `unknown-symbol`. */
+  reason?: 'rate-limited' | 'not-configured' | 'not-eligible' | 'unknown-symbol';
+  retryAfterSeconds?: number;
+}
+
+export const earningsListQuerySchema = z.object({
+  symbol: z
+    .string()
+    .trim()
+    .min(1)
+    .max(30)
+    .transform((value) => value.toUpperCase())
+    .optional(),
+  limit: z.coerce.number().int().min(1).max(EARNINGS_MAX_LIMIT).optional(),
+});
+
+/** The report date a `GET /earnings/{symbol}/{period}` is addressed by. */
+export const earningsPeriodSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'The period is the report date (YYYY-MM-DD)');

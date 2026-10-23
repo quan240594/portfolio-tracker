@@ -17,6 +17,7 @@ export function runUsageStoreContract(name: string, create: Factory): void {
         durableObjectGbSeconds: 0,
         rowsRead: 0,
         rowsWritten: 0,
+        aiNeurons: 0,
       });
     });
 
@@ -31,6 +32,7 @@ export function runUsageStoreContract(name: string, create: Factory): void {
         durableObjectGbSeconds: 0,
         rowsRead: 10,
         rowsWritten: 4,
+        aiNeurons: 0,
       });
     });
 
