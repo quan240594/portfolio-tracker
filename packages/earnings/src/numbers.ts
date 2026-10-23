@@ -125,7 +125,7 @@ const CONTEXT_CHARS = 80;
 const TABLE_SCALE_WORDS = ['thousands', 'millions', 'billions'] as const;
 
 const isAsciiLetter = (char: string | undefined): boolean => char !== undefined && ((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z'));
-const isWordChar = (char: string | undefined): boolean => char !== undefined && (isAsciiLetter(char) || isDigit(char) || char === '_');
+const isWordChar = (char: string | undefined): boolean => isAsciiLetter(char) || isDigit(char) || char === '_';
 const isSpace = (char: string | undefined): boolean => char !== undefined && char.trim() === '';
 const startsWithIgnoreCase = (text: string, word: string, from: number): boolean => text.slice(from, from + word.length).toLowerCase() === word;
 

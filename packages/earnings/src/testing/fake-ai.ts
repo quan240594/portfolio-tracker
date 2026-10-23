@@ -5,17 +5,15 @@ export interface AiCall {
   input: AiRunInput;
 }
 
-export type AiReply = unknown;
-
 /**
  * A fake Workers AI binding: replies in order (the last repeats), each a JSON object (answered as `{ response, usage }`), a raw
  * `{ raw }` string, an Error, or a function of the call. No network.
  */
 export class FakeAi implements AiLike {
   readonly calls: AiCall[] = [];
-  private readonly replies: AiReply[];
+  private readonly replies: unknown[];
 
-  constructor(...replies: AiReply[]) {
+  constructor(...replies: unknown[]) {
     this.replies = replies;
   }
 
