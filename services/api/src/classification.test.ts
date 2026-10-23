@@ -102,6 +102,18 @@ describe('PUT and DELETE /classification/{symbol}', () => {
     expect((await put(s, 'AAA', { domain: '192.168.0.1' })).status).toBe(400);
   });
 
+  it('stores the earnings KPI template, keeps it out of the allocation values and refuses an unknown one', async () => {
+    const s = setup();
+    const { status, body } = await put(s, 'AAA', { kpiTemplate: 'saas' });
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ symbol: 'AAA', effective: { name: 'Aaa Inc', sector: 'Technology' }, override: { kpiTemplate: 'saas' } });
+    expect(s.mgmt.overrides).toEqual([{ userId: 'demo', symbol: 'AAA', kpiTemplate: 'saas', createdAt: NOW, updatedAt: NOW }]);
+    const profiles = await loadProfiles({ deps: s.deps, userId: 'demo' } as never, ['AAA']);
+    expect(profiles.AAA).toEqual(s.repo.profiles.AAA);
+    expect((await put(s, 'AAA', { kpiTemplate: 'crypto' })).status).toBe(400);
+    expect((await put(s, 'AAA', {})).status).toBe(400);
+  });
+
   it('is applied by holdings, allocation and asset detail, and removed again by DELETE', async () => {
     const s = setup();
     const before = await s.call('GET', '/allocation', { query: { by: 'assetClass' } });

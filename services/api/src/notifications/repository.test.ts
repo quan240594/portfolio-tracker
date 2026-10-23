@@ -19,9 +19,9 @@ describe('ItemNotificationRepository', () => {
     const store = new MemoryItemStore();
     const repo = new ItemNotificationRepository(store);
     expect(await repo.getSettings('u1')).toBeNull();
-    await repo.putSettings({ userId: 'u1', types: { exDividend: true, declared: false, received: true }, exDividendDaysBefore: 3, createdAt: 'c', updatedAt: 'u' });
+    await repo.putSettings({ userId: 'u1', types: { exDividend: true, declared: false, received: true, earnings: true }, exDividendDaysBefore: 3, createdAt: 'c', updatedAt: 'u' });
     expect(await store.get(notificationKeys.settings('u1'))).toMatchObject({ PK: 'USER#u1', SK: 'NOTIFYSETTINGS', entityType: 'NOTIFICATION_SETTINGS', exDividendDaysBefore: 3 });
-    expect(await repo.getSettings('u1')).toEqual({ userId: 'u1', types: { exDividend: true, declared: false, received: true }, exDividendDaysBefore: 3, createdAt: 'c', updatedAt: 'u' });
+    expect(await repo.getSettings('u1')).toEqual({ userId: 'u1', types: { exDividend: true, declared: false, received: true, earnings: true }, exDividendDaysBefore: 3, createdAt: 'c', updatedAt: 'u' });
     expect(await repo.getSettings('u2')).toBeNull();
   });
 
