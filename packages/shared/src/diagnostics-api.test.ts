@@ -45,6 +45,7 @@ const report = (): AlarmDiagnosticsReport => ({
 describe('alarm diagnostics contract', () => {
   it('names the route', () => {
     expect(DIAGNOSTICS_ROUTES.alarms).toBe('GET /diagnostics/alarms');
+    expect(DIAGNOSTICS_ROUTES.pricesStatus).toBe('GET /prices/status');
   });
 
   it('accepts a valid report', () => {

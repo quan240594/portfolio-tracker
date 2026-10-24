@@ -1,5 +1,5 @@
 import type { PricesConfig } from '@portfolio/prices';
-import type { T212QuoteState, T212QuoteStatus } from '@portfolio/shared';
+import type { PriceHistoryCoverage, T212QuoteState, T212QuoteStatus } from '@portfolio/shared';
 
 export interface PriceSourceStatus {
   name: 'twelvedata' | 'eodhd' | 'coingecko' | 'alphavantage' | 'frankfurter' | 't212';
@@ -22,6 +22,11 @@ export interface PricesStatus {
   message: string;
   /** The Trading 212 quote refresh of the signed-in user; null while no refresh has run (no connected account, or not yet). */
   t212Quotes: T212QuotesReport | null;
+  /**
+   * How much end-of-day history is stored for each open position of the signed-in user, and why a gap is there (see "Price history
+   * coverage" in docs/architecture.md). Null without a signed-in user or when it could not be read.
+   */
+  history: PriceHistoryCoverage | null;
 }
 
 /** What the last Trading 212 quote refresh did: the freshness of the prices of the held positions. Never contains credentials. */
@@ -64,8 +69,8 @@ function summary(keyed: number, missingSecrets: readonly string[], t212: T212Quo
   return 'No market-data API key is set: ' + rates + ' and ' + prices + '; charts and history need the secrets listed in missingSecrets.';
 }
 
-/** `t212` is the stored status of the signed-in user's Trading 212 quote refresh, when there is one. */
-export function pricesStatus(config: PricesConfig, t212: T212QuoteStatus | null = null): PricesStatus {
+/** `t212` is the stored status of the signed-in user's Trading 212 quote refresh, when there is one; `history` the coverage of the held symbols. */
+export function pricesStatus(config: PricesConfig, t212: T212QuoteStatus | null = null, history: PriceHistoryCoverage | null = null): PricesStatus {
   const sources: PriceSourceStatus[] = SOURCES.map(({ name, secret, key, covers }) => ({ name, configured: config.keys[key] !== undefined, secret, covers }));
   sources.push({ name: 'frankfurter', configured: true, secret: null, covers: 'daily foreign-exchange rates (no key needed)' });
   const t212Report = t212 ? report(t212) : null;
@@ -74,5 +79,5 @@ export function pricesStatus(config: PricesConfig, t212: T212QuoteStatus | null 
   const keyed = SOURCES.length - missingSecrets.length;
   let state: PricesStatus['state'] = 'ok';
   if (missingSecrets.length > 0) state = keyed === 0 ? 'no-keys' : 'partial';
-  return { state, sources, missingSecrets, message: summary(keyed, missingSecrets, t212Report), t212Quotes: t212Report };
+  return { state, sources, missingSecrets, message: summary(keyed, missingSecrets, t212Report), t212Quotes: t212Report, history };
 }

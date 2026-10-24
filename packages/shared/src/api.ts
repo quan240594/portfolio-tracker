@@ -18,6 +18,8 @@
  * - Writes (POST /transactions, imports) target exactly one portfolio and validate overselling against that
  *   portfolio only. A symbol must use the same currency in every portfolio of the user (422 otherwise), so
  *   the combined view can always be computed.
+ * - GET /history: `valuedAtCost` (additive, only when needed) names the held symbols without a stored close on some days of the
+ *   range: they are valued at cost until `until`. The last point is valued with the stored quotes, like the headline total.
  */
 import type {
   AllocationDimension,
@@ -30,6 +32,7 @@ import type {
   Transaction,
   ValuePoint,
 } from './types.js';
+import type { ValuedAtCost } from './price-coverage.js';
 import type { HistoryRange, TransactionInput } from './schemas.js';
 
 export const DEMO_USER_ID = 'demo';
@@ -78,7 +81,13 @@ export type GetHoldingsResponse = { baseCurrency: string; holdings: Holding[] };
 export type GetAllocationRequest = { by?: AllocationDimension };
 export type GetAllocationResponse = { by: AllocationDimension; baseCurrency: string; slices: AllocationSlice[] };
 export type GetHistoryRequest = { range?: HistoryRange };
-export type GetHistoryResponse = { range: HistoryRange; baseCurrency: string; points: ValuePoint[] };
+export type GetHistoryResponse = {
+  range: HistoryRange;
+  baseCurrency: string;
+  points: ValuePoint[];
+  /** Present only when some held symbol had no stored close on some days of the range: they are valued at cost on those days. */
+  valuedAtCost?: ValuedAtCost;
+};
 export type GetDividendsResponse = DividendOverview;
 export type ListTransactionsResponse = { transactions: Transaction[] };
 export type CreateTransactionRequest = TransactionInput;

@@ -11,6 +11,8 @@ import { z } from 'zod';
 
 export const DIAGNOSTICS_ROUTES = {
   alarms: 'GET /diagnostics/alarms',
+  /** Cloudflare deployment only: the market-data sources and, in `history`, the price-data coverage of the held symbols (see price-coverage.ts). */
+  pricesStatus: 'GET /prices/status',
 } as const;
 
 export const ALARM_RUN_OUTCOMES = ['completed', 'deferred', 'failed'] as const;

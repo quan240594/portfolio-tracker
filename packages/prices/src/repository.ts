@@ -25,6 +25,13 @@ export interface Attempts {
   /** Whether the last try ended `skipped`. */
   skipped: boolean;
 }
+/** The last try recorded for a symbol (see `lastAttempts`). */
+export interface LastAttempt {
+  day: string;
+  attempts: number;
+  outcome: AttemptOutcome;
+  error: string;
+}
 export const healKey = { PK: 'USAGE', SK: 'ENRICH#HEAL' } as const;
 /** Marks the one-time repair of stored minor-unit prices (pence) as done. */
 export const minorUnitRepairKey = { PK: 'USAGE', SK: 'REPAIR#minor-units-v1' } as const;
@@ -205,6 +212,19 @@ export class PriceRepository {
   async attemptsOn(kind: AttemptKind, symbols: readonly string[], day: string): Promise<Map<string, Attempts>> {
     const items = symbols.length === 0 ? [] : await this.store.getMany(symbols.map((symbol) => attemptKey(symbol, kind)));
     return new Map(items.filter((item) => item.day === day && typeof item.attempts === 'number').map((item) => [symbolOfPk(item), { count: Number(item.attempts), skipped: item.outcome === 'skipped' }]));
+  }
+
+  /** The last recorded try of the enrichment of each symbol, whatever day it was on (what the price coverage report explains a gap with). */
+  async lastAttempts(symbols: readonly string[]): Promise<Map<string, LastAttempt>> {
+    const items = symbols.length === 0 ? [] : await this.store.getMany(symbols.map((symbol) => attemptKey(symbol, 'core')));
+    const found = items.filter((item) => typeof item.day === 'string' && typeof item.attempts === 'number');
+    return new Map(found.map((item) => [symbolOfPk(item), { day: String(item.day), attempts: Number(item.attempts), outcome: item.outcome === 'skipped' ? 'skipped' : 'retry', error: typeof item.lastError === 'string' ? item.lastError : '' }]));
+  }
+
+  /** The newest `limit` EOD rows of `symbol` in ONE query: their dates (newest first) and sources (absent: a market-data provider's row). */
+  async newestEod(symbol: string, limit: number): Promise<{ date: string; source?: string }[]> {
+    const page = await this.store.query({ pk: keys.tickerPk(symbol), sk: { beginsWith: keys.eodPrefix }, reverse: true, limit });
+    return page.items.map((item) => ({ date: item.SK.slice(keys.eodPrefix.length), ...(typeof item.source === 'string' ? { source: item.source } : {}) }));
   }
 
   /** Stores the number of tries of `day`, how the last one ended and why. */

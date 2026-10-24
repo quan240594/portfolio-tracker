@@ -1,4 +1,4 @@
-import { JOBS, type JobHandler } from '@portfolio/platform';
+import { JOBS, silentLogger, type JobHandler } from '@portfolio/platform';
 import { usageSnapshotSchema } from '@portfolio/shared';
 import { describe, expect, it, vi } from 'vitest';
 import { Browser } from '../test/browser.js';
@@ -50,6 +50,16 @@ describe('HubCore', () => {
     expect(ledger()).toHaveLength(1); // one row per UTC day
     expect(ledger()[0]!.worker_requests).toBe(3);
     expect(ledger()[0]!.rows_written).toBeGreaterThan(0);
+  });
+
+  it('serves the sources of the price status even when the history coverage cannot be read', async () => {
+    const warn = vi.fn();
+    const { stack, api } = await signedIn({ logger: { ...silentLogger, warn } });
+    vi.spyOn(stack.core.platform.items, 'query').mockRejectedValue(new Error('store unavailable'));
+    const status = await api('GET', '/prices/status');
+    expect(status.status).toBe(200);
+    expect(status.body).toMatchObject({ state: 'no-keys', history: null });
+    expect(warn).toHaveBeenCalledWith('The price history coverage could not be read', { error: expect.stringContaining('store unavailable') });
   });
 
   it('keeps reads and refuses writes with 503 BUDGET_UNAVAILABLE while the ledger cannot be read', async () => {

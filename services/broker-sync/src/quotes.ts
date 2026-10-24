@@ -1,9 +1,10 @@
 import { JOBS, logger, type JobHandler, type JobQueue } from '@portfolio/platform';
-import { normalizeCurrency, type Quote, type SymbolMapping, type T212QuoteState, type T212QuoteStatus, type Trading212Credentials } from '@portfolio/shared';
+import { normalizeCurrency, type EodPrice, type Quote, type SymbolMapping, type T212QuoteState, type T212QuoteStatus, type Trading212Credentials } from '@portfolio/shared';
 import { z } from 'zod';
 import type { HandlerResult } from './app.js';
 import type { CredentialSource } from './credentials.js';
 import { BrokerError, describeError } from './errors.js';
+import { calendarDay, endOfDayRows, freshQuotes, snapshotMode } from './end-of-day.js';
 import { mergeQuote, resolvePrice, type EuroRates, type QuoteCandidate } from './quote-price.js';
 import type { QuoteStore } from './quote-store.js';
 import type { BrokerStore } from './store.js';
@@ -19,7 +20,7 @@ import type { OpenPosition, TradableInstrument } from './t212/schemas.js';
  * ticker or ISIN, the rate-limited exchange metadata), maps every instrument to the app symbol with the importer's mapper, and
  * stores one quote per held symbol in ONE batched write. See docs/architecture.md "Trading 212 position quotes".
  */
-const payloadSchema = z.object({ trigger: z.enum(['scheduled', 'sync']), userId: z.string().min(1).optional() });
+const payloadSchema = z.object({ trigger: z.enum(['scheduled', 'sync', 'close']), userId: z.string().min(1).optional() });
 export type RefreshQuotesPayload = z.infer<typeof payloadSchema>;
 
 export interface QuoteDeps {
@@ -32,6 +33,8 @@ export interface QuoteDeps {
   createApi: (credentials: Trading212Credentials) => Pick<Trading212Api, 'positions' | 'instruments' | 'exchanges'>;
   symbolOverrides: Readonly<Record<string, string>>;
   now: () => Date;
+  /** Keeps the quotes as end-of-day rows (at the `close` run, and once as a seed); absent = quotes only. `timeZone` decides the calendar day. */
+  endOfDay?: { timeZone: string };
 }
 
 export interface UserQuoteResult {
@@ -44,6 +47,8 @@ export interface UserQuoteResult {
   skipped: number;
   /** Baseline profiles written in this run (absent without a profile store). */
   profiles?: number;
+  /** End-of-day rows written in this run (absent when none). */
+  endOfDay?: number;
 }
 
 export interface QuoteRunResult {
@@ -83,7 +88,7 @@ function waitReason(status: T212QuoteStatus | null, trigger: RefreshQuotesPayloa
   if (!status) return undefined;
   if (nowMs - Date.parse(status.lastAttemptAt) < MIN_INTERVAL_MS) return 'too-soon';
   const retryAt = status.nextAttemptAt === undefined ? Number.NaN : Date.parse(status.nextAttemptAt);
-  return trigger === 'scheduled' && nowMs < retryAt ? 'backing-off' : undefined;
+  return trigger !== 'sync' && nowMs < retryAt ? 'backing-off' : undefined;
 }
 
 /** A failure that is not about the credentials of this user (a store error, say) is not recorded as a quote failure: it is thrown to the queue. */
@@ -178,6 +183,30 @@ function candidates(items: readonly OpenPosition[], mapped: Mapped, rates: EuroR
   return [...bySymbol.values()];
 }
 
+/** The end-of-day rows of a run and the marks (in the status item) that keep it once a day. */
+interface Snapshot {
+  rows: EodPrice[];
+  marks: Partial<Pick<T212QuoteStatus, 'eodSeededAt' | 'eodClosedDay'>>;
+}
+
+const NO_SNAPSHOT: Snapshot = { rows: [], marks: {} };
+
+/**
+ * At the close run (once a day) and on the very first run (a seed), keeps each fresh Trading 212 quote as the EOD row of the Amsterdam
+ * calendar day, unless a market-data provider already has that row. One batched read here, the rows are written with the quotes.
+ */
+async function endOfDaySnapshot(deps: QuoteDeps, trigger: RefreshQuotesPayload['trigger'], previous: T212QuoteStatus | null, quotes: readonly Quote[]): Promise<Snapshot> {
+  if (!deps.endOfDay) return NO_SNAPSHOT;
+  const now = deps.now();
+  const day = calendarDay(now, deps.endOfDay.timeZone);
+  const mode = snapshotMode(trigger, previous, day);
+  if (mode === 'none') return NO_SNAPSHOT;
+  const fresh = freshQuotes(quotes, now);
+  const existing = await deps.quotes.eodSources(fresh.map((quote) => quote.symbol), day.date);
+  const marks = { eodSeededAt: previous?.eodSeededAt ?? now.toISOString(), ...(mode === 'close' ? { eodClosedDay: day.date } : {}) };
+  return { rows: endOfDayRows(fresh, day.date, existing), marks };
+}
+
 async function refreshUser(deps: QuoteDeps, userId: string, trigger: RefreshQuotesPayload['trigger']): Promise<UserQuoteResult> {
   if ((await deps.store.listStates(userId)).length === 0) return notRefreshed(userId, 'skipped', 'not-connected');
   const previous = await deps.quotes.getStatus(userId);
@@ -199,22 +228,35 @@ async function refreshUser(deps: QuoteDeps, userId: string, trigger: RefreshQuot
   const wanted = candidates(items, mapped, await ratesFor(deps, items), asOf);
   const stored = await deps.quotes.latest(wanted.map((candidate) => candidate.symbol));
   const quotes = wanted.map((candidate) => mergeQuote(candidate, stored.get(candidate.symbol))).filter((quote): quote is Quote => quote !== undefined);
+  const snapshot = await endOfDaySnapshot(deps, trigger, previous, quotes);
   // Before the status is saved: loading the instruments records the time of the request in it.
   const baselines = deps.profiles === undefined ? undefined : await refreshBaselines(deps.profiles, heldInstruments(items, mapped.symbols), () => instruments.load());
   const { lastError: _lastError, nextAttemptAt: _nextAttemptAt, ...rest }: Partial<T212QuoteStatus> = previous ?? {};
-  await deps.quotes.save(quotes, {
-    ...rest,
+  await deps.quotes.save(
+    quotes,
+    {
+      ...rest,
+      userId,
+      state: 'OK',
+      lastAttemptAt: asOf,
+      lastSuccessAt: asOf,
+      failures: 0,
+      quoted: quotes.length,
+      skipped: items.length - quotes.length,
+      tickerSymbols: mapped.cache,
+      ...(instruments.triedAt() === undefined ? {} : { metadataTriedAt: instruments.triedAt() }),
+      ...snapshot.marks,
+    },
+    snapshot.rows,
+  );
+  return {
     userId,
-    state: 'OK',
-    lastAttemptAt: asOf,
-    lastSuccessAt: asOf,
-    failures: 0,
+    outcome: 'refreshed',
     quoted: quotes.length,
     skipped: items.length - quotes.length,
-    tickerSymbols: mapped.cache,
-    ...(instruments.triedAt() === undefined ? {} : { metadataTriedAt: instruments.triedAt() }),
-  });
-  return { userId, outcome: 'refreshed', quoted: quotes.length, skipped: items.length - quotes.length, ...(baselines === undefined ? {} : { profiles: baselines }) };
+    ...(baselines === undefined ? {} : { profiles: baselines }),
+    ...(snapshot.rows.length === 0 ? {} : { endOfDay: snapshot.rows.length }),
+  };
 }
 
 interface RunCursor {

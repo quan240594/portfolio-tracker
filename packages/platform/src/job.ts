@@ -27,8 +27,8 @@ export interface JobPayloads {
   enrichTransactions: TransactionsChangedDetail;
   refreshPrices: { trigger: 'scheduled' };
   refreshCalendar: { trigger: 'scheduled' };
-  /** Refresh the quotes of the positions held at Trading 212 (`scheduled`, or `sync` right after a successful sync); `userId` limits it to one user. */
-  refreshT212Quotes: { trigger: 'scheduled' | 'sync'; userId?: string };
+  /** Refresh the quotes of the positions held at Trading 212 (`scheduled`; `close` at the 22:05 slot, which also keeps the quotes as end-of-day rows; `sync` right after a successful sync); `userId` limits it to one user. */
+  refreshT212Quotes: { trigger: 'scheduled' | 'sync' | 'close'; userId?: string };
   /** Send the dividend push notifications that are due (`scheduled` for everyone, `sync` after a broker sync for `userId`). */
   notifyDividends: { trigger: 'scheduled' | 'sync'; userId?: string };
   /**

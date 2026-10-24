@@ -282,12 +282,17 @@ const addDays = (date: string, days: number): string => {
   return d.toISOString().slice(0, 10);
 };
 
+interface LastClose {
+  close: number;
+  date: string;
+}
+
 /** Closes before `start`: the latest one per symbol seeds the carry-forward. */
-function seedLastClose(eod: Readonly<Record<string, readonly EodPrice[]>>, start: string): Map<string, number> {
-  const lastClose = new Map<string, number>();
+function seedLastClose(eod: Readonly<Record<string, readonly EodPrice[]>>, start: string): Map<string, LastClose> {
+  const lastClose = new Map<string, LastClose>();
   for (const [symbol, prices] of Object.entries(eod)) {
     const prior = prices.filter((p) => p.date < start).sort((a, b) => a.date.localeCompare(b.date)).at(-1);
-    if (prior) lastClose.set(symbol, prior.close);
+    if (prior) lastClose.set(symbol, { close: prior.close, date: prior.date });
   }
   return lastClose;
 }
@@ -312,26 +317,64 @@ function futureSplitFactor(splits: readonly SplitEvent[] | undefined, date: stri
   return (splits ?? []).reduce((f, s) => (s.date > date ? f * s.ratio : f), 1);
 }
 
+/** The first and last day a symbol was valued at its average cost because no close was known. */
+export interface CostValuedSpan {
+  symbol: string;
+  from: string;
+  to: string;
+}
+
+/** Everything the daily valuation reads and keeps while it walks the days. */
+interface Valuation {
+  closeIndex: ReadonlyMap<string, ReadonlyMap<string, number>>;
+  lastClose: Map<string, LastClose>;
+  timeline: FxTimeline;
+  splits: ReadonlyMap<string, readonly SplitEvent[]>;
+  /** The last day of the series: valued at the stored quote (the price of the headline) when there is one. */
+  last: string;
+  quotes: Readonly<Record<string, Quote>>;
+  /** Days valued at cost per symbol. */
+  atCost: Map<string, CostValuedSpan>;
+  /** Symbols with an open position on at least one day of the series. */
+  held: Set<string>;
+}
+
+function noteCostValued(atCost: Map<string, CostValuedSpan>, symbol: string, date: string): void {
+  const span = atCost.get(symbol);
+  if (span) span.to = date;
+  else atCost.set(symbol, { symbol, from: date, to: date });
+}
+
+/**
+ * The quote that values `symbol` on the last day, or undefined: the same one the headline uses (`calculatePortfolio`), as long as it
+ * is not older than the last known close (a provider's close of a later day is the newer price).
+ */
+function liveQuote(valuation: Valuation, symbol: string, date: string): Quote | undefined {
+  const quote = valuation.quotes[symbol];
+  if (!quote || date !== valuation.last) return undefined;
+  return quote.asOf.slice(0, 10) >= (valuation.lastClose.get(symbol)?.date ?? '') ? quote : undefined;
+}
+
 /** Market value and cost basis (base currency) of the open positions on `date`; updates `lastClose`. */
-function valuePositionsOn(
-  positions: ReadonlyMap<string, Position>,
-  closeIndex: ReadonlyMap<string, ReadonlyMap<string, number>>,
-  lastClose: Map<string, number>,
-  timeline: FxTimeline,
-  date: string,
-  splits: ReadonlyMap<string, readonly SplitEvent[]>,
-): { value: number; invested: number } {
+function valuePositionsOn(positions: ReadonlyMap<string, Position>, valuation: Valuation, date: string): { value: number; invested: number } {
   let value = 0;
   let invested = 0;
   for (const p of positions.values()) {
-    const close = closeIndex.get(p.symbol)?.get(date);
-    if (close !== undefined) lastClose.set(p.symbol, close);
+    const close = valuation.closeIndex.get(p.symbol)?.get(date);
+    if (close !== undefined) valuation.lastClose.set(p.symbol, { close, date });
     if (p.quantity <= 0) continue;
+    valuation.held.add(p.symbol);
     // Provider closes are split-adjusted (as if the latest share basis always applied), so units held before a
     // later split are restated to today's basis; the fallback price (cost / units) uses the same basis.
-    const units = p.quantity * futureSplitFactor(splits.get(p.symbol), date);
-    const price = lastClose.get(p.symbol) ?? p.costLocal / units;
-    value += timeline.toBase(units * price, p.currency, date);
+    const units = p.quantity * futureSplitFactor(valuation.splits.get(p.symbol), date);
+    const quote = liveQuote(valuation, p.symbol, date);
+    if (quote) {
+      value += valuation.timeline.toBase(units * quote.price, quote.currency);
+    } else {
+      const known = valuation.lastClose.get(p.symbol);
+      if (!known) noteCostValued(valuation.atCost, p.symbol, date);
+      value += valuation.timeline.toBase(units * (known?.close ?? p.costLocal / units), p.currency, date);
+    }
     invested += p.costBase;
   }
   return { value, invested };
@@ -340,13 +383,63 @@ function valuePositionsOn(
 /** Extra value/cost on a date that does not come from positions (cash balances, custom assets). */
 export type ValueHistoryExtra = (date: string, timeline: FxTimeline) => { value: number; invested: number };
 
+export interface ValueSeriesInput {
+  transactions: readonly Transaction[];
+  eod: Readonly<Record<string, readonly EodPrice[]>>;
+  fx: FxRates;
+  from: string;
+  to: string;
+  fxHistory?: readonly FxDay[];
+  extra?: ValueHistoryExtra;
+  /** Latest stored quote per symbol: on the last day (`to`) a position is valued at it, like the headline total. */
+  quotes?: Readonly<Record<string, Quote>>;
+}
+
+export interface ValueSeries {
+  points: ValuePoint[];
+  /** Symbols that were valued at average cost on some days because no close was stored yet, with those days. */
+  costValued: CostValuedSpan[];
+  /** Symbols with an open position on at least one day of the series. */
+  held: number;
+}
+
 /**
- * Daily portfolio value series between `from` and `to` (inclusive) in the base currency.
+ * Daily portfolio value series between `from` and `to` (inclusive) in the base currency, with the symbols that had to be valued at cost.
  * Each day's value uses that day's ECB fixing (carried over weekends/holidays) when `fxHistory` is
  * given, else the latest rate; `invested` is the cost basis at the purchase-date rates.
  * Missing closes carry forward the last known close, falling back to the position's average cost.
+ * The last day uses the latest stored quote of each position (when given and not older than the last close) at the latest FX rate:
+ * exactly what the headline total is made of.
  * Assumption: EOD closes are split-adjusted (Yahoo-style), so quantities held before a SPLIT are shown multiplied by the
  * split ratio; the value therefore does not jump on the split date. `extra` adds cash/custom-asset value and cost.
+ */
+export function buildValueSeries({ transactions, eod, fx, from, to, fxHistory, extra, quotes = {} }: Readonly<ValueSeriesInput>): ValueSeries {
+  const sorted = dropDuplicateSplits(sortTransactions(transactions));
+  if (sorted.length === 0 || from > to) return { points: [], costValued: [], held: 0 };
+  const timeline = new FxTimeline(fx, fxHistory);
+  const start = from < sorted[0]!.date ? sorted[0]!.date : from;
+
+  const closeIndex = new Map<string, Map<string, number>>();
+  for (const [symbol, prices] of Object.entries(eod)) {
+    closeIndex.set(symbol, new Map(prices.map((p) => [p.date, p.close])));
+  }
+
+  const valuation: Valuation = { closeIndex, lastClose: seedLastClose(eod, start), timeline, splits: splitsBySymbol(sorted), last: to, quotes, atCost: new Map(), held: new Set() };
+  const points: ValuePoint[] = [];
+  const positions = new Map<string, Position>();
+  let next = 0;
+  for (let date = start; date <= to; date = addDays(date, 1)) {
+    while (next < sorted.length && sorted[next]!.date <= date) applyTransaction(positions, sorted[next++]!, timeline);
+    const held = valuePositionsOn(positions, valuation, date);
+    const added = extra?.(date, timeline) ?? { value: 0, invested: 0 };
+    points.push({ date, value: round(held.value + added.value), invested: round(held.invested + added.invested) });
+  }
+  return { points, costValued: [...valuation.atCost.values()], held: valuation.held.size };
+}
+
+/**
+ * Daily portfolio value series between `from` and `to` (inclusive) in the base currency: `buildValueSeries` without live quotes
+ * (every day, the last one included, is valued at the last known close).
  */
 export function buildValueHistory(
   transactions: readonly Transaction[],
@@ -357,28 +450,7 @@ export function buildValueHistory(
   fxHistory?: readonly FxDay[],
   extra?: ValueHistoryExtra,
 ): ValuePoint[] {
-  const sorted = dropDuplicateSplits(sortTransactions(transactions));
-  if (sorted.length === 0 || from > to) return [];
-  const timeline = new FxTimeline(fx, fxHistory);
-  const start = from < sorted[0]!.date ? sorted[0]!.date : from;
-
-  const closeIndex = new Map<string, Map<string, number>>();
-  for (const [symbol, prices] of Object.entries(eod)) {
-    closeIndex.set(symbol, new Map(prices.map((p) => [p.date, p.close])));
-  }
-
-  const lastClose = seedLastClose(eod, start);
-  const splits = splitsBySymbol(sorted);
-  const points: ValuePoint[] = [];
-  const positions = new Map<string, Position>();
-  let next = 0;
-  for (let date = start; date <= to; date = addDays(date, 1)) {
-    while (next < sorted.length && sorted[next]!.date <= date) applyTransaction(positions, sorted[next++]!, timeline);
-    const held = valuePositionsOn(positions, closeIndex, lastClose, timeline, date, splits);
-    const added = extra?.(date, timeline) ?? { value: 0, invested: 0 };
-    points.push({ date, value: round(held.value + added.value), invested: round(held.invested + added.invested) });
-  }
-  return points;
+  return buildValueSeries({ transactions, eod, fx, from, to, fxHistory, extra }).points;
 }
 
 /**

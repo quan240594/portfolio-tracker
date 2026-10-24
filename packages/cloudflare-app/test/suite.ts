@@ -449,6 +449,7 @@ export function defineAppSuite(label: string, start: StartStack): void {
         expect(status.body).toMatchObject({ state: 'no-keys', missingSecrets: ['TWELVEDATA_API_KEY', 'EODHD_API_KEY', 'COINGECKO_API_KEY', 'ALPHAVANTAGE_API_KEY'] });
         expect(status.body.message).toContain('No market-data API key is set');
         expect(status.body.t212Quotes).toBeNull();
+        expect(status.body.history).toMatchObject({ symbols: [], totals: { held: 0, complete: 0, partial: 0, missing: 0, valuedAtCostSince: null, valuedAtCostUntil: null, truncated: false } });
         expect(JSON.stringify(status.body)).not.toContain(TD_KEY);
         expect((await new Browser(stack).request('/api/prices/status')).status).toBe(401);
 
@@ -464,6 +465,9 @@ export function defineAppSuite(label: string, start: StartStack): void {
         const holdings = await call('GET', `/holdings?portfolioId=${portfolio}`);
         expect(holdings.status).toBe(200);
         expect(holdings.body.holdings[0]).toMatchObject({ symbol: 'AAPL', quantity: 2, priceStale: true });
+        const history = (await call('GET', '/prices/status')).body.history;
+        expect(history.symbols).toHaveLength(1);
+        expect(history.symbols[0]).toMatchObject({ symbol: 'AAPL', name: 'AAPL', provider: 'twelvedata', eodRows: 0, historyState: 'missing', reason: 'No provider key for this exchange', firstTransaction: '2026-01-05' });
         expect((await owner.request('/api/usage')).status).toBe(200);
       } finally {
         await stack.dispose();
@@ -579,6 +583,124 @@ export function defineAppSuite(label: string, start: StartStack): void {
         await stack.enqueue('refreshT212Quotes', { trigger: 'sync', userId });
         await stack.drain();
         expect(stack.trading212.positionCalls()).toBe(1);
+        expect(await stack.failedJobs()).toEqual([]);
+      } finally {
+        await stack.dispose();
+      }
+    });
+  });
+
+  describe(`${label}: price history coverage and end-of-day rows`, () => {
+    const userId = `github-${OWNER_ID}`;
+    // The pinned clock of the budget tests (Monday 5 Jan 2026, 13:00 in Amsterdam): the day the rows get.
+    const DAY = '2026-01-05';
+    const settle = { ignoreJobs: ['enrichTransactions'] };
+    const sap = { date: '2026-01-02', type: 'BUY', symbol: 'SAP.DE', quantity: 5, price: 200, currency: 'EUR' };
+    const etf = { date: '2026-01-02', type: 'BUY', symbol: 'VWRL.AS', quantity: 1, price: 100, currency: 'EUR' };
+
+    async function held(options?: SuiteStartOptions) {
+      const stack = await start({ limits: METRIC_LIMITS, ...options });
+      const owner = new Browser(stack);
+      await owner.signIn();
+      const call = async (method: string, path: string, body?: unknown) => {
+        const response = await owner.request(`/api${path}`, { method, ...(body === undefined ? {} : { body }) });
+        const text = await response.text();
+        return { status: response.status, body: text ? JSON.parse(text) : undefined };
+      };
+      const portfolio = (await call('POST', '/portfolios', { name: `History ${crypto.randomUUID().slice(0, 8)}` })).body.portfolioId as string;
+      expect((await call('PUT', '/brokers/trading212', { portfolioId: portfolio, apiKey: T212_KEY, apiSecret: T212_SECRET, environment: 'demo' })).status).toBe(204);
+      for (const transaction of [sap, etf]) expect((await call('POST', '/transactions', { portfolioId: portfolio, ...transaction })).status).toBe(201);
+      const coverage = async () => (await call('GET', '/prices/status')).body.history;
+      const close = async () => {
+        await stack.enqueue('refreshT212Quotes', { trigger: 'close', userId });
+        await stack.drain(settle);
+      };
+      return { stack, owner, call, portfolio, coverage, close };
+    }
+
+    it('lists the held symbols with why their history is missing, and tells the chart which ones are valued at cost', async () => {
+      const { stack, call, coverage, portfolio } = await held();
+      try {
+        const history = await coverage();
+        expect(history.totals).toEqual({ held: 2, complete: 0, partial: 0, missing: 2, valuedAtCostSince: '2026-01-02', valuedAtCostUntil: DAY, truncated: false });
+        expect(history.symbols.map((row: { symbol: string }) => row.symbol)).toEqual(['SAP.DE', 'VWRL.AS']);
+        expect(history.symbols[0]).toMatchObject({ provider: 'eodhd', eodRows: 0, firstEod: null, lastEod: null, eodSources: [], historyState: 'missing', reason: 'No provider key for this exchange' });
+        const chart = (await call('GET', `/history?portfolioId=${portfolio}&range=ALL`)).body;
+        expect(chart.valuedAtCost).toEqual({ symbols: ['SAP.DE', 'VWRL.AS'], held: 2, until: DAY });
+        expect(JSON.stringify(history)).not.toContain(T212_SECRET);
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('keeps the Trading 212 quote as the close of the day at the close run, and the chart then ends at the headline total', async () => {
+      const { stack, call, coverage, close, portfolio } = await held();
+      try {
+        await close();
+        expect(await stack.failedJobs()).toEqual([]);
+        expect(stack.trading212.positionCalls()).toBe(1);
+
+        const history = await coverage();
+        const bySymbol = Object.fromEntries(history.symbols.map((row: { symbol: string }) => [row.symbol, row]));
+        expect(bySymbol['SAP.DE']).toMatchObject({ eodRows: 1, firstEod: DAY, lastEod: DAY, eodSources: ['t212'], lastQuoteSource: 't212', historyState: 'complete', reason: 'Full history stored' });
+        expect(bySymbol['VWRL.AS']).toMatchObject({ eodRows: 0, historyState: 'missing' });
+        expect(history.totals).toMatchObject({ held: 2, complete: 1, missing: 1, valuedAtCostSince: '2026-01-02' });
+
+        const summary = (await call('GET', `/portfolio?portfolioId=${portfolio}`)).body;
+        const chart = (await call('GET', `/history?portfolioId=${portfolio}&range=ALL`)).body;
+        expect(summary.totalValue).toBeCloseTo(5 * SAP_PRICE + 100, 2);
+        expect(chart.points.at(-1).value).toBeCloseTo(summary.totalValue, 2);
+        // SAP.DE has a close from the 5th on: it is still valued at cost on the 2nd to the 4th
+        expect(chart.valuedAtCost).toEqual({ symbols: ['SAP.DE', 'VWRL.AS'], held: 2, until: DAY });
+        // the stored row is a close like any other: the asset's own history serves it
+        const asset = (await call('GET', '/assets/SAP.DE/history?range=1M')).body;
+        expect(JSON.stringify(asset)).toContain(String(SAP_PRICE));
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('writes the row once: a second run of the same day makes no new request and no second row', async () => {
+      const { stack, coverage, close } = await held();
+      try {
+        await close();
+        await close();
+        expect(stack.trading212.positionCalls()).toBe(1);
+        const row = (await coverage()).symbols.find((entry: { symbol: string }) => entry.symbol === 'SAP.DE');
+        expect(row).toMatchObject({ eodRows: 1, eodSources: ['t212'] });
+        expect(await stack.failedJobs()).toEqual([]);
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('never replaces the close of a market-data provider', async () => {
+      const { stack, coverage, close } = await held();
+      try {
+        await stack.seed([{ PK: 'TICKER#SAP.DE', SK: `EOD#${DAY}`, entityType: 'EOD', symbol: 'SAP.DE', date: DAY, close: 150, currency: 'EUR' }]);
+        await close();
+        const row = (await coverage()).symbols.find((entry: { symbol: string }) => entry.symbol === 'SAP.DE');
+        expect(row).toMatchObject({ eodRows: 1, eodSources: ['provider'], lastQuoteSource: 't212' });
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('is dropped with the quote refresh once the budget is blocked: no request, no row, no failed job', async () => {
+      const limits: MetricLimits = { ...METRIC_LIMITS, workerRequests: 40 };
+      const stack = await start({ limits });
+      try {
+        const owner = new Browser(stack);
+        await owner.signIn();
+        const portfolio = (await (await owner.request('/api/portfolios', { method: 'POST', body: { name: `Blocked ${crypto.randomUUID().slice(0, 8)}` } })).json()).portfolioId as string;
+        const credentials = { portfolioId: portfolio, apiKey: T212_KEY, apiSecret: T212_SECRET, environment: 'demo' };
+        expect((await owner.request('/api/brokers/trading212', { method: 'PUT', body: credentials })).status).toBe(204);
+        const state = async () => usageSnapshotSchema.parse(await (await owner.request('/api/usage')).json()).state;
+        for (let request = 0; request < 80 && (await state()) !== 'blocked'; request++) await owner.request('/api/portfolios');
+        expect(await state()).toBe('blocked');
+        await stack.enqueue('refreshT212Quotes', { trigger: 'close', userId });
+        await stack.drain(settle);
+        expect(stack.trading212.positionCalls()).toBe(0);
         expect(await stack.failedJobs()).toEqual([]);
       } finally {
         await stack.dispose();

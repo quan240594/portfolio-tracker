@@ -2,7 +2,7 @@ import {
   allocationQuerySchema,
   applyManagement,
   buildPositions,
-  buildValueHistory,
+  buildValueSeries,
   calculateAllocation,
   calculateDividends,
   calculatePortfolio,
@@ -11,6 +11,7 @@ import {
   managementHistoryExtra,
   marketSymbols,
   sortTransactions,
+  valuedAtCostOf,
   type EodPrice,
   type FxDay,
   type FxRates,
@@ -138,12 +139,17 @@ export async function getHistory(ctx: RouteContext): Promise<RouteResult> {
   // All symbols ever traded matter for history (positions may have been closed inside the range).
   const symbols = marketSymbols([...new Set(transactions.map((t) => t.symbol))]);
   const eodFrom = addDays(from, -EOD_LOOKBACK_DAYS);
-  const series = await Promise.all(symbols.map((s) => repo.getEod(s, eodFrom, today)));
+  // The stored quotes (one batched read) value the last day exactly like the headline total does.
+  const [series, quotes, management] = await Promise.all([
+    Promise.all(symbols.map((s) => repo.getEod(s, eodFrom, today))),
+    symbols.length ? repo.getQuotes(symbols) : {},
+    loadManagementScope(ctx, scope),
+  ]);
   const eod: Record<string, EodPrice[]> = Object.fromEntries(symbols.map((s, i) => [s, series[i]!]));
-  const management = await loadManagementScope(ctx, scope);
   const extra = managementHistoryExtra({ transactions, ...management });
-  const points = downsample(buildValueHistory(transactions, eod, fx, from, today, fxHistory, extra));
-  return ok({ range, baseCurrency: fx.base, points } satisfies GetHistoryResponse);
+  const valued = buildValueSeries({ transactions, eod, fx, from, to: today, fxHistory, extra, quotes });
+  const valuedAtCost = valuedAtCostOf(valued, today);
+  return ok({ range, baseCurrency: fx.base, points: downsample(valued.points), ...(valuedAtCost ? { valuedAtCost } : {}) } satisfies GetHistoryResponse);
 }
 
 export async function getDividends(ctx: RouteContext): Promise<RouteResult> {

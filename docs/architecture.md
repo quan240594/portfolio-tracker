@@ -2546,7 +2546,7 @@ check and a forward, designed for well under the free plan's 10 ms).
 Without market-data keys every holding was valued at cost (`priceStale: true`). The Trading 212 account that the sync already reads has
 a near-live price for every open position, so a keyless job turns `GET /api/v0/equity/positions` into quotes. Charts, history,
 dividends and profiles still come from the provider keys (`TWELVEDATA_API_KEY`, `EODHD_API_KEY`, optionally `COINGECKO_API_KEY` and
-`ALPHAVANTAGE_API_KEY`): the job writes only the latest quote, never `EOD#` rows, so it cannot replace a real close.
+`ALPHAVANTAGE_API_KEY`): the job writes the latest quote and, at the 22:05 close run only, one end-of-day row per held symbol that no provider has a row for (see "Price history coverage"), so it can never replace a real close.
 
 ### Job and schedule
 
@@ -2626,7 +2626,8 @@ Status (one per user; read by `GET /api/prices/status`, never contains credentia
 
 Adds `t212Quotes: null | { state, lastAttemptAt, lastSuccessAt, quoted, lastError, nextAttemptAt }` (the signed-in user's status item) and a `t212`
 entry in `sources` (`configured` when the last run succeeded, `secret: null`). The `message` says when the held positions are priced from
-Trading 212 (with the time of the last refresh) and that charts and history still need the listed secrets. The asset page shows
+Trading 212 (with the time of the last refresh) and that charts and history still need the listed secrets. It also carries `history`, the price-history
+coverage of the held symbols (see "Price history coverage"). The asset page shows
 `As of <date, time> · Trading 212` for such a quote (`AssetQuoteInfo.provider` is the stored `source`).
 
 ### Daily cost (Free plan)
@@ -3449,3 +3450,79 @@ push decrypted by the fake subscriber), `@portfolio/web` (unit tests and `e2e/ea
 **Not verified (cannot be here):** real SEC access from the Worker (the SEC blocks the developer's laptop; the exhibit file-name heuristic is only tested with fakes), real Workers AI output quality and JSON-mode behaviour of the fp8 model
 (the schema lists `response_format`; a failure is retried once and then reported as `unreadable`), the neuron estimate against the real dashboard, Alpha Vantage `EARNINGS` field names beyond the documented ones, and the push on a real phone.
 The owner judges the format on the phone after the first backfill.
+
+## Price history coverage
+
+The headline total uses the latest stored quote of each holding; the "Value vs invested" chart used the last stored close, and a holding with no stored close at all
+was valued at its average cost on every day. With free provider keys (EODHD 20 calls a day, Twelve Data 8 credits a minute, Alpha Vantage 25 a day) some of ~26 holdings
+have no history for days, or for good (an exchange without a key). The chart then ended about EUR 6,000 under the headline. Three changes, all additive, no new dependency.
+
+### 1. The last point of the chart is the headline total
+
+`buildValueSeries({ transactions, eod, fx, from, to, fxHistory, extra, quotes })` (`packages/shared/src/portfolio.ts`; `buildValueHistory` is unchanged and delegates to it without quotes)
+values, on the last day `to` only, each open position with its stored quote at the latest FX rate, exactly like `calculatePortfolio`, when the quote is not older than the last known close (a provider's
+close of a later day wins). The days before are unchanged. `GET /history` loads the quotes of the traded market symbols with one batched read (`repo.getQuotes`) and passes them in; cash and custom
+assets come from the same `extra`. Test: `services/api/src/app.test.ts` and `management.test.ts` (headline == last point, to the cent), `packages/shared/src/value-series.test.ts`.
+
+The series also reports which symbols were valued at cost, with their first and last such day, and how many symbols were held (`ValueSeries.costValued`, `.held`).
+`GET /history` turns that into an optional field (absent when every day had a price, so the AWS response is unchanged for a complete history):
+
+```json
+{ "range": "ALL", "baseCurrency": "EUR", "points": [], "valuedAtCost": { "symbols": ["NOVO-B.CO", "VWRL.AS"], "held": 26, "until": "2026-10-23" } }
+```
+
+`until` is the first day on which every listed symbol has a price (the day after the last cost-valued day, at most the last day of the range). The dashboard shows, under the chart title,
+"2 of 26 holdings have no price history before 23-10-2026; they are valued at cost until then (details)" (`web/src/components/charts/ValuedAtCostNote.tsx`, dates via `formatDate`), where
+"details" links to `/settings/diagnostics#price-coverage`. Where else valuation history is shown (Analytics returns and Growth, the benchmark comparison, the asset page) the same limitation
+holds and the note is **not** there yet: their calculators (`analytics-compute.ts`, `growth.ts`) call `buildValueHistory` without quotes. Follow-up: pass `data.quotes` and surface `costValued` in those responses.
+
+### 2. `GET /api/prices/status` -> `history` (Cloudflare deployment)
+
+`packages/shared/src/price-coverage.ts` (pure) and `packages/cloudflare-app/src/price-coverage.ts` (`loadPriceCoverage`, reads the store). For the open positions of the signed-in user that a market-data
+provider can price (cash and custom assets are left out):
+
+```json
+{ "asOf": "...", "rowsRead": 3100,
+  "symbols": [ { "symbol": "NOVO-B.CO", "name": "Novo Nordisk", "provider": "eodhd", "eodRows": 0, "eodRowsCapped": false, "firstEod": null, "lastEod": null,
+                 "eodSources": [], "firstTransaction": "2026-01-05", "lastQuoteAt": "2026-10-23T08:15:00.000Z", "lastQuoteSource": "t212",
+                 "historyState": "missing", "lastAttempt": { "day": "2026-10-22", "attempts": 3, "outcome": "retry", "error": "..." }, "reason": "Daily quota used up, retries after reset" } ],
+  "totals": { "held": 26, "complete": 18, "partial": 2, "missing": 6, "valuedAtCostSince": "2026-01-05", "valuedAtCostUntil": "2026-10-23", "truncated": false } }
+```
+
+* `historyState`: **complete** = the stored rows start no later than 4 days after the wanted start and end within 4 days of today, where the wanted start is the first transaction of the symbol or a year before today,
+  whichever is later; **partial** = some rows, but not that; **missing** = none. `eodSources` are the distinct row sources (`provider` for a row without one, `t212` for the close-slot snapshot).
+* `reason`, first match wins: complete -> "Full history stored"; no key for the symbol's source (`twelvedata` for bare US tickers, `eodhd` for exchange suffixes, `coingecko` for crypto, the router of the price service) -> "No provider key for this exchange";
+  the last history attempt ended `skipped` -> "Provider has no data for this symbol"; the source has a "limit reached" block in force, or the last error mentions a quota or limit -> "Daily quota used up, retries after reset";
+  any other recorded attempt -> "Last attempt failed, retried automatically"; none: "Only part of the history is stored" (partial) or "Not tried yet" (missing).
+* `lastAttempt` is the `ENRICH_STATE` item of the symbol (`PriceRepository.lastAttempts`): its error is sanitised (URLs, `key=` parameters and long tokens removed, one line, at most 120 characters).
+* `valuedAtCostSince` is the first transaction date of the earliest symbol that has no price from then on (missing, or partial with rows that start late); `valuedAtCostUntil` the first day all of them have a price (today for a missing one).
+  The chart's own `valuedAtCost` is computed from the real series and is authoritative: the tolerance of "complete" can differ from it by a few days.
+* **Cost of one call**: the transactions of the user (about one row each), then **one query per held symbol** (`PriceRepository.newestEod`: the newest 401 EOD rows, at most 400 are used, `eodRowsCapped` says there are more), and one batched read each for the
+  quotes, the profiles (names) and the last attempts, plus at most three block items. At most **60 symbols** are examined (alphabetical; `totals.held` still counts all, `totals.truncated`). 26 holdings with a year of history is about 7,000 rows read, 0.14 % of the 5,000,000 daily cap;
+  `rowsRead` reports it. Nothing is written, nothing polls: the page reads it once and on Refresh. A failure of the report leaves `history: null` and the rest of the status intact.
+* **Web**: the "Price data coverage" card at the top of `/settings/diagnostics` (`web/src/features/diagnostics/PriceCoverageCard.tsx`): logo, symbol, a state chip with the state as text, rows (`400+` when capped), first and last day, reason, last attempt and last quote.
+  Below 768 px the dates and the reason move under the symbol so nothing scrolls sideways (checked at 320 px). Hidden where `/prices/status` is not served (AWS, the demo).
+
+### 3. Real history from now on, without quota
+
+The Hub already refreshes the Trading 212 quotes every 15 minutes on weekdays. The **22:05 slot (`t212-quotes-close`) now has payload `{ trigger: 'close' }`** and, in the same run and the same single batched write as the quotes and the status item, keeps each fresh quote as the
+end-of-day row of the Amsterdam calendar day (`services/broker-sync/src/end-of-day.ts`, `QuoteDeps.endOfDay = { timeZone: 'Europe/Amsterdam' }`, set only by the Cloudflare composition):
+
+* the row is `EOD#<date>` of the symbol with `close` = the quote price **in major units** (the quote is already one; `majorEod` is applied again as a guard, GBX 9650 -> GBP 96.50), `currency`, and the new optional `source: 't212'` (`EodPrice.source`);
+* **provider precedence**: the symbols' rows of that day are read first (one `getMany` of at most the held symbols): a row that exists without `source: 't212'` is a market-data provider's and is never replaced. A provider writing the day later replaces a `t212` row (`putEods` stores the whole item, so the `source` goes);
+* **skipped**: Saturdays and Sundays on the Amsterdam clock (no mark is set), and quotes that are not `t212` or older than 36 hours;
+* **once a day**: the status item gets `eodClosedDay`; a second close run the same day (a double fire, a retry after the 30 s minimum interval) refreshes the quotes only and writes no rows;
+* **seed**: the first run after the deploy, whatever its trigger and on a weekday, also writes today's row and sets `eodSeededAt` (so the owner's first day is not lost); the close run of that day then replaces it with the closing quote;
+* a `close` run waits out a back-off like a scheduled run, and is dropped (not deferred) when the budget guard denies `refreshT212Quotes` (80 % of a cap): no request, no row. If the 22:05 call itself fails (rate limit, 5xx), that day has no row and the chart carries the previous close forward.
+
+Cost: about 26 rows read (the provider-row check) and 26 rows written once a weekday, in the existing batch, 0.03 % of the 100,000 daily write cap; no extra subrequest. The rows are read like any other EOD row by the portfolio value series, the asset price chart and the benchmark comparison.
+
+**Limitation**: the history **before the first snapshot** of a symbol no provider covers (no key for its exchange, or a provider without data) stays valued at cost, hence the note under the chart; it shrinks by one trading day per day, and a provider key (or a later quota reset)
+fills the past without any change. The close price is Trading 212's last price at 22:05, which for a European listing is its official close and for a US one the regular-session close, not an adjusted close (dividends and splits are not applied to these rows; a split after the snapshot makes them inconsistent with split-adjusted provider rows until a provider row replaces them).
+
+### Tests
+
+`pnpm --filter @portfolio/shared test` (`price-coverage.test.ts`, `value-series.test.ts`: classification, tolerance, reasons, sanitising, headline == last point, cost-valued spans), `@portfolio/api` (`GET /history` consistency and `valuedAtCost`, cash included),
+`@portfolio/broker-sync` (`end-of-day.test.ts`, `quotes.test.ts`: once a day, provider precedence, GBX, stale, weekend, seed, double fire, one batch), `@portfolio/prices` (`lastAttempts`, `newestEod`), `@portfolio/cloudflare-app` (`src/price-coverage.test.ts`; `test/suite.ts` "price history coverage and end-of-day rows"
+in Node **and** real workerd, including the blocked-budget case; `test/end-of-day.node.test.ts` for weekends and the next day on a moving clock), `@portfolio/web` (unit tests; `e2e/price-coverage.spec.ts` in the mock suite and `e2e-github/diagnostics.spec.ts` at 320 and 1280 px, no horizontal overflow).
+All clocks are pinned; there are no wall-clock timing assertions.

@@ -130,4 +130,24 @@ describe('DashboardPage', () => {
     expect(await screen.findByText(/0 holdings · cost/)).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'No transactions yet' })).not.toBeInTheDocument();
   });
+
+  describe('note about holdings valued at cost', () => {
+    const history = (valuedAtCost?: { symbols: string[]; held: number; until: string }) =>
+      HttpResponse.json({ ...getHistory('1Y'), ...(valuedAtCost ? { valuedAtCost } : {}) });
+
+    it('says how many holdings have no price history, until when they are valued at cost, and links to the coverage card', async () => {
+      server.use(http.get('*/api/history', () => history({ symbols: ['NOVO-B.CO', 'MSFT'], held: 26, until: '2026-10-23' })));
+      renderWithProviders(<DashboardPage />);
+      const note = await screen.findByTestId('valued-at-cost-note');
+      expect(note).toHaveTextContent('2 of 26 holdings have no price history before 23-10-2026; they are valued at cost until then (details)');
+      expect(within(note).getByRole('link', { name: 'details' })).toHaveAttribute('href', '/settings/diagnostics#price-coverage');
+    });
+
+    it('shows no note when every holding had prices', async () => {
+      server.use(http.get('*/api/history', () => history()));
+      renderWithProviders(<DashboardPage />);
+      await screen.findByRole('img', { name: chartFor('1Y') });
+      expect(screen.queryByTestId('valued-at-cost-note')).not.toBeInTheDocument();
+    });
+  });
 });

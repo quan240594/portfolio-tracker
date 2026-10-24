@@ -3,6 +3,8 @@ import { EmptyState } from '../../components/EmptyState';
 import { ErrorState } from '../../components/ErrorState';
 import { PageHeader } from '../../components/Layout';
 import { LoadingRegion, Skeleton } from '../../components/Skeleton';
+import { PriceCoverageCard } from './PriceCoverageCard';
+import { usePriceCoverage, type PriceCoverageResult } from './usePriceCoverage';
 import { jobLine, formatDuration, formatInstant, retryLabel, RUN_STATUS_LABELS, statusOf, type RunStatus } from './runFormat';
 import { useAlarmDiagnostics } from './useAlarmDiagnostics';
 
@@ -149,9 +151,27 @@ function Arms({ arms }: Readonly<{ arms: readonly AlarmArmReport[] }>) {
   );
 }
 
-function Loaded({ report }: Readonly<{ report: AlarmDiagnosticsReport }>) {
+/** The coverage card; nothing where the backend has no such report, a short message when it could not be read. */
+function CoverageSlot({ prices }: Readonly<{ prices: PriceCoverageResult }>) {
+  if (prices.coverage) return <PriceCoverageCard coverage={prices.coverage} />;
+  if (prices.availability !== 'error') return null;
+  return (
+    <section id="price-coverage" aria-labelledby="price-coverage-error" className="card space-y-2 p-4">
+      <h2 id="price-coverage-error" className="text-base font-semibold">
+        Price data coverage
+      </h2>
+      <p className="text-sm">The coverage of the stored prices could not be read.</p>
+      <button type="button" className="btn-secondary" onClick={prices.refetch}>
+        Try again
+      </button>
+    </section>
+  );
+}
+
+function Loaded({ report, prices }: Readonly<{ report: AlarmDiagnosticsReport; prices: PriceCoverageResult }>) {
   return (
     <div className="space-y-6">
+      <CoverageSlot prices={prices} />
       <Summary report={report} />
       <Runs runs={report.runs} />
       <Arms arms={report.arms} />
@@ -169,10 +189,11 @@ function Loaded({ report }: Readonly<{ report: AlarmDiagnosticsReport }>) {
  */
 export function DiagnosticsView() {
   const diagnostics = useAlarmDiagnostics();
+  const prices = usePriceCoverage();
   let body: React.ReactNode;
-  if (diagnostics.availability === 'not-exposed') body = <EmptyState title="Diagnostics are not available" description="This deployment does not keep an alarm log." />;
+  if (diagnostics.availability === 'not-exposed') body = <EmptyState title="Diagnostics are not available" description="This deployment does not keep an alarm log or price coverage details." />;
   else if (diagnostics.availability === 'error') body = <ErrorState error={diagnostics.error} onRetry={diagnostics.refetch} />;
-  else if (diagnostics.report) body = <Loaded report={diagnostics.report} />;
+  else if (diagnostics.report) body = <Loaded report={diagnostics.report} prices={prices} />;
   else {
     body = (
       <LoadingRegion label="Loading diagnostics">
@@ -181,13 +202,21 @@ export function DiagnosticsView() {
     );
   }
   const refresh = (
-    <button type="button" className="btn-secondary" onClick={diagnostics.refetch} disabled={diagnostics.isFetching}>
-      {diagnostics.isFetching ? 'Refreshing…' : 'Refresh'}
+    <button
+      type="button"
+      className="btn-secondary"
+      onClick={() => {
+        diagnostics.refetch();
+        prices.refetch();
+      }}
+      disabled={diagnostics.isFetching || prices.isFetching}
+    >
+      {diagnostics.isFetching || prices.isFetching ? 'Refreshing…' : 'Refresh'}
     </button>
   );
   return (
     <>
-      <PageHeader title="Diagnostics" description="What the background alarm of this deployment did lately." actions={diagnostics.availability === 'ready' ? refresh : undefined} />
+      <PageHeader title="Diagnostics" description="What the background alarm of this deployment did lately, and how much price history is stored." actions={diagnostics.availability === 'ready' ? refresh : undefined} />
       {body}
     </>
   );

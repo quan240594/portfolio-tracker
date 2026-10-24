@@ -155,6 +155,29 @@ describe('read routes', () => {
     expect(month.points[0].value).toBeCloseTo(2009.09, 2);
   });
 
+  it('GET /history ends at the headline total with live quotes and partial history, and says which holdings were valued at cost', async () => {
+    const { handler, repo } = setup();
+    // VWRL.AS has closes for the whole month; AAPL only from 2026-06-10 and its quote (220) is newer than that close (210)
+    repo.eod = [
+      ...['2026-05-10', '2026-06-01', '2026-06-12'].map((date) => ({ symbol: 'VWRL.AS', date, close: 110, currency: 'EUR' })),
+      { symbol: 'AAPL', date: '2026-06-10', close: 210, currency: 'USD' },
+    ];
+    const headline = json(await handler(apiEvent('GET', '/portfolio'))).totalValue;
+    const month = json(await handler(apiEvent('GET', '/history', { query: { range: '1M' } })));
+    expect(month.points.at(-1).value).toBeCloseTo(headline, 2);
+    expect(month.points.at(-1).value).toBeCloseTo(2200, 2);
+    // before 2026-06-10 AAPL is valued at its cost: 5 * 150 / 1.1
+    expect(month.points[0].value).toBeCloseTo(10 * 110 + (5 * 150) / 1.1, 2);
+    expect(month.valuedAtCost).toEqual({ symbols: ['AAPL'], held: 2, until: '2026-06-10' });
+  });
+
+  it('GET /history has no valuedAtCost when every held symbol has a close on every day', async () => {
+    const { handler, repo } = setup();
+    repo.eod = ['VWRL.AS', 'AAPL'].flatMap((symbol) => ['2026-05-10', '2026-06-10'].map((date) => ({ symbol, date, close: 100, currency: symbol === 'AAPL' ? 'USD' : 'EUR' })));
+    const month = json(await handler(apiEvent('GET', '/history', { query: { range: '1M' } })));
+    expect(month).not.toHaveProperty('valuedAtCost');
+  });
+
   it('GET /history returns empty points for a user without transactions', async () => {
     const { handler } = setup();
     const body = json(await handler(apiEvent('GET', '/history', { sub: 'nobody' })));

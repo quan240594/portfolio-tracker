@@ -74,7 +74,8 @@ export const SCHEDULED_JOBS = [
     cloudflareOnly: true,
   }),
   // Weekdays 07:00-21:45 every 15 minutes, plus one run at 22:05 (after the US close): 61 runs a day. Each costs one subrequest
-  // per connected account and one batched write of about one row per held symbol, see docs/architecture.md.
+  // per connected account and one batched write of about one row per held symbol, see docs/architecture.md. The 22:05 run also
+  // keeps each fresh quote as the end-of-day row of the day ("Price history coverage" in docs/architecture.md).
   scheduled({
     name: 't212-quotes',
     job: JOBS.refreshT212Quotes,
@@ -88,7 +89,7 @@ export const SCHEDULED_JOBS = [
   scheduled({
     name: 't212-quotes-close',
     job: JOBS.refreshT212Quotes,
-    payload: { trigger: 'scheduled' },
+    payload: { trigger: 'close' },
     timezone: 'Europe/Amsterdam',
     minute: 5,
     hours: [22],

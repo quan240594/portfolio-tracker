@@ -20,7 +20,7 @@ import {
   type SecretStore,
 } from '@portfolio/platform';
 import { ItemNotificationRepository, ItemRepository, MAX_PUSHES_PER_USER_STEP, notifyDividendsJob } from '@portfolio/api';
-import { ItemBrokerStore, ItemProfileStore, ItemQuoteStore, SecretCredentialStore, Trading212Client, brokerSyncJob, refreshQuotesAfterSync, refreshQuotesJob, type HandlerResult, type QuoteDeps, type SyncDeps } from '@portfolio/broker-sync';
+import { END_OF_DAY_ZONE, ItemBrokerStore, ItemProfileStore, ItemQuoteStore, SecretCredentialStore, Trading212Client, brokerSyncJob, refreshQuotesAfterSync, refreshQuotesJob, type HandlerResult, type QuoteDeps, type SyncDeps } from '@portfolio/broker-sync';
 import { ItemIngestStore, importUploadedJob } from '@portfolio/ingest';
 import { DEFAULT_STEP_SUBREQUESTS, PRICE_SCHEDULES, createPriceJobs, type PriceJobDeps } from '@portfolio/prices';
 import { CHECKS_PER_STEP, createFetchEarningsSummaryJob, createWatchEarningsJob, type AiLike, type NeuronMeter } from '@portfolio/earnings';
@@ -113,6 +113,8 @@ export const CORE_JOB_FACTORIES: JobFactories = {
       createApi: (credentials) => new Trading212Client({ credentials, fetchFn: fetch, maxAttempts: 1, timeoutMs: T212_QUOTE_TIMEOUT_MS, maxWaitMs: 0 }),
       symbolOverrides: config.symbolOverrides,
       now,
+      // The close run keeps each quote as the end-of-day row of the day (docs/architecture.md "Price history coverage").
+      endOfDay: { timeZone: END_OF_DAY_ZONE },
     };
     return refreshQuotesJob(() => deps);
   },
