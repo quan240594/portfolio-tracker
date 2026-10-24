@@ -64,6 +64,12 @@ You need a Cloudflare account on the Free plan and a GitHub account. Every comma
    classes without any key. **Charts, history, dividends, splits and sector / country of the company still need the market-data keys below**;
    until they are set the day change starts at 0 and price charts stay empty.
 
+   **Price history without quota.** The 22:05 run also keeps each fresh Trading 212 quote as the end-of-day row of that day (`source: 't212'`, weekdays only, never replacing a row
+   from a market-data provider; about 26 rows a day), so a holding that no provider covers builds a real history from the day you deploy. Before that day it stays valued at cost,
+   and the dashboard says so under the "Value vs invested" chart ("N of M holdings have no price history before dd-mm-yyyy; they are valued at cost until then"). The chart's last point is
+   valued with the same quotes as the headline total. **Settings > Diagnostics > Price data coverage** (`GET /api/prices/status` -> `history`) lists every held symbol with its stored rows,
+   first and last day, state (complete, partial, missing) and why (no key for that exchange, daily quota used up, no data at the provider, not tried yet). See `docs/architecture.md`, "Price history coverage".
+
    **What to expect from free keys.** The free plans are small (Twelve Data: 8 credits a minute, `/profile` is not included; EODHD: 20 calls a
    day). The price jobs know that: they keep the minute and day usage in the database, remember a "limit reached" answer until the limit resets
    (next minute, or the next UTC midnight) instead of retrying, try a symbol at most 3 times a day, and fetch dividends last. With about 25 holdings
