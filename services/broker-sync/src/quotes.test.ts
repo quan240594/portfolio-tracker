@@ -542,3 +542,125 @@ describe('baseline profiles', () => {
     expect((await unmapped.run()).results[0]).toMatchObject({ profiles: 0 });
   });
 });
+
+describe('refreshQuotesJob end-of-day rows', () => {
+  const CLOSE = Date.parse('2026-10-20T20:05:00.000Z'); // 22:05 in Amsterdam (summer time), a Tuesday
+  const SATURDAY = Date.parse('2026-10-24T20:05:00.000Z');
+  const zone = { endOfDay: { timeZone: 'Europe/Amsterdam' } };
+
+  const eodRows = (t: Awaited<ReturnType<typeof setup>>) => t.store.items.snapshot().filter((item) => item.SK.startsWith('EOD#'));
+  const provider = (symbol: string, date: string, close: number) => ({ ...keys.eod(symbol, date), entityType: 'EOD', symbol, date, close, currency: 'USD' });
+
+  it('writes nothing of the kind unless the deployment asks for it', async () => {
+    const t = await setup({ positions: HELD });
+    t.clock.ms = CLOSE;
+    await t.run({ trigger: 'close' });
+    expect(eodRows(t)).toEqual([]);
+    expect(await t.status()).not.toHaveProperty('eodSeededAt');
+  });
+
+  it('at the close run keeps each fresh quote as the EOD row of the Amsterdam day, in major units, in the batch of the quotes', async () => {
+    const t = await setup({ positions: HELD }, zone);
+    t.clock.ms = CLOSE;
+    const batches: number[] = [];
+    const original = t.store.items.batchWrite.bind(t.store.items);
+    t.store.items.batchWrite = (operations) => {
+      batches.push(operations.length);
+      return original(operations);
+    };
+    const { results } = await t.run({ trigger: 'close' });
+    expect(results[0]).toMatchObject({ outcome: 'refreshed', quoted: 3, endOfDay: 3 });
+    expect(batches).toEqual([3 + 3 + 1]);
+    expect(eodRows(t).map(({ PK, SK, ...rest }) => [PK, SK, rest])).toEqual([
+      ['TICKER#AAPL', 'EOD#2026-10-20', { entityType: 'EOD', symbol: 'AAPL', date: '2026-10-20', close: 212.5, currency: 'USD', source: 't212' }],
+      ['TICKER#VUSA.L', 'EOD#2026-10-20', { entityType: 'EOD', symbol: 'VUSA.L', date: '2026-10-20', close: 96.5, currency: 'GBP', source: 't212' }],
+      ['TICKER#SAP.DE', 'EOD#2026-10-20', { entityType: 'EOD', symbol: 'SAP.DE', date: '2026-10-20', close: 231.4, currency: 'EUR', source: 't212' }],
+    ]);
+    expect(await t.status()).toMatchObject({ eodSeededAt: '2026-10-20T20:05:00.000Z', eodClosedDay: '2026-10-20' });
+  });
+
+  it('never replaces the row of a market-data provider, but replaces an earlier Trading 212 row of the day', async () => {
+    const t = await setup({ positions: HELD }, zone);
+    await t.store.items.put(provider('AAPL', '2026-10-20', 199));
+    await t.store.items.put({ ...provider('SAP.DE', '2026-10-20', 1), currency: 'EUR', source: 't212' });
+    t.clock.ms = CLOSE;
+    const { results } = await t.run({ trigger: 'close' });
+    expect(results[0]).toMatchObject({ endOfDay: 2 });
+    const byKey = new Map(eodRows(t).map((item) => [item.PK, item]));
+    expect(byKey.get('TICKER#AAPL')).toMatchObject({ close: 199 });
+    expect(byKey.get('TICKER#AAPL')).not.toHaveProperty('source');
+    expect(byKey.get('TICKER#SAP.DE')).toMatchObject({ close: 231.4, source: 't212' });
+    expect(byKey.get('TICKER#VUSA.L')).toMatchObject({ close: 96.5, source: 't212' });
+  });
+
+  it('writes the close rows once a day: a second close run only refreshes the quotes', async () => {
+    const t = await setup({ positions: HELD }, zone);
+    t.clock.ms = CLOSE;
+    await t.run({ trigger: 'close' });
+    t.clock.advance(MIN_INTERVAL_MS + 1);
+    t.api.data.positions = [position({ ticker: 'AAPL_US_EQ', currentPrice: 300 })];
+    const second = (await t.run({ trigger: 'close' })).results[0]!;
+    expect(second).toMatchObject({ outcome: 'refreshed', quoted: 1 });
+    expect(second).not.toHaveProperty('endOfDay');
+    expect(eodRows(t)).toHaveLength(3);
+    expect(eodRows(t).find((item) => item.PK === 'TICKER#AAPL')).toMatchObject({ close: 212.5 });
+  });
+
+  it('the next weekday gets its own close rows', async () => {
+    const t = await setup({ positions: HELD }, zone);
+    t.clock.ms = CLOSE;
+    await t.run({ trigger: 'close' });
+    t.clock.advance(24 * 3_600_000);
+    await t.run({ trigger: 'close' });
+    expect(eodRows(t).map((item) => item.SK)).toEqual(expect.arrayContaining(['EOD#2026-10-20', 'EOD#2026-10-21']));
+    expect(eodRows(t)).toHaveLength(6);
+  });
+
+  it('writes no row on a Saturday or Sunday, and sets no mark', async () => {
+    const t = await setup({ positions: HELD }, zone);
+    t.clock.ms = SATURDAY;
+    const { results } = await t.run({ trigger: 'close' });
+    expect(results[0]).toMatchObject({ quoted: 3 });
+    expect(results[0]).not.toHaveProperty('endOfDay');
+    expect(eodRows(t)).toEqual([]);
+    expect(await t.status()).not.toHaveProperty('eodSeededAt');
+  });
+
+  it('seeds the row of the day once, on the first run of any kind, and the close run then replaces it with the closing quote', async () => {
+    const t = await setup({ positions: [position({ ticker: 'AAPL_US_EQ', currentPrice: 200 })] }, zone);
+    expect((await t.run({ trigger: 'scheduled' })).results[0]).toMatchObject({ endOfDay: 1 });
+    expect(eodRows(t)).toHaveLength(1);
+    expect(await t.status()).toMatchObject({ eodSeededAt: '2026-10-20T10:15:00.000Z' });
+    expect(await t.status()).not.toHaveProperty('eodClosedDay');
+
+    t.clock.advance(15 * 60_000);
+    t.api.data.positions = [position({ ticker: 'AAPL_US_EQ', currentPrice: 205 })];
+    expect((await t.run({ trigger: 'scheduled' })).results[0]).not.toHaveProperty('endOfDay');
+    expect(eodRows(t)[0]).toMatchObject({ close: 200 });
+
+    t.clock.ms = CLOSE;
+    t.api.data.positions = [position({ ticker: 'AAPL_US_EQ', currentPrice: 210 })];
+    await t.run({ trigger: 'close' });
+    expect(eodRows(t)).toHaveLength(1);
+    expect(eodRows(t)[0]).toMatchObject({ close: 210, source: 't212' });
+    expect(await t.status()).toMatchObject({ eodSeededAt: '2026-10-20T10:15:00.000Z', eodClosedDay: '2026-10-20' });
+  });
+
+  it('keeps the marks over a failed run', async () => {
+    const t = await setup({ positions: HELD }, zone);
+    t.clock.ms = CLOSE;
+    await t.run({ trigger: 'close' });
+    t.clock.advance(MIN_INTERVAL_MS + 1);
+    t.api.data = { error: new BrokerError('T212_RATE_LIMITED', 'slow down', 429) };
+    await t.run({ trigger: 'close' });
+    expect(await t.status()).toMatchObject({ state: 'RATE_LIMITED', eodClosedDay: '2026-10-20' });
+  });
+
+  it('a close run waits out a back-off like a scheduled one', async () => {
+    const t = await setup({ error: new BrokerError('T212_AUTH_REJECTED', 'rejected', 401) }, zone);
+    t.clock.ms = CLOSE - 3_600_000;
+    await t.run();
+    t.clock.ms = CLOSE;
+    expect((await t.run({ trigger: 'close' })).results[0]).toMatchObject({ outcome: 'skipped', reason: 'backing-off' });
+  });
+});
