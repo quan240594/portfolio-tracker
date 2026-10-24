@@ -3,7 +3,7 @@ import { HubCore } from '../src/hub-core.js';
 import { createWorker } from '../src/worker.js';
 import type { WorkerEnv } from '../src/runtime.js';
 import { SqlJsStorage, TestClock } from '@portfolio/cloudflare/testing';
-import { parseAllowedHosts, parseLogosConfig, type MetricLimits } from '@portfolio/platform';
+import { parseAllowedHosts, parseLogosConfig, type Logger, type MetricLimits } from '@portfolio/platform';
 import { parsePricesConfig } from '@portfolio/prices';
 import { parseEarningsConfig } from '@portfolio/earnings';
 import { fakeAiFor, secFor } from './earnings-fakes.js';
@@ -15,6 +15,8 @@ export const T0 = Date.UTC(2026, 0, 5, 12);
 
 export interface NodeStackOptions {
   limits?: MetricLimits;
+  /** Receives what the Hub logs (it logs nothing by default). */
+  logger?: Logger;
   jobFactories?: JobFactories;
   /** Replaces the vars of the Worker/Hub (e.g. to leave one out). */
   env?: Partial<WorkerEnv>;
@@ -68,7 +70,7 @@ export async function createNodeStack(options: NodeStackOptions = {}): Promise<S
       earnings: parseEarningsConfig({ ...(options.earnings?.contact === undefined ? {} : { SEC_CONTACT: options.earnings.contact }), ...(options.prices?.ALPHAVANTAGE_API_KEY === undefined ? {} : { ALPHAVANTAGE_API_KEY: options.prices.ALPHAVANTAGE_API_KEY }) }),
       push: { ...(options.noVapid ? {} : { publicKey: TEST_VAPID.publicKey, privateKey: TEST_VAPID.privateKey }), allowedHosts: parseAllowedHosts(undefined) },
     },
-    { now: clock.now, limits: options.limits, jobFactories: options.jobFactories, ...(options.earnings?.ai ? { ai: fakeAiFor(options.earnings.releases ?? []) } : {}), fetch: outbound, sleep: () => Promise.resolve(), queue: { baseBackoffMs: 1_000 } },
+    { now: clock.now, limits: options.limits, logger: options.logger, jobFactories: options.jobFactories, ...(options.earnings?.ai ? { ai: fakeAiFor(options.earnings.releases ?? []) } : {}), fetch: outbound, sleep: () => Promise.resolve(), queue: { baseBackoffMs: 1_000 } },
   );
   await core.start();
   const env: WorkerEnv = {

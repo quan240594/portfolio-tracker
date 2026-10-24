@@ -21,13 +21,14 @@ import { ItemBrokerStore, ItemQuoteStore, SecretCredentialStore, Trading212Clien
 import { AlarmDiagnostics, MAX_FILE_BYTES, createDurableObjectPlatform, describeDiagnosticError, uploadTokenFromUrl, type AlarmJobQueueOptions, type ArmEvent, type DurableObjectPlatform } from '@portfolio/cloudflare';
 import type { AiLike } from '@portfolio/earnings';
 import { createMarketDataService } from '@portfolio/prices';
-import { parseImportObjectKey } from '@portfolio/shared';
+import { parseImportObjectKey, type PriceHistoryCoverage } from '@portfolio/shared';
 import { readBodyBounded } from './body.js';
 import type { HubConfig } from './config.js';
 import { createEarningsApi, earningsConfigured, neuronMeter } from './earnings.js';
 import { createHubLogoRoute, logoLookupGate } from './logos.js';
 import { alarmReport, finishOf, limitOf, triggerOf, type AlarmInfo } from './diagnostics.js';
 import { ALL_JOB_FACTORIES, createJobRegistry, eventsFor, priceJobDeps, schedulesFor, type JobContext, type JobFactories } from './jobs.js';
+import { loadPriceCoverage } from './price-coverage.js';
 import { pricesStatus } from './prices-status.js';
 import { pushConfig } from './push.js';
 import { ARM_PATH, REQUEST_ID_HEADER, SUBJECT_HEADER, stripApiPrefix, userIdOfSubject } from './protocol.js';
@@ -335,10 +336,21 @@ export class HubCore {
     });
   }
 
-  /** The sources that are on, and how fresh the Trading 212 quotes of the signed-in user are (one read of the status item). */
+  /** The sources that are on, how fresh the Trading 212 quotes of the signed-in user are (one read of the status item) and the history coverage of the held symbols. */
   private async pricesStatus(userId: string | undefined): Promise<PortableResponse> {
     const t212 = userId === undefined ? null : await new ItemQuoteStore(this.platform.items).getStatus(userId);
-    return { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }, body: JSON.stringify(pricesStatus(this.config.prices, t212)) };
+    const history = userId === undefined ? null : await this.priceCoverage(userId);
+    return { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' }, body: JSON.stringify(pricesStatus(this.config.prices, t212, history)) };
+  }
+
+  /** The coverage report, or null when it cannot be read: the sources of the status must show up whatever happens to it. */
+  private async priceCoverage(userId: string): Promise<PriceHistoryCoverage | null> {
+    try {
+      return await loadPriceCoverage({ items: this.platform.items, config: this.config.prices, now: this.now }, userId);
+    } catch (error) {
+      this.logger?.warn('The price history coverage could not be read', { error: describeDiagnosticError(error).message });
+      return null;
+    }
   }
 
   private usage(): Promise<PortableResponse> {

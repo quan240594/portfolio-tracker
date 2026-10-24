@@ -184,5 +184,29 @@ describe('PriceRepository', () => {
       expect((await repo.blockedProviders(['eodhd', 'twelvedata'], new Date('2026-10-13T16:30:00Z'))).get('eodhd')).toEqual({ until: Date.parse('2026-10-14T00:01:00Z'), scope: 'day' });
       expect(await repo.blockedProviders(['eodhd'], new Date('2026-10-14T00:02:00Z'))).toEqual(new Map());
     });
+
+    it('reads the last recorded try of a symbol whatever its day, and ignores other items', async () => {
+      const store = new MemoryItemStore().load([{ PK: 'TICKER#NOPE', SK: 'ENRICH#core', entityType: 'ENRICH_STATE', symbol: 'NOPE' }]);
+      const repo = new PriceRepository(store);
+      await repo.putAttempts('core', 'AAA', '2026-10-12', 3, 'skipped', 'unknown symbol');
+      await repo.putAttempts('core', 'BBB', '2026-10-13', 1, 'retry', 'timeout');
+      await repo.putAttempts('profile', 'CCC', '2026-10-13', 1, 'retry', 'profile only');
+      expect(await repo.lastAttempts(['AAA', 'BBB', 'CCC', 'NOPE', 'NONE'])).toEqual(
+        new Map([
+          ['AAA', { day: '2026-10-12', attempts: 3, outcome: 'skipped', error: 'unknown symbol' }],
+          ['BBB', { day: '2026-10-13', attempts: 1, outcome: 'retry', error: 'timeout' }],
+        ]),
+      );
+      expect(await repo.lastAttempts([])).toEqual(new Map());
+    });
+
+    it('reads the newest EOD rows of one symbol in one query, with their sources', async () => {
+      const row = (symbol: string, date: string, extra: Record<string, unknown> = {}) => ({ PK: `TICKER#${symbol}`, SK: `EOD#${date}`, entityType: 'EOD', symbol, date, close: 1, currency: 'USD', ...extra });
+      const store = new MemoryItemStore().load([row('AAA', '2026-10-01'), row('AAA', '2026-10-02', { source: 't212' }), row('AAA', '2026-10-03'), row('BBB', '2026-10-09'), { PK: 'TICKER#AAA', SK: 'PROFILE' }]);
+      const repo = new PriceRepository(store);
+      expect(await repo.newestEod('AAA', 2)).toEqual([{ date: '2026-10-03' }, { date: '2026-10-02', source: 't212' }]);
+      expect(await repo.newestEod('AAA', 10)).toHaveLength(3);
+      expect(await repo.newestEod('NONE', 10)).toEqual([]);
+    });
   });
 });

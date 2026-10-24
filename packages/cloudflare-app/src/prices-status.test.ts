@@ -52,4 +52,10 @@ describe('pricesStatus', () => {
     expect(pricesStatus(parsePricesConfig(all), null).message).toBe('Every market-data source is configured.');
     expect(pricesStatus(parsePricesConfig(all), { userId: 'u1', state: 'ERROR', lastAttemptAt: '2026-10-20T10:15:00.000Z', failures: 1 })).toMatchObject({ state: 'ok', missingSecrets: [] });
   });
+
+  it('carries the history coverage of the held symbols, null when there is none', () => {
+    const history = { asOf: '2026-10-23T09:00:00.000Z', symbols: [], totals: { held: 0, complete: 0, partial: 0, missing: 0, valuedAtCostSince: null, valuedAtCostUntil: null, truncated: false }, rowsRead: 0 };
+    expect(pricesStatus(parsePricesConfig({}), null, history).history).toEqual(history);
+    expect(status({}).history).toBeNull();
+  });
 });
