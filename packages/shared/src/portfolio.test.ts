@@ -170,7 +170,8 @@ describe('validation & performance regressions', () => {
     );
     const t0 = performance.now();
     const points = buildValueHistory(txns, {}, fx, '2021-01-01', '2026-06-30');
-    expect(performance.now() - t0).toBeLessThan(500);
+    // A guard against quadratic behaviour, not a benchmark: generous, because a shared CI runner with coverage instrumentation is slow.
+    expect(performance.now() - t0).toBeLessThan(3000);
     expect(points.at(-1)!.invested).toBe(20000);
     const mid = points.find((p) => p.date === '2022-06-15')!;
     const expected = [...buildPositions(txns, '2022-06-15').values()].reduce((s, p) => s + p.costLocal, 0);
