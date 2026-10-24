@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { server } from '../../mocks/server';
 import { api } from '../../mocks/utils';
 import { report } from '../../test/diagnostics';
+import { localDateTime } from '../../test/localTime';
 import { coverage, pricesStatus, symbolRow } from '../../test/priceCoverage';
 import { renderApp, renderWithProviders } from '../../test/utils';
 import { DiagnosticsView } from './DiagnosticsView';
@@ -69,7 +70,7 @@ describe('Price data coverage card', () => {
 
   it('shows a quote that has no source', async () => {
     renderWithProviders(<PriceCoverageCard coverage={coverage({ symbols: [symbolRow({ lastQuoteSource: null })] })} />);
-    expect(screen.getAllByText('Last quote 23-10-2026, 10:15').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(`Last quote ${localDateTime('2026-10-23T08:15:00.000Z')}`).length).toBeGreaterThan(0);
   });
 
   it('is absent when the Hub does not report it, and the alarm log still shows', async () => {
