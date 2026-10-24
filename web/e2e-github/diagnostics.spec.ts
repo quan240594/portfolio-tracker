@@ -37,6 +37,44 @@ const REPORT = {
   arms: [{ id: 1, at: T - 3_000_000, reason: 'job-enqueued', alarmAt: T - 3_000_000, runId: null }],
 };
 
+const row = (over: Record<string, unknown>) => ({
+  provider: 'eodhd',
+  eodRows: 252,
+  eodRowsCapped: false,
+  firstEod: '2025-10-23',
+  lastEod: '2026-10-19',
+  eodSources: ['eodhd'],
+  firstTransaction: '2024-03-02',
+  lastQuoteAt: '2026-10-19T08:15:00.000Z',
+  lastQuoteSource: 't212',
+  historyState: 'complete',
+  lastAttempt: null,
+  reason: 'Full history stored',
+  ...over,
+});
+
+// A long name and a long error must wrap inside the card instead of widening the page.
+const COVERAGE = {
+  asOf: '2026-10-19T10:00:00.000Z',
+  symbols: [
+    row({ symbol: 'NOVO-B.CO', name: 'Novo Nordisk A/S Class B Shares (a rather long company name)', eodRows: 0, firstEod: null, lastEod: null, eodSources: [], lastQuoteAt: null, lastQuoteSource: null, historyState: 'missing', reason: 'No provider key for this exchange' }),
+    row({
+      symbol: 'MSFT',
+      name: 'Microsoft',
+      provider: 'twelvedata',
+      eodRows: 40,
+      firstEod: '2026-09-01',
+      historyState: 'partial',
+      eodSources: ['provider', 't212'],
+      lastAttempt: { day: '2026-10-18', attempts: 2, outcome: 'retry', error: 'Daily credits exhausted, a rather long error message that must wrap inside its cell instead of widening the page' },
+      reason: 'Daily quota used up, retries after reset',
+    }),
+    row({ symbol: 'ASML.AS', name: 'ASML Holding' }),
+  ],
+  totals: { held: 3, complete: 1, partial: 1, missing: 1, valuedAtCostSince: '2026-01-05', valuedAtCostUntil: '2026-10-19', truncated: false },
+  rowsRead: 330,
+};
+
 async function mockWorker(page: Page, { exposed = true }: { exposed?: boolean } = {}) {
   const asked: string[] = [];
   await page.route((url) => url.pathname.startsWith('/auth/'), (route: Route) => {
@@ -49,6 +87,7 @@ async function mockWorker(page: Page, { exposed = true }: { exposed?: boolean } 
       asked.push(search);
       return exposed ? route.fulfill({ json: REPORT }) : route.fulfill({ status: 404, json: { error: { code: 'NOT_FOUND', message: 'Not found' } } });
     }
+    if (pathname === '/api/prices/status') return exposed ? route.fulfill({ json: { state: 'partial', sources: [], missingSecrets: [], message: '', t212Quotes: null, history: COVERAGE } }) : route.fulfill({ status: 404, json: { error: { code: 'NOT_FOUND', message: 'Not found' } } });
     if (pathname === '/api/notifications') return route.fulfill({ json: { available: false, configured: false, settings: { types: { exDividend: true, declared: true, received: true }, exDividendDaysBefore: 2 }, devices: [], maxDevices: 10 } });
     if (pathname === '/api/portfolios') return route.fulfill({ json: { portfolios: [] } });
     return route.fulfill({ status: 404, json: { error: { code: 'NOT_FOUND', message: 'Not found' } } });
@@ -95,6 +134,25 @@ for (const viewport of [
       await page.getByRole('button', { name: 'Refresh' }).click();
       await expect.poll(() => asked.filter((search) => search === '?limit=50').length).toBeGreaterThanOrEqual(2);
       expect(await overflow(page)).toBeLessThanOrEqual(0);
+    });
+
+    test('shows the price data coverage of the held symbols, with the state as text, and nothing sticking out', async ({ page }) => {
+      await mockWorker(page);
+      await page.goto('/settings/diagnostics#price-coverage');
+      const card = page.getByRole('region', { name: 'Price data coverage' });
+      await expect(card).toBeVisible();
+      await expect(card).toContainText('3 held symbols: 1 complete, 1 partial, 1 missing.');
+      await expect(card).toContainText('from 05-01-2026 until 19-10-2026');
+      const symbols = card.getByRole('table').getByRole('row').filter({ has: page.getByRole('rowheader') });
+      await expect(symbols).toHaveCount(3);
+      await expect(symbols.nth(0)).toContainText('Missing');
+      await expect(symbols.nth(1)).toContainText('Partial');
+      await expect(symbols.nth(2)).toContainText('Complete');
+      await expect(card.getByText('No provider key for this exchange').locator('visible=true')).toBeVisible();
+      await expect(card.getByText(/Daily credits exhausted/).locator('visible=true')).toBeVisible();
+      expect(await overflow(page)).toBeLessThanOrEqual(0);
+      const box = await card.boundingBox();
+      expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
     });
   });
 }

@@ -11,6 +11,7 @@ import { LoadingRegion, Skeleton } from '../components/Skeleton';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { PageHeader } from '../components/Layout';
 import { ValueChart } from '../components/charts/ValueChart';
+import { ValuedAtCostNote } from '../components/charts/ValuedAtCostNote';
 import { AllocationDonut } from '../components/charts/AllocationDonut';
 import { StaleBadge } from '../features/holdings/HoldingsTable';
 import { WatchlistWidget } from '../features/watchlist/WatchlistWidget';
@@ -127,6 +128,7 @@ function PerformanceCard() {
               P&amp;L change over period: <Change amount={delta} currency={data.baseCurrency} />
             </p>
           )}
+          {data?.valuedAtCost && <ValuedAtCostNote valuedAtCost={data.valuedAtCost} />}
         </div>
         <SegmentedControl label="Chart range" options={RANGE_OPTIONS} value={range} onChange={setRange} />
       </div>

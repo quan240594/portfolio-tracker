@@ -8,7 +8,7 @@ import {
   PortfolioError,
   applyManagement,
   buildPositions,
-  buildValueHistory,
+  buildValueSeries,
   calculateAllocation,
   calculateDividends,
   calculatePortfolio,
@@ -16,6 +16,7 @@ import {
   historyRangeStart,
   managementHistoryExtra,
   sortTransactions,
+  valuedAtCostOf,
   type AllocationDimension,
   type AnalyticsData,
   type GetAllocationResponse,
@@ -135,11 +136,18 @@ export function getHistory(range: HistoryRange, scope?: MockScope): GetHistoryRe
   const sorted = sortTransactions(scoped(scope));
   const today = state.seed.today;
   const from = historyRangeStart(range, today, sorted[0]?.date);
-  return {
-    range,
-    baseCurrency: BASE_CURRENCY,
-    points: buildValueHistory(sorted, state.seed.eod, state.seed.fx, from, today, state.seed.fxHistory, managementHistoryExtra({ transactions: sorted, ...managementFor(scope) })),
-  };
+  const series = buildValueSeries({
+    transactions: sorted,
+    eod: state.seed.eod,
+    fx: state.seed.fx,
+    from,
+    to: today,
+    fxHistory: state.seed.fxHistory,
+    extra: managementHistoryExtra({ transactions: sorted, ...managementFor(scope) }),
+    quotes: quotesFor(sorted),
+  });
+  const valuedAtCost = valuedAtCostOf(series, today);
+  return { range, baseCurrency: BASE_CURRENCY, points: series.points, ...(valuedAtCost ? { valuedAtCost } : {}) };
 }
 
 export const getDividends = (scope?: MockScope): GetDividendsResponse =>
