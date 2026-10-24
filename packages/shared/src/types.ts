@@ -92,6 +92,8 @@ export interface EodPrice {
   date: string;
   close: number;
   currency: string;
+  /** Where the row comes from, when it is not a market-data provider's close (`t212`: the Trading 212 quote at the end of the day). */
+  source?: string;
 }
 
 /** A corporate dividend event announced for an instrument (per-share amounts). */

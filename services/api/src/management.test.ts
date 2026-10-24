@@ -168,10 +168,15 @@ describe('cash tracking in the read endpoints', () => {
     const all = (await s.call('GET', '/portfolio')).body;
     expect(all.cashValue).toBe(3318.18);
     s.repo.eod = [{ symbol: 'VWRL.AS', date: '2026-06-15', close: 120, currency: 'EUR' }];
-    const history = (await s.call('GET', '/history', { query: { portfolioId: 'default', range: '1M' } })).body.points;
-    // EUR cash 4000 + VWRL 1200; AAPL has no close (valued at cost 750 USD) and cancels the -750 USD cash
-    expect(history.at(-1).value).toBe(5200);
+    const response = (await s.call('GET', '/history', { query: { portfolioId: 'default', range: '1M' } })).body;
+    const history = response.points;
+    // EUR cash 4000 + VWRL 1200 + AAPL at its stored quote (5 * 220 USD) less the 750 USD cash it cost: the headline total
+    const headline = (await s.call('GET', '/portfolio', { query: { portfolioId: 'default' } })).body.totalValue;
+    expect(history.at(-1).value).toBe(5518.18);
+    expect(history.at(-1).value).toBeCloseTo(headline, 2);
     expect(history[0].value).toBeGreaterThan(0);
+    // AAPL has no stored close at all and VWRL.AS only the one of the last day: both are at cost on the days before
+    expect(response.valuedAtCost).toEqual({ symbols: ['AAPL', 'VWRL.AS'], held: 2, until: history.at(-1).date });
   });
 });
 

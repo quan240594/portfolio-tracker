@@ -173,6 +173,10 @@ export interface T212QuoteStatus {
   tickerSymbols?: Record<string, string>;
   /** Last time the (rate-limited, large) exchange metadata was requested. */
   metadataTriedAt?: string;
+  /** When the first end-of-day row was written from the quotes (the one-time seed after the feature appeared). */
+  eodSeededAt?: string;
+  /** The calendar day (Amsterdam) whose close-slot rows were written: the close slot writes once a day. */
+  eodClosedDay?: string;
 }
 
 /** GET /brokers/trading212 — never contains credentials. */
