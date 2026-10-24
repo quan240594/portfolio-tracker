@@ -151,7 +151,9 @@ describe('table scales (a linear scanner, no regex)', () => {
       wordsOf(attack);
       normalizeForQuote(attack);
     }
-    expect(performance.now() - started).toBeLessThan(2000);
+    // Locally this takes about 0.1 s. Catastrophic backtracking on these inputs would take minutes, so the budget only has to sit far
+    // above the noise of a shared CI runner that also instruments the code for coverage (a 2 s budget failed there at 2.8 s).
+    expect(performance.now() - started).toBeLessThan(20_000);
   });
 
   it('trims dots, apostrophes and hyphens at the edges of words only', () => {

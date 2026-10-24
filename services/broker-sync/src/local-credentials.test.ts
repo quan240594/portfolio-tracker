@@ -26,7 +26,8 @@ describe('parseEnvFile edge cases', () => {
     expect(parseEnvFile('A="x\'\nB=\'y\'')).toEqual({ A: '"x\'', B: 'y' });
     const started = Date.now();
     parseEnvFile(`K=${' '.repeat(50_000)}x${' '.repeat(50_000)}\n${' '.repeat(50_000)}=`);
-    expect(Date.now() - started).toBeLessThan(1000);
+    // Backtracking on this input would take minutes; the budget only has to be far above the noise of a shared CI runner.
+    expect(Date.now() - started).toBeLessThan(10_000);
   });
 });
 
