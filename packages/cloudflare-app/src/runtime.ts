@@ -57,11 +57,13 @@ export interface HubEnv {
   /**
    * Earnings summaries (all optional; the feature is off until both exist): `SEC_CONTACT` is the complete User-Agent every SEC request declares
    * (name and contact information, passed at deploy time like ORIGIN, never committed), `AI` is the Workers AI binding (`"ai": { "binding": "AI" }`),
-   * `EARNINGS_AI_MODEL` a Workers AI text model (default `@cf/meta/llama-3.1-8b-instruct-fp8`), `EARNINGS_AI_DAILY_NEURONS` the daily cap (default 6000, at most 8000).
+   * `EARNINGS_AI_MODEL` a Workers AI text model (default `@cf/meta/llama-3.1-8b-instruct-fp8`), `EARNINGS_AI_DAILY_NEURONS` the daily cap (default 6000, at most 8000),
+   * `EARNINGS_BACKFILL_QUARTERS` how many quarterly releases per holding the backfill reads (default 4, at most 8).
    */
   SEC_CONTACT?: string;
   EARNINGS_AI_MODEL?: string;
   EARNINGS_AI_DAILY_NEURONS?: string;
+  EARNINGS_BACKFILL_QUARTERS?: string;
   AI?: AiLike;
   /** Plain variables of the price service: `TICKER=coingecko-id` pairs, daily call budgets, EU refresh hours, FX back-fill start, calendar tuning. */
   COINGECKO_COIN_IDS?: string;

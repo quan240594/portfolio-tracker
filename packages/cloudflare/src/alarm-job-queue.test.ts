@@ -416,7 +416,7 @@ describe('cron schedules', () => {
   });
 
   it('uses the shared schedules by default', () => {
-    expect(SCHEDULED_JOBS.map((job) => job.name).sort((a, b) => a.localeCompare(b))).toEqual(['broker-sync', 'broker-sync-intraday', 'earnings-watch', 'earnings-watch-morning', 'notify-dividends', 'prices-calendar', 'prices-refresh', 't212-quotes', 't212-quotes-close']);
+    expect(SCHEDULED_JOBS.map((job) => job.name).sort((a, b) => a.localeCompare(b))).toEqual(['broker-sync', 'broker-sync-intraday', 'earnings-backfill', 'earnings-watch', 'earnings-watch-morning', 'notify-dividends', 'prices-calendar', 'prices-refresh', 't212-quotes', 't212-quotes-close']);
   });
 
   it('arms the alarm for the Trading 212 quote schedules and enqueues the job per slot', async () => {
@@ -432,9 +432,11 @@ describe('cron schedules', () => {
         calls.push(invocation);
         return ok();
       },
+      // The earnings backfill is due every 15 minutes too, at the same slots.
+      backfillEarnings: () => ok(),
     });
     expect(calls).toEqual([{ payload: { trigger: 'scheduled' }, cursor: undefined }]);
-    expect(report).toMatchObject({ steps: 1, completed: 1, nextAlarm: slot + 15 * 60_000 });
+    expect(report).toMatchObject({ steps: 2, completed: 2, nextAlarm: slot + 15 * 60_000 });
   });
 
   it('sleeps over the weekend: the next quote slot is the only wake-up', async () => {

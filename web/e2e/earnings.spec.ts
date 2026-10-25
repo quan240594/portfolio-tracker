@@ -100,3 +100,37 @@ test.describe('Earnings summaries: every KPI template', () => {
     });
   }
 });
+
+test.describe('Earnings summaries: what was checked', () => {
+  for (const viewport of [320, 1280]) {
+    test(`says why nothing is stored, company by company, without overflow at ${viewport} px`, async ({ page }) => {
+      await page.setViewportSize({ width: viewport, height: 900 });
+      await page.addInitScript(() => sessionStorage.setItem('earnings-demo-empty', 'on'));
+      await page.goto('/earnings');
+      await expect(page.getByRole('heading', { name: 'No earnings summaries yet' })).toBeVisible();
+      const section = page.locator('details', { hasText: 'What was checked' });
+      await expect(section).toHaveAttribute('open', '');
+      await expect(section.getByText('CLDV: found 8-K from 21-10-2026, the AI could not read it (invalid JSON)')).toBeVisible();
+      await expect(section.getByText('HBRB: no results release in the last 135 days')).toBeVisible();
+      await expect(section.getByText(/^NRDV\.AS: not found in the SEC company list/)).toBeVisible();
+      await expect(section.getByText(/^Last full pass: every company was looked at since 25-10-2026/)).toBeVisible();
+      await expect(section.getByText(/3 of 12 releases read/)).toBeVisible();
+      await expect(section.getByText(/Resumes at 00:00 UTC/)).toBeVisible();
+      await expect(section.getByRole('button', { name: 'Fetch all now' })).toBeVisible();
+      await section.getByRole('button', { name: 'Fetch all now' }).click();
+      await expect(section.getByText(/Started\. The page fills as releases are read/)).toBeVisible();
+      expect(await overflowing(page)).toEqual([]);
+    });
+
+    test(`keeps the section closed under the cards and opens it on click at ${viewport} px`, async ({ page }) => {
+      await page.setViewportSize({ width: viewport, height: 900 });
+      await page.goto('/earnings');
+      await expect(page.getByRole('article')).toHaveCount(2);
+      const section = page.locator('details', { hasText: 'What was checked' });
+      await expect(section).not.toHaveAttribute('open', '');
+      await section.locator('summary').click();
+      await expect(section.getByText(/8 of 8 releases read/)).toBeVisible();
+      expect(await overflowing(page)).toEqual([]);
+    });
+  }
+});

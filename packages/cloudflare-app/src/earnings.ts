@@ -19,7 +19,7 @@ import {
   type NeuronsToday,
 } from '@portfolio/earnings';
 import { DailyQuota, StoreQuotaLedger } from '@portfolio/prices';
-import { heldQuantities, isMarketSymbol, kpiTemplateFor, type EarningsHolding } from '@portfolio/shared';
+import { classificationFieldsOf, heldQuantities, isMarketSymbol, kpiTemplateFor, type EarningsHolding } from '@portfolio/shared';
 import type { HubConfig } from './config.js';
 
 /** Whether the feature has everything it needs: the SEC contact and the Workers AI binding. */
@@ -31,7 +31,9 @@ const CALENDAR_DAYS_AHEAD = 130;
 
 /**
  * The distinct companies held by any user today, with the KPI template (the owner's override, else the table or sector) and the expected
- * report dates of the calendar. Instruments without earnings (ETFs, crypto, ...) are left out. A user whose transactions cannot be replayed
+ * report dates of the calendar. Instruments without earnings (ETFs, crypto, ...) are left out. What an instrument is comes from the stored
+ * profile with the owner's classification overrides on top, as everywhere else (the Snowball import classifies the holdings through overrides;
+ * reading the stored profile alone silently left every such holding out); an instrument whose class nobody knows counts unless its name reads like a fund. A user whose transactions cannot be replayed
  * (an oversold position) is skipped. Nothing about quantities or users leaves this function.
  */
 export function createEarningsInputs(items: ItemStore): EarningsInputs {
@@ -53,12 +55,16 @@ export function createEarningsInputs(items: ItemStore): EarningsInputs {
       const symbols = [...new Set(held.flatMap((entry) => entry.symbols))].sort((a, b) => a.localeCompare(b));
       if (symbols.length === 0) return { holdings: [], calendar: {} };
       const [profiles, overrides] = await Promise.all([repo.getProfiles(symbols), Promise.all(held.map((entry) => mgmt.getClassificationOverrides(entry.userId, entry.symbols)))]);
-      const override = (symbol: string): string | undefined => overrides.map((byUser) => byUser[symbol]?.kpiTemplate).find((template) => template !== undefined);
+      const fieldsOf = (symbol: string) => overrides.flatMap((byUser) => (byUser[symbol] === undefined ? [] : [classificationFieldsOf(byUser[symbol])]));
       const holdings: EarningsHolding[] = [];
       for (const symbol of symbols) {
         const profile = profiles[symbol];
-        const template = kpiTemplateFor({ symbol, assetClass: profile?.assetClass, sector: profile?.sector, override: override(symbol) });
-        if (template !== null) holdings.push({ symbol, name: profile?.name ?? symbol, template, ...(profile?.currency === undefined ? {} : { currency: profile.currency }) });
+        const fields = fieldsOf(symbol);
+        const assetClass = fields.find((entry) => entry.assetClass !== undefined)?.assetClass ?? profile?.assetClass;
+        const name = fields.find((entry) => entry.name !== undefined)?.name ?? profile?.name;
+        const sector = fields.find((entry) => entry.sector !== undefined)?.sector ?? profile?.sector;
+        const template = kpiTemplateFor({ symbol, assetClass, sector, name, override: fields.find((entry) => entry.kpiTemplate !== undefined)?.kpiTemplate });
+        if (template !== null) holdings.push({ symbol, name: name ?? symbol, template, ...(profile?.currency === undefined ? {} : { currency: profile.currency }), ...(profile?.isin === undefined ? {} : { isin: profile.isin }) });
       }
       const wanted = holdings.map((holding) => holding.symbol);
       const events = wanted.length === 0 ? { earnings: [] } : await repo.getCalendarEvents(wanted, addDays(today, -CALENDAR_DAYS_BACK), addDays(today, CALENDAR_DAYS_AHEAD));
@@ -105,6 +111,7 @@ export function earningsJobDeps(context: EarningsContext): EarningsJobDeps {
   return {
     repo: new EarningsRepository(items),
     inputs: createEarningsInputs(items),
+    neurons: context.neurons,
     config: earnings,
     ...(earnings.secUserAgent === undefined ? {} : { sec: new SecClient({ userAgent: earnings.secUserAgent, fetch: fetchFn, now, sleep: context.sleep }) }),
     ...(context.ai === undefined ? {} : { extractor: new WorkersAiExtractor({ ai: context.ai, meter: context.neurons, model: earnings.model }) }),

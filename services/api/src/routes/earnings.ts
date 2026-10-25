@@ -6,6 +6,7 @@ import {
   hasEarnings,
   marketSymbols,
   type EARNINGS_ROUTES,
+  type EarningsBackfillResponse,
   type EarningsListResponse,
   type EarningsStatusResponse,
   type EarningsSummary,
@@ -47,7 +48,7 @@ async function earningsStatus(ctx: RouteContext): Promise<RouteResult> {
   if (!ctx.deps.earnings) return ok({ available: false, configured: false, missing: [], estimatesConfigured: false, symbols: [] } satisfies EarningsStatusResponse);
   const own = await ownSymbols(ctx);
   const profiles = await loadProfiles(ctx, own);
-  const symbols = own.map((symbol) => ({ symbol, eligible: hasEarnings(profiles[symbol]?.assetClass) }));
+  const symbols = own.map((symbol) => ({ symbol, eligible: hasEarnings(profiles[symbol]?.assetClass, profiles[symbol]?.name) }));
   return ok(await ctx.deps.earnings.status(symbols));
 }
 
@@ -69,7 +70,7 @@ async function refreshEarnings(ctx: RouteContext): Promise<RouteResult> {
   const own = await ownSymbols(ctx);
   if (!own.includes(symbol)) throw new HttpError(404, 'NOT_FOUND', 'You do not hold this symbol');
   const profiles = await loadProfiles(ctx, [symbol]);
-  const result = await earnings.refresh(symbol, hasEarnings(profiles[symbol]?.assetClass));
+  const result = await earnings.refresh(symbol, hasEarnings(profiles[symbol]?.assetClass, profiles[symbol]?.name));
   if (result.accepted) return ok(result, 202);
   switch (result.reason) {
     case 'rate-limited':
@@ -81,9 +82,20 @@ async function refreshEarnings(ctx: RouteContext): Promise<RouteResult> {
   }
 }
 
+/** `POST /earnings/backfill`: "Fetch all now" re-arms the backfill of every holding (failed releases get another chance); once per hour. */
+async function backfillEarnings(ctx: RouteContext): Promise<RouteResult> {
+  const result: EarningsBackfillResponse = await requireEarnings(ctx).backfill();
+  if (result.accepted) return ok(result, 202);
+  if (result.reason === 'rate-limited') {
+    return { statusCode: 429, body: { error: { code: 'RATE_LIMITED', message: 'Fetch all was started less than an hour ago', details: { retryAfterSeconds: result.retryAfterSeconds } } }, headers: { 'retry-after': String(result.retryAfterSeconds ?? 3600) } };
+  }
+  throw new HttpError(503, 'NOT_CONFIGURED', 'Earnings summaries are not configured on the server (SEC_CONTACT or the Workers AI binding is missing)');
+}
+
 export const earningsHandlers: Record<keyof typeof EARNINGS_ROUTES, RouteHandler> = {
   earningsList: listEarnings,
   earningsStatus: earningsStatus,
   earningsGet: getEarnings,
   earningsRefresh: refreshEarnings,
+  earningsBackfill: backfillEarnings,
 };

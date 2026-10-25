@@ -1,4 +1,5 @@
 import { DEFAULT_AI_MODEL } from './ai.js';
+import { EARNINGS_BACKFILL_DEFAULT_QUARTERS, EARNINGS_BACKFILL_MAX_QUARTERS } from '@portfolio/shared';
 
 /** Default and maximum neurons the feature may spend per UTC day (the Free plan allows 10,000; 80 % is where the budget guard blocks). */
 export const DEFAULT_DAILY_NEURONS = 6000;
@@ -11,6 +12,8 @@ export interface EarningsConfig {
   secProblem?: 'missing' | 'invalid';
   model: string;
   dailyNeurons: number;
+  /** Quarterly releases per holding the backfill reads (`EARNINGS_BACKFILL_QUARTERS`, 1 to 8, default 4). */
+  backfillQuarters: number;
   /** Whether the optional Alpha Vantage key (EPS estimates) exists. */
   estimatesConfigured: boolean;
 }
@@ -19,6 +22,7 @@ export interface EarningsEnv {
   SEC_CONTACT?: string;
   EARNINGS_AI_MODEL?: string;
   EARNINGS_AI_DAILY_NEURONS?: string;
+  EARNINGS_BACKFILL_QUARTERS?: string;
   ALPHAVANTAGE_API_KEY?: string;
 }
 
@@ -40,12 +44,14 @@ export function parseEarningsConfig(env: EarningsEnv): EarningsConfig {
   const requested = Number.parseInt(env.EARNINGS_AI_DAILY_NEURONS ?? '', 10);
   const dailyNeurons = Number.isFinite(requested) && requested >= 0 ? Math.min(requested, MAX_DAILY_NEURONS) : DEFAULT_DAILY_NEURONS;
   const model = env.EARNINGS_AI_MODEL?.trim();
+  const quarters = Number.parseInt(env.EARNINGS_BACKFILL_QUARTERS ?? '', 10);
   const valid = validSecContact(contact);
   return {
     ...(valid ? { secUserAgent: contact } : {}),
     ...(valid ? {} : { secProblem: contact === undefined || contact === '' ? ('missing' as const) : ('invalid' as const) }),
     model: model !== undefined && MODEL_PATTERN.test(model) ? model : DEFAULT_AI_MODEL,
     dailyNeurons,
+    backfillQuarters: Number.isFinite(quarters) && quarters >= 1 ? Math.min(quarters, EARNINGS_BACKFILL_MAX_QUARTERS) : EARNINGS_BACKFILL_DEFAULT_QUARTERS,
     estimatesConfigured: (env.ALPHAVANTAGE_API_KEY ?? '').trim() !== '',
   };
 }

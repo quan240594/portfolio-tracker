@@ -1,5 +1,5 @@
 import type { EventPublisher, FileStore } from '@portfolio/platform';
-import type { EarningsRefreshResponse, EarningsStatusResponse } from '@portfolio/shared';
+import type { EarningsBackfillResponse, EarningsRefreshResponse, EarningsStatusResponse } from '@portfolio/shared';
 import type { BrokerDeps } from './broker-deps.js';
 import type { Config } from './config.js';
 import type { ManagementRepository } from './management-repository.js';
@@ -12,6 +12,8 @@ export interface EarningsDeps {
   status(symbols: readonly { symbol: string; eligible: boolean }[]): Promise<EarningsStatusResponse>;
   /** Queues a re-check of one symbol; refuses (without queuing) when it was asked for less than an hour ago. */
   refresh(symbol: string, eligible: boolean): Promise<EarningsRefreshResponse>;
+  /** "Fetch all now": re-arms the backfill of the last quarters of every holding; refuses (without queuing) when it was asked for less than an hour ago. */
+  backfill(): Promise<EarningsBackfillResponse>;
 }
 
 /** Everything the handlers need from the platform: repositories, events, files, the clock. Built by the adapter. */

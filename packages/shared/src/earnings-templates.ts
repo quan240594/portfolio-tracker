@@ -10,9 +10,10 @@ import { isKpiTemplateId, type KpiTemplateId } from './earnings.js';
 import type { AssetClass } from './types.js';
 
 const REIT = ['O', 'PLD', 'AMT', 'SPG', 'WELL', 'PSA', 'DLR', 'VICI', 'NNN', 'ADC', 'STAG', 'REXR', 'EXR', 'CCI', 'MAA', 'AVB', 'EQR', 'ARE', 'VTR', 'IRM', 'WPC', 'GLPI', 'KIM', 'REG', 'FR', 'EPRT'];
-const BANK = ['JPM', 'BAC', 'WFC', 'C', 'GS', 'MS', 'USB', 'PNC', 'TFC', 'BK', 'STT', 'FITB', 'KEY', 'RF', 'HBAN', 'MTB', 'CFG', 'COF', 'ALLY', 'ZION', 'CMA'];
-const SAAS = ['CRM', 'NOW', 'ADBE', 'WDAY', 'SNOW', 'DDOG', 'TEAM', 'HUBS', 'ZM', 'DOCU', 'CRWD', 'NET', 'MDB', 'OKTA', 'TWLO', 'ZS', 'TTD', 'VEEV', 'PAYC', 'BILL', 'ESTC', 'GTLB', 'U', 'DBX', 'BOX', 'MNDY'];
-const INFRA = ['MSFT', 'GOOGL', 'GOOG', 'AMZN', 'ORCL', 'NVDA', 'AVGO', 'ANET', 'SMCI', 'DELL', 'CRWV', 'NBIS', 'VRT', 'EQIX', 'IBM', 'AKAM', 'FSLY', 'NTAP', 'PSTG', 'MU'];
+// The German (Xetra) spellings of US companies the owner holds are listed next to their tickers: FOO is Salesforce, ADB Adobe, CMC JPMorgan, MSF Microsoft, AMZ Amazon, ABEA Alphabet, NVD Nvidia.
+const BANK = ['CMC', 'JPM', 'BAC', 'WFC', 'C', 'GS', 'MS', 'USB', 'PNC', 'TFC', 'BK', 'STT', 'FITB', 'KEY', 'RF', 'HBAN', 'MTB', 'CFG', 'COF', 'ALLY', 'ZION', 'CMA'];
+const SAAS = ['FOO', 'ADB', 'CRM', 'NOW', 'ADBE', 'WDAY', 'SNOW', 'DDOG', 'TEAM', 'HUBS', 'ZM', 'DOCU', 'CRWD', 'NET', 'MDB', 'OKTA', 'TWLO', 'ZS', 'TTD', 'VEEV', 'PAYC', 'BILL', 'ESTC', 'GTLB', 'U', 'DBX', 'BOX', 'MNDY'];
+const INFRA = ['MSF', 'AMZ', 'ABEA', 'NVD', 'MSFT', 'GOOGL', 'GOOG', 'AMZN', 'ORCL', 'NVDA', 'AVGO', 'ANET', 'SMCI', 'DELL', 'CRWV', 'NBIS', 'VRT', 'EQIX', 'IBM', 'AKAM', 'FSLY', 'NTAP', 'PSTG', 'MU'];
 
 const TABLE: ReadonlyMap<string, KpiTemplateId> = new Map([
   ...REIT.map((ticker): [string, KpiTemplateId] => [ticker, 'reit']),
@@ -27,16 +28,26 @@ export interface KpiTemplateInput {
   symbol: string;
   assetClass?: AssetClass;
   sector?: string;
+  /** The name of the instrument, used only when the asset class is not known. */
+  name?: string;
   /** The owner's choice on the classification override. */
   override?: string;
 }
 
-/** Only companies report quarterly results: funds, crypto, bonds, cash and the like have no earnings. */
-export const hasEarnings = (assetClass: AssetClass | undefined): boolean => assetClass === 'STOCK';
+const FUND_NAME = /\b(?:etf|etn|etc|fund|ucits|index|ishares|vanguard|spdr|xtrackers|amundi|lyxor|wisdomtree|vaneck|invesco|physical|bitcoin|ethereum|crypto)\b/i;
+
+/**
+ * Only companies report quarterly results: funds, crypto, bonds, cash and the like have no earnings. An instrument whose class is not
+ * known (no profile yet, or the placeholder `OTHER`) counts when its name does not read like a fund: a missing profile must not hide a company.
+ */
+export function hasEarnings(assetClass: AssetClass | undefined, name?: string): boolean {
+  if (assetClass === 'STOCK') return true;
+  return (assetClass === undefined || assetClass === 'OTHER') && !FUND_NAME.test(name ?? '');
+}
 
 /** The template for the symbol, or `null` when the instrument has no earnings (an ETF, crypto, ...). */
 export function kpiTemplateFor(input: KpiTemplateInput): KpiTemplateId | null {
-  if (!hasEarnings(input.assetClass)) return null;
+  if (!hasEarnings(input.assetClass, input.name)) return null;
   if (isKpiTemplateId(input.override)) return input.override;
   const fromTable = TABLE.get(baseTicker(input.symbol));
   if (fromTable !== undefined) return fromTable;

@@ -54,4 +54,18 @@ describe('capText', () => {
   it('caps a very long release at the default size', () => {
     expect(htmlToText(`<p>${'word '.repeat(40_000)}</p>`.replaceAll('word ', 'word</p><p>')).length).toBeLessThanOrEqual(MAX_RELEASE_CHARS);
   });
+
+  it('a release in one giant paragraph keeps its beginning (it used to vanish: one line was longer than the whole cap)', () => {
+    const text = htmlToText(`<p>Revenue was $4.82 billion. ${'Lots of discussion about the quarter and the outlook. '.repeat(2000)}</p>`);
+    expect(text.startsWith('Revenue was $4.82 billion.')).toBe(true);
+    expect(text.length).toBeLessThanOrEqual(MAX_RELEASE_CHARS);
+    expect(text.split('\n').every((line) => line.length <= 1500)).toBe(true);
+    const unbroken = htmlToText(`<p>${'x'.repeat(4000)}</p>`);
+    expect(unbroken.split('\n').map((line) => line.length)).toEqual([1500, 1500, 1000]);
+  });
+
+  it('drops inline XBRL headers and display:none blocks, nested ones included', () => {
+    const html = '<body><div style="display:none"><div>hidden <div>deeper</div> still hidden</div></div><p>shown</p><ix:header>meta</ix:header><span style="display: none">gone</span></body>';
+    expect(htmlToText(html)).toBe('shown');
+  });
 });

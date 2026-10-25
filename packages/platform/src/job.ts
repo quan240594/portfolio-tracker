@@ -14,6 +14,7 @@ export const JOBS = {
   notifyDividends: 'notifyDividends',
   watchEarnings: 'watchEarnings',
   fetchEarningsSummary: 'fetchEarningsSummary',
+  backfillEarnings: 'backfillEarnings',
 } as const;
 
 export type JobName = (typeof JOBS)[keyof typeof JOBS];
@@ -38,6 +39,11 @@ export interface JobPayloads {
   watchEarnings: { trigger: 'scheduled' | 'manual'; symbol?: string };
   /** Read one release (an SEC filing of `symbol`), extract and verify its figures and store the summary. */
   fetchEarningsSummary: { symbol: string; cik: string; accession: string; form: '8-K' | '6-K'; filingDate: string; primaryDocument: string; origin: 'live' | 'backfill' };
+  /**
+   * Read the most recent quarterly releases of every eligible held company, newest first across all companies, within the daily Workers AI
+   * allowance (`scheduled`: every 15 minutes, a one-row no-op once complete or while waiting; `manual`: the owner pressed "Fetch all now").
+   */
+  backfillEarnings: { trigger: 'scheduled' | 'manual' };
 }
 
 /**

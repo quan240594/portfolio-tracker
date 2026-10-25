@@ -23,7 +23,7 @@ import { ItemNotificationRepository, ItemRepository, MAX_PUSHES_PER_USER_STEP, n
 import { END_OF_DAY_ZONE, ItemBrokerStore, ItemProfileStore, ItemQuoteStore, SecretCredentialStore, Trading212Client, brokerSyncJob, refreshQuotesAfterSync, refreshQuotesJob, type HandlerResult, type QuoteDeps, type SyncDeps } from '@portfolio/broker-sync';
 import { ItemIngestStore, importUploadedJob } from '@portfolio/ingest';
 import { DEFAULT_STEP_SUBREQUESTS, PRICE_SCHEDULES, createPriceJobs, type PriceJobDeps } from '@portfolio/prices';
-import { CHECKS_PER_STEP, createFetchEarningsSummaryJob, createWatchEarningsJob, type AiLike, type NeuronMeter } from '@portfolio/earnings';
+import { BACKFILL_STEP_SUBREQUESTS, CHECKS_PER_STEP, createBackfillEarningsJob, createFetchEarningsSummaryJob, createWatchEarningsJob, type AiLike, type NeuronMeter } from '@portfolio/earnings';
 import type { HubConfig } from './config.js';
 import { earningsJobDeps } from './earnings.js';
 import { pushConfig } from './push.js';
@@ -128,13 +128,15 @@ export const CORE_JOB_FACTORIES: JobFactories = {
 };
 
 /**
- * Earnings summaries: `watchEarnings` (one SEC request per candidate symbol, queues a release it finds) and `fetchEarningsSummary` (reads the
- * release with Workers AI, verifies and stores it). Both run only below 60 % of the budget and are dropped, not deferred, above it: the next
- * watch finds the release again. Without `SEC_CONTACT` or the AI binding they finish at once without any outbound call.
+ * Earnings summaries: `watchEarnings` (one SEC request per candidate symbol, queues a release it finds), `fetchEarningsSummary` (reads the
+ * release with Workers AI, verifies and stores it) and `backfillEarnings` (the last quarters of every holding, newest first, within the daily
+ * AI allowance; one row read when complete or waiting). All run only below 60 % of the budget and are dropped, not deferred, above it: the
+ * next watch or the next 15-minute backfill step finds the work again. Without `SEC_CONTACT` or the AI binding they finish at once without any outbound call.
  */
 export const EARNINGS_JOB_FACTORIES: JobFactories = {
   watchEarnings: (context) => createWatchEarningsJob(() => earningsJobDeps(context)),
   fetchEarningsSummary: (context) => createFetchEarningsSummaryJob(() => earningsJobDeps(context)),
+  backfillEarnings: (context) => createBackfillEarningsJob(() => earningsJobDeps(context)),
 };
 
 /** What the price jobs need, built from the Hub's ports (`@portfolio/prices`' `PriceJobDeps`). */
@@ -179,6 +181,8 @@ export const JOB_SUBREQUEST_RESERVE: Readonly<Partial<Record<JobName, number>>> 
   watchEarnings: CHECKS_PER_STEP + 4,
   // A release: the filing index, up to three documents, the estimate and at most two model calls.
   fetchEarningsSummary: 8,
+  // A backfill step: the ticker table and four submissions lists, or one release (its index, up to four documents, the estimate).
+  backfillEarnings: BACKFILL_STEP_SUBREQUESTS,
 };
 
 export const ALL_JOB_FACTORIES: JobFactories = { ...CORE_JOB_FACTORIES, ...PRICE_JOB_FACTORIES, ...EARNINGS_JOB_FACTORIES };
@@ -193,7 +197,8 @@ export const registeredJobs = (factories: JobFactories = ALL_JOB_FACTORIES): Job
  */
 export const schedulesFor = (factories: JobFactories = ALL_JOB_FACTORIES, earningsOn = true): ScheduledJob[] => {
   const known = new Set<string>(registeredJobs(factories));
-  return SCHEDULED_JOBS.filter((schedule) => known.has(schedule.job) && (earningsOn || schedule.job !== JOBS.watchEarnings));
+  const earningsJobs = new Set<string>([JOBS.watchEarnings, JOBS.backfillEarnings]);
+  return SCHEDULED_JOBS.filter((schedule) => known.has(schedule.job) && (earningsOn || !earningsJobs.has(schedule.job)));
 };
 
 /** The price service's own schedules (`prices-refresh`, `prices-calendar`), for the status report. */

@@ -26,34 +26,70 @@ function withoutNulls(input: unknown): unknown {
 
 const KPI_KEYS = [...new Set(Object.values(KPI_TEMPLATES).flatMap((template) => template.slots.map((slot) => slot.key)))];
 
-export const extractionSchema = z.preprocess(
-  withoutNulls,
-  z.object({
-    period: z.string().trim().min(1).max(40).optional(),
-    currency: z.string().trim().min(1).max(8).optional(),
-    epsGaap: pair.optional(),
-    epsAdjusted: pair.optional(),
-    revenue: pair.optional(),
-    operatingIncome: pair.optional(),
-    operatingMargin: pair.optional(),
-    netIncome: pair.optional(),
-    operatingCashFlow: pair.optional(),
-    capex: pair.optional(),
-    freeCashFlow: pair.optional(),
-    dilutedShares: pair.optional(),
-    kpis: z.array(z.object({ key: z.string().max(40), value: printed, yearAgo: printed.optional() })).max(16).optional(),
-    guidance: z
-      .array(z.object({ label, period: z.string().trim().max(60).optional(), low: printed.optional(), high: printed.optional(), point: printed.optional() }))
-      .max(10)
-      .optional(),
-    segments: z.array(z.object({ name: label, value: printed, yearAgo: printed.optional() })).max(10).optional(),
-    keyUpdates: z.array(z.string().trim().min(1).max(160)).max(8).optional(),
-    quote: z.object({ text: z.string().trim().min(1).max(400), speaker: z.string().trim().max(80).optional() }).optional(),
-  }),
-);
+const fieldShape = {
+  period: z.string().trim().min(1).max(40).optional(),
+  currency: z.string().trim().min(1).max(8).optional(),
+  epsGaap: pair.optional(),
+  epsAdjusted: pair.optional(),
+  revenue: pair.optional(),
+  operatingIncome: pair.optional(),
+  operatingMargin: pair.optional(),
+  netIncome: pair.optional(),
+  operatingCashFlow: pair.optional(),
+  capex: pair.optional(),
+  freeCashFlow: pair.optional(),
+  dilutedShares: pair.optional(),
+  kpis: z.array(z.object({ key: z.string().max(40), value: printed, yearAgo: printed.optional() })).max(16).optional(),
+  guidance: z
+    .array(z.object({ label, period: z.string().trim().max(60).optional(), low: printed.optional(), high: printed.optional(), point: printed.optional() }))
+    .max(10)
+    .optional(),
+  segments: z.array(z.object({ name: label, value: printed, yearAgo: printed.optional() })).max(10).optional(),
+  keyUpdates: z.array(z.string().trim().min(1).max(160)).max(8).optional(),
+  quote: z.object({ text: z.string().trim().min(1).max(400), speaker: z.string().trim().max(80).optional() }).optional(),
+};
+
+export const extractionSchema = z.preprocess(withoutNulls, z.object(fieldShape));
 
 export type Extraction = z.infer<typeof extractionSchema>;
 export type ExtractedPair = z.infer<typeof pair>;
+
+/** A model sometimes prints a figure as a JSON number (`20.7`): in the lenient reading it is the text the release shows. */
+function numbersAsText(input: unknown): unknown {
+  if (typeof input === 'number') return String(input);
+  if (Array.isArray(input)) return input.map((entry) => numbersAsText(entry));
+  if (input !== null && typeof input === 'object') return Object.fromEntries(Object.entries(input).map(([key, value]) => [key, numbersAsText(value)]));
+  return input;
+}
+
+type FieldSchema = (typeof fieldShape)[keyof typeof fieldShape];
+
+/** One field, or, for a list, the entries that are valid (one bad entry does not cost the others). */
+function validPart(schema: FieldSchema, value: unknown): unknown {
+  const whole = schema.safeParse(value);
+  if (whole.success) return whole.data;
+  if (!Array.isArray(value)) return undefined;
+  const kept = value.filter((entry) => schema.safeParse([entry]).success);
+  const again = kept.length === 0 ? undefined : schema.safeParse(kept);
+  return again?.success ? again.data : undefined;
+}
+
+/**
+ * What the model answered, as far as it is usable: the strict reading first; when that fails (one malformed field) every valid field and
+ * list entry is kept and the rest dropped. `undefined` when nothing at all is usable (not an object, or no valid field).
+ */
+export function parseExtraction(input: unknown): { extraction: Extraction; lenient: boolean } | undefined {
+  const strict = extractionSchema.safeParse(input);
+  if (strict.success) return { extraction: strict.data, lenient: false };
+  const cleaned = withoutNulls(numbersAsText(input));
+  if (cleaned === null || typeof cleaned !== 'object' || Array.isArray(cleaned)) return undefined;
+  const record = cleaned as Record<string, unknown>;
+  const entries = (Object.entries(fieldShape) as [string, FieldSchema][]).flatMap(([key, schema]) => {
+    const part = record[key] === undefined ? undefined : validPart(schema, record[key]);
+    return part === undefined ? [] : [[key, part] as const];
+  });
+  return entries.length === 0 ? undefined : { extraction: Object.fromEntries(entries) as Extraction, lenient: true };
+}
 
 const STRING = { type: 'string' } as const;
 const PAIR_SCHEMA = { type: 'object', properties: { value: STRING, yearAgo: STRING }, required: ['value'] } as const;

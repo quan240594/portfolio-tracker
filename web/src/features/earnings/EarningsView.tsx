@@ -7,6 +7,7 @@ import { ErrorState } from '../../components/ErrorState';
 import { PageHeader } from '../../components/Layout';
 import { LoadingRegion, Skeleton } from '../../components/Skeleton';
 import { formatDateTime } from '../../lib/format';
+import { CheckedSection } from './CheckedSection';
 import { EarningsCard } from './EarningsCard';
 
 const NOTICE = 'block rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-100';
@@ -92,35 +93,12 @@ function RefreshButton({ symbol }: Readonly<{ symbol: string }>) {
   );
 }
 
-function checkedLine(entry: EarningsStatusResponse['symbols'][number]): string {
-  if (!entry.lastCheckedAt) return `${entry.symbol}: not checked yet`;
-  const reason = entry.lastReason ? `, ${entry.lastReason}` : '';
-  return `${entry.symbol}: checked ${formatDateTime(entry.lastCheckedAt)}${reason}`;
-}
-
-function checkedText(status: EarningsStatusResponse): string[] {
-  return status.symbols.filter((entry) => entry.eligible).map(checkedLine);
-}
-
-function Empty({ status, selected }: Readonly<{ status: EarningsStatusResponse; selected: string | undefined }>) {
-  const lines = checkedText(status).filter((line) => selected === undefined || line.startsWith(`${selected}:`));
+function Empty() {
   return (
-    <div className="space-y-3">
-      <EmptyState
-        title="No earnings summaries yet"
-        description="When a company you hold publishes quarterly results, its summary appears here by itself. The most recent quarter of each holding is read once after the feature is switched on, a few companies at a time."
-      />
-      {lines.length > 0 && (
-        <details className="card p-3 text-sm">
-          <summary className="cursor-pointer font-medium">What was checked</summary>
-          <ul className="muted mt-2 space-y-1">
-            {lines.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-        </details>
-      )}
-    </div>
+    <EmptyState
+      title="No earnings summaries yet"
+      description="When a company you hold publishes quarterly results, its summary appears here by itself. The latest quarters of every holding are read in the background, within the free daily AI allowance: the section below says how far it is and why anything is missing."
+    />
   );
 }
 
@@ -161,7 +139,7 @@ export function EarningsView() {
         <Notices status={status} />
         <Chips symbols={list.symbols} selected={symbol} />
         {list.summaries.length === 0 ? (
-          <Empty status={status} selected={symbol} />
+          <Empty />
         ) : (
           <div className="grid gap-4">
             {list.summaries.map((summary) => (
@@ -169,6 +147,7 @@ export function EarningsView() {
             ))}
           </div>
         )}
+        <CheckedSection status={status} selected={symbol} hasSummaries={list.summaries.length > 0} />
       </div>
     );
   }

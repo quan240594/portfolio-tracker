@@ -143,8 +143,11 @@ You need a Cloudflare account on the Free plan and a GitHub account. Every comma
    Without `SEC_CONTACT` nothing is sent to the SEC and `/earnings` says "not configured". The `ai` binding (`AI`) is already in `wrangler.jsonc` and needs no key or paid plan
    (Free plan: 10,000 neurons a day; the app stops at 80 % and never goes past it; a request over the allowance would fail, not bill). Optional: the secret
    `ALPHAVANTAGE_API_KEY` of step 7 also gives the **expected EPS** and the EPS beat/miss (one call per release, from the 25 a day; without it the cell says "no estimate available");
-   variables `EARNINGS_AI_MODEL` (default `@cf/meta/llama-3.1-8b-instruct-fp8`) and `EARNINGS_AI_DAILY_NEURONS` (default 6000, at most 8000). The first runs after the deploy write the
-   **latest reported quarter of up to 3 held companies per run** (silently, no push) so you can judge the format at once. Only the public release text goes to Workers AI, never your
+   variables `EARNINGS_AI_MODEL` (default `@cf/meta/llama-3.1-8b-instruct-fp8`), `EARNINGS_AI_DAILY_NEURONS` (default 6000, at most 8000) and `EARNINGS_BACKFILL_QUARTERS` (default 4, at most 8).
+   The first scheduled step after the deploy starts a **backfill**: the latest `EARNINGS_BACKFILL_QUARTERS` quarterly releases of **every** held company, newest first across all companies (silently, no push,
+   except a release from the last 48 hours), one release per step every 15 minutes, within the daily AI allowance: with about 20 companies that is about 80 releases, one to four days. The Earnings page shows the progress
+   ("34 of 80 releases read, resumes at 00:00 UTC when the daily AI allowance is used up"), one line per company about what stopped it ("What was checked", open while there is nothing to show) and a **Fetch all now**
+   button (once an hour; it also retries releases that failed). Only the public release text goes to Workers AI, never your
    portfolio. Revenue and guidance consensus have no free source and are never shown. Details, cost and limits: `docs/architecture.md`, "Earnings summaries".
 
 Until the variables and secrets are valid, every API and sign-in route answers 503 `NOT_CONFIGURED` naming the missing

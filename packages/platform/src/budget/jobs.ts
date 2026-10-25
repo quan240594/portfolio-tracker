@@ -32,6 +32,8 @@ export const JOB_CEILINGS: Readonly<Record<JobName, JobCeiling>> = {
   watchEarnings: 'ok',
   /** Reading a release costs a few requests and rows plus Workers AI neurons (which have their own cap): only below 60 %; a skipped run is simply tried again by the next watch. */
   fetchEarningsSummary: 'ok',
+  /** The backfill is a convenience that must never crowd out the owner's requests: only below 60 %; a skipped run is simply tried again 15 minutes later. */
+  backfillEarnings: 'ok',
 };
 
 /** A job this table does not know is treated as non-essential. */

@@ -11,6 +11,8 @@ const SUBMISSIONS_BASE = 'https://data.sec.gov/submissions';
 const ARCHIVES_BASE = 'https://www.sec.gov/Archives/edgar/data';
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_DOCUMENT_CHARS = 2_500_000;
+/** `filings.recent` lists up to a thousand filings (a frequent 6-K filer has hundreds a year). */
+const MAX_SUBMISSIONS = 1000;
 /** Capacity and refill of the token bucket: at most 4 requests per second, bursts of 3. */
 const BUCKET_CAPACITY = 3;
 const BUCKET_RATE_PER_SECOND = 4;
@@ -97,7 +99,7 @@ export function parseSubmissions(json: unknown): SecFiling[] {
   const column = (name: string): unknown[] => (Array.isArray(recent[name]) ? (recent[name] as unknown[]) : []);
   const [accession, filingDate, reportDate, form, items, primary] = ['accessionNumber', 'filingDate', 'reportDate', 'form', 'items', 'primaryDocument'].map(column);
   const filings: SecFiling[] = [];
-  for (let index = 0; index < accession!.length && index < 200; index++) {
+  for (let index = 0; index < accession!.length && index < MAX_SUBMISSIONS; index++) {
     const filed = text(filingDate![index]);
     if (text(accession![index]) === '' || !/^\d{4}-\d{2}-\d{2}$/.test(filed)) continue;
     const reported = text(reportDate![index]);
@@ -132,29 +134,57 @@ export function parseIndex(json: unknown): string[] {
 const DOCUMENT_EXTENSION = /\.(?:htm|html|txt)$/i;
 const EXHIBIT_99 = /(?:ex|exhibit)[-_ ]?99(?:[-_.]?\d{1,2})?(?!\d)/i;
 const EXHIBIT_99_1 = /(?:ex|exhibit)[-_ ]?99[-_.]?0?1(?!\d)/i;
+const RELEASE_NAME_HINT = /(?:press|release|earnings|results|quarter|(?:^|[-_])q[1-4])/i;
+const NOT_A_DOCUMENT = /(?:index|(?:^|\/)R\d+\.|financial_report)/i;
+const MAX_DOCUMENTS = 4;
 
 /**
- * The files that can hold the press release, best first: exhibit 99.1, other 99.x exhibits, then the primary document. The file names of
- * exhibits vary by filer (`ex99_1.htm`, `lmt-20260930xex991.htm`, `d12345dex991.htm`); the text is checked afterwards anyway.
+ * The files that can hold the press release, best first: exhibit 99.1, other 99.x exhibits, files whose name says press release or results,
+ * then the primary document (for an 8-K only when nothing better exists). The file names of exhibits vary by filer (`ex99_1.htm`,
+ * `lmt-20260930xex991.htm`, `d12345dex991.htm`) and the filing index does not say which file is which, so the text is checked afterwards anyway.
  */
 export function chooseDocuments(names: readonly string[], primaryDocument: string, form: string): string[] {
-  const documents = names.filter((name) => DOCUMENT_EXTENSION.test(name)).toSorted((a, b) => a.localeCompare(b));
+  const documents = names.filter((name) => DOCUMENT_EXTENSION.test(name) && !NOT_A_DOCUMENT.test(name)).toSorted((a, b) => a.localeCompare(b));
   const first = documents.filter((name) => EXHIBIT_99_1.test(name));
   const others = documents.filter((name) => EXHIBIT_99.test(name) && !first.includes(name));
+  const hinted = documents.filter((name) => name !== primaryDocument && RELEASE_NAME_HINT.test(name) && !first.includes(name) && !others.includes(name));
   const primary = primaryDocument !== '' && DOCUMENT_EXTENSION.test(primaryDocument) ? [primaryDocument] : [];
-  return [...new Set([...first, ...others, ...(form === '6-K' || first.length + others.length === 0 ? primary : [])])].slice(0, 3);
+  const better = first.length + others.length + hinted.length;
+  return [...new Set([...first, ...others, ...hinted, ...(form === '6-K' || better === 0 ? primary : [])])].slice(0, MAX_DOCUMENTS);
 }
 
 /** A results release is never shorter than this (a cover page of an 8-K is). */
 const MIN_RELEASE_CHARS = 700;
 const RESULT_WORDS = /\b(?:revenues?|net sales|net income|earnings per share|operating income|operating profit|quarter)\b/gi;
+const HEAD_CHARS = 3000;
+const HEAD_KEYWORDS: readonly RegExp[] = [
+  /\bresults\b/i,
+  /\bquarter\b/i,
+  /\brevenues?\b/i,
+  /\bearnings per share\b|\beps\b/i,
+  /\bnet income\b|\bnet profit\b|\bprofit attributable\b/i,
+  /\boperating (?:income|profit|margin)\b/i,
+  /\bthree months ended\b|\bfirst quarter\b|\bsecond quarter\b|\bthird quarter\b|\bfourth quarter\b|\bq[1-4]\b/i,
+];
+/** Distinct result keywords a foreign issuer's 6-K must show in its first 3,000 characters (a 6-K has no item number to say it is a results release). */
+export const FOREIGN_RELEASE_KEYWORDS = 3;
 
-/** A cheap deterministic check before any AI is spent: does this text read like a quarterly results release? */
-export function looksLikeResults(releaseText: string): boolean {
+/** How many of the result keywords the beginning of the text contains. */
+export function headKeywordScore(releaseText: string): number {
+  const head = releaseText.slice(0, HEAD_CHARS);
+  return HEAD_KEYWORDS.filter((keyword) => keyword.test(head)).length;
+}
+
+/**
+ * A cheap deterministic check before any AI is spent: does this text read like a quarterly results release? A 6-K also has to name the
+ * results in its first lines (monthly revenue notices, meeting notices and board resolutions are 6-Ks too).
+ */
+export function looksLikeResults(releaseText: string, form: string = '8-K'): boolean {
   if (releaseText.length < MIN_RELEASE_CHARS) return false;
   const words = releaseText.match(RESULT_WORDS)?.length ?? 0;
   const figures = releaseText.match(/\d[\d,]*\.?\d*/g)?.length ?? 0;
-  return words >= 4 && figures >= 12;
+  if (words < 4 || figures < 12) return false;
+  return form !== '6-K' || headKeywordScore(releaseText) >= FOREIGN_RELEASE_KEYWORDS;
 }
 
 export class SecClient {
@@ -193,7 +223,7 @@ export class SecClient {
     try {
       return JSON.parse(body);
     } catch {
-      throw new SecError(`${what} is not JSON`);
+      throw new SecError(body.trimStart().startsWith('<') ? `${what} came back as a web page instead of JSON` : `${what} is not JSON`);
     }
   }
 
@@ -213,9 +243,18 @@ export class SecClient {
     if (response.status === 403 || response.status === 429) throw new SecBlockedError(response.status, retryAfterMs(response));
     if (response.status === 404) throw new SecNotFoundError(what);
     if (!response.ok) throw new SecError(`${what}: the SEC answered ${response.status}`, response.status);
-    return response.text();
+    const body = await response.text();
+    // The SEC sometimes answers its "Request Rate Threshold Exceeded" page with status 200: it is a block, not a document.
+    if (isRateLimitPage(body)) throw new SecBlockedError(429, retryAfterMs(response));
+    return body;
   }
 }
+
+const RATE_LIMIT_PAGE = /request rate threshold|undeclared automated tool|exceeded the maximum (?:allowed )?request rate/i;
+const RATE_LIMIT_PAGE_MAX_CHARS = 20_000;
+
+/** The SEC's fair-access page: a short HTML document that names the rate threshold. */
+export const isRateLimitPage = (body: string): boolean => body.length <= RATE_LIMIT_PAGE_MAX_CHARS && RATE_LIMIT_PAGE.test(body);
 
 /** Running out of subrequests is the host's budget, not a problem with the SEC: it is passed on untouched. */
 export const isSubrequestError = (error: unknown): boolean => error instanceof Error && error.name.startsWith('Subrequest');

@@ -17,3 +17,9 @@ export function useRefreshEarnings() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (symbol: string) => earningsApi.refresh(symbol), onSettled: () => qc.invalidateQueries({ queryKey: earningsKeys.all }) });
 }
+
+/** "Fetch all now": re-arms the backfill of the latest quarters of every holding (at most once an hour; the answer says so). */
+export function useBackfillEarnings() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: () => earningsApi.backfill(), onSettled: () => qc.invalidateQueries({ queryKey: earningsKeys.all }) });
+}

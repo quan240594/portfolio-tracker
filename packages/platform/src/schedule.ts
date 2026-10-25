@@ -118,6 +118,18 @@ export const SCHEDULED_JOBS = [
     weekdaysOnly: false,
     cloudflareOnly: true,
   }),
+  // While the backfill of the last quarters is incomplete a step runs every 15 minutes, on every day: it reads one row (the marker) and does nothing
+  // when the backfill is complete or waits for the daily Workers AI allowance or the SEC.
+  scheduled({
+    name: 'earnings-backfill',
+    job: JOBS.backfillEarnings,
+    payload: { trigger: 'scheduled' },
+    timezone: 'Europe/Amsterdam',
+    minute: [0, 15, 30, 45],
+    hours: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
+    weekdaysOnly: false,
+    cloudflareOnly: true,
+  }),
 ] as const satisfies readonly ScheduledJob[];
 
 const minutesOf = ({ minute }: ScheduledJob): string => (typeof minute === 'number' ? String(minute) : minute.join(','));

@@ -33,7 +33,7 @@ describe('EarningsService.status', () => {
     expect(status).toMatchObject({ configured: true, missing: [], secBlockedUntil: '2026-10-21T11:00:00.000Z', neurons: { used: 4321, dailyCap: 8000, allowance: 10_000, state: 'ok' } });
     expect(status.symbols).toEqual([
       { symbol: 'LMFG', eligible: true, lastCheckedAt: '2026-10-21T09:30:00.000Z', lastResult: 'failed', lastReason: 'The submissions list: the SEC answered 500', retryAfter: '2026-10-21T10:30:00.000Z', latestReportDate: '2026-07-22' },
-      { symbol: 'VWRL', eligible: false },
+      { symbol: 'VWRL', eligible: false, lastRun: { at: NOW.toISOString(), stage: 'not-eligible', detail: 'no quarterly results (a fund, crypto or similar)' } },
     ]);
   });
 

@@ -189,7 +189,9 @@ class Verifier {
   period(claimed: string | undefined): string | undefined {
     if (claimed === undefined) return undefined;
     const year = /\b20\d{2}\b/.exec(claimed)?.[0];
-    if (year !== undefined && this.text.includes(year)) return claimed;
+    // Labels like `3Q26` or `Q3 FY26` have no four-digit year: they count when the release prints the label itself.
+    const printed = /\d/.test(claimed) && this.normalizedText.includes(normalizeForQuote(claimed));
+    if ((year !== undefined && this.text.includes(year)) || (year === undefined && printed)) return claimed;
     this.drop('period');
     return undefined;
   }
