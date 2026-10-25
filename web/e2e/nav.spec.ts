@@ -20,6 +20,30 @@ const overflowing = (page: Page) =>
       .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 70)} right=${Math.round(el.getBoundingClientRect().right)}`);
   });
 
+test.describe('Portfolio menu layering on a phone', () => {
+  test.use({ viewport: { width: 360, height: 740 } });
+
+  // Regression: on the Dividends page (positioned cards and charts below the header) the open menu was painted under the page, so only its
+  // first rows could be tapped. Every entry must be the topmost element at its own centre.
+  for (const path of ['/', '/dividends', '/calendar', '/holdings', '/goals']) {
+    test(`every menu entry is on top of the page content on ${path}`, async ({ page }) => {
+      await page.goto(path);
+      await openPortfolioMenu(page);
+      const nav = mainNav(page);
+      for (const label of MENU_LABELS) {
+        const link = nav.getByRole('link', { name: label, exact: true });
+        await expect(link).toBeVisible();
+        const onTop = await link.evaluate((el) => {
+          const box = el.getBoundingClientRect();
+          const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+          return hit === el || el.contains(hit);
+        });
+        expect(onTop, `${label} is covered by other content on ${path}`).toBe(true);
+      }
+    });
+  }
+});
+
 test.describe('Header navigation (mock mode)', () => {
   test('groups the pages and opens/closes the Portfolio menu', async ({ page }) => {
     await page.goto('/');
