@@ -59,11 +59,26 @@ describe('kpiTemplateFor', () => {
   });
 
   it('has none for instruments without earnings', () => {
-    for (const assetClass of ['ETF', 'CRYPTO', 'BOND', 'CASH', 'COMMODITY', 'REAL_ESTATE', 'OTHER', undefined] as const) {
+    for (const assetClass of ['ETF', 'CRYPTO', 'BOND', 'CASH', 'COMMODITY', 'REAL_ESTATE'] as const) {
       expect(kpiTemplateFor({ symbol: 'JPM', assetClass, override: 'bank' })).toBeNull();
       expect(hasEarnings(assetClass)).toBe(false);
+      expect(hasEarnings(assetClass, 'Some Company')).toBe(false);
     }
     expect(hasEarnings('STOCK')).toBe(true);
+  });
+
+  it('an unknown class (no profile yet, or the placeholder OTHER) counts unless the name reads like a fund', () => {
+    for (const assetClass of ['OTHER', undefined] as const) {
+      expect(hasEarnings(assetClass)).toBe(true);
+      expect(hasEarnings(assetClass, 'Salesforce')).toBe(true);
+      expect(hasEarnings(assetClass, 'Vanguard FTSE All-World UCITS ETF')).toBe(false);
+      expect(hasEarnings(assetClass, 'iShares Physical Gold')).toBe(false);
+      expect(hasEarnings(assetClass, 'Bitcoin')).toBe(false);
+      expect(hasEarnings(assetClass, 'Harborstone Realty Trust')).toBe(true);
+      expect(hasEarnings(assetClass, 'Barrick Gold Corporation')).toBe(true);
+      expect(kpiTemplateFor({ symbol: 'FOO.DE', assetClass, name: 'Salesforce' })).toBe('saas');
+      expect(kpiTemplateFor({ symbol: 'VWRL.L', assetClass, name: 'Vanguard FTSE All-World UCITS ETF' })).toBeNull();
+    }
   });
 });
 

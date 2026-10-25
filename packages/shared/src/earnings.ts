@@ -20,6 +20,7 @@
  * - GET  /earnings/status              is the feature configured, per-symbol checks, neurons used today
  * - GET  /earnings/{symbol}/{period}   one summary (`period` = the report date, YYYY-MM-DD)
  * - POST /earnings/{symbol}/refresh    owner-triggered re-check, at most once per symbol per hour
+ * - POST /earnings/backfill            owner-triggered "fetch all now": re-arms the backfill of the last quarters of every holding, at most once per hour
  */
 import { z } from 'zod';
 
@@ -28,9 +29,10 @@ export const EARNINGS_ROUTES = {
   earningsStatus: 'GET /earnings/status',
   earningsGet: 'GET /earnings/{symbol}/{period}',
   earningsRefresh: 'POST /earnings/{symbol}/refresh',
+  earningsBackfill: 'POST /earnings/backfill',
 } as const;
 
-export const EARNINGS_ENTITY = { summary: 'EARNINGS_SUMMARY', state: 'EARNINGS_STATE', sec: 'EARNINGS_SEC', held: 'EARNINGS_HELD' } as const;
+export const EARNINGS_ENTITY = { summary: 'EARNINGS_SUMMARY', state: 'EARNINGS_STATE', sec: 'EARNINGS_SEC', held: 'EARNINGS_HELD', backfill: 'EARNINGS_BACKFILL' } as const;
 
 export const earningsKeys = {
   summary: (symbol: string, reportDate: string) => ({ PK: `TICKER#${symbol}`, SK: `EARNSUM#${reportDate}` }),
@@ -39,6 +41,7 @@ export const earningsKeys = {
   tickerPk: (symbol: string) => `TICKER#${symbol}`,
   sec: { PK: 'EARNINGS', SK: 'SEC' },
   held: { PK: 'EARNINGS', SK: 'HELD' },
+  backfill: { PK: 'EARNINGS', SK: 'BACKFILL' },
 } as const;
 
 /** The newest quarters kept per symbol. */
@@ -51,6 +54,11 @@ export const EARNINGS_DEFAULT_LIMIT = 12;
 export const EARNINGS_FRESH_DAYS = 5;
 /** `POST /earnings/{symbol}/refresh` is accepted once per symbol per this many milliseconds. */
 export const EARNINGS_REFRESH_INTERVAL_MS = 3_600_000;
+/** Quarterly releases the backfill reads per holding (`EARNINGS_BACKFILL_QUARTERS`): the default and the most. */
+export const EARNINGS_BACKFILL_DEFAULT_QUARTERS = 4;
+export const EARNINGS_BACKFILL_MAX_QUARTERS = 8;
+/** A release published this recently is announced even when the backfill found it. */
+export const EARNINGS_LIVE_HOURS = 48;
 
 export const EARNINGS_DISCLAIMER = "Auto-generated from the company's press release; every number was checked against the text. Check the source before acting.";
 
@@ -271,6 +279,42 @@ export interface EarningsSummary {
   status: 'ok';
 }
 
+/** Where the last run for a symbol ended: the first stage that did not go on, or `ok`. */
+export const EARNINGS_RUN_STAGES = ['ticker-map', 'submissions', 'select-filing', 'exhibit', 'text', 'ai', 'verify', 'store', 'budget', 'sec-blocked', 'not-eligible', 'no-release-found', 'ok'] as const;
+export type EarningsRunStage = (typeof EARNINGS_RUN_STAGES)[number];
+
+/** What the pipeline did last for one symbol, sanitised: never a URL with a query, a secret or a figure from a release. */
+export interface EarningsLastRun {
+  at: string;
+  stage: EarningsRunStage;
+  /** At most 120 characters. */
+  detail?: string;
+  filing?: { form: string; date: string; accession: string };
+  /** Figures the model gave that were not in the release and were dropped. */
+  droppedNumbers?: number;
+  neurons?: number;
+}
+
+export type EarningsPlanStatus = 'todo' | 'stored' | 'skipped' | 'failed';
+
+/** One release of the backfill plan of a symbol (newest first). */
+export interface EarningsPlanItem {
+  accession: string;
+  form: '8-K' | '6-K';
+  filingDate: string;
+  reportDate: string;
+  primaryDocument: string;
+  status: EarningsPlanStatus;
+  /** Reads attempted, in total and on `triesDay` (UTC). */
+  tries: number;
+  triesDay?: string;
+  triesToday?: number;
+  /** Not tried again before this time. */
+  nextTryAt?: string;
+  failedAt?: string;
+  reason?: string;
+}
+
 export type EarningsCheckResult = 'ok' | 'no-filing' | 'not-in-sec' | 'blocked' | 'failed' | 'unreadable' | 'ai-allowance' | 'not-configured' | 'skipped';
 
 /** What the watcher knows about a symbol (`TICKER#{symbol}` / `EARNSTATE`). Never holds a figure from a release. */
@@ -305,6 +349,12 @@ export interface EarningsSymbolState {
   pendingAccession?: string;
   pendingAt?: string;
   lastManualRefreshAt?: string;
+  /** The structured outcome of the last run for this symbol (what the Earnings page shows). */
+  lastRun?: EarningsLastRun;
+  /** The backfill plan: the newest quarterly releases found at the SEC, with what became of each. */
+  plan?: EarningsPlanItem[];
+  planQuarters?: number;
+  plannedAt?: string;
   updatedAt: string;
 }
 
@@ -325,6 +375,8 @@ export interface EarningsHolding {
   template: KpiTemplateId;
   /** The currency of the stored profile (a fallback when a release does not name its currency). */
   currency?: string;
+  /** The ISIN of the stored profile: a US-prefixed one says the company files with the SEC. */
+  isin?: string;
 }
 
 /** Whether the SEC refused requests (403 or 429): nothing is sent before `blockedUntil`. */
@@ -333,6 +385,46 @@ export interface EarningsSecBlock {
   failures: number;
   lastStatus?: number;
   updatedAt: string;
+}
+
+export type EarningsBackfillWait = 'allowance' | 'sec-blocked' | 'sec-error' | 'attempts' | 'ai-error';
+
+/** The backfill of the last quarters of every holding (`EARNINGS` / `BACKFILL`): one row, read first by every scheduled step. */
+export interface EarningsBackfillMarker {
+  armedAt: string;
+  /** `auto`: the first scheduled step after the feature was switched on (or `EARNINGS_BACKFILL_QUARTERS` changed); `manual`: "Fetch all now". */
+  armedBy: 'auto' | 'manual';
+  quarters: number;
+  status: 'running' | 'complete';
+  /** Why the run waits and until when (the next 00:00 UTC for the AI allowance). */
+  waitUntil?: string;
+  waitReason?: EarningsBackfillWait;
+  /** Releases planned, finished (stored, skipped or failed), stored and failed. */
+  total: number;
+  done: number;
+  stored: number;
+  failed: number;
+  /** Companies with a plan, of the companies that are eligible. */
+  planned: number;
+  companies: number;
+  lastStepAt?: string;
+  completedAt?: string;
+  updatedAt: string;
+}
+
+export interface EarningsBackfillStatus {
+  status: 'running' | 'complete' | 'not-started';
+  quarters: number;
+  total: number;
+  done: number;
+  stored: number;
+  failed: number;
+  planned: number;
+  companies: number;
+  waitUntil?: string;
+  waitReason?: EarningsBackfillWait;
+  completedAt?: string;
+  lastStepAt?: string;
 }
 
 export interface EarningsListResponse {
@@ -350,6 +442,10 @@ export interface EarningsSymbolStatus {
   lastReason?: string;
   retryAfter?: string;
   latestReportDate?: string;
+  /** The structured outcome of the last run (additive: absent before the first run). */
+  lastRun?: EarningsLastRun;
+  /** Quarterly releases of the backfill plan: how many exist and how many are stored. */
+  releases?: { planned: number; stored: number; failed: number };
 }
 
 export type EarningsNotReady = 'sec-contact' | 'ai-binding';
@@ -364,7 +460,17 @@ export interface EarningsStatusResponse {
   estimatesConfigured: boolean;
   secBlockedUntil?: string;
   neurons?: { used: number; dailyCap: number; allowance: number; state: 'ok' | 'warn' | 'blocked' | 'unavailable'; resetsAt: string };
+  /** The backfill of the last quarters of every holding. */
+  backfill?: EarningsBackfillStatus;
+  /** When the oldest of the last runs of the eligible companies happened: every company was looked at since. */
+  lastFullPassAt?: string;
   symbols: EarningsSymbolStatus[];
+}
+
+export interface EarningsBackfillResponse {
+  accepted: boolean;
+  reason?: 'rate-limited' | 'not-configured';
+  retryAfterSeconds?: number;
 }
 
 export interface EarningsRefreshResponse {
