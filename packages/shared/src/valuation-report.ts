@@ -160,7 +160,7 @@ function flagsOf(line: ValuedPosition, stored: EodPrice | undefined, ageDays: nu
   if (ageDays !== null && ageDays > STALE_CLOSE_DAYS && line.source !== 'quote') flags.push('stale');
   if (line.source === 'cost') flags.push('cost');
   if (line.priceCurrency !== line.currency) flags.push('currency');
-  if (stored !== undefined && line.priceDate === stored.date && (stored.close !== line.price || stored.currency !== line.priceCurrency)) flags.push('scale');
+  if (stored?.date === line.priceDate && (stored.close !== line.price || stored.currency !== line.priceCurrency)) flags.push('scale');
   if (line.fx.fallback !== 'none') flags.push('fx');
   return flags;
 }

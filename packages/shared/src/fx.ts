@@ -15,6 +15,28 @@ export const FIXING_GAP_DAYS = 5;
 
 const daysBetween = (from: string, to: string): number => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 
+/** Index of the last of the ascending `dates` that is on or before `date`, or -1. */
+function lastOnOrBefore(dates: readonly string[], date: string): number {
+  let lo = 0;
+  let hi = dates.length - 1;
+  let found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (dates[mid]! <= date) {
+      found = mid;
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  return found;
+}
+
+/** Why the fixing at `found` (see `lastOnOrBefore`) is not the one of `date`. */
+function fallbackOf(dates: readonly string[], found: number, date: string): FxFallback {
+  if (found < 0) return 'before';
+  const newest = found === dates.length - 1;
+  return newest && date > dates[found]! && daysBetween(dates[found]!, date) > FIXING_GAP_DAYS ? 'after' : 'none';
+}
+
 export class MissingFxRateError extends Error {
   constructor(public readonly currency: string, public readonly base: string) {
     super(`No FX rate for ${currency} against base ${base}`);
@@ -66,21 +88,9 @@ export class FxTimeline {
     if (currency === this.base) return { rate: 1, date: date ?? null, fallback: 'none' };
     const s = date ? this.series.get(currency) : undefined;
     if (s && date) {
-      let lo = 0;
-      let hi = s.dates.length - 1;
-      let found = -1;
-      while (lo <= hi) {
-        const mid = (lo + hi) >> 1;
-        if (s.dates[mid]! <= date) {
-          found = mid;
-          lo = mid + 1;
-        } else hi = mid - 1;
-      }
+      const found = lastOnOrBefore(s.dates, date);
       const index = Math.max(found, 0);
-      let fallback: FxFallback = 'none';
-      if (found < 0) fallback = 'before';
-      else if (found === s.dates.length - 1 && date > s.dates[found]! && daysBetween(s.dates[found]!, date) > FIXING_GAP_DAYS) fallback = 'after';
-      return { rate: s.rates[index]!, date: s.dates[index]!, fallback };
+      return { rate: s.rates[index]!, date: s.dates[index]!, fallback: fallbackOf(s.dates, found, date) };
     }
     const latest = this.latest.rates[currency];
     if (!latest || latest <= 0) throw new MissingFxRateError(currency, this.base);

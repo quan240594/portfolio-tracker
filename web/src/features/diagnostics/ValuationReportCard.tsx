@@ -162,13 +162,14 @@ interface PickerProps {
 function DayPicker({ days, selected, custom, onSelect, onOther, onReset }: Readonly<PickerProps>) {
   return (
     <div className="flex flex-wrap items-end gap-2">
-      <div role="group" aria-label="Day" className="flex flex-wrap gap-1">
+      <fieldset className="m-0 flex min-w-0 flex-wrap gap-1 border-0 p-0">
+        <legend className="sr-only">Day</legend>
         {days.map((date) => (
           <button key={date} type="button" className={date === selected ? 'btn-primary' : 'btn-secondary'} aria-pressed={date === selected} onClick={() => onSelect(date)}>
             {formatDate(date)}
           </button>
         ))}
-      </div>
+      </fieldset>
       <label className="flex items-center gap-2 text-sm">
         <span>Other day</span>
         <input
