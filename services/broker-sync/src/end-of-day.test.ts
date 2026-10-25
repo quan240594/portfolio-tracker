@@ -67,4 +67,9 @@ describe('endOfDayRows', () => {
     const existing = new Map<string, string | undefined>([['A', undefined], ['B', 'twelvedata'], ['C', 't212']]);
     expect(endOfDayRows([quote('A'), quote('B'), quote('C'), quote('D')], '2026-10-20', existing).map((row) => row.symbol)).toEqual(['C', 'D']);
   });
+
+  it('replaces a row that was taken from another listing of the same fund: the quote is the symbol’s own price', () => {
+    const existing = new Map<string, string | undefined>([['FWRA.MI', 'eodhd:FWRA.DE'], ['A', 'eodhd']]);
+    expect(endOfDayRows([quote('FWRA.MI'), quote('A')], '2026-10-20', existing).map((row) => row.symbol)).toEqual(['FWRA.MI']);
+  });
 });

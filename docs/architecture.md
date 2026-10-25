@@ -3526,3 +3526,57 @@ fills the past without any change. The close price is Trading 212's last price a
 `@portfolio/broker-sync` (`end-of-day.test.ts`, `quotes.test.ts`: once a day, provider precedence, GBX, stale, weekend, seed, double fire, one batch), `@portfolio/prices` (`lastAttempts`, `newestEod`), `@portfolio/cloudflare-app` (`src/price-coverage.test.ts`; `test/suite.ts` "price history coverage and end-of-day rows"
 in Node **and** real workerd, including the blocked-budget case; `test/end-of-day.node.test.ts` for weekends and the next day on a moving clock), `@portfolio/web` (unit tests; `e2e/price-coverage.spec.ts` in the mock suite and `e2e-github/diagnostics.spec.ts` at 320 and 1280 px, no horizontal overflow).
 All clocks are pinned; there are no wall-clock timing assertions.
+
+## Chart reconciliation and proxy listings
+
+The owner's phone showed the "Value vs invested" chart under the invested line for most of a year and a vertical jump of about EUR 8,000 at its last point, although the last point (live quotes) was right.
+The jump is the sum of the days before it being valued wrongly, so the cause is in how a stored close is turned into a value. Three additive changes, no new dependency, nothing to migrate.
+
+### 1. What was wrong: closes of another unit
+
+The price service cannot know in which unit an exchange-listed close is quoted. `makeEod` takes every London (`.L`) close for pence (`GBX`), divides it by 100 and labels it GBP (PR #54). A London line that is
+quoted in US dollars (an iShares or WisdomTree UCITS ETF on the LSE in USD, the lines that Trading 212 labels `USD`) is stored 100 times too small, as a "pound" price. A position valued on those rows is worth about
+1 % of its value on every day but the last one, which uses the live Trading 212 quote (correct, in USD). With a few such lines the value sits EUR 7 to 8 thousand under the truth, i.e. under the invested line, and jumps at the last point.
+Complete-looking coverage (255 rows) does not show it. Reproduction: `services/api/src/history-reconciliation.test.ts` (12 holdings in EUR, USD and GBP, monthly purchases over 18 months, prices that only rise, FX history that
+covers only the last months, two London USD lines stored as pence, one holding without any history): the value is below the invested line on 153 days and 5.7 % off the truth before the fix, and equal to it (cost for the line without history) after.
+
+`alignEodScale(rows, quote?)` (`packages/shared/src/eod-scale.ts`) restores the unit. A real day-to-day move is never near 100 times, so a close that is a power of 100 off (within a factor 2) is recognised against the
+newer neighbouring rows (a break in the series) and against the stored live quote of the broker (the anchor of the newest row). Those rows are rescaled and relabelled with the currency of the quote (the unit says the label was a guess).
+Idempotent, rows that agree are returned unchanged, a uniformly wrong history without a quote cannot be told (nothing to compare). It is applied where closes are read (`GET /history`, the analytics loaders, the asset detail and
+history: `routes/portfolio.ts`, `analytics.ts`, `securities.ts` read the quotes with one batched `loadQuotes`) and where they are written (`enrichTransactions` aligns a new history against the quote that is stored), so stored rows heal on read.
+`buildValueSeries` also values a close in the currency of its own row (it used the currency of the position), and `FxTimeline.lookup(currency, date)` reports where a rate comes from (`none`: that day's or the latest earlier fixing,
+`before`: the earliest stored one for a day before the history, `after`: the newest one for a day more than 5 days after it, `latest`: no history for the currency). `FxTimeline.rate` is unchanged (it never used one latest rate for the whole past
+when history exists). The FX backfill now also fills a gap before the oldest stored fixing, once a UTC day, from `FX_HISTORY_START` (resumable year chunks of the existing refresh job; `PriceRepository.earliestFxDay`,
+`fxFrontCheckedOn`), because the forward-only backfill never reached years before the first stored fixing.
+
+### 2. The reconciliation (`GET /api/diagnostics/valuation?dates=YYYY-MM-DD,...`)
+
+Additive API route (`VALUATION_ROUTES` in `packages/shared/src/valuation-report.ts`, handler `services/api/src/routes/diagnostics.ts`, so the Cloudflare Hub serves it through the same app; AWS has the same route behind `$default`).
+Up to three days, default today, yesterday and 182 days back. One pass: the transactions, FX, one read of the closes per symbol from the oldest day (at most 60 symbols, the open positions first), one batched read of the quotes, the
+cash and custom-asset settings, and the headline total. It runs the chart's own valuation (`buildValueSeries` with its `onPosition` hook), so the lines add up to the chart point (tested against `GET /history`). Per symbol:
+units on that day, the price used and its currency (`close`, `carried` close with its date and age, `quote` (live, last day), `cost` fallback), the FX rate with its fixing date and `fxFallback`, the value in the base currency, a **fair
+value** (units x the close as stored x that day's fixing; the live quote, then the cost, when there is no close) and the gap, the value of the same symbol today, and flags: `carried`, `stale` (close older than 7 days), `cost`,
+`currency` (price currency is not the position's), `scale` (the chart used a rescaled close), `fx` (rate not of that day). Lines are sorted by the largest absolute gap. The totals are the chart value, the sum of the lines, cash and custom assets,
+the fair value, chart minus fair, invested and the headline. `fx` lists per currency the stored fixings (count, first, last) and `fallbackDays`: days since the first transaction on which the rate is not that day's fixing.
+
+**Reading it.** Settings > Diagnostics > Chart reconciliation > Show reconciliation (read only on request, about a year of closes). Pick a day. "Chart value" is what the chart shows that day; it must equal "Sum of the lines" plus cash. The first lines
+are the distortions: `at cost` (no close: valued at cost, the gap is against the live price), `rescaled` (the stored close had the wrong unit; the gap is large because the fair value uses the stored row), `carried N d`/`old close` (the close
+is from an earlier day), `close in USD` (the close's currency is not the position's), `other-day FX`/`latest FX` (see the FX history lines: a currency with 0 fixings or many fallback days is converted at one rate). On a healthy day
+every gap is 0 or small and "Chart minus fair" is near 0. The card has no colour-only meaning (flags are text), stacks at 320 px and shows the 12 biggest lines first.
+
+### 3. History from another listing of the same fund (proxy listing)
+
+A held symbol the provider has no data for (for example `FWRA.MI`, "unknown symbol" at EODHD) used to stay valued at cost. `enrichTransactions` now, when the primary history is unknown and the symbol is exchange-listed and its
+stored (Trading 212 baseline) profile has an ISIN, asks `searchListings(isin)` (EODHD `/search/<ISIN>`, one call against the daily quota, answer stored once per ISIN as `ISIN#<isin>/PROXY`, a negative answer retried after 7 days) and
+picks a listing: same ISIN, another exchange, the same currency as the position (a London listing only for a GBP position and only when quoted in `GBX`; never another currency), in the order XETRA (`DE`), Frankfurt (`F`), Amsterdam
+(`AS`), Paris (`PA`), Milan (`MI`), London (`L`). Its history is fetched (one more call) and stored under the held symbol's key with `source: 'eodhd:<ALT>'` (for example `eodhd:FWRA.DE`), never on a day the symbol already has a
+row of its own (a provider close or the broker's `t212` row); a later provider row of the symbol overwrites a proxy row (same key), and the broker's end-of-day row replaces one too (`endOfDayRows`). The quote comes from the proxy history (no call for
+an unknown symbol). Resumable and idempotent with the existing `ENRICH_STATE` attempts, blocks and step budget; a rate limit keeps the symbol pending until the reset. The coverage report gets `proxyListing` (for example `FWRA.DE`) and
+its reason reads "History from another listing of the same fund (XETRA); prices can differ by a few tenths of a percent".
+
+### Tests
+
+`pnpm --filter @portfolio/shared test` (`eod-scale.test.ts`, `fx-history.test.ts` lookups, `value-series.test.ts` hook and row currency, `valuation-report.test.ts`, `price-coverage.test.ts` proxy), `@portfolio/api`
+(`history-reconciliation.test.ts` fails before the fix, `diagnostics.test.ts`), `@portfolio/prices` (`jobs/proxy-listing.test.ts`: fake EODHD search and eod, `enrich.test.ts` alignment, `refresh-prices.test.ts` FX gap,
+`providers.test.ts` search), `@portfolio/broker-sync` (`end-of-day.test.ts`), `@portfolio/cloudflare-app` (suite in Node and workerd), `@portfolio/web` (unit tests with `TZ=UTC`; `e2e-github/diagnostics.spec.ts` at 320 and 1280 px).
+All clocks are pinned; no wall-clock timing assertions.

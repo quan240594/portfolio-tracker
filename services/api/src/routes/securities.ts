@@ -1,4 +1,5 @@
 import {
+  alignEodScale,
   assetHistoryQuerySchema,
   assetRangeStart,
   assetSymbolSchema,
@@ -53,7 +54,7 @@ export async function getAssetDetail(ctx: RouteContext): Promise<RouteResult> {
     repo.getDividendEvents(symbol),
     loadFx(ctx.deps, []),
   ]);
-  const detail = computeAssetDetail({ symbol, today, profile: profiles[symbol], quote: quotes[symbol], eod, dividendEvents, fx });
+  const detail = computeAssetDetail({ symbol, today, profile: profiles[symbol], quote: quotes[symbol], eod: alignEodScale(eod, quotes[symbol]), dividendEvents, fx });
   if (!detail) throw notFound(symbol);
   return ok(detail satisfies AssetDetailResponse);
 }
@@ -85,7 +86,7 @@ export async function getAssetHistory(ctx: RouteContext): Promise<RouteResult> {
     range,
     profile: profiles[symbol],
     quote: quotes[symbol],
-    eod,
+    eod: alignEodScale(eod, quotes[symbol]),
     transactions,
     benchmarks: benchmarks.map((b, i) => ({ symbol: b, eod: benchmarkEod[i]! })),
     options,

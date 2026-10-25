@@ -1,6 +1,6 @@
 import type { DividendEvent, EodPrice, InstrumentProfile, Quote } from '@portfolio/shared';
 import { majorCurrencyCode, sequentially } from '@portfolio/shared';
-import { silentLogger, type Logger } from '@portfolio/platform';
+import { silentLogger, type ListingMatch, type Logger } from '@portfolio/platform';
 import { z } from 'zod';
 import { ProviderError, RateLimitError, SymbolNotFoundError } from '../errors.js';
 import type { HttpClient } from '../http.js';
@@ -25,6 +25,12 @@ export function toEodhdSymbol(symbol: string): string {
   const suffix = exchangeSuffix(symbol);
   if (suffix === null) return `${symbol}.US`;
   return `${baseTicker(symbol)}.${EXCHANGES[suffix]?.code ?? suffix}`;
+}
+
+/** The app's suffix of an EODHD exchange code (`XETRA` -> `DE`), or undefined for an exchange the app does not know. */
+function suffixOfExchangeCode(code: string): string | undefined {
+  const upper = code.toUpperCase();
+  return Object.entries(EXCHANGES).find(([, info]) => info.code.toUpperCase() === upper)?.[0];
 }
 
 const num = z.unknown().transform(asFloat);
@@ -132,6 +138,20 @@ export class EodhdProvider implements PriceSource {
       exchange: exchangeFor(symbol) ?? nonEmpty(match.Exchange),
       isin: validIsin(match.ISIN),
     });
+  }
+
+  /** `/search/<ISIN>`: one row per listing; only the exchanges of the app (see `EXCHANGES`) and rows that carry the same ISIN are kept. */
+  async searchListings(isin: string): Promise<ListingMatch[]> {
+    const data = await this.get(`/search/${isin}`, { limit: 30 }, 1);
+    const out: ListingMatch[] = [];
+    for (const row of Array.isArray(data) ? (data as unknown[]) : []) {
+      if (!isRecord(row) || validIsin(row.ISIN) !== isin) continue;
+      const suffix = suffixOfExchangeCode(asText(row.Exchange));
+      const code = nonEmpty(row.Code);
+      const currency = nonEmpty(row.Currency);
+      if (suffix !== undefined && code !== undefined && currency !== undefined) out.push({ symbol: `${code.toUpperCase()}.${suffix}`, exchange: suffix, currency, isin, name: nonEmpty(row.Name) ?? code });
+    }
+    return out;
   }
 
   async getDividends(symbol: string, start: string, end: string): Promise<DividendEvent[]> {

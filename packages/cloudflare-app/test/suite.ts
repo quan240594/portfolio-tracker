@@ -686,6 +686,47 @@ export function defineAppSuite(label: string, start: StartStack): void {
       }
     });
 
+    it('reports a history taken from another listing of the same fund, and the chart reconciliation lists every held symbol', async () => {
+      const { stack, call, coverage, close } = await held();
+      try {
+        await close();
+        const rows = ['2026-01-02', '2026-01-03'].map((date) => ({ PK: 'TICKER#VWRL.AS', SK: `EOD#${date}`, entityType: 'EOD', symbol: 'VWRL.AS', date, close: 101, currency: 'EUR', source: 'eodhd:VWRL.DE' }));
+        await stack.seed(rows);
+        const proxied = (await coverage()).symbols.find((entry: { symbol: string }) => entry.symbol === 'VWRL.AS');
+        expect(proxied).toMatchObject({ eodRows: 2, eodSources: ['eodhd:VWRL.DE'], proxyListing: 'VWRL.DE', historyState: 'complete' });
+        expect(proxied.reason).toBe('History from another listing of the same fund (XETRA); prices can differ by a few tenths of a percent');
+
+        const report = await call('GET', '/diagnostics/valuation?dates=2026-01-03');
+        expect(report.status).toBe(200);
+        const [day] = report.body.days;
+        expect(day.date).toBe('2026-01-03');
+        expect(day.lines.map((line: { symbol: string }) => line.symbol).sort()).toEqual(['SAP.DE', 'VWRL.AS']);
+        expect(day.lines.find((line: { symbol: string }) => line.symbol === 'VWRL.AS')).toMatchObject({ source: 'close', priceDate: '2026-01-03', price: 101 });
+        expect(day.lines.find((line: { symbol: string }) => line.symbol === 'SAP.DE')).toMatchObject({ source: 'cost' });
+        expect(day.chartValue).toBeCloseTo(day.positionsValue + day.extraValue, 2);
+        expect(report.body.symbolsTotal).toBe(2);
+        expect(JSON.stringify(report.body)).not.toContain(T212_SECRET);
+        expect((await call('GET', '/diagnostics/valuation?dates=nonsense')).status).toBe(400);
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('serves the chart reconciliation to the signed-in owner only', async () => {
+      const stack = await start({ limits: METRIC_LIMITS });
+      try {
+        const anonymous = await new Browser(stack).request('/api/diagnostics/valuation');
+        expect(anonymous.status).toBe(401);
+        const owner = new Browser(stack);
+        await owner.signIn();
+        const empty = await owner.request('/api/diagnostics/valuation');
+        expect(empty.status).toBe(200);
+        expect(await empty.json()).toMatchObject({ days: [], symbolsTotal: 0 });
+      } finally {
+        await stack.dispose();
+      }
+    });
+
     it('is dropped with the quote refresh once the budget is blocked: no request, no row, no failed job', async () => {
       const limits: MetricLimits = { ...METRIC_LIMITS, workerRequests: 40 };
       const stack = await start({ limits });

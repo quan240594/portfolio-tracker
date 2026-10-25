@@ -35,12 +35,26 @@ export interface QuoteBatch {
   unavailable: string[];
 }
 
+/** One listing of an instrument on an exchange, as a provider's search by ISIN returns it. */
+export interface ListingMatch {
+  /** The canonical symbol of the listing (`FWRA.DE`). */
+  symbol: string;
+  /** The suffix of the exchange (`DE`, `AS`, `L`). */
+  exchange: string;
+  /** The currency the listing is quoted in, as the provider says it (`EUR`, `GBX`, `USD`). */
+  currency: string;
+  isin: string;
+  name: string;
+}
+
 export interface MarketDataProvider {
   readonly name: string;
   getQuotes(symbols: readonly string[]): Promise<QuoteBatch>;
   getEodHistory(symbol: string, start: string, end: string): Promise<EodPrice[]>;
   getProfile(symbol: string): Promise<InstrumentProfile | null>;
   getDividends(symbol: string, start: string, end: string): Promise<DividendEvent[]>;
+  /** The listings of the instrument with this ISIN on the exchanges the provider covers (one search call); absent when it cannot search. */
+  searchListings?(isin: string): Promise<ListingMatch[]>;
 }
 
 /** The per-symbol price provider (quotes, EOD history, profile, dividends) under its operational name. */

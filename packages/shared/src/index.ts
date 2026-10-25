@@ -7,6 +7,8 @@ export * from './events.js';
 export * from './fx.js';
 export * from './portfolio.js';
 export * from './minor-units.js';
+export * from './eod-scale.js';
+export * from './valuation-report.js';
 export * from './auth.js';
 export * from './analytics.js';
 export * from './analytics-income.js';

@@ -1,4 +1,5 @@
 import {
+  alignEodScale,
   analyticsBenchmarkQuerySchema,
   analyticsGoalQuerySchema,
   analyticsReturnsQuerySchema,
@@ -23,6 +24,7 @@ import {
 import { ok, validate, type RouteResult } from '../lib/http.js';
 import type { RouteContext } from '../deps.js';
 import { loadProfiles } from '../lib/profiles.js';
+import { loadQuotes } from '../lib/quotes.js';
 import type { RouteHandler } from '../router.js';
 import { heldSymbols, loadFx } from './portfolio.js';
 import { scopedTransactions } from './portfolios.js';
@@ -54,8 +56,8 @@ async function loadEod(ctx: RouteContext, transactions: readonly Transaction[], 
   for (const t of transactions) if (t.date < first) first = t.date;
   const symbols = [...new Set([...transactions.map((t) => t.symbol), ...(extra === undefined ? [] : [extra].flat())])];
   const from = addDays(first, -EOD_LOOKBACK_DAYS);
-  const series = await Promise.all(symbols.map((s) => ctx.deps.repo.getEod(s, from, today)));
-  return Object.fromEntries(symbols.map((s, i) => [s, series[i]!]));
+  const [series, quotes] = await Promise.all([Promise.all(symbols.map((s) => ctx.deps.repo.getEod(s, from, today))), loadQuotes(ctx.deps.repo, symbols)]);
+  return Object.fromEntries(symbols.map((s, i) => [s, alignEodScale(series[i]!, quotes[s])]));
 }
 
 /** Loads exactly the stored data the requested calculation needs, scoped like every other read endpoint. */

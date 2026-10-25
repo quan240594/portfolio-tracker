@@ -5,6 +5,11 @@ import {
   coverageTotals,
   coverageWindowStart,
   historyStateOf,
+  isProxySource,
+  listingExchangeName,
+  proxyListingOf,
+  proxyReason,
+  proxySourceOf,
   priceHistoryCoverageSchema,
   pricesStatusHistorySchema,
   sanitizeAttemptError,
@@ -214,5 +219,34 @@ describe('valuedAtCostOf', () => {
   it('never goes beyond the last day of the series', () => {
     expect(valuedAtCostOf({ costValued: [{ symbol: 'ZZZ', from: '2026-10-01', to: TODAY }], held: 1 }, TODAY)?.until).toBe(TODAY);
     expect(valuedAtCostOf({ costValued: [{ symbol: 'ZZZ', from: '2026-10-01', to: '2026-10-10' }], held: 1 }, TODAY)?.until).toBe('2026-10-11');
+  });
+});
+
+describe('history from another listing of the same fund', () => {
+  const proxied = eod(['2026-03-02', '2026-10-22'], 'eodhd:FWRA.DE');
+
+  it('names the listing in the source and finds it again', () => {
+    expect(proxySourceOf('FWRA.DE')).toBe('eodhd:FWRA.DE');
+    expect(isProxySource('eodhd:FWRA.DE')).toBe(true);
+    expect([undefined, 't212', 'eodhd'].some((source) => isProxySource(source))).toBe(false);
+    expect(proxyListingOf(['provider', 'eodhd:FWRA.DE'])).toBe('FWRA.DE');
+    expect(proxyListingOf(['provider', 't212'])).toBeNull();
+    expect(listingExchangeName('FWRA.DE')).toBe('XETRA');
+    expect(listingExchangeName('FWRA.XX')).toBe('FWRA.XX');
+  });
+
+  it('is reported in the coverage with the reason, and does not hide a history that is still missing', () => {
+    const row = symbolCoverage(input({ symbol: 'FWRA.MI', provider: 'eodhd', eod: proxied }), TODAY);
+    expect(row).toMatchObject({ proxyListing: 'FWRA.DE', historyState: 'complete', reason: proxyReason('FWRA.DE') });
+    expect(row.reason).toBe('History from another listing of the same fund (XETRA); prices can differ by a few tenths of a percent');
+    expect(symbolCoverage(input({ eod: eod(['2026-03-02', '2026-10-22']) }), TODAY).proxyListing).toBeNull();
+    expect(coverageReason({ state: 'missing', keyConfigured: true, providerBlocked: false, attempt: null, proxyListing: 'FWRA.DE' })).toBe(COVERAGE_REASONS.notTried);
+  });
+
+  it('is part of the stored report schema, and an older report without it reads as none', () => {
+    const report = { asOf: 'x', symbols: [symbolCoverage(input({ eod: proxied }), TODAY)], totals: coverageTotals([], 0, TODAY), rowsRead: 1 };
+    expect(priceHistoryCoverageSchema.parse(report).symbols[0]!.proxyListing).toBe('FWRA.DE');
+    const { proxyListing: _dropped, ...older } = report.symbols[0]!;
+    expect(priceHistoryCoverageSchema.parse({ ...report, symbols: [older] }).symbols[0]!.proxyListing).toBeNull();
   });
 });

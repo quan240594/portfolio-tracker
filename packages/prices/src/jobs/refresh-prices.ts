@@ -89,15 +89,35 @@ async function runFx(ctx: StepContext, state: State, now: Date): Promise<void> {
     ctx.logger.error('fx refresh failed', { error: errorMessage(error) });
   }
   try {
-    const stored = await ctx.repo.latestFxDay(base);
-    const start = stored === null ? ctx.deps.config.fxHistoryStart : addDays(stored, 1);
-    const today = utcDay(now);
-    state.history = { ranges: start <= today ? yearChunks(start, today).filter(([lo, hi]) => hasWeekday(lo, hi)) : [], written: 0, ok: true, lastDay: stored, final: false };
+    const { ranges, newest } = await missingFxRanges(ctx, now);
+    state.history = { ranges, written: 0, ok: true, lastDay: newest, final: false };
   } catch (error) {
     ctx.logger.error('fx history plan failed', { error: errorMessage(error) });
     state.history = { ranges: [], written: 0, ok: false, lastDay: null, final: true };
   }
   state.phase = 'history';
+}
+
+/** The stored fixings may start later than `FX_HISTORY_START` (it was set later, or the first backfill never reached the early years): fixings older than this many days past the start count as a gap. */
+export const FX_FRONT_TOLERANCE_DAYS = 10;
+
+/**
+ * The year ranges of fixings to fetch, oldest first: the gap before the oldest stored fixing (looked for once a UTC day, so a provider
+ * without those years is not asked every run) and everything after the newest one; all of it from `FX_HISTORY_START` when nothing is stored.
+ */
+async function missingFxRanges(ctx: StepContext, now: Date): Promise<{ ranges: [string, string][]; newest: string | null }> {
+  const base = ctx.deps.config.baseCurrency;
+  const configured = ctx.deps.config.fxHistoryStart;
+  const today = utcDay(now);
+  const [newest, oldest] = await Promise.all([ctx.repo.latestFxDay(base), ctx.repo.earliestFxDay(base)]);
+  const ranges: [string, string][] = [];
+  if (oldest !== null && oldest > addDays(configured, FX_FRONT_TOLERANCE_DAYS) && !(await ctx.repo.fxFrontCheckedOn(today))) {
+    await ctx.repo.markFxFrontChecked(today);
+    ranges.push(...yearChunks(configured, addDays(oldest, -1)));
+  }
+  const start = newest === null ? configured : addDays(newest, 1);
+  if (start <= today) ranges.push(...yearChunks(start, today));
+  return { ranges: ranges.filter(([lo, hi]) => hasWeekday(lo, hi)), newest };
 }
 
 /** Missing fixings, one calendar year per request, stored as they arrive; today's fixing last (never over a gap). */

@@ -95,3 +95,57 @@ describe('buildValueSeries: the days valued at cost', () => {
     expect(series.points[0]!.value).toBe(90);
   });
 });
+
+describe('buildValueSeries: how each position was valued (onPosition)', () => {
+  const rates: FxRates = { base: 'EUR', rates: { USD: 1.25, GBP: 0.8 }, asOf: '2026-10-23T00:00:00Z' };
+  const fixings = [{ base: 'EUR', date: '2026-10-05', rates: { USD: 1.2, GBP: 0.85 } }];
+
+  interface Seen {
+    date: string;
+    symbol: string;
+    source: string;
+    price: number;
+    priceCurrency: string;
+    priceDate: string | null;
+    fxRate: number;
+    fxFallback: string;
+    value: number;
+  }
+
+  function lines(eod: Record<string, EodPrice[]>, quotes: Record<string, Quote> = {}, transactions: Transaction[] = [tx({ symbol: 'AAA', quantity: 10, price: 10 })]) {
+    const seen: Seen[] = [];
+    buildValueSeries({
+      transactions,
+      eod,
+      fx: rates,
+      fxHistory: fixings,
+      from: '2026-10-01',
+      to: '2026-10-08',
+      quotes,
+      onPosition: (l) => seen.push({ date: l.date, symbol: l.symbol, source: l.source, price: l.price, priceCurrency: l.priceCurrency, priceDate: l.priceDate, fxRate: l.fx.rate, fxFallback: l.fx.fallback, value: l.value }),
+    });
+    return seen;
+  }
+
+  it('says close, carried, cost and quote, with the price date and the fixing', () => {
+    const seen = lines({ AAA: [close('AAA', '2026-10-03', 12)] }, { AAA: quote('AAA', 13, '2026-10-08T08:00:00Z') });
+    expect(seen.find((l) => l.date === '2026-10-01')).toMatchObject({ source: 'cost', price: 10, priceDate: null });
+    expect(seen.find((l) => l.date === '2026-10-03')).toMatchObject({ source: 'close', price: 12, priceDate: '2026-10-03', value: 120 });
+    expect(seen.find((l) => l.date === '2026-10-04')).toMatchObject({ source: 'carried', priceDate: '2026-10-03' });
+    expect(seen.find((l) => l.date === '2026-10-08')).toMatchObject({ source: 'quote', price: 13, priceDate: '2026-10-08', value: 130 });
+  });
+
+  it('values a close in the currency of its own row, not the one of the position', () => {
+    const transactions = [tx({ symbol: 'GLD', quantity: 10, price: 50, currency: 'GBP' })];
+    const seen = lines({ GLD: [close('GLD', '2026-10-06', 60, 'USD')] }, {}, transactions);
+    expect(seen.find((l) => l.date === '2026-10-06')).toMatchObject({ priceCurrency: 'USD', fxRate: 1.2, value: 500 });
+  });
+
+  it('converts at that day’s fixing, the earliest one before the history, and the latest rate for a live quote', () => {
+    const transactions = [tx({ symbol: 'BBB', quantity: 10, price: 10, currency: 'USD' })];
+    const seen = lines({ BBB: [close('BBB', '2026-10-01', 10, 'USD')] }, { BBB: quote('BBB', 10, '2026-10-08T08:00:00Z', 'USD') }, transactions);
+    expect(seen.find((l) => l.date === '2026-10-02')).toMatchObject({ fxRate: 1.2, fxFallback: 'before' });
+    expect(seen.find((l) => l.date === '2026-10-06')).toMatchObject({ fxRate: 1.2, fxFallback: 'none' });
+    expect(seen.find((l) => l.date === '2026-10-08')).toMatchObject({ source: 'quote', fxRate: 1.25, fxFallback: 'none' });
+  });
+});

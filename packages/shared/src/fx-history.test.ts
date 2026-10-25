@@ -35,6 +35,36 @@ const tx = (p: Partial<Transaction>): Transaction => ({
   ...p,
 });
 
+describe('FxTimeline.lookup: where a rate comes from', () => {
+  const timeline = new FxTimeline(latest, history);
+
+  it('is the fixing of the day, or the latest one before it, without a fallback', () => {
+    expect(timeline.lookup('USD', '2025-01-03')).toEqual({ rate: 1.03, date: '2025-01-03', fallback: 'none' });
+    expect(timeline.lookup('USD', '2025-01-05')).toEqual({ rate: 1.03, date: '2025-01-03', fallback: 'none' });
+    expect(timeline.lookup('USD', '2025-09-04')).toEqual({ rate: 1.08, date: '2025-09-01', fallback: 'none' });
+    expect(timeline.lookup('EUR', '2025-09-04')).toEqual({ rate: 1, date: '2025-09-04', fallback: 'none' });
+    expect(timeline.lookup('EUR')).toEqual({ rate: 1, date: null, fallback: 'none' });
+  });
+
+  it('uses the nearest fixing, never the latest rate, for a day before or long after the stored history', () => {
+    expect(timeline.lookup('USD', '2024-06-01')).toEqual({ rate: 1.04, date: '2025-01-02', fallback: 'before' });
+    expect(timeline.lookup('USD', '2025-09-06')).toMatchObject({ rate: 1.08, fallback: 'none' });
+    expect(timeline.lookup('USD', '2025-09-07')).toEqual({ rate: 1.08, date: '2025-09-01', fallback: 'after' });
+    expect(timeline.lookup('USD', '2026-10-13')).toEqual({ rate: 1.08, date: '2025-09-01', fallback: 'after' });
+  });
+
+  it('is the latest rate only without a date, or without any history for the currency', () => {
+    expect(timeline.lookup('USD')).toEqual({ rate: 1.17, date: null, fallback: 'none' });
+    expect(new FxTimeline(latest).lookup('USD', '2025-03-01')).toEqual({ rate: 1.17, date: null, fallback: 'latest' });
+    expect(() => timeline.lookup('JPY', '2025-03-01')).toThrow(MissingFxRateError);
+  });
+
+  it('reports the span of the stored fixings', () => {
+    expect(timeline.span('USD')).toEqual({ first: '2025-01-02', last: '2025-09-01', fixings: 4 });
+    expect(timeline.span('JPY')).toBeNull();
+  });
+});
+
 describe('FxTimeline', () => {
   const t = new FxTimeline(latest, [...history, { base: 'USD', date: '2025-01-02', rates: { EUR: 9 } }, { base: 'EUR', date: '2025-01-06', rates: { USD: 0 } }]);
   it('uses the fixing of the date, carries it over weekends, and ignores other bases / bad rates', () => {

@@ -9,6 +9,7 @@ export const symbolRow = (over: Partial<HeldSymbolCoverage> = {}): HeldSymbolCov
   firstEod: '2025-10-23',
   lastEod: '2026-10-23',
   eodSources: ['eodhd'],
+  proxyListing: null,
   firstTransaction: '2024-03-02',
   lastQuoteAt: '2026-10-23T08:15:00.000Z',
   lastQuoteSource: 't212',

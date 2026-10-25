@@ -1,5 +1,5 @@
 import type { DividendEvent, EodPrice, InstrumentProfile, Quote } from '@portfolio/shared';
-import { isMarketSymbol, sourceOf } from '@portfolio/shared';
+import { alignEodScale, isMarketSymbol, sourceOf } from '@portfolio/shared';
 import type { EnrichmentSummary, JobHandler, JobPayloads } from '@portfolio/platform';
 import { z } from 'zod';
 import { errorMessage, ProviderError, ProviderUnavailableError, RateLimitError, SymbolNotFoundError } from '../errors.js';
@@ -8,6 +8,7 @@ import { byText } from '../parse.js';
 import { isCrypto, minimalProfile, normalizeSymbol, providerOf, routeOf } from '../symbols.js';
 import { addDays, utcDay } from '../time.js';
 import type { AttemptOutcome } from '../repository.js';
+import { proxyHistory } from './proxy-listing.js';
 import { createStepContext, pendingStep, rethrowBudget, runStep, runUnits, type PriceJobDeps, type StepContext } from './common.js';
 
 export const HISTORY_DAYS = 365;
@@ -109,24 +110,41 @@ async function providerQuote(ctx: StepContext, symbol: string): Promise<Quote | 
   return batch.quotes[symbol] ?? null;
 }
 
+/**
+ * The history of `symbol` and whether it comes from another listing: the provider's own, else (an exchange-listed symbol it does not
+ * know) the history of another listing of the same fund (see `proxyHistory`), else null.
+ */
+async function historyOf(ctx: StepContext, symbol: string, stored: InstrumentProfile | undefined, today: string): Promise<{ rows: EodPrice[]; proxy: boolean } | null> {
+  const { provider } = ctx.md;
+  const start = addDays(today, -HISTORY_DAYS);
+  const own = await orNull(provider.getEodHistory(symbol, start, today));
+  if (own !== null) return { rows: own, proxy: false };
+  if (routeOf(symbol) !== 'listed') return null;
+  const proxy = await proxyHistory(ctx, symbol, stored, today, (listing) => orNull(provider.getEodHistory(listing, start, today)));
+  return proxy === null ? null : { rows: proxy, proxy: true };
+}
+
 /** Fetches and stores the history, quote and profile of a new symbol. Resolves false for a symbol no provider knows. */
 async function fetchAndStore(ctx: StepContext, symbol: string, now: Date): Promise<boolean> {
   const { provider } = ctx.md;
   const today = utcDay(now);
-  const history = await orNull(provider.getEodHistory(symbol, addDays(today, -HISTORY_DAYS), today));
-  if (history === null) {
+  const stored = await ctx.repo.getProfile(symbol);
+  const found = await historyOf(ctx, symbol, stored, today);
+  if (found === null) {
     ctx.logger.warn('unknown symbol; not enriching', { symbol });
     return false;
   }
-  const stored = await ctx.repo.getProfile(symbol);
+  const { rows: history, proxy } = found;
   const profile = await providerProfile(ctx, symbol, stored);
   const existingQuote = (await ctx.repo.latestQuotes([symbol])).get(symbol);
-  const quote = existingQuote ?? (await providerQuote(ctx, symbol)) ?? quoteFromHistory(symbol, history, provider.name);
-  await ctx.repo.putEods(history);
+  // The provider has no quote for a symbol it does not know: the history of the other listing stands in.
+  const quote = existingQuote ?? (proxy ? null : await providerQuote(ctx, symbol)) ?? quoteFromHistory(symbol, history, provider.name);
+  // The live quote of the broker settles the unit of an exchange-listed history (see `alignEodScale`).
+  await ctx.repo.putEods(alignEodScale(history, existingQuote));
   if (existingQuote === undefined && quote !== null) await ctx.repo.putQuote(quote);
   await ctx.repo.ensureTracked(symbol, now.toISOString());
   await ctx.repo.putEnrichedProfile(symbol, profile, minimalProfile(symbol), today);
-  ctx.logger.info('symbol enriched', { symbol, eod: history.length, quote: quote !== null, profile: profile !== null });
+  ctx.logger.info('symbol enriched', { symbol, eod: history.length, quote: quote !== null, profile: profile !== null, proxy });
   return true;
 }
 

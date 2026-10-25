@@ -1,4 +1,4 @@
-import { T212_QUOTE_SOURCE, majorEod, type EodPrice, type Quote, type T212QuoteStatus } from '@portfolio/shared';
+import { T212_QUOTE_SOURCE, isProxySource, majorEod, type EodPrice, type Quote, type T212QuoteStatus } from '@portfolio/shared';
 
 /**
  * The end-of-day snapshot of the Trading 212 quote refresh: at the close slot the quote of every held symbol is also kept as the
@@ -39,10 +39,10 @@ export function freshQuotes(quotes: readonly Quote[], now: Date): Quote[] {
 /**
  * The rows to write for `day`: one per quote, in major units, unless a market-data provider already has a row for that symbol and day
  * (`existing` maps a symbol with a row to its `source`, undefined for a provider's). A Trading 212 row of the day is replaced: the later
- * quote is the better close.
+ * quote is the better close. So is a row taken from another listing of the same fund (`isProxySource`): the quote is the symbol's own price.
  */
 export function endOfDayRows(quotes: readonly Quote[], day: string, existing: ReadonlyMap<string, string | undefined>): EodPrice[] {
   return quotes
-    .filter((quote) => !existing.has(quote.symbol) || existing.get(quote.symbol) === T212_QUOTE_SOURCE)
+    .filter((quote) => !existing.has(quote.symbol) || existing.get(quote.symbol) === T212_QUOTE_SOURCE || isProxySource(existing.get(quote.symbol)))
     .map((quote) => majorEod({ symbol: quote.symbol, date: day, close: quote.price, currency: quote.currency, source: T212_QUOTE_SOURCE }));
 }

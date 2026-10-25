@@ -58,6 +58,19 @@ describe('PriceRepository', () => {
     expect(await store.get({ PK: 'FX#EUR', SK: 'DAY#2026-10-09' })).toEqual({ PK: 'FX#EUR', SK: 'DAY#2026-10-09', entityType: 'FX_DAY', base: 'EUR', date: '2026-10-09', rates: { USD: 1.1 } });
   });
 
+  it('keeps the listing chosen for an ISIN, and the fact that there was none', async () => {
+    const store = new MemoryItemStore();
+    const repo = new PriceRepository(store);
+    expect(await repo.getProxyListing('IE000000FWRA')).toBeUndefined();
+    await repo.putProxyListing({ isin: 'IE000000FWRA', currency: 'EUR', listing: 'FWRA.DE', checkedOn: '2026-10-13' });
+    expect(await repo.getProxyListing('IE000000FWRA')).toEqual({ isin: 'IE000000FWRA', currency: 'EUR', listing: 'FWRA.DE', checkedOn: '2026-10-13' });
+    await repo.putProxyListing({ isin: 'IE000000FWRA', currency: 'EUR', listing: null, checkedOn: '2026-10-14' });
+    expect(await repo.getProxyListing('IE000000FWRA')).toEqual({ isin: 'IE000000FWRA', currency: 'EUR', listing: null, checkedOn: '2026-10-14' });
+    expect(await store.get({ PK: 'ISIN#IE000000FWRA', SK: 'PROXY' })).not.toHaveProperty('listing');
+    store.load([{ PK: 'ISIN#BROKEN', SK: 'PROXY', entityType: 'PROXY_LISTING', currency: 5 }]);
+    expect(await repo.getProxyListing('BROKEN')).toBeUndefined();
+  });
+
   it('reads the latest quotes and skips corrupt items', async () => {
     const store = new MemoryItemStore().load([
       { PK: 'TICKER#A', SK: 'QUOTE#LATEST', symbol: 'A', price: 1, previousClose: 1, currency: 'USD', asOf: 't', source: 's' },

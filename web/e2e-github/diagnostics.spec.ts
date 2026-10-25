@@ -44,6 +44,7 @@ const row = (over: Record<string, unknown>) => ({
   firstEod: '2025-10-23',
   lastEod: '2026-10-19',
   eodSources: ['eodhd'],
+  proxyListing: null,
   firstTransaction: '2024-03-02',
   lastQuoteAt: '2026-10-19T08:15:00.000Z',
   lastQuoteSource: 't212',
@@ -70,9 +71,56 @@ const COVERAGE = {
       reason: 'Daily quota used up, retries after reset',
     }),
     row({ symbol: 'ASML.AS', name: 'ASML Holding' }),
+    row({ symbol: 'FWRA.MI', name: 'Invesco FTSE All-World Acc', eodSources: ['eodhd:FWRA.DE'], proxyListing: 'FWRA.DE', reason: 'History from another listing of the same fund (XETRA); prices can differ by a few tenths of a percent' }),
   ],
-  totals: { held: 3, complete: 1, partial: 1, missing: 1, valuedAtCostSince: '2026-01-05', valuedAtCostUntil: '2026-10-19', truncated: false },
+  totals: { held: 4, complete: 2, partial: 1, missing: 1, valuedAtCostSince: '2026-01-05', valuedAtCostUntil: '2026-10-19', truncated: false },
   rowsRead: 330,
+};
+
+const line = (over: Record<string, unknown>) => ({
+  units: 10,
+  currency: 'USD',
+  price: 200,
+  priceCurrency: 'USD',
+  priceDate: '2026-10-18',
+  ageDays: 1,
+  source: 'close',
+  fxRate: 1.1,
+  fxDate: '2026-10-16',
+  fxFallback: 'none',
+  value: 1818.18,
+  fair: 1818.18,
+  gap: 0,
+  today: 1900,
+  flags: [],
+  ...over,
+});
+
+// A long symbol and many flags must wrap inside the card instead of widening the page.
+const VALUATION = {
+  asOf: '2026-10-19T00:00:00.000Z',
+  baseCurrency: 'EUR',
+  headline: 64012.5,
+  days: [
+    { date: '2026-04-19', chartValue: 33000, positionsValue: 33000, extraValue: 0, invested: 40000, fairValue: 36000, gap: -3000, lines: [line({ symbol: 'AAPL' })] },
+    {
+      date: '2026-10-19',
+      chartValue: 64012.5,
+      positionsValue: 64012.5,
+      extraValue: 0,
+      invested: 55010,
+      fairValue: 71000,
+      gap: -6987.5,
+      lines: [
+        line({ symbol: 'IITU.L-A-RATHER-LONG-SYMBOL-NAME', units: 1400.123456, price: 52.1234, value: 6618.18, fair: 66.18, gap: 6552, flags: ['scale', 'carried', 'stale', 'currency', 'fx', 'cost'], today: 123456.78 }),
+        line({ symbol: 'FWRA.MI', currency: 'EUR', priceCurrency: 'EUR', price: 9.5, priceDate: null, ageDays: null, source: 'cost', fxRate: 1, fxDate: null, value: 9500, fair: 11200, gap: -1700, flags: ['cost'] }),
+      ],
+    },
+  ],
+  fx: [{ currency: 'USD', fixings: 134, first: '2026-02-02', last: '2026-10-16', fallbackDays: 383 }],
+  symbolsTotal: 2,
+  truncated: false,
+  rowsRead: 6620,
 };
 
 async function mockWorker(page: Page, { exposed = true }: { exposed?: boolean } = {}) {
@@ -88,6 +136,7 @@ async function mockWorker(page: Page, { exposed = true }: { exposed?: boolean } 
       return exposed ? route.fulfill({ json: REPORT }) : route.fulfill({ status: 404, json: { error: { code: 'NOT_FOUND', message: 'Not found' } } });
     }
     if (pathname === '/api/prices/status') return exposed ? route.fulfill({ json: { state: 'partial', sources: [], missingSecrets: [], message: '', t212Quotes: null, history: COVERAGE } }) : route.fulfill({ status: 404, json: { error: { code: 'NOT_FOUND', message: 'Not found' } } });
+    if (pathname === '/api/diagnostics/valuation') return exposed ? route.fulfill({ json: VALUATION }) : route.fulfill({ status: 404, json: { error: { code: 'NOT_FOUND', message: 'Not found' } } });
     if (pathname === '/api/notifications') return route.fulfill({ json: { available: false, configured: false, settings: { types: { exDividend: true, declared: true, received: true }, exDividendDaysBefore: 2 }, devices: [], maxDevices: 10 } });
     if (pathname === '/api/portfolios') return route.fulfill({ json: { portfolios: [] } });
     return route.fulfill({ status: 404, json: { error: { code: 'NOT_FOUND', message: 'Not found' } } });
@@ -141,18 +190,60 @@ for (const viewport of [
       await page.goto('/settings/diagnostics#price-coverage');
       const card = page.getByRole('region', { name: 'Price data coverage' });
       await expect(card).toBeVisible();
-      await expect(card).toContainText('3 held symbols: 1 complete, 1 partial, 1 missing.');
+      await expect(card).toContainText('4 held symbols: 2 complete, 1 partial, 1 missing.');
       await expect(card).toContainText('from 05-01-2026 until 19-10-2026');
       const symbols = card.getByRole('table').getByRole('row').filter({ has: page.getByRole('rowheader') });
-      await expect(symbols).toHaveCount(3);
+      await expect(symbols).toHaveCount(4);
       await expect(symbols.nth(0)).toContainText('Missing');
       await expect(symbols.nth(1)).toContainText('Partial');
       await expect(symbols.nth(2)).toContainText('Complete');
+      await expect(symbols.nth(3)).toContainText('Complete');
       await expect(card.getByText('No provider key for this exchange').locator('visible=true')).toBeVisible();
       await expect(card.getByText(/Daily credits exhausted/).locator('visible=true')).toBeVisible();
       expect(await overflow(page)).toBeLessThanOrEqual(0);
       const box = await card.boundingBox();
       expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
+    });
+  });
+}
+
+for (const viewport of [
+  { name: '1280 px', width: 1280, height: 900 },
+  { name: '320 px', width: 320, height: 800 },
+]) {
+  test.describe(`Chart reconciliation at ${viewport.name}`, () => {
+    test.use({ viewport: { width: viewport.width, height: viewport.height } });
+
+    test('is read on request and lists the symbols with their facts as text, nothing sticking out', async ({ page }) => {
+      await mockWorker(page);
+      await page.goto('/settings/diagnostics');
+      const card = page.getByRole('region', { name: 'Chart reconciliation' });
+      await expect(card).toBeVisible();
+      await card.getByRole('button', { name: 'Show reconciliation' }).click();
+      await expect(card.getByRole('group', { name: 'Day' }).getByRole('button')).toHaveCount(2);
+      await expect(card).toContainText('Chart value');
+      const table = card.getByRole('table');
+      await expect(table.getByRole('rowheader')).toHaveCount(2);
+      await expect(table.getByRole('rowheader').nth(0)).toContainText('IITU.L-A-RATHER-LONG-SYMBOL-NAME');
+      await expect(table).toContainText('rescaled');
+      await expect(table).toContainText('cost fallback');
+      await expect(card).toContainText('USD: 134 fixings');
+      await expect(card).toContainText('383 days use another day');
+      expect(await overflow(page)).toBeLessThanOrEqual(0);
+      const box = await card.boundingBox();
+      expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
+
+      await card.getByRole('group', { name: 'Day' }).getByRole('button').first().click();
+      await expect(card.getByRole('group', { name: 'Day' }).getByRole('button').first()).toHaveAttribute('aria-pressed', 'true');
+      expect(await overflow(page)).toBeLessThanOrEqual(0);
+    });
+
+    test('shows the history that comes from another listing of the same fund', async ({ page }) => {
+      await mockWorker(page);
+      await page.goto('/settings/diagnostics#price-coverage');
+      const card = page.getByRole('region', { name: 'Price data coverage' });
+      await expect(card.getByText(/History from another listing of the same fund \(XETRA\)/).locator('visible=true')).toBeVisible();
+      expect(await overflow(page)).toBeLessThanOrEqual(0);
     });
   });
 }

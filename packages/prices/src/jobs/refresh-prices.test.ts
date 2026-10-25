@@ -142,6 +142,36 @@ describe('refreshPrices', () => {
       expect(h.fake.urls.slice(calls).filter((url) => url.includes('..'))).toEqual([]);
     });
 
+    it('fills the gap before the oldest stored fixing once a day, from FX_HISTORY_START, without refetching what is stored', async () => {
+      const day = (date: string) => ({ PK: 'FX#EUR', SK: `DAY#${date}`, entityType: 'FX_DAY', base: 'EUR', date, rates: { USD: 1.1 } });
+      const h = harness({ fake: liveFake(), env: { FX_HISTORY_START: '2026-09-01' } });
+      h.store.load([day('2026-10-05'), day('2026-10-12')]);
+      h.fake.add('frankfurter.dev/v1/2026-09-01..2026-10-04', { base: 'EUR', rates: { '2026-09-01': { USD: 1.2 }, '2026-09-02': { USD: 1.2 } } });
+      h.fake.add('frankfurter.dev/v1/2026-10-13..2026-10-13', { base: 'EUR', rates: {} });
+      const first = (await drive(h, createRefreshPricesJob(h.deps), { trigger: 'scheduled' })).result;
+      expect(first).toMatchObject({ fxHistoryOk: true });
+      expect(fxDays(h.store)).toEqual(expect.arrayContaining(['2026-09-01', '2026-09-02', '2026-10-05', '2026-10-12', '2026-10-13']));
+      expect(h.fake.urls.filter((url) => url.includes('..') && url.includes('2026-09-01'))).toHaveLength(1);
+      // the gap is filled: the next run asks for nothing before the oldest fixing
+      const calls = h.fake.urls.length;
+      await drive(h, createRefreshPricesJob(h.deps), { trigger: 'scheduled' });
+      expect(h.fake.urls.slice(calls).filter((url) => url.includes('2026-09-01'))).toEqual([]);
+    });
+
+    it('looks for that gap once a UTC day even when the provider has nothing for it', async () => {
+      const day = { PK: 'FX#EUR', SK: 'DAY#2026-10-12', entityType: 'FX_DAY', base: 'EUR', date: '2026-10-12', rates: { USD: 1.1 } };
+      const h = harness({ fake: liveFake().add('frankfurter.dev/v1/2026-09-01..2026-10-11', { base: 'EUR', rates: {} }).add('frankfurter.dev/v1/2026-10-13..2026-10-13', { base: 'EUR', rates: {} }), env: { FX_HISTORY_START: '2026-09-01' } });
+      h.store.load([day]);
+      const asked = () => h.fake.urls.filter((url) => url.includes('2026-09-01..')).length;
+      await drive(h, createRefreshPricesJob(h.deps), { trigger: 'scheduled' });
+      await drive(h, createRefreshPricesJob(h.deps), { trigger: 'scheduled' });
+      expect(asked()).toBe(1);
+      h.clock.advance(24 * 3_600_000);
+      h.fake.add('frankfurter.dev/v1/2026-10-13..2026-10-14', { base: 'EUR', rates: {} });
+      await drive(h, createRefreshPricesJob(h.deps), { trigger: 'scheduled' });
+      expect(asked()).toBe(2);
+    });
+
     it('starts at FX_HISTORY_START and never stores weekend fixings', async () => {
       const h = noQuotes();
       const { result } = await drive(h, createRefreshPricesJob(h.deps), { trigger: 'scheduled' });
@@ -171,10 +201,10 @@ describe('refreshPrices', () => {
     it('writes the latest fixing when the history is not published yet', async () => {
       const fake = liveFake().add('frankfurter.dev/v1/2026-10-13..2026-10-13', { base: 'EUR', rates: {} });
       const h = harness({ fake });
-      h.store.load([{ PK: 'FX#EUR', SK: 'DAY#2026-10-12', entityType: 'FX_DAY', base: 'EUR', date: '2026-10-12', rates: { USD: 1.1 } }]);
+      h.store.load(['2026-10-02', '2026-10-12'].map((date) => ({ PK: 'FX#EUR', SK: `DAY#${date}`, entityType: 'FX_DAY', base: 'EUR', date, rates: { USD: 1.1 } })));
       const { result } = await drive(h, createRefreshPricesJob(h.deps), { trigger: 'scheduled' });
       expect(result.fxDaysWritten).toBe(1);
-      expect(fxDays(h.store)).toEqual(['2026-10-12', '2026-10-13']);
+      expect(fxDays(h.store)).toEqual(['2026-10-02', '2026-10-12', '2026-10-13']);
     });
 
     it('isolates a failing write of today\'s fixing', async () => {
