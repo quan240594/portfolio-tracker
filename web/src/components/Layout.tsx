@@ -74,10 +74,12 @@ export function Layout() {
         Skip to content
       </a>
       {/* From sm up the banner and the header are one sticky unit; below sm the wrapper vanishes (`contents`) and only the
-          banner is pinned (it is sticky itself), so the header scrolls away. useStickyOffset feeds scroll-padding-top. */}
+          banner is pinned (it is sticky itself), so the header scrolls away. useStickyOffset feeds scroll-padding-top. The header carries its
+          own `relative z-20` for that case: its backdrop blur makes it a stacking context, so without a z-index of its own the open
+          Portfolio menu (z-40 inside it) was painted UNDER positioned cards and charts further down the page. The pinned banner is z-30. */}
       <div ref={stickyRef} className="contents sm:sticky sm:top-0 sm:z-30 sm:block">
         {USE_MOCKS && <DemoBanner />}
-        <header className="border-b border-slate-200 bg-white/85 backdrop-blur dark:border-slate-800 dark:bg-slate-950/85">
+        <header className="relative z-20 border-b border-slate-200 bg-white/85 backdrop-blur dark:border-slate-800 dark:bg-slate-950/85">
           <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
             <NavLink to={withScope('/')} className="flex items-center gap-2 font-semibold tracking-tight">
               <Logo />
