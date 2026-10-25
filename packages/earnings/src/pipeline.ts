@@ -53,6 +53,22 @@ async function releaseText(deps: PipelineDeps, ref: ReleaseRef): Promise<Release
 
 const sanitized = (message: string): string => message.replaceAll(/https?:\/\/\S+/gi, '').slice(0, 100);
 
+/** The filing was found but holds no results release: no document at all, or documents that do not read like one. */
+function notResults(read: number): ReleaseOutcome {
+  if (read === 0) return { status: 'not-results', stage: 'exhibit', detail: 'the filing has no press release document' };
+  return { status: 'not-results', stage: 'text', detail: `${read} document(s) read, none reads like a results release` };
+}
+
+type FailedExtraction = Extract<Awaited<ReturnType<PipelineDeps['extractor']['extract']>>, { ok: false }>;
+
+/** The model call did not produce an extraction: the daily allowance, a platform error, or an answer that was not valid JSON. */
+function failedExtraction(outcome: FailedExtraction): ReleaseOutcome {
+  if (outcome.reason === 'allowance') return { status: 'ai-allowance', neurons: outcome.neurons };
+  if (outcome.reason === 'ai-error') return { status: 'ai-error', neurons: outcome.neurons, detail: outcome.detail ?? 'the model call failed' };
+  const why = outcome.detail === undefined ? '' : ` (${outcome.detail})`;
+  return { status: 'unreadable', stage: 'ai', reason: 'The model did not return valid JSON', detail: `invalid JSON${why}`, neurons: outcome.neurons };
+}
+
 /**
  * Reads the release of `ref`. `previous` is the newest stored summary of the symbol older than the release (for quarter-over-quarter). The
  * SEC and the model are called in sequence (a handful of subrequests); every failure is an outcome, only SEC blocks and subrequest limits are thrown.
@@ -65,18 +81,9 @@ export async function processRelease(deps: PipelineDeps, ref: ReleaseRef, holdin
     if (error instanceof SecError) return { status: 'sec-error', stage: 'exhibit', detail: sanitized(error.message) };
     throw error;
   }
-  if (!('text' in release)) {
-    return release.read === 0
-      ? { status: 'not-results', stage: 'exhibit', detail: 'the filing has no press release document' }
-      : { status: 'not-results', stage: 'text', detail: `${release.read} document(s) read, none reads like a results release` };
-  }
+  if (!('text' in release)) return notResults(release.read);
   const outcome = await deps.extractor.extract({ text: release.text, template: holding.template, company: holding.name });
-  if (!outcome.ok) {
-    if (outcome.reason === 'allowance') return { status: 'ai-allowance', neurons: outcome.neurons };
-    if (outcome.reason === 'ai-error') return { status: 'ai-error', neurons: outcome.neurons, detail: outcome.detail ?? 'the model call failed' };
-    const why = outcome.detail === undefined ? '' : ` (${outcome.detail})`;
-    return { status: 'unreadable', stage: 'ai', reason: 'The model did not return valid JSON', detail: `invalid JSON${why}`, neurons: outcome.neurons };
-  }
+  if (!outcome.ok) return failedExtraction(outcome);
   const { verified, dropped } = verifyExtraction(outcome.extraction, release.text, holding.template);
   if (!hasHeadline(verified)) {
     return { status: 'unreadable', stage: 'verify', reason: 'No headline figure could be verified in the release', detail: `no headline figure was found in the text (${dropped.length} dropped)`, neurons: outcome.neurons, dropped: dropped.length };
