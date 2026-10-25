@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
-import { sampleDemoSummaries, sampleSummary, type EarningsListResponse, type EarningsStatusResponse } from '@portfolio/shared';
+import { sampleDemoSummaries, sampleSummary, type EarningsLastRun, type EarningsListResponse, type EarningsStatusResponse } from '@portfolio/shared';
 import { DEMO_EARNINGS_STATUS, earningsHandlers } from '../mocks/earningsHandlers';
 import { api } from '../mocks/utils';
 import { server } from '../mocks/server';
@@ -95,13 +95,67 @@ describe('the page', () => {
     demo();
     serveList({ available: true, summaries: [], symbols: [] });
     serveStatus(status({ symbols: [{ symbol: 'LMFG', eligible: true, lastCheckedAt: '2026-10-21T19:30:00.000Z', lastReason: 'no new release' }, { symbol: 'NEW', eligible: true }, { symbol: 'VWRL', eligible: false }] }));
-    const user = userEvent.setup();
     renderApp('/earnings');
     expect(await screen.findByRole('heading', { name: 'No earnings summaries yet' })).toBeInTheDocument();
-    await user.click(screen.getByText('What was checked'));
+    expect(screen.getByText('What was checked').closest('details')).toHaveAttribute('open');
     expect(screen.getByText(`LMFG: checked ${formatDateTime('2026-10-21T19:30:00.000Z')}, no new release`)).toBeInTheDocument();
     expect(screen.getByText('NEW: not checked yet')).toBeInTheDocument();
     expect(screen.queryByText(/VWRL/)).not.toBeInTheDocument();
+  });
+
+  it('explains in one line per company why nothing is stored, with the totals, the last full pass and the progress', async () => {
+    demo();
+    serveList({ available: true, summaries: [], symbols: [] });
+    const run = (stage: EarningsLastRun['stage'], detail: string | undefined, filing?: EarningsLastRun['filing']): EarningsLastRun => ({ at: '2026-10-25T06:30:00.000Z', stage, ...(detail === undefined ? {} : { detail }), ...(filing === undefined ? {} : { filing }) });
+    serveStatus(
+      status({
+        lastFullPassAt: '2026-10-25T06:30:00.000Z',
+        backfill: { status: 'running', quarters: 4, total: 80, done: 34, stored: 30, failed: 4, planned: 18, companies: 20, waitReason: 'allowance', waitUntil: '2026-10-26T00:05:00.000Z' },
+        symbols: [
+          { symbol: 'MSFT', eligible: true, lastRun: run('ai', 'invalid JSON', { form: '8-K', date: '2026-10-29', accession: 'a-1' }), releases: { planned: 4, stored: 1, failed: 2 } },
+          { symbol: 'ASML.AS', eligible: true, lastRun: run('no-release-found', 'no results release found in the last 120 days') },
+          { symbol: 'JPM', eligible: true, lastRun: run('sec-blocked', 'blocked by the SEC (HTTP 429)') },
+          { symbol: 'FOO.DE', eligible: true, lastRun: run('ticker-map', 'not found in the SEC company list') },
+          { symbol: 'VWRL', eligible: false, lastRun: run('not-eligible', 'no quarterly results') },
+        ],
+        secBlockedUntil: '2026-10-25T09:30:00.000Z',
+      }),
+    );
+    renderApp('/earnings');
+    expect(await screen.findByText('MSFT: found 8-K from 29-10-2026, the AI could not read it (invalid JSON) · 1 of 4 quarters stored, 2 could not be read')).toBeInTheDocument();
+    expect(screen.getByText('ASML.AS: no results release found in the last 120 days')).toBeInTheDocument();
+    expect(screen.getByText(`JPM: blocked by the SEC until ${formatDateTime('2026-10-25T09:30:00.000Z')}`)).toBeInTheDocument();
+    expect(screen.getByText('FOO.DE: not found in the SEC company list')).toBeInTheDocument();
+    expect(screen.queryByText(/VWRL/)).not.toBeInTheDocument();
+    expect(screen.getByText('5 holdings · 4 companies · 0 with a summary · 1 without quarterly results (funds, crypto, ...)')).toBeInTheDocument();
+    expect(screen.getByText(`Last full pass: every company was looked at since ${formatDateTime('2026-10-25T06:30:00.000Z')}.`)).toBeInTheDocument();
+    expect(screen.getByText(/34 of 80 releases read \(4 could not be read\)\. The SEC list of 2 of 20 companies is not read yet\./)).toBeInTheDocument();
+    expect(screen.getByText(/Resumes at 00:00 UTC .* when the daily AI allowance is used up/)).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Releases read' })).toHaveAttribute('value', '34');
+  });
+
+  it('"Fetch all now" asks for the backfill, once an hour, and says what happened', async () => {
+    demo();
+    serveList({ available: true, summaries: [sampleSummary({ symbol: 'LMFG' })], symbols: ['LMFG'] });
+    serveStatus(status({ backfill: { status: 'running', quarters: 4, total: 8, done: 2, stored: 1, failed: 1, planned: 2, companies: 2 } }));
+    const user = userEvent.setup();
+    renderApp('/earnings');
+    await screen.findAllByRole('article');
+    const section = screen.getByText('What was checked').closest('details')!;
+    expect(section).not.toHaveAttribute('open');
+    await user.click(screen.getByText('What was checked'));
+    expect(screen.getByText(/also tries the 1 release that could not be read again/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Fetch all now' }));
+    expect(await screen.findByText(/Started\. The page fills as releases are read/)).toBeInTheDocument();
+    server.use(http.post(api('/earnings/backfill'), () => HttpResponse.json({ accepted: false, reason: 'rate-limited', retryAfterSeconds: 100 }, { status: 202 })));
+    await user.click(screen.getByRole('button', { name: 'Fetch all now' }));
+    expect(await screen.findByText(/Started less than an hour ago/)).toBeInTheDocument();
+    server.use(http.post(api('/earnings/backfill'), () => HttpResponse.json({ accepted: false, reason: 'not-configured' }, { status: 202 })));
+    await user.click(screen.getByRole('button', { name: 'Fetch all now' }));
+    expect(await screen.findByText(/Not switched on on the server yet/)).toBeInTheDocument();
+    server.use(http.post(api('/earnings/backfill'), () => HttpResponse.json({ error: { code: 'X', message: 'Nope' } }, { status: 500 })));
+    await user.click(screen.getByRole('button', { name: 'Fetch all now' }));
+    expect(await screen.findByText('Nope')).toBeInTheDocument();
   });
 
   it('says when the SEC asked to slow down and when the AI allowance is used up, above the cards', async () => {
