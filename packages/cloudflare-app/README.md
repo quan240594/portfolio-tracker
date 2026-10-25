@@ -70,6 +70,11 @@ You need a Cloudflare account on the Free plan and a GitHub account. Every comma
    valued with the same quotes as the headline total. **Settings > Diagnostics > Price data coverage** (`GET /api/prices/status` -> `history`) lists every held symbol with its stored rows,
    first and last day, state (complete, partial, missing) and why (no key for that exchange, daily quota used up, no data at the provider, not tried yet). See `docs/architecture.md`, "Price history coverage".
 
+   **Chart reconciliation.** Settings > Diagnostics > Chart reconciliation (`GET /api/diagnostics/valuation?dates=`) shows, for a day of the value chart, what each held symbol is counted at (close, carried close, live quote or
+   cost), the currency and FX rate used and a fair value, largest gap first, plus the FX history coverage: the tool to read why the chart is off. A London close stored in the wrong unit (a USD line taken for pence) is rescaled
+   against the broker quote. A symbol the provider does not know (for example `FWRA.MI`) takes its history from another listing of the same fund (same ISIN and currency; XETRA, Frankfurt, Amsterdam, Paris, Milan, London in
+   that order; two EODHD calls, once per ISIN), marked "History from another listing of the same fund". See `docs/architecture.md`, "Chart reconciliation and proxy listings".
+
    **What to expect from free keys.** The free plans are small (Twelve Data: 8 credits a minute, `/profile` is not included; EODHD: 20 calls a
    day). The price jobs know that: they keep the minute and day usage in the database, remember a "limit reached" answer until the limit resets
    (next minute, or the next UTC midnight) instead of retrying, try a symbol at most 3 times a day, and fetch dividends last. With about 25 holdings
