@@ -32,6 +32,8 @@ export interface LastAttempt {
   outcome: AttemptOutcome;
   error: string;
 }
+/** Marks the day the fixings before the oldest stored one were last looked for (see `runFx`). */
+export const fxFrontKey = { PK: 'USAGE', SK: 'FX#front' } as const;
 export const healKey = { PK: 'USAGE', SK: 'ENRICH#HEAL' } as const;
 /** Marks the one-time repair of stored minor-unit prices (pence) as done. */
 export const minorUnitRepairKey = { PK: 'USAGE', SK: 'REPAIR#minor-units-v1' } as const;
@@ -55,6 +57,18 @@ function rescaledItem(item: Item): Item | undefined {
   }
   return out as Item;
 }
+/** What the search by ISIN found, stored once per ISIN (`listing` null: nothing usable). */
+export interface ProxyRecord {
+  isin: string;
+  /** The (major) currency of the held symbol the listing was chosen for. */
+  currency: string;
+  listing: string | null;
+  checkedOn: string;
+}
+
+/** The listing chosen for an ISIN when the provider has no data for the held symbol (see `proxyHistory`). */
+export const PROXY_LISTING_ENTITY = 'PROXY_LISTING';
+export const proxyKey = (isin: string) => ({ PK: `ISIN#${isin}`, SK: 'PROXY' });
 export const attemptKey = (symbol: string, kind: AttemptKind) => ({ PK: calendarKeys.tickerPk(symbol), SK: `ENRICH#${kind}` });
 const MAX_ERROR_CHARS = 200;
 
@@ -232,6 +246,17 @@ export class PriceRepository {
     await this.store.put({ ...attemptKey(symbol, kind), entityType: ENRICH_STATE_ENTITY, symbol, day, attempts, outcome, lastError: error.slice(0, MAX_ERROR_CHARS) });
   }
 
+  /** The stored answer of the search by ISIN, or undefined. */
+  async getProxyListing(isin: string): Promise<ProxyRecord | undefined> {
+    const item = await this.store.get(proxyKey(isin));
+    if (item === undefined || typeof item.currency !== 'string' || typeof item.checkedOn !== 'string') return undefined;
+    return { isin, currency: item.currency, listing: typeof item.listing === 'string' ? item.listing : null, checkedOn: item.checkedOn };
+  }
+
+  async putProxyListing(record: ProxyRecord): Promise<void> {
+    await this.store.put({ ...proxyKey(record.isin), entityType: PROXY_LISTING_ENTITY, ...definedOnly({ currency: record.currency, listing: record.listing ?? undefined, checkedOn: record.checkedOn }) });
+  }
+
   /** Whether the not-yet-enriched symbols were already handed to an enrichment job on `day`. */
   async healedOn(day: string): Promise<boolean> {
     return (await this.store.get(healKey))?.day === day;
@@ -291,6 +316,22 @@ export class PriceRepository {
     const page = await this.store.query({ pk: `FX#${base}`, sk: { beginsWith: keys.fxDayPrefix }, reverse: true, limit: 1 });
     const sk = page.items[0]?.SK;
     return sk === undefined ? null : sk.slice(keys.fxDayPrefix.length);
+  }
+
+  /** Date of the oldest stored FX_DAY item of `base`, or null. */
+  async earliestFxDay(base: string): Promise<string | null> {
+    const page = await this.store.query({ pk: `FX#${base}`, sk: { beginsWith: keys.fxDayPrefix }, limit: 1 });
+    const sk = page.items[0]?.SK;
+    return sk === undefined ? null : sk.slice(keys.fxDayPrefix.length);
+  }
+
+  /** Whether the stored fixings were already checked for a gap before the oldest one on `day` (once a UTC day). */
+  async fxFrontCheckedOn(day: string): Promise<boolean> {
+    return (await this.store.get(fxFrontKey))?.day === day;
+  }
+
+  async markFxFrontChecked(day: string): Promise<void> {
+    await this.store.put({ ...fxFrontKey, entityType: ENRICH_STATE_ENTITY, day });
   }
 
   async putFxDays(days: readonly FxDay[]): Promise<number> {

@@ -102,6 +102,24 @@ describe('enrichTransactions', () => {
     expect(h.store.snapshot().filter((item) => item.PK !== 'USAGE')).toEqual(before.filter((item) => item.PK !== 'USAGE'));
   });
 
+  it('stores a London history that the broker quote shows is a hundred times too small, in the unit and currency of the quote', async () => {
+    // a USD line on the London exchange: EODHD returns US dollars, the app takes every London price for pence
+    const fake = new FakeFetch()
+      .add('eodhd.com/api/search/IITU', [])
+      .add('eodhd.com/api/eod/IITU.LSE', [{ date: '2026-10-12', close: 51 }, { date: '2026-10-13', close: 52 }])
+      .add('eodhd.com/api/div/IITU.LSE', []);
+    const h = harness({ fake });
+    h.store.load([
+      { ...baseline('IITU.L'), currency: 'USD', isin: undefined },
+      { PK: 'TICKER#IITU.L', SK: 'QUOTE#LATEST', entityType: 'QUOTE', symbol: 'IITU.L', price: 52.5, previousClose: 52, currency: 'USD', asOf: '2026-10-13T16:25:00.000Z', source: 'trading212' },
+    ]);
+    await drive(h, createEnrichTransactionsJob(h.deps), event(['IITU.L']));
+    expect(items(h.store, 'TICKER#IITU.L', 'EOD#').map((item) => [item.SK, item.close, item.currency])).toEqual([
+      ['EOD#2026-10-12', 51, 'USD'],
+      ['EOD#2026-10-13', 52, 'USD'],
+    ]);
+  });
+
   it('keeps an existing TRACKED item untouched', async () => {
     const h = harness({ fake: enrichFake() });
     h.store.load([{ PK: 'TRACKED', SK: 'TICKER#BTC-EUR', entityType: 'TRACKED_TICKER', symbol: 'BTC-EUR' }]);

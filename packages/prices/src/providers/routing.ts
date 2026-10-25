@@ -1,6 +1,6 @@
 import type { DividendEvent, EodPrice, InstrumentProfile } from '@portfolio/shared';
 import { sequentially } from '@portfolio/shared';
-import { silentLogger, type Logger } from '@portfolio/platform';
+import { silentLogger, type ListingMatch, type Logger } from '@portfolio/platform';
 import { ProviderError, ProviderUnavailableError } from '../errors.js';
 import { isCrypto, routeOf, type Route } from '../symbols.js';
 import { failureOf, notFound, type PriceBatch, type PriceSource } from './base.js';
@@ -112,6 +112,16 @@ export class RoutingProvider implements PriceSource {
       }
     }
     return twelvedata === undefined ? null : twelvedata.getProfile(symbol);
+  }
+
+  /** The listings of an ISIN: only EODHD searches by ISIN (and only when its key is configured). */
+  searchListings(isin: string): Promise<ListingMatch[]> {
+    const eodhd = this.sources.eodhd;
+    if (eodhd?.searchListings === undefined) {
+      this.warnOnce('eodhd');
+      return Promise.resolve([]);
+    }
+    return eodhd.searchListings(isin);
   }
 
   getDividends(symbol: string, start: string, end: string): Promise<DividendEvent[]> {

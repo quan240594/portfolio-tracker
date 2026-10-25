@@ -225,3 +225,42 @@ describe('routing provider', () => {
     expect(new SymbolNotFoundError('x')).toBeInstanceOf(ProviderError);
   });
 });
+
+describe('EODHD search by ISIN', () => {
+  const ISIN = 'IE000000FWRA';
+  const eodhd = (fake: FakeFetch, limit = 20) => new EodhdProvider({ apiKey: 'k', http: http(fake, 'eodhd'), bucket: bucket(), quota: quota('eodhd', limit), now: () => NOW });
+
+  it('lists the listings of the ISIN on the exchanges of the app, as canonical symbols, and drops everything else', async () => {
+    const fake = new FakeFetch().add(`/search/${ISIN}`, [
+      { Code: 'fwra', Exchange: 'XETRA', Name: 'World fund', Currency: 'EUR', ISIN },
+      { Code: 'FWRA', Exchange: 'LSE', Currency: 'GBX', ISIN },
+      { Code: 'FWRA', Exchange: 'NASDAQ', Currency: 'USD', ISIN },
+      { Code: 'OTHR', Exchange: 'AS', Currency: 'EUR', ISIN: 'IE000000OTHR' },
+      { Code: 'NOCUR', Exchange: 'AS', ISIN },
+      { Exchange: 'AS', Currency: 'EUR', ISIN },
+      'junk',
+    ]);
+    expect(await eodhd(fake).searchListings(ISIN)).toEqual([
+      { symbol: 'FWRA.DE', exchange: 'DE', currency: 'EUR', isin: ISIN, name: 'World fund' },
+      { symbol: 'FWRA.L', exchange: 'L', currency: 'GBX', isin: ISIN, name: 'FWRA' },
+    ]);
+    expect(fake.urls[0]).toContain('/api/search/IE000000FWRA');
+  });
+
+  it('counts the call against the daily quota and tolerates an answer that is not a list', async () => {
+    const fake = new FakeFetch().add('/search/', { error: 'x' });
+    const provider = eodhd(fake, 1);
+    expect(await provider.searchListings(ISIN)).toEqual([]);
+    await expect(provider.searchListings(ISIN)).rejects.toMatchObject({ name: 'RateLimitError' });
+    expect(fake.requests).toHaveLength(1);
+  });
+
+  it('is routed to EODHD only, and says nothing without its key', async () => {
+    const fake = new FakeFetch().add('/search/', [{ Code: 'FWRA', Exchange: 'F', Currency: 'EUR', ISIN, Name: 'World fund' }]);
+    const router = new RoutingProvider({ eodhd: eodhd(fake) });
+    expect((await router.searchListings(ISIN)).map((l) => l.symbol)).toEqual(['FWRA.F']);
+    const plain: PriceSource = { name: 'plain', getQuotes: vi.fn(), getEodHistory: vi.fn(), getProfile: vi.fn(), getDividends: vi.fn() };
+    expect(await new RoutingProvider({ eodhd: plain }).searchListings(ISIN)).toEqual([]);
+    expect(await new RoutingProvider({}).searchListings(ISIN)).toEqual([]);
+  });
+});

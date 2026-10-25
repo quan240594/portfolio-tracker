@@ -20,6 +20,25 @@ export const MAX_ATTEMPT_ERROR_CHARS = 120;
 export const HISTORY_STATES = ['complete', 'partial', 'missing'] as const;
 export type HistoryState = (typeof HISTORY_STATES)[number];
 
+/** The `source` of an EOD row that was fetched under another listing of the same fund: `eodhd:<provider symbol of that listing>`. */
+export const PROXY_SOURCE_PREFIX = 'eodhd:';
+export const proxySourceOf = (listing: string): string => `${PROXY_SOURCE_PREFIX}${listing}`;
+export const isProxySource = (source: string | undefined): boolean => source?.startsWith(PROXY_SOURCE_PREFIX) === true;
+
+const LISTING_NAMES: Readonly<Record<string, string>> = { DE: 'XETRA', F: 'Frankfurt', AS: 'Amsterdam', PA: 'Paris', MI: 'Milan', L: 'London' };
+
+/** The listing the history of a symbol was taken from (`FWRA.DE`) when one of its sources says so, else null. */
+export function proxyListingOf(sources: readonly string[]): string | null {
+  const source = sources.find((candidate) => isProxySource(candidate));
+  return source === undefined ? null : source.slice(PROXY_SOURCE_PREFIX.length);
+}
+
+/** `XETRA` for `FWRA.DE`; the symbol itself for an exchange without a short name. */
+export function listingExchangeName(listing: string): string {
+  const suffix = listing.slice(listing.lastIndexOf('.') + 1);
+  return LISTING_NAMES[suffix] ?? listing;
+}
+
 export const COVERAGE_REASONS = {
   complete: 'Full history stored',
   noKey: 'No provider key for this exchange',
@@ -29,6 +48,9 @@ export const COVERAGE_REASONS = {
   notTried: 'Not tried yet',
   partial: 'Only part of the history is stored',
 } as const;
+
+/** The note of a history that comes from another listing of the same fund. */
+export const proxyReason = (listing: string): string => `History from another listing of the same fund (${listingExchangeName(listing)}); prices can differ by a few tenths of a percent`;
 
 /** What the history job last did for the symbol (the `ENRICH_STATE` item). `error` is sanitised and short. */
 export interface CoverageAttempt {
@@ -59,6 +81,8 @@ export interface HeldSymbolCoverage {
   firstEod: string | null;
   lastEod: string | null;
   eodSources: string[];
+  /** The listing (`FWRA.DE`) the stored history was fetched under, because the provider has no data for this symbol; null for the symbol's own history. */
+  proxyListing: string | null;
   /** Date of the first transaction of the symbol. */
   firstTransaction: string;
   lastQuoteAt: string | null;
@@ -140,10 +164,12 @@ export interface CoverageReasonInput {
   keyConfigured: boolean;
   providerBlocked: boolean;
   attempt: CoverageAttempt | null;
+  proxyListing?: string | null;
 }
 
 /** A short hint why the history is incomplete (or that it is not). */
-export function coverageReason({ state, keyConfigured, providerBlocked, attempt }: Readonly<CoverageReasonInput>): string {
+export function coverageReason({ state, keyConfigured, providerBlocked, attempt, proxyListing = null }: Readonly<CoverageReasonInput>): string {
+  if (proxyListing !== null && state !== 'missing') return proxyReason(proxyListing);
   if (state === 'complete') return COVERAGE_REASONS.complete;
   if (!keyConfigured) return COVERAGE_REASONS.noKey;
   if (attempt?.outcome === 'skipped') return COVERAGE_REASONS.noData;
@@ -167,6 +193,7 @@ export interface SymbolCoverageInput {
 export function symbolCoverage(input: Readonly<SymbolCoverageInput>, today: string): HeldSymbolCoverage {
   const { eod, attempt } = input;
   const historyState = historyStateOf(eod, input.firstTransaction, today);
+  const proxyListing = proxyListingOf(eod.sources);
   return {
     symbol: input.symbol,
     name: input.name,
@@ -176,12 +203,13 @@ export function symbolCoverage(input: Readonly<SymbolCoverageInput>, today: stri
     firstEod: eod.first,
     lastEod: eod.last,
     eodSources: eod.sources,
+    proxyListing,
     firstTransaction: input.firstTransaction,
     lastQuoteAt: input.quote?.asOf ?? null,
     lastQuoteSource: input.quote?.source || null,
     historyState,
     lastAttempt: attempt,
-    reason: coverageReason({ state: historyState, keyConfigured: input.keyConfigured, providerBlocked: input.providerBlocked, attempt }),
+    reason: coverageReason({ state: historyState, keyConfigured: input.keyConfigured, providerBlocked: input.providerBlocked, attempt, proxyListing }),
   };
 }
 
@@ -252,6 +280,7 @@ export const priceHistoryCoverageSchema = z.object({
       firstEod: day.nullable(),
       lastEod: day.nullable(),
       eodSources: z.array(z.string()),
+      proxyListing: z.string().nullable().default(null),
       firstTransaction: day,
       lastQuoteAt: z.string().nullable(),
       lastQuoteSource: z.string().nullable(),
