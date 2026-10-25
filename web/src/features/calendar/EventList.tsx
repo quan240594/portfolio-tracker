@@ -2,7 +2,7 @@ import type { CalendarEvent } from '@portfolio/shared';
 import { CompanyLogo } from '../../components/CompanyLogo';
 import { formatWeekdayDate } from '../../lib/format';
 import { STATUS_LABELS, eventAriaLabel, groupByDate } from './calendarModel';
-import { STATUS_CHIP, chipClasses } from './calendarColours';
+import { STATUS_CHIP, eventClasses } from './calendarColours';
 import { EventMarker } from './EventMarker';
 import { eventDetailLine, expectedLabel } from './eventText';
 
@@ -21,8 +21,9 @@ export function EventRow({ event, baseCurrency, onSelect }: Readonly<RowProps>) 
         type="button"
         onClick={() => onSelect(event)}
         aria-label={eventAriaLabel(event, amount)}
-        className={`block w-full rounded-lg border-l-4 px-3 py-2 text-left text-sm hover:brightness-95 ${chipClasses(event.status)}`}
+        className={`block w-full rounded-lg border-l-4 px-3 py-2 text-left text-sm hover:brightness-95 ${eventClasses(event.type, event.status)}`}
         data-status={event.status}
+        data-type={event.type}
       >
         {/* A plain span carries the flex row (a button as a flex container is not reliable everywhere): logo | text column | amount and status. */}
         <span className="flex w-full items-center gap-3" data-row="">

@@ -850,17 +850,29 @@ earnings and splits.
 ### Web
 
 `/calendar` (`web/src/pages/CalendarPage.tsx`, `web/src/features/calendar/`): month navigator, range (this month / next 12
-months, the latter as a list), event-type toggles with a marker shape **and** letter (E, P, R, S, C; one neutral colour), status toggles, scope select, a
+months, the latter as a list), event-type toggles with a marker shape **and** letter (E, P, R, S, C; the ex-dividend violet, the others one neutral slate), status toggles, scope select, a
 Calendar/List toggle (list is the default below 640 px), a Monday-first month grid built as a real `<table>` (buttons inside cells, "+N more"
 opens the day), the month's expected dividends, four KPIs, a 12-month received/declared/estimated stacked chart (value label per bar, dashed `avg` line, per-status tooltip; the legend and the "Show data table" headers include/exclude statuses and months, the KPIs and the grid keep describing the whole calendar),
 event dialogs and a coverage `<details>`. View, month, range and filters live in the URL; type/status/scope filters apply
 client-side to one loaded range, the `.ics` download sends them to the API. Amounts follow the portfolio scope selector.
 
-**Colour language.** The *status* carries the colour everywhere on the page (chips, list rows, status filters, chart,
-legend, tooltip); the event *type* is told by marker shape and letter. `PAID` is shown as **Received** (pastel green, `#dcfce7`
-fill / `#14532d` text), `ESTIMATED` as **Estimated** (pastel yellow, `#fef9c3` / `#422006`, always with a dashed outline and italic
-chip text so colour is never the only cue), `CONFIRMED` as **Confirmed** / **Declared** (pastel blue, `#dbeafe` / `#1e3a8a`);
-dark theme uses muted fills with light text (all text ≥ 4.5:1, see `calendarColours.ts`). The API enum values are unchanged.
+**Colour language.** Two independent signals, never colour alone (`web/src/features/calendar/calendarColours.ts`):
+
+* **Status** is the colour of every chip, list row, status filter, chart bar, legend and tooltip. `PAID` is shown as **Received**
+  (pastel green, `#dcfce7` fill / `#14532d` text), `ESTIMATED` as **Estimated** (pastel yellow, `#fef9c3` / `#422006`, always with a
+  dashed outline and italic chip text), `CONFIRMED` as **Confirmed** / **Declared** (pastel blue, `#dbeafe` / `#1e3a8a`). On a row it is
+  the left border and the status chip, whatever the type.
+* **Type** has its own hue only for the **ex-dividend**: violet. Light: surface `#e9d5ff`, text `#3b0764` (11.0:1), outline `#7c3aed`
+  (5.7:1 on white), marker `#6d28d9` (7.1:1 on white, white letter 7.1:1). Dark: surface `#4a2a7a`, text `#f3e8ff` (9.4:1), outline and
+  marker `#c4b5fd` (9.7:1 on the `#0f172a` card, letter `#020617` 10.9:1). The violet is the row/chip surface (plus a 1 px inset outline,
+  replaced by the dashed outline when estimated), so an ex-dividend never looks like a payment of the same status. Payments, earnings,
+  splits and corporate actions keep the status surface and one neutral slate marker: another hue would collide with the three status hues.
+  Shape and letter (circle E, square P, diamond R, triangle S, hexagon C), the type in the second line and in the accessible name stay.
+
+A native `<ul>` colour key under the filters (`ColourKey`) states this: ex-dividend violet, then received green, confirmed blue and
+estimated yellow dashed. Rows and chips carry `data-type` and `data-status`. All text pairs are ≥ 4.5:1 and outlines/markers ≥ 3:1,
+asserted from the hex tokens in `calendarColours.test.ts`; `e2e/calendar-type-colour.spec.ts` checks at 320 and 1280 px that an
+ex-dividend and a payment of the same status differ in computed colour. The API enum values are unchanged.
 
 ## Dividend growth stats
 

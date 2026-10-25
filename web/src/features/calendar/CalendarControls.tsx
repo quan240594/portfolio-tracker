@@ -2,7 +2,7 @@ import { useId } from 'react';
 import { CALENDAR_EVENT_TYPES, CALENDAR_SCOPES, CALENDAR_STATUSES, calendarMonthOf, type CalendarEventType, type CalendarScope, type CalendarStatus } from '@portfolio/shared';
 import { formatMonthYear } from '../../lib/format';
 import { EVENT_META, SCOPE_LABELS, STATUS_LABELS, shiftMonth, type CalendarRange, type CalendarUiState, type CalendarView } from './calendarModel';
-import { STATUS_CHIP } from './calendarColours';
+import { KEY_SWATCH, STATUS_CHIP } from './calendarColours';
 import { EventMarker } from './EventMarker';
 
 interface ToggleOption<T extends string> {
@@ -80,6 +80,35 @@ export function StatusFilter({ value, onChange }: Readonly<{ value: readonly Cal
         })}
       </div>
     </fieldset>
+  );
+}
+
+const KEY_ITEMS: readonly { id: string; label: string; swatch: string; marker?: CalendarEventType }[] = [
+  { id: 'ex-dividend', label: 'Ex-dividend: violet', swatch: KEY_SWATCH.exDividend, marker: 'EX_DIVIDEND' },
+  { id: 'paid', label: 'Received: green', swatch: KEY_SWATCH.PAID },
+  { id: 'confirmed', label: 'Confirmed: blue', swatch: KEY_SWATCH.CONFIRMED },
+  { id: 'estimated', label: 'Estimated: yellow, dashed', swatch: KEY_SWATCH.ESTIMATED },
+];
+
+/** What the colours of the rows mean: the ex-dividend has its own hue, every other event shows its status. The words repeat what the swatches show. */
+export function ColourKey() {
+  const id = useId();
+  return (
+    <div className="basis-full text-xs">
+      <p id={id} className="muted mb-1 font-medium">
+        Colours: ex-dividend by type, everything else by status
+      </p>
+      <ul aria-labelledby={id} className="flex flex-wrap gap-x-4 gap-y-1">
+        {KEY_ITEMS.map((item) => (
+          <li key={item.id} className="inline-flex items-center gap-1.5">
+            <span aria-hidden="true" className={`inline-flex h-5 min-w-5 items-center justify-center rounded border-l-4 ${item.swatch}`}>
+              {item.marker && <EventMarker type={item.marker} className="h-3 w-3" />}
+            </span>
+            <span>{item.label}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -188,6 +217,7 @@ export function FilterBar({ state, onChange, onDownload, downloading, downloadDi
         </svg>
         {downloading ? 'Preparing…' : 'Download .ics'}
       </button>
+      <ColourKey />
     </div>
   );
 }

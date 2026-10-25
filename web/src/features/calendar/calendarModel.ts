@@ -13,6 +13,7 @@ import {
   type CalendarScope,
   type CalendarStatus,
 } from '@portfolio/shared';
+import { EX_DIVIDEND_MARKER_FILL } from './calendarColours';
 
 export type CalendarView = 'calendar' | 'list';
 export type CalendarRange = 'month' | 'year';
@@ -40,7 +41,7 @@ export interface EventMeta {
   fill: string;
 }
 
-/** One neutral marker colour: the type is told by shape and letter, the colours are reserved for the status. */
+/** Neutral marker colour of every type but the ex-dividend: shape and letter tell the type, the three status hues stay free for the status. */
 const MARKER_FILL = 'fill-slate-700 dark:fill-slate-200';
 
 export const EVENT_META: Readonly<Record<CalendarEventType, EventMeta>> = {
@@ -48,7 +49,7 @@ export const EVENT_META: Readonly<Record<CalendarEventType, EventMeta>> = {
     label: 'Ex-dividend',
     letter: 'E',
     shape: 'circle',
-    fill: MARKER_FILL,
+    fill: EX_DIVIDEND_MARKER_FILL,
   },
   DIVIDEND_PAY: {
     label: 'Dividend payment',
