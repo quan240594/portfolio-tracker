@@ -1,6 +1,7 @@
 import type { JobQueue } from '@portfolio/platform';
-import type { EarningsNotReady, EarningsRefreshResponse, EarningsStatusResponse, EarningsSymbolStatus } from '@portfolio/shared';
+import type { EarningsBackfillMarker, EarningsBackfillResponse, EarningsBackfillStatus, EarningsNotReady, EarningsRefreshResponse, EarningsStatusResponse, EarningsSymbolState, EarningsSymbolStatus } from '@portfolio/shared';
 import { EARNINGS_REFRESH_INTERVAL_MS } from '@portfolio/shared';
+import { armedMarker } from './backfill.js';
 import type { EarningsConfig } from './config.js';
 import type { EarningsRepository } from './repository.js';
 
@@ -28,6 +29,38 @@ export interface SymbolRef {
   eligible: boolean;
 }
 
+/** Releases of the plan of a symbol: how many are wanted, stored and given up on. */
+function releasesOf(state: EarningsSymbolState | undefined): Pick<EarningsSymbolStatus, 'releases'> {
+  if (state?.plan === undefined) return {};
+  const count = (status: string): number => state.plan!.filter((item) => item.status === status).length;
+  return { releases: { planned: count('todo') + count('stored') + count('failed'), stored: count('stored'), failed: count('failed') } };
+}
+
+function backfillStatus(marker: EarningsBackfillMarker | null, quarters: number, now: Date): EarningsBackfillStatus {
+  if (marker === null) return { status: 'not-started', quarters, total: 0, done: 0, stored: 0, failed: 0, planned: 0, companies: 0 };
+  return {
+    status: marker.status,
+    quarters: marker.quarters,
+    total: marker.total,
+    done: marker.done,
+    stored: marker.stored,
+    failed: marker.failed,
+    planned: marker.planned,
+    companies: marker.companies,
+    ...(marker.waitUntil === undefined || Date.parse(marker.waitUntil) <= now.getTime() ? {} : { waitUntil: marker.waitUntil }),
+    ...(marker.waitReason === undefined ? {} : { waitReason: marker.waitReason }),
+    ...(marker.completedAt === undefined ? {} : { completedAt: marker.completedAt }),
+    ...(marker.lastStepAt === undefined ? {} : { lastStepAt: marker.lastStepAt }),
+  };
+}
+
+/** The oldest last run of the eligible companies: every one of them was looked at since then. Absent while one was never looked at. */
+function fullPass(rows: readonly EarningsSymbolStatus[]): { lastFullPassAt?: string } {
+  const eligible = rows.filter((row) => row.eligible);
+  const times = eligible.flatMap((row) => (row.lastRun === undefined ? [] : [row.lastRun.at]));
+  return eligible.length > 0 && times.length === eligible.length ? { lastFullPassAt: times.toSorted((a, b) => a.localeCompare(b))[0] } : {};
+}
+
 /** What the API needs from the feature on a deployment that has it (`Deps.earnings` of the API). */
 export class EarningsService {
   constructor(private readonly deps: EarningsServiceDeps) {}
@@ -41,16 +74,18 @@ export class EarningsService {
 
   async status(symbols: readonly SymbolRef[]): Promise<EarningsStatusResponse> {
     const { repo, config, now } = this.deps;
-    const [block, neurons, states, latest] = await Promise.all([
+    const [block, neurons, states, latest, marker] = await Promise.all([
       repo.getSecBlock(),
       this.deps.neurons(),
       repo.getStates(symbols.map((entry) => entry.symbol)),
       Promise.all(symbols.map((entry) => repo.latest(entry.symbol, 1))),
+      repo.getBackfill(),
     ]);
     const missing = this.missing();
     const blockedUntil = block?.blockedUntil !== undefined && Date.parse(block.blockedUntil) > now().getTime() ? block.blockedUntil : undefined;
     const rows: EarningsSymbolStatus[] = symbols.map((entry, index) => {
       const state = states.get(entry.symbol);
+      const lastRun = entry.eligible ? state?.lastRun : { at: now().toISOString(), stage: 'not-eligible' as const, detail: 'no quarterly results (a fund, crypto or similar)' };
       return {
         symbol: entry.symbol,
         eligible: entry.eligible,
@@ -59,6 +94,8 @@ export class EarningsService {
         ...(state?.lastReason === undefined ? {} : { lastReason: state.lastReason }),
         ...(state?.retryAfter === undefined ? {} : { retryAfter: state.retryAfter }),
         ...(latest[index]![0] === undefined ? {} : { latestReportDate: latest[index]![0].reportDate }),
+        ...(lastRun === undefined ? {} : { lastRun }),
+        ...releasesOf(state),
       };
     });
     return {
@@ -68,8 +105,24 @@ export class EarningsService {
       estimatesConfigured: config.estimatesConfigured,
       ...(blockedUntil === undefined ? {} : { secBlockedUntil: blockedUntil }),
       neurons: { used: neurons.used, dailyCap: config.dailyNeurons, allowance: neurons.allowance, state: neurons.state, resetsAt: neurons.resetsAt },
+      backfill: backfillStatus(marker, config.backfillQuarters, now()),
+      ...fullPass(rows),
       symbols: rows,
     };
+  }
+
+  /** "Fetch all now": the owner re-arms the backfill (failed releases get another chance); at most once an hour. The work itself runs as a job. */
+  async backfill(): Promise<EarningsBackfillResponse> {
+    const { repo, queue, config } = this.deps;
+    if (this.missing().length > 0) return { accepted: false, reason: 'not-configured' };
+    const now = this.deps.now();
+    const marker = await repo.getBackfill();
+    const age = marker?.armedBy === 'manual' ? now.getTime() - Date.parse(marker.armedAt) : Number.POSITIVE_INFINITY;
+    if (age < EARNINGS_REFRESH_INTERVAL_MS) return { accepted: false, reason: 'rate-limited', retryAfterSeconds: Math.ceil((EARNINGS_REFRESH_INTERVAL_MS - age) / 1000) };
+    const { total = 0, done = 0, stored = 0, failed = 0, planned = 0, companies = 0 } = marker ?? {};
+    await repo.putBackfill({ ...armedMarker(config.backfillQuarters, 'manual', now), total, done, stored, failed, planned, companies });
+    await queue.enqueue({ job: 'backfillEarnings', payload: { trigger: 'manual' } });
+    return { accepted: true };
   }
 
   /** The owner asks for a re-check of one symbol: at most once an hour; the check itself runs as a job. */

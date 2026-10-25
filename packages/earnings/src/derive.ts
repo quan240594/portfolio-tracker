@@ -213,6 +213,28 @@ function kpisOf(verified: Verified, template: KpiTemplateId, previous: EarningsS
   });
 }
 
+/**
+ * The summary with its quarter-over-quarter figures and guidance directions recomputed against `previous` (an earlier stored summary). Used when
+ * the backfill stores the older quarter after the newer one. Idempotent: it starts by removing what an earlier call (or none) put there.
+ */
+export function withPrevious(summary: EarningsSummary, rawPrevious: EarningsSummary): EarningsSummary {
+  const previous = sameCurrency(rawPrevious, summary.reportingCurrency);
+  const bare = (metric: EarningsMetric): EarningsMetric => {
+    const { qoqPct: _pct, qoqPoints: _points, ...rest } = metric;
+    return rest;
+  };
+  const headline: Partial<Record<CoreMetricKey, EarningsMetric>> = {};
+  for (const [key, metric] of Object.entries(summary.headline) as [CoreMetricKey, EarningsMetric][]) headline[key] = withQuarter(bare(metric), previous?.headline[key]);
+  const kpis = summary.kpis.map((kpi) => (kpi.metric === undefined ? kpi : { ...kpi, metric: withQuarter(bare(kpi.metric), previous?.kpis.find((entry) => entry.key === kpi.key)?.metric) }));
+  const guidance = summary.guidance.map((entry) => {
+    const { direction: _direction, ...rest } = entry;
+    const direction = guidanceDirection(rest, previous);
+    return direction === undefined ? rest : { ...rest, direction };
+  });
+  const { previousReportDate: _previousReportDate, ...rest } = summary;
+  return { ...rest, headline, kpis, guidance, ...(previous === undefined ? {} : { previousReportDate: previous.reportDate }) };
+}
+
 /** Builds the stored summary of a release from its verified figures. Pure. */
 export function deriveSummary(input: DeriveInput): EarningsSummary {
   const { verified, template, previous: rawPrevious } = input;

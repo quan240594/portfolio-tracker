@@ -5,6 +5,7 @@ import {
   EARNINGS_KEEP_QUARTERS,
   earningsKeys,
   fromItem,
+  type EarningsBackfillMarker,
   type EarningsHeldCache,
   type EarningsSecBlock,
   type EarningsSummary,
@@ -78,5 +79,14 @@ export class EarningsRepository {
 
   async putHeld(cache: EarningsHeldCache): Promise<void> {
     await this.store.put({ ...earningsKeys.held, entityType: EARNINGS_ENTITY.held, ...dropUndefined(cache) });
+  }
+
+  async getBackfill(): Promise<EarningsBackfillMarker | null> {
+    const item = await this.store.get(earningsKeys.backfill, { consistent: true });
+    return item ? fromItem<EarningsBackfillMarker>(item) : null;
+  }
+
+  async putBackfill(marker: EarningsBackfillMarker): Promise<void> {
+    await this.store.put({ ...earningsKeys.backfill, entityType: EARNINGS_ENTITY.backfill, ...dropUndefined(marker) });
   }
 }

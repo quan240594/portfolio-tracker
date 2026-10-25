@@ -12,6 +12,10 @@ export interface FilingSpec {
   reportDate?: string;
   /** Extra form types on the same submissions list, newest first. */
   items?: string;
+  /** More documents of the filing (name to HTML), listed in its index next to the exhibit. */
+  files?: Record<string, string>;
+  /** Defaults to `primary.htm` (a cover page that is no results release). */
+  primaryDocument?: string;
 }
 
 /** A scripted SEC: the ticker table, submissions, filing indexes and documents of the fixture releases. No network, no timers. */
@@ -19,6 +23,12 @@ export class FakeSec {
   readonly requests: RecordedRequest[] = [];
   /** `{status}` answers every request with that status (403 and 429 are the SEC's "slow down"). */
   forceStatus: number | undefined;
+  /** Answers every request with the SEC's HTML "Request Rate Threshold Exceeded" page and status 200. */
+  rateLimitPage = false;
+  /** Answers requests whose URL contains the key with that status (`index.json` to 404, for example). */
+  readonly statusFor = new Map<string, number>();
+  /** The next request whose URL contains `needle` fails with `error` (once), like the host's subrequest limit does. */
+  readonly rejections: { needle: string; error: Error }[] = [];
   /** Replaces the body of a document by file name. */
   readonly documents = new Map<string, string>();
   private readonly filings: FilingSpec[];
@@ -41,10 +51,14 @@ export class FakeSec {
   handle(url: string, userAgent?: string, acceptEncoding?: string): PlainReply {
     this.requests.push({ url, userAgent, acceptEncoding });
     if (this.forceStatus !== undefined) return { status: this.forceStatus, body: 'blocked', headers: { 'retry-after': '120' } };
+    for (const [needle, status] of this.statusFor) if (url.includes(needle)) return { status, body: 'error', headers: {} };
+    if (this.rateLimitPage) return text('<html><head><title>SEC.gov | Request Rate Threshold Exceeded</title></head><body><h1>Your Request Originates from an Undeclared Automated Tool</h1><p>To allow for equitable access to all users, SEC reserves the right to limit requests originating from undeclared automated tools.</p></body></html>');
     return this.route(url);
   }
 
   readonly fetch = (url: string, init?: RequestInit): Promise<Response> => {
+    const rejection = this.rejections.findIndex((entry) => url.includes(entry.needle));
+    if (rejection !== -1) return Promise.reject(this.rejections.splice(rejection, 1)[0]!.error);
     const headers = new Headers(init?.headers);
     const reply = this.handle(url, headers.get('user-agent') ?? undefined, headers.get('accept-encoding') ?? undefined);
     return Promise.resolve(new Response(reply.body, { status: reply.status, headers: reply.headers }));
@@ -59,11 +73,14 @@ export class FakeSec {
     const [, cik, accession, file] = archive;
     const spec = this.filings.find((candidate) => Number(candidate.release.cik) === Number(cik) && candidate.release.accession.replaceAll('-', '') === accession);
     if (!spec) return notFound();
-    if (file === 'index.json') return json({ directory: { name: `/Archives/edgar/data/${cik}/${accession}`, item: [{ name: 'primary.htm', type: 'text.gif', size: '1000' }, { name: spec.release.exhibit, type: 'text.gif', size: '9000' }, { name: 'image.jpg', type: 'image.gif', size: '10' }] } });
+    const extra = Object.keys(spec.files ?? {});
+    const primary = spec.primaryDocument ?? 'primary.htm';
+    if (file === 'index.json') return json({ directory: { name: `/Archives/edgar/data/${cik}/${accession}`, item: [primary, spec.release.exhibit, ...extra, 'image.jpg'].map((name) => ({ name, type: 'text.gif', size: '1000' })) } });
     const name = decodeURIComponent(file!);
     if (this.documents.has(name)) return text(this.documents.get(name)!);
+    if (spec.files?.[name] !== undefined) return text(spec.files[name]);
     if (name === spec.release.exhibit) return text(spec.release.html);
-    if (name === 'primary.htm') return text('<html><body>Item 2.02 Results of Operations. See Exhibit 99.1.</body></html>');
+    if (name === primary) return text('<html><body>Item 2.02 Results of Operations. See Exhibit 99.1.</body></html>');
     return notFound();
   }
 
@@ -89,7 +106,7 @@ export class FakeSec {
           reportDate: column((spec) => spec.reportDate ?? spec.release.filingDate),
           form: column((spec) => spec.release.form),
           items: column((spec) => spec.items ?? (spec.release.form === '8-K' ? '2.02,9.01' : '')),
-          primaryDocument: column(() => 'primary.htm'),
+          primaryDocument: column((spec) => spec.primaryDocument ?? 'primary.htm'),
         },
       },
     });

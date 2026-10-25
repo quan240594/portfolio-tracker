@@ -117,7 +117,7 @@ describe('WorkersAiExtractor', () => {
     const allowance = await new WorkersAiExtractor({ ai: new FakeAi(new Error('daily free allocation used')), meter: new TestMeter() }).extract(input);
     expect(allowance).toMatchObject({ ok: false, reason: 'allowance', calls: 1, neurons: 0 });
     const broken = await new WorkersAiExtractor({ ai: new FakeAi(new Error('upstream exploded')), meter: new TestMeter() }).extract(input);
-    expect(broken).toMatchObject({ ok: false, reason: 'ai-error', calls: 1 });
+    expect(broken).toMatchObject({ ok: false, reason: 'ai-error', calls: 2, detail: 'upstream exploded' });
     const jsonMode = new FakeAi(new Error("JSON Mode couldn't be met"), GENERIC_RELEASE.extraction);
     expect(await new WorkersAiExtractor({ ai: jsonMode, meter: new TestMeter() }).extract(input)).toMatchObject({ ok: true, calls: 2 });
   });

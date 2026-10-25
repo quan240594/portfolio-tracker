@@ -1,58 +1,43 @@
 /**
- * The two jobs of the feature.
+ * The two live jobs of the feature.
  *
  * `watchEarnings` (cheap, scheduled): looks at the held symbols that may have just reported (see `selectCandidates`), makes at most one SEC
  * request per candidate and queues a `fetchEarningsSummary` for a new results release. `fetchEarningsSummary` reads one release with the
- * model, verifies it and stores the summary. Both are resumable and idempotent (deterministic keys), report every failure as a state of
- * the symbol with a back-off, and never loop: SEC refusals (403, 429) stop everything for a long while.
+ * model, verifies it and stores the summary. Both are resumable and idempotent (deterministic keys), report every outcome as the
+ * `lastRun` of the symbol (stage and reason, for the Earnings page), back off after failures, and never loop: SEC refusals (403, 429) stop
+ * everything for a long while. The first quarters of every holding are the backfill job's work (`backfill.ts`).
  */
-import { logger, type JobHandler, type JobPayloads, type JobQueue } from '@portfolio/platform';
-import { localDayAndHour, sequentially, type EarningsHeldCache, type EarningsHolding, type EarningsSecBlock, type EarningsSummary, type EarningsSymbolState } from '@portfolio/shared';
-import type { TextExtractor } from './ai.js';
-import type { EarningsConfig } from './config.js';
-import type { EstimateSource } from './estimates.js';
-import { processRelease } from './pipeline.js';
-import type { EarningsRepository } from './repository.js';
-import { SecBlockedError, SecError, isSubrequestError, resultsFilings, type SecClient, type SecFiling } from './sec.js';
+import { logger, type JobHandler, type JobPayloads } from '@portfolio/platform';
+import { localDayAndHour, sequentially, type EarningsHolding, type EarningsSymbolState } from '@portfolio/shared';
 import {
-  MAX_ATTEMPTS_PER_DAY,
-  MAX_FILING_AGE_DAYS,
-  selectCandidates,
-  type Candidate,
-} from './select.js';
+  activeBlock,
+  announce,
+  clearBlockHistory,
+  describeFailure,
+  failSymbol,
+  iso,
+  loadHeld,
+  nextAllowanceReset,
+  originFor,
+  recordBlock,
+  resolveCiks,
+  runOf,
+  type EarningsJobDeps,
+} from './common.js';
+import { processRelease, type ReleaseOutcome } from './pipeline.js';
+import { SecBlockedError, SecError, isSubrequestError, resultsFilings, type SecFiling } from './sec.js';
+import { MAX_ATTEMPTS_PER_DAY, MAX_FILING_AGE_DAYS, selectCandidates, type Candidate } from './select.js';
+import { storeSummary } from './store.js';
 import { addDays, utcDayOf } from './util.js';
 
 export type WatchPayload = JobPayloads['watchEarnings'];
 export type FetchPayload = JobPayloads['fetchEarningsSummary'];
 
-/** What the host builds from the user data: the held companies and their expected report dates. */
-export interface EarningsInputs {
-  build(today: string, now: Date): Promise<{ holdings: EarningsHolding[]; calendar: Record<string, string[]> }>;
-}
-
-export interface EarningsJobDeps {
-  repo: EarningsRepository;
-  inputs: EarningsInputs;
-  config: EarningsConfig;
-  /** Absent until `SEC_CONTACT` is set. */
-  sec?: SecClient;
-  /** Absent until the Workers AI binding exists. */
-  extractor?: TextExtractor;
-  estimates?: EstimateSource;
-  queue: JobQueue;
-  now: () => Date;
-}
-
-export const HELD_CACHE_HOURS = 6;
 /** Candidates looked at per step: one SEC request each (the step makes about a dozen subrequests). */
 export const CHECKS_PER_STEP = 10;
-const BACKOFF_BASE_MS = 30 * 60_000;
-const BACKOFF_MAX_MS = 24 * 3_600_000;
-const SEC_BLOCK_BASE_MS = 3_600_000;
 const UNREADABLE_RETRY_MS = 6 * 3_600_000;
 const MAX_UNREADABLE = 2;
 const MAX_SEEN = 12;
-const NEXT_DAY_MARGIN_MS = 5 * 60_000;
 
 export interface WatchResult {
   checked: number;
@@ -65,51 +50,6 @@ export interface FetchResult {
   outcome: 'stored' | 'exists' | 'not-results' | 'unreadable' | 'ai-allowance' | 'ai-error' | 'failed' | 'blocked' | 'attempts' | 'not-held' | 'not-configured' | 'sec-blocked';
 }
 
-const backoffMs = (failures: number): number => Math.min(BACKOFF_BASE_MS * 2 ** Math.max(0, failures - 1), BACKOFF_MAX_MS);
-const iso = (ms: number): string => new Date(ms).toISOString();
-
-/** The next 00:00 UTC (plus a margin), when the Workers AI allowance starts again. */
-export function nextAllowanceReset(now: Date): string {
-  return iso(Date.parse(`${utcDayOf(now)}T00:00:00Z`) + 86_400_000 + NEXT_DAY_MARGIN_MS);
-}
-
-/** The held companies and the calendar, from the cache (rebuilt every six hours: reading it costs one row). */
-export async function loadHeld(deps: Pick<EarningsJobDeps, 'repo' | 'inputs' | 'now'>, force = false): Promise<EarningsHeldCache> {
-  const now = deps.now();
-  const cached = await deps.repo.getHeld();
-  if (!force && cached !== null && now.getTime() - Date.parse(cached.builtAt) < HELD_CACHE_HOURS * 3_600_000) return cached;
-  const built = await deps.inputs.build(localDayAndHour(now).day, now);
-  const cache: EarningsHeldCache = { builtAt: now.toISOString(), ...built };
-  await deps.repo.putHeld(cache);
-  return cache;
-}
-
-/** Records a 403 or 429: nothing goes to the SEC until `blockedUntil` (an hour, doubling to a day, or what `Retry-After` asks). */
-async function recordBlock(repo: EarningsRepository, error: SecBlockedError, now: Date): Promise<void> {
-  const previous = await repo.getSecBlock();
-  const failures = (previous?.failures ?? 0) + 1;
-  const wait = Math.max(error.retryAfterMs ?? 0, Math.min(SEC_BLOCK_BASE_MS * 2 ** (failures - 1), BACKOFF_MAX_MS));
-  await repo.putSecBlock({ blockedUntil: iso(now.getTime() + wait), failures, lastStatus: error.status, updatedAt: now.toISOString() });
-}
-
-async function activeBlock(repo: EarningsRepository, now: Date): Promise<EarningsSecBlock | undefined> {
-  const block = await repo.getSecBlock();
-  return block?.blockedUntil !== undefined && Date.parse(block.blockedUntil) > now.getTime() ? block : undefined;
-}
-
-/** A successful SEC call ends the long back-off history. */
-async function clearBlockHistory(repo: EarningsRepository, now: Date): Promise<void> {
-  const block = await repo.getSecBlock();
-  if (block !== null && block.failures > 0) await repo.putSecBlock({ failures: 0, updatedAt: now.toISOString() });
-}
-
-async function failSymbol(deps: EarningsJobDeps, symbol: string, reason: string, extra: Partial<EarningsSymbolState> = {}): Promise<void> {
-  const now = deps.now();
-  const state = await deps.repo.getState(symbol);
-  const failures = (state?.failures ?? 0) + 1;
-  await deps.repo.patchState(symbol, { ...extra, lastCheckedAt: now.toISOString(), lastResult: 'failed', lastReason: reason, failures, retryAfter: iso(now.getTime() + backoffMs(failures)) }, now);
-}
-
 // --- watchEarnings --------------------------------------------------------------------------------------------------------
 
 interface WatchCursor {
@@ -117,44 +57,6 @@ interface WatchCursor {
   index: number;
   checked: number;
   queued: number;
-}
-
-/** CIKs of the candidates that have none: one request for the whole ticker table, then remembered per symbol (checked again after a month). */
-async function resolveCiks(deps: EarningsJobDeps, candidates: readonly Candidate[], states: ReadonlyMap<string, EarningsSymbolState>, holdings: ReadonlyMap<string, EarningsHolding>): Promise<void> {
-  const missing = candidates.filter((candidate) => states.get(candidate.symbol)?.cik === undefined);
-  if (missing.length === 0 || deps.sec === undefined) return;
-  const table = await deps.sec.tickers();
-  const now = deps.now();
-  await Promise.all(
-    missing.map(async ({ symbol }) => {
-      const hit = lookupTicker(table, symbol, holdings.get(symbol)?.name);
-      await deps.repo.patchState(symbol, hit === undefined ? { cikMissingAt: now.toISOString(), lastResult: 'not-in-sec', lastCheckedAt: now.toISOString() } : { cik: hit, cikMissingAt: undefined }, now);
-    }),
-  );
-}
-
-const SUFFIX_NOISE = new Set(['inc', 'corp', 'corporation', 'co', 'company', 'ltd', 'limited', 'plc', 'nv', 'sa', 'ag', 'se', 'holding', 'holdings', 'group', 'the', 'adr', 'class', 'a', 'b', 'ordinary', 'shares']);
-
-function significantWords(name: string): string[] {
-  return name
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((word) => word.length > 1 && !SUFFIX_NOISE.has(word));
-}
-
-/**
- * The CIK of a symbol in the SEC table. A US ticker matches itself; a symbol with an exchange suffix (`ASML.AS`) matches its US listing
- * (the ADR files the company's reports) only when the SEC's company title shares a significant word with the holding's name.
- */
-export function lookupTicker(table: ReadonlyMap<string, { cik: string; title: string }>, symbol: string, name: string | undefined): string | undefined {
-  const upper = symbol.toUpperCase();
-  const exact = table.get(upper) ?? table.get(upper.replaceAll('.', '-'));
-  if (exact !== undefined && !upper.includes('.')) return exact.cik;
-  if (!upper.includes('.') && !upper.includes('-')) return undefined;
-  const base = table.get(upper.split('.')[0]!);
-  if (base === undefined || name === undefined) return exact?.cik;
-  const wanted = new Set(significantWords(name));
-  return significantWords(base.title).some((word) => wanted.has(word)) ? base.cik : undefined;
 }
 
 /** The newest results filing that is new for the symbol: later than what is stored, not seen before, young enough. */
@@ -185,15 +87,17 @@ async function checkSymbol(context: CheckContext, candidate: Candidate): Promise
   const filing = newFiling(filings, state, latest, today);
   const base: Partial<EarningsSymbolState> = { lastCheckedAt: now.toISOString(), checksDay: utcDay, checks, failures: 0, retryAfter: undefined, lastReason: undefined };
   if (filing === undefined) {
-    await repo.patchState(candidate.symbol, { ...base, lastResult: 'no-filing', ...(candidate.mode === 'backfill' ? { backfillDone: true as const } : {}) }, now);
+    const run = latest === undefined ? runOf(now, 'no-release-found', `no results release in the last ${MAX_FILING_AGE_DAYS} days`) : runOf(now, 'ok', 'nothing newer than the stored release');
+    await repo.patchState(candidate.symbol, { ...base, lastResult: 'no-filing', lastRun: run }, now);
     return 'looked';
   }
-  const origin = candidate.mode === 'backfill' ? 'backfill' : 'live';
+  const origin = originFor(filing.reportDate, now, candidate.mode !== 'discovery' || latest !== undefined ? 'live' : 'by-age');
   await deps.queue.enqueue({
     job: 'fetchEarningsSummary',
     payload: { symbol: candidate.symbol, cik: state.cik, accession: filing.accession, form: filing.form as '8-K' | '6-K', filingDate: filing.reportDate, primaryDocument: filing.primaryDocument, origin },
   });
-  await repo.patchState(candidate.symbol, { ...base, lastResult: 'ok', pendingAccession: filing.accession, pendingAt: now.toISOString() }, now);
+  const run = runOf(now, 'select-filing', 'found a results release, reading it', { filing });
+  await repo.patchState(candidate.symbol, { ...base, lastResult: 'ok', lastRun: run, pendingAccession: filing.accession, pendingAt: now.toISOString() }, now);
   return 'queued';
 }
 
@@ -205,7 +109,7 @@ async function startWatch(deps: EarningsJobDeps, payload: WatchPayload): Promise
   const [states, latest] = await Promise.all([deps.repo.getStates(symbols), Promise.all(symbols.map((symbol) => deps.repo.latest(symbol, 1)))]);
   const latestReport = new Map(symbols.flatMap((symbol, index) => (latest[index]![0] === undefined ? [] : [[symbol, latest[index]![0].reportDate] as [string, string]])));
   const candidates = selectCandidates({ now, today: localDayAndHour(now).day, holdings: held.holdings, states, latestReport, calendar: held.calendar, manualSymbol: payload.trigger === 'manual' ? payload.symbol : undefined });
-  await resolveCiks(deps, candidates, states, holdings);
+  await resolveCiks(deps, candidates.map((candidate) => candidate.symbol), states, holdings);
   return { cursor: { candidates, index: 0, checked: 0, queued: 0 }, holdings };
 }
 
@@ -250,8 +154,8 @@ export function createWatchEarningsJob(getDeps: () => EarningsJobDeps): JobHandl
 async function failedCheck(deps: EarningsJobDeps, candidate: Candidate, error: unknown): Promise<'skipped'> {
   if (error instanceof SecBlockedError || isSubrequestError(error)) throw error;
   logger.warn('Earnings check failed', { error: error instanceof Error ? error.name : 'unknown' });
-  const reason = error instanceof SecError ? error.message : 'The check failed';
-  await failSymbol(deps, candidate.symbol, reason);
+  const detail = error instanceof SecError ? error.message : 'the check failed';
+  await failSymbol(deps, candidate.symbol, runOf(deps.now(), 'submissions', detail));
   return 'skipped';
 }
 
@@ -263,6 +167,8 @@ async function giveUp(deps: EarningsJobDeps, payload: FetchPayload, state: Earni
   const seen = [...(state?.seenAccessions ?? []), payload.accession].slice(-MAX_SEEN);
   await deps.repo.patchState(payload.symbol, { ...patch, seenAccessions: seen, pendingAccession: undefined, pendingAt: undefined, backfillDone: true }, deps.now());
 }
+
+const filingOf = (payload: FetchPayload) => ({ form: payload.form, reportDate: payload.filingDate, accession: payload.accession });
 
 /** `fetchEarningsSummary`: read, extract, verify and store one release. One step; the host's guard runs it only below 60 % of the budget. */
 export function createFetchEarningsSummaryJob(getDeps: () => EarningsJobDeps): JobHandler<FetchPayload, FetchResult> {
@@ -277,7 +183,7 @@ export function createFetchEarningsSummaryJob(getDeps: () => EarningsJobDeps): J
     if (attempts >= MAX_ATTEMPTS_PER_DAY) return done('attempts');
     const existing = await deps.repo.getSummary(payload.symbol, payload.filingDate);
     if (existing?.accession === payload.accession) {
-      await deps.repo.patchState(payload.symbol, { pendingAccession: undefined, pendingAt: undefined, backfillDone: true }, now);
+      await deps.repo.patchState(payload.symbol, { pendingAccession: undefined, pendingAt: undefined, backfillDone: true, lastRun: runOf(now, 'ok', 'already stored', { filing: filingOf(payload) }) }, now);
       return done('exists');
     }
     const holding = (await loadHeld(deps)).holdings.find((candidate) => candidate.symbol === payload.symbol);
@@ -295,57 +201,61 @@ export function createFetchEarningsSummaryJob(getDeps: () => EarningsJobDeps): J
     } catch (error) {
       if (error instanceof SecBlockedError) {
         await recordBlock(deps.repo, error, deps.now());
+        await deps.repo.patchState(payload.symbol, { lastRun: runOf(deps.now(), 'sec-blocked', `blocked by the SEC (HTTP ${error.status})`, { filing: filingOf(payload) }) }, deps.now());
         return done('blocked');
       }
       if (isSubrequestError(error)) return { done: false, next: 'retry', delayMs: 1000 };
       logger.warn('Reading an earnings release failed', { error: error instanceof Error ? error.name : 'unknown' });
-      await failSymbol(deps, payload.symbol, error instanceof SecError ? error.message : 'Reading the release failed');
+      await failSymbol(deps, payload.symbol, runOf(deps.now(), 'text', describeFailure(error), { filing: filingOf(payload) }));
       return done('failed');
     }
   };
 }
 
-type ReleaseOutcomeOf = Awaited<ReturnType<typeof processRelease>>;
-
-async function settle(deps: EarningsJobDeps, payload: FetchPayload, state: EarningsSymbolState | null, counted: Partial<EarningsSymbolState>, outcome: ReleaseOutcomeOf): Promise<{ done: true; result: FetchResult }> {
+async function settle(deps: EarningsJobDeps, payload: FetchPayload, state: EarningsSymbolState | null, counted: Partial<EarningsSymbolState>, outcome: ReleaseOutcome): Promise<{ done: true; result: FetchResult }> {
   const now = deps.now();
   const { repo } = deps;
+  const filing = filingOf(payload);
   const clear = { pendingAccession: undefined, pendingAt: undefined, failures: 0, retryAfter: undefined, lastReason: undefined };
   switch (outcome.status) {
     case 'stored': {
-      await storeSummary(deps, outcome.summary);
-      await repo.patchState(payload.symbol, { ...counted, ...clear, lastResult: 'ok', lastSuccessAt: now.toISOString(), lastAccession: payload.accession, backfillDone: true, unreadableCount: undefined }, now);
-      if (payload.origin === 'live') await announce(deps.queue);
+      await storeSummary(repo, outcome.summary);
+      const run = runOf(now, 'ok', 'summary stored', { filing, dropped: outcome.dropped, neurons: outcome.neurons });
+      await repo.patchState(payload.symbol, { ...counted, ...clear, lastResult: 'ok', lastRun: run, lastSuccessAt: now.toISOString(), lastAccession: payload.accession, backfillDone: true, unreadableCount: undefined }, now);
+      if (payload.origin === 'live') await announce(deps);
       return done('stored', true);
     }
     case 'not-results':
-      await giveUp(deps, payload, state, { ...counted, ...clear, lastResult: 'no-filing' });
+      await giveUp(deps, payload, state, { ...counted, ...clear, lastResult: 'no-filing', lastRun: runOf(now, outcome.stage, outcome.detail, { filing }) });
       return done('not-results');
     case 'unreadable': {
       const count = (state?.unreadableCount ?? 0) + 1;
-      if (count >= MAX_UNREADABLE) await giveUp(deps, payload, state, { ...counted, ...clear, lastResult: 'unreadable', lastReason: outcome.reason, unreadableCount: count });
-      else await repo.patchState(payload.symbol, { ...counted, ...clear, pendingAccession: undefined, lastResult: 'unreadable', lastReason: outcome.reason, unreadableCount: count, retryAfter: iso(now.getTime() + UNREADABLE_RETRY_MS) }, now);
+      const patch = { ...counted, ...clear, lastResult: 'unreadable' as const, lastReason: outcome.reason, lastRun: runOf(now, outcome.stage, outcome.detail, { filing, dropped: outcome.dropped, neurons: outcome.neurons }), unreadableCount: count };
+      if (count >= MAX_UNREADABLE) await giveUp(deps, payload, state, patch);
+      else await repo.patchState(payload.symbol, { ...patch, pendingAccession: undefined, retryAfter: iso(now.getTime() + UNREADABLE_RETRY_MS) }, now);
       return done('unreadable');
     }
     case 'ai-allowance':
-      await repo.patchState(payload.symbol, { pendingAccession: undefined, pendingAt: undefined, lastCheckedAt: now.toISOString(), lastResult: 'ai-allowance', lastReason: 'The Workers AI allowance of today is used up', retryAfter: nextAllowanceReset(now) }, now);
+      await repo.patchState(
+        payload.symbol,
+        {
+          pendingAccession: undefined,
+          pendingAt: undefined,
+          lastCheckedAt: now.toISOString(),
+          lastResult: 'ai-allowance',
+          lastReason: 'The Workers AI allowance of today is used up',
+          lastRun: runOf(now, 'budget', 'the daily AI allowance is used up, it resumes after 00:00 UTC', { filing, neurons: outcome.neurons }),
+          retryAfter: nextAllowanceReset(now),
+        },
+        now,
+      );
       return done('ai-allowance');
+    case 'sec-error':
+      await failSymbol(deps, payload.symbol, runOf(now, outcome.stage, outcome.detail, { filing }), { ...counted, pendingAccession: undefined, pendingAt: undefined });
+      return done('failed');
     default:
-      await failSymbol(deps, payload.symbol, 'The model call failed', { ...counted, pendingAccession: undefined, pendingAt: undefined });
+      await failSymbol(deps, payload.symbol, runOf(now, 'ai', `model error: ${outcome.detail}`, { filing, neurons: outcome.neurons }), { ...counted, pendingAccession: undefined, pendingAt: undefined });
       return done('ai-error');
   }
 }
 
-async function storeSummary(deps: EarningsJobDeps, summary: EarningsSummary): Promise<void> {
-  await deps.repo.putSummary(summary);
-  await deps.repo.prune(summary.symbol);
-}
-
-/** A stored live summary is announced by the notification job (quiet hours and the ledger decide; a failure to queue never loses the summary). */
-async function announce(queue: JobQueue): Promise<void> {
-  try {
-    await queue.enqueue({ job: 'notifyDividends', payload: { trigger: 'sync' } });
-  } catch {
-    logger.warn('Could not queue the notification job after an earnings summary');
-  }
-}

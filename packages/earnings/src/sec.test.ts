@@ -125,7 +125,8 @@ describe('SecClient', () => {
     await expect(client(sec(), { fetch: () => Promise.reject(new Error('socket')) }).tickers()).rejects.toThrow('the request failed');
     const html = new FakeSec([], {});
     html.documents.set('x', 'x');
-    await expect(client(html, { fetch: () => Promise.resolve(new Response('<html>', { status: 200 })) }).tickers()).rejects.toThrow('is not JSON');
+    await expect(client(html, { fetch: () => Promise.resolve(new Response('<html>', { status: 200 })) }).tickers()).rejects.toThrow('web page instead of JSON');
+    await expect(client(html, { fetch: () => Promise.resolve(new Response('not json', { status: 200 })) }).tickers()).rejects.toThrow('is not JSON');
     const limit = Object.assign(new Error('budget'), { name: 'SubrequestLimitError' });
     await expect(client(sec(), { fetch: () => Promise.reject(limit) }).tickers()).rejects.toBe(limit);
     expect(isSubrequestError(limit)).toBe(true);

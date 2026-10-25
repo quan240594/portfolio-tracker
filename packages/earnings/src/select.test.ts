@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EarningsHolding, EarningsSymbolState } from '@portfolio/shared';
-import { BACKFILL_PER_RUN, MAX_CHECKS_PER_DAY, selectCandidates, type SelectInput } from './select.js';
+import { MAX_CHECKS_PER_DAY, selectCandidates, type SelectInput } from './select.js';
 
 const NOW = new Date('2026-10-21T19:30:00.000Z');
 const TODAY = '2026-10-21';
@@ -37,19 +37,17 @@ describe('selectCandidates', () => {
     expect(select({ symbols: ['F'], calendar: { F: ['2026-10-01'] } })).toEqual([{ symbol: 'F', mode: 'discovery' }]);
   });
 
-  it('backfill mode: nothing stored and never attempted, at most three per run, after the others', () => {
+  it('has no backfill mode: the first quarters of every holding are the backfill job\'s work, a symbol without a stored release is only discovered', () => {
     const symbols = ['A', 'B', 'C', 'D', 'E'];
-    const found = selectCandidates({ now: NOW, today: TODAY, holdings: [...symbols, 'Z'].map(holding), states: new Map([state('E', { backfillDone: true })]), latestReport: new Map([['Z', '2026-07-22']]), calendar: {} });
-    expect(found.map((candidate) => candidate.mode)).toEqual(['discovery', 'discovery', 'backfill', 'backfill', 'backfill']);
-    expect(found.filter((candidate) => candidate.mode === 'backfill')).toHaveLength(BACKFILL_PER_RUN);
-    expect(found.slice(0, 2).map((candidate) => candidate.symbol)).toEqual(['E', 'Z']);
+    const found = selectCandidates({ now: NOW, today: TODAY, holdings: symbols.map(holding), states: new Map(), latestReport: new Map(), calendar: {} });
+    expect(found.map((candidate) => candidate.mode)).toEqual(['discovery', 'discovery', 'discovery', 'discovery', 'discovery']);
   });
 
   it('skips symbols that are backed off, pending, unknown to the SEC, or looked at too often today', () => {
     const calendar = { A: [TODAY], B: [TODAY], C: [TODAY], D: [TODAY], E: [TODAY], F: [TODAY] };
     const states = new Map([
       state('A', { retryAfter: '2026-10-21T20:00:00.000Z' }),
-      state('B', { pendingAt: '2026-10-21T15:00:00.000Z' }),
+      state('B', { pendingAt: '2026-10-21T19:00:00.000Z' }),
       state('C', { cikMissingAt: '2026-10-01T00:00:00.000Z' }),
       state('D', { checksDay: '2026-10-21', checks: MAX_CHECKS_PER_DAY }),
       state('E', { retryAfter: '2026-10-21T19:00:00.000Z', pendingAt: '2026-10-20T10:00:00.000Z', cikMissingAt: '2026-08-01T00:00:00.000Z', checksDay: '2026-10-20', checks: 99 }),

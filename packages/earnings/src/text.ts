@@ -4,7 +4,7 @@
  * capped; when the release is longer the headline and the first tables come first and the cash flow statement is kept.
  */
 
-export const MAX_RELEASE_CHARS = 60_000;
+export const MAX_RELEASE_CHARS = 48_000;
 
 const ENTITIES: Readonly<Record<string, string>> = {
   amp: '&',
@@ -35,7 +35,10 @@ const ENTITIES: Readonly<Record<string, string>> = {
 
 const BLOCK_TAGS: ReadonlySet<string> = new Set(['p', 'div', 'br', 'li', 'ul', 'ol', 'tr', 'table', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'section', 'article', 'header', 'footer', 'blockquote', 'pre', 'hr', 'body']);
 const CELL_TAGS: ReadonlySet<string> = new Set(['td', 'th']);
-const SKIPPED_TAGS: ReadonlySet<string> = new Set(['script', 'style', 'head', 'noscript', 'template']);
+const SKIPPED_TAGS: ReadonlySet<string> = new Set(['script', 'style', 'head', 'noscript', 'template', 'ix:header', 'ix:hidden', 'ix:references', 'ix:resources']);
+/** Elements that may be hidden with an inline `display:none` (inline XBRL puts its header in such a `div`). */
+const HIDEABLE_TAGS: ReadonlySet<string> = new Set(['div', 'span', 'table', 'section']);
+const HIDDEN_STYLE = /style\s*=\s*["'][^"']*display\s*:\s*none/i;
 
 function decodeEntity(body: string): string | undefined {
   if (body.startsWith('#')) {
@@ -71,7 +74,7 @@ export function decodeEntities(text: string): string {
 function tagName(tag: string): { name: string; closing: boolean } {
   const closing = tag.startsWith('/');
   let end = closing ? 1 : 0;
-  while (end < tag.length && /[a-zA-Z0-9]/.test(tag[end]!)) end += 1;
+  while (end < tag.length && /[a-zA-Z0-9:]/.test(tag[end]!)) end += 1;
   return { name: tag.slice(closing ? 1 : 0, end).toLowerCase(), closing };
 }
 
@@ -80,6 +83,22 @@ function skipElement(lower: string, name: string, from: number): number {
   const close = lower.indexOf(`</${name}`, from);
   if (close === -1) return lower.length;
   const end = lower.indexOf('>', close);
+  return end === -1 ? lower.length : end + 1;
+}
+
+/** Like `skipElement`, for an element that may hold elements of its own name (a hidden `div` with `div`s inside). */
+function skipNested(lower: string, name: string, from: number): number {
+  let depth = 1;
+  let index = from;
+  while (depth > 0) {
+    const open = lower.indexOf(`<${name}`, index);
+    const close = lower.indexOf(`</${name}`, index);
+    if (close === -1) return lower.length;
+    const nested = open !== -1 && open < close;
+    depth += nested ? 1 : -1;
+    index = (nested ? open : close) + name.length + 1;
+  }
+  const end = lower.indexOf('>', index);
   return end === -1 ? lower.length : end + 1;
 }
 
@@ -99,6 +118,7 @@ function readTag(html: string, lower: string, open: number): { text: string; nex
   if (close === -1) return undefined;
   const { name, closing } = tagName(html.slice(open + 1, close));
   if (!closing && SKIPPED_TAGS.has(name)) return { text: '', next: skipElement(lower, name, close + 1) };
+  if (!closing && HIDEABLE_TAGS.has(name) && HIDDEN_STYLE.test(html.slice(open, close))) return { text: '', next: skipNested(lower, name, close + 1) };
   return { text: tagText(name, closing), next: close + 1 };
 }
 
@@ -158,11 +178,28 @@ export function capText(text: string, max = MAX_RELEASE_CHARS): string {
   return [...lines.slice(0, head), ...tail].join('\n');
 }
 
+/** Lines longer than this are cut at a space: one paragraph that holds a whole release must not hide the rest of the text from the cap. */
+const MAX_LINE_CHARS = 1500;
+
+function splitLongLine(line: string): string[] {
+  const parts: string[] = [];
+  let rest = line;
+  while (rest.length > MAX_LINE_CHARS) {
+    const space = rest.lastIndexOf(' ', MAX_LINE_CHARS);
+    const at = space > MAX_LINE_CHARS / 2 ? space : MAX_LINE_CHARS;
+    parts.push(rest.slice(0, at).trimEnd());
+    rest = rest.slice(at).trimStart();
+  }
+  parts.push(rest);
+  return parts;
+}
+
 /** The plain text of an HTML (or plain text) press release, capped at `max` characters. */
 export function htmlToText(html: string, max = MAX_RELEASE_CHARS): string {
   const lines = decodeEntities(flatten(html))
     .split('\n')
     .map(cleanLine)
-    .filter((line) => line !== '' && !isPipeOnly(line));
+    .filter((line) => line !== '' && !isPipeOnly(line))
+    .flatMap((line) => splitLongLine(line));
   return capText(lines.join('\n'), max);
 }

@@ -1,19 +1,37 @@
 /**
  * Workers AI behind a small port. `AiLike` is the slice of the `AI` binding this package uses (`env.AI.run(model, input)`); tests pass a
- * fake. `WorkersAiExtractor` builds the prompt, asks for JSON that follows the extraction schema, retries once with a different prompt
- * on invalid JSON, and accounts the neurons of every call against the daily allowance: it never makes a call it cannot afford.
+ * fake. `WorkersAiExtractor` builds the prompt (which always shows the model the shape of the JSON it must answer with), asks for JSON that
+ * follows the extraction schema, retries once on a different footing when the first answer is unusable, and accounts the neurons of every
+ * call against the daily allowance: it never makes a call it cannot afford.
  *
- * Docs checked 2026-10-23: `env.AI.run(model, { messages, response_format: { type: 'json_schema', json_schema }, max_tokens })`, a result of
- * `{ response, usage? }`; JSON mode needs a model that supports it (the default `@cf/meta/llama-3.1-8b-instruct-fp8` accepts `response_format`);
- * Free plan: 10,000 neurons per day, resets at 00:00 UTC, a request over the allowance fails.
+ * Docs checked 2026-10-25 (developers.cloudflare.com/workers-ai): `env.AI.run(model, { messages, response_format: { type: 'json_schema',
+ * json_schema }, max_tokens })`, a result of `{ response, usage? }` where `response` is an object in JSON mode and a string otherwise.
+ * The JSON Mode page lists the models that support it: `@cf/meta/llama-3.1-8b-instruct-fp8` (our default, the cheapest) is NOT among them
+ * (its input schema accepts `response_format`, but nothing promises the answer follows it). So the prompt itself carries the shape, the
+ * reading of the answer is lenient (a string with fences, an object, numbers instead of strings, one bad field), and the second attempt
+ * asks without `response_format`. Context window of the default model: 32,000 tokens; the release text is capped well below that and is
+ * cut further when the platform still says it is too long. Free plan: 10,000 neurons per day, resets at 00:00 UTC.
  */
 import { KPI_TEMPLATES, sequentially, type KpiTemplateId } from '@portfolio/shared';
-import { extractionJsonSchema, extractionSchema, type Extraction } from './schema.js';
+import { extractionJsonSchema, parseExtraction, type Extraction } from './schema.js';
+import { capText } from './text.js';
 
 export const DEFAULT_AI_MODEL = '@cf/meta/llama-3.1-8b-instruct-fp8';
 export const MAX_OUTPUT_TOKENS = 1800;
-/** At most this many model calls for one release (the second only when the first was not valid JSON). */
+/** At most this many model calls for one release (the second only when the first was not usable). A context-length refusal costs no neurons and is answered with a shorter text. */
 export const MAX_CALLS_PER_RELEASE = 2;
+/** The models the Workers AI JSON Mode page lists (2026-10-25). */
+export const JSON_MODE_MODELS: ReadonlySet<string> = new Set([
+  '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+  '@cf/meta/llama-3-8b-instruct',
+  '@cf/meta/llama-3.1-8b-instruct',
+  '@hf/nousresearch/hermes-2-pro-mistral-7b',
+  '@hf/thebloke/deepseek-coder-6.7b-instruct-awq',
+  '@cf/deepseek-ai/deepseek-r1-distill-qwen-32b',
+]);
+/** The text is cut to this share when the platform says the input is too long. */
+const CONTEXT_RETRY_SHARE = 0.55;
+const MIN_CONTEXT_RETRY_CHARS = 8000;
 
 export interface AiMessage {
   role: 'system' | 'user';
@@ -24,7 +42,8 @@ export interface AiRunInput {
   messages: AiMessage[];
   max_tokens: number;
   temperature: number;
-  response_format: { type: 'json_schema'; json_schema: Record<string, unknown> };
+  /** Absent on the plain second attempt. */
+  response_format?: { type: 'json_schema'; json_schema: Record<string, unknown> };
 }
 
 export interface AiLike {
@@ -90,8 +109,20 @@ const RULES = [
   'freeCashFlow only when the release itself states free cash flow. dilutedShares is the diluted weighted-average share count.',
   'keyUpdates: up to 6 short bullets (12 words or fewer) copied or tightly paraphrased from the release headlines. quote: one short verbatim sentence of management.',
   'guidance: outlook ranges the release states (label, period, low, high or point).',
-  'Answer with one JSON object and nothing else.',
+  'Answer with one JSON object and nothing else: no explanation, no markdown fence.',
 ];
+
+const PAIR_SHAPE = '{"value":"<as printed>","yearAgo":"<as printed, same quarter a year earlier>"}';
+
+/** The shape of the answer, in the prompt itself: a model that ignores `response_format` still has to know the field names. */
+const SHAPE = [
+  'The JSON object has these fields (leave out every field the release does not state; every value is text exactly as printed):',
+  `{"period":"<fiscal quarter as the release names it>","currency":"<ISO code>","revenue":${PAIR_SHAPE},"epsAdjusted":${PAIR_SHAPE},"epsGaap":${PAIR_SHAPE},`,
+  `"operatingIncome":${PAIR_SHAPE},"operatingMargin":${PAIR_SHAPE},"netIncome":${PAIR_SHAPE},"operatingCashFlow":${PAIR_SHAPE},"capex":${PAIR_SHAPE},`,
+  `"freeCashFlow":${PAIR_SHAPE},"dilutedShares":${PAIR_SHAPE},"kpis":[{"key":"<template key>","value":"<as printed>","yearAgo":"<as printed>"}],`,
+  '"guidance":[{"label":"<what is guided>","period":"<period>","low":"<as printed>","high":"<as printed>","point":"<as printed>"}],',
+  '"segments":[{"name":"<segment>","value":"<as printed>","yearAgo":"<as printed>"}],"keyUpdates":["<short bullet>"],"quote":{"text":"<verbatim sentence>","speaker":"<name>"}}',
+].join('\n');
 
 function kpiHints(template: KpiTemplateId): string {
   const slots = KPI_TEMPLATES[template].slots;
@@ -102,7 +133,7 @@ function kpiHints(template: KpiTemplateId): string {
 export function buildMessages(input: ExtractInput, attempt: 1 | 2): AiMessage[] {
   const rules = attempt === 1 ? RULES : [RULES[0]!, RULES[1]!, RULES[2]!, RULES[4]!, 'Return only the fields you are sure about, as one valid JSON object.'];
   return [
-    { role: 'system', content: rules.join('\n') },
+    { role: 'system', content: `${rules.join('\n')}\n${SHAPE}` },
     { role: 'user', content: `Company: ${input.company}\n${kpiHints(input.template)}\n\n<release>\n${input.text}\n</release>` },
   ];
 }
@@ -129,22 +160,43 @@ export function responseJson(result: unknown): unknown {
   }
 }
 
-/** `allowance`: the platform refused for the daily neurons; `no-json`: JSON mode could not be met (worth one more try); `ai-error`: anything else. */
-export function classifyAiError(error: unknown): 'allowance' | 'no-json' | 'ai-error' {
+/** `allowance`: the platform refused for the daily neurons; `context`: the input is too long for the model; `no-json`: JSON mode could not be met (worth one more try); `ai-error`: anything else. */
+export function classifyAiError(error: unknown): 'allowance' | 'context' | 'no-json' | 'ai-error' {
   const message = error instanceof Error ? error.message : '';
   if (/daily free allocation|neurons|quota|allowance/i.test(message)) return 'allowance';
+  if (/context (?:length|window)|too long|too many tokens|maximum (?:context|input)|token limit|exceeds? the (?:max|limit)/i.test(message)) return 'context';
   if (/json mode|valid json/i.test(message)) return 'no-json';
   return 'ai-error';
 }
 
-type CallResult = { ok: true; json: unknown; neurons: number } | { ok: false; detail: 'allowance' | 'no-json' | 'ai-error'; neurons: number };
-type RunVerdict = { kind: 'done'; extraction: Extraction } | { kind: 'stop'; reason: 'ai-error' | 'allowance' } | { kind: 'retry'; detail: string };
+/** A short, harmless description of a platform error for the status page: no URLs, no control characters, at most 100 characters. */
+export function describeAiError(error: unknown): string {
+  const message = error instanceof Error ? error.message : 'unknown error';
+  return message
+    .replaceAll(/https?:\/\/\S+/gi, '')
+    .replaceAll(/[^\x20-\x7e]/g, ' ')
+    .replaceAll(/\s+/g, ' ')
+    .trim()
+    .slice(0, 100);
+}
 
-/** What one call means for the loop: finished, impossible to retry (platform error or allowance), or worth a second attempt. */
-function judgeRun(run: CallResult): RunVerdict {
-  if (!run.ok) return run.detail === 'ai-error' || run.detail === 'allowance' ? { kind: 'stop', reason: run.detail } : { kind: 'retry', detail: run.detail };
-  const parsed = extractionSchema.safeParse(run.json);
-  return parsed.success ? { kind: 'done', extraction: parsed.data as Extraction } : { kind: 'retry', detail: 'schema' };
+type FailureKind = 'allowance' | 'context' | 'no-json' | 'ai-error';
+type CallResult = { ok: true; json: unknown; neurons: number } | { ok: false; kind: FailureKind; message?: string; neurons: number };
+type RunVerdict = { kind: 'done'; extraction: Extraction } | { kind: 'stop'; reason: 'ai-error' | 'allowance'; message?: string } | { kind: 'retry'; detail: string; context?: true };
+
+/**
+ * What one call means for the loop: finished, impossible to retry (platform error or allowance), or worth another attempt. A platform
+ * error on the attempt that asked for JSON mode is worth the plain attempt too: the model may not support `response_format`.
+ */
+function judgeRun(run: CallResult, jsonModeAsked: boolean): RunVerdict {
+  if (!run.ok) {
+    if (run.kind === 'allowance' || (run.kind === 'ai-error' && !jsonModeAsked)) return { kind: 'stop', reason: run.kind, ...(run.message === undefined ? {} : { message: run.message }) };
+    if (run.kind === 'context') return { kind: 'retry', detail: 'context', context: true };
+    return { kind: 'retry', detail: run.kind === 'ai-error' ? `ai-error: ${run.message ?? ''}`.trim() : run.kind };
+  }
+  const parsed = parseExtraction(run.json);
+  if (parsed !== undefined) return { kind: 'done', extraction: parsed.extraction };
+  return { kind: 'retry', detail: run.json === undefined ? 'no-json' : 'schema' };
 }
 
 export interface ExtractorOptions {
@@ -152,6 +204,8 @@ export interface ExtractorOptions {
   meter: NeuronMeter;
   model?: string;
 }
+
+type AttemptResult = { kind: 'allowance' } | (RunVerdict & { neurons: number; calls: number });
 
 /** Calls Workers AI for one release: at most two calls, each only when its estimated neurons fit the remaining allowance. */
 export class WorkersAiExtractor implements TextExtractor {
@@ -173,39 +227,51 @@ export class WorkersAiExtractor implements TextExtractor {
     // One attempt after the other on purpose: the second only happens after the first failed, and only while the allowance still covers it.
     for await (const attempt of sequentially([1, 2] as const, (number) => this.#attempt(input, number))) {
       if (attempt.kind === 'allowance') return failure('allowance');
-      calls += 1;
+      calls += attempt.calls;
       neurons += attempt.neurons;
       if (attempt.kind === 'done') return { ok: true, extraction: attempt.extraction, model: this.#model, neurons, calls };
-      if (attempt.kind === 'stop') return { ok: false, reason: attempt.reason, model: this.#model, neurons, calls };
+      if (attempt.kind === 'stop') {
+        if (attempt.message !== undefined) detail = attempt.message;
+        return { ok: false, reason: attempt.reason, model: this.#model, neurons, calls, ...(detail === undefined ? {} : { detail }) };
+      }
       detail = attempt.detail;
     }
     return failure('invalid-json');
   }
 
-  /** One model call, unless its estimated neurons no longer fit the allowance. */
-  async #attempt(input: ExtractInput, attempt: 1 | 2): Promise<{ kind: 'allowance' } | (RunVerdict & { neurons: number })> {
-    const messages = buildMessages(input, attempt);
-    const estimate = neuronsFor(this.#model, estimateTokens(messages.map((message) => message.content).join('\n')), MAX_OUTPUT_TOKENS);
-    if ((await this.#meter.remaining()) < estimate) return { kind: 'allowance' };
-    const run = await this.#call(messages, input.template, estimate);
-    return { ...judgeRun(run), neurons: run.neurons };
+  /** One attempt: a model call, repeated once on a shorter text when the platform says the input is too long. */
+  async #attempt(input: ExtractInput, attempt: 1 | 2): Promise<AttemptResult> {
+    const first = await this.#call(input, attempt, input.text);
+    if (first.kind !== 'retry' || first.context !== true || input.text.length <= MIN_CONTEXT_RETRY_CHARS) return first;
+    const shorter = await this.#call(input, attempt, capText(input.text, Math.max(MIN_CONTEXT_RETRY_CHARS, Math.floor(input.text.length * CONTEXT_RETRY_SHARE))));
+    return shorter.kind === 'allowance' ? first : { ...shorter, calls: first.calls + shorter.calls, neurons: first.neurons + shorter.neurons };
   }
 
-  async #call(messages: AiMessage[], template: KpiTemplateId, estimate: number): Promise<CallResult> {
+  /** One model call, unless its estimated neurons no longer fit the allowance. */
+  async #call(input: ExtractInput, attempt: 1 | 2, text: string): Promise<AttemptResult> {
+    const messages = buildMessages({ ...input, text }, attempt);
+    const estimate = neuronsFor(this.#model, estimateTokens(messages.map((message) => message.content).join('\n')), MAX_OUTPUT_TOKENS);
+    if ((await this.#meter.remaining()) < estimate) return { kind: 'allowance' };
+    const jsonModeAsked = attempt === 1;
+    const run = await this.#run(messages, input.template, estimate, jsonModeAsked);
+    return { ...judgeRun(run, jsonModeAsked), neurons: run.neurons, calls: 1 };
+  }
+
+  async #run(messages: AiMessage[], template: KpiTemplateId, estimate: number, jsonMode: boolean): Promise<CallResult> {
     try {
       const result = await this.#ai.run(this.#model, {
         messages,
         max_tokens: MAX_OUTPUT_TOKENS,
         temperature: 0,
-        response_format: { type: 'json_schema', json_schema: extractionJsonSchema(template) },
+        ...(jsonMode ? { response_format: { type: 'json_schema' as const, json_schema: extractionJsonSchema(template) } } : {}),
       });
       const usage = usageOf(result);
       const neurons = usage === undefined ? estimate : neuronsFor(this.#model, usage.prompt, usage.completion);
       await this.#meter.spend(neurons);
       const json = responseJson(result);
-      return json === undefined ? { ok: false, detail: 'no-json', neurons } : { ok: true, json, neurons };
+      return json === undefined ? { ok: false, kind: 'no-json', neurons } : { ok: true, json, neurons };
     } catch (error) {
-      return { ok: false, detail: classifyAiError(error), neurons: 0 };
+      return { ok: false, kind: classifyAiError(error), message: describeAiError(error), neurons: 0 };
     }
   }
 }
