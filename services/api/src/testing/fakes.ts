@@ -227,6 +227,7 @@ export function fakeNotifyDeps(options: { configured?: boolean; result?: PushRes
 export function fakeEarningsDeps(options: { configured?: boolean; refusal?: 'rate-limited' | 'not-configured' } = {}) {
   const { configured = true, refusal } = options;
   const refreshed: { symbol: string; eligible: boolean }[] = [];
+  const backfilled: number[] = [];
   const earnings: EarningsDeps = {
     status: (symbols) =>
       Promise.resolve({
@@ -244,6 +245,12 @@ export function fakeEarningsDeps(options: { configured?: boolean; refusal?: 'rat
       if (refusal === 'not-configured') return Promise.resolve({ accepted: false, reason: 'not-configured' });
       return Promise.resolve({ accepted: true });
     },
+    backfill: () => {
+      backfilled.push(backfilled.length);
+      if (refusal === 'rate-limited') return Promise.resolve({ accepted: false, reason: 'rate-limited', retryAfterSeconds: 1800 });
+      if (refusal === 'not-configured') return Promise.resolve({ accepted: false, reason: 'not-configured' });
+      return Promise.resolve({ accepted: true });
+    },
   };
-  return { earnings, refreshed };
+  return { earnings, refreshed, backfilled };
 }

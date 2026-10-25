@@ -46,8 +46,30 @@ describe('createEarningsInputs', () => {
     expect(built.holdings).toEqual([
       { symbol: 'JPM', name: 'JPM Inc', template: 'bank', currency: 'USD' },
       { symbol: 'LMFG', name: 'LMFG Inc', template: 'saas', currency: 'USD' },
+      { symbol: 'NOPROFILE', name: 'NOPROFILE', template: 'generic' },
     ]);
     expect(built.calendar).toEqual({ JPM: ['2027-02-15'], LMFG: ['2026-10-21'] });
+  });
+
+  it('applies the owner\'s classification: an override makes a holding a stock (or a fund), with its name, and the ISIN of the profile is passed on', async () => {
+    const store = new MemoryItemStore();
+    await registerUser(store, 'github-1', 'x');
+    await store.batchWrite(['FOO.DE', 'ETFX.DE', 'M4I.DE', 'ASML.AS'].map((symbol) => ({ type: 'put' as const, item: transactionItem(tx('github-1', symbol)) })));
+    const profile = (symbol: string, extra: Record<string, unknown>) => ({ ...keys.profile(symbol), entityType: 'PROFILE', symbol, currency: 'EUR', ...extra });
+    const override = (symbol: string, extra: Record<string, unknown>) => ({ ...classificationKeys.override('github-1', symbol), entityType: 'CLASSIFICATION', userId: 'github-1', symbol, createdAt: 'x', updatedAt: 'x', ...extra });
+    await store.batchWrite([
+      { type: 'put', item: profile('FOO.DE', { name: 'FOO.DE', assetClass: 'OTHER' }) },
+      { type: 'put', item: override('FOO.DE', { name: 'Salesforce', assetClass: 'STOCK' }) },
+      { type: 'put', item: profile('ETFX.DE', { name: 'Some Company', assetClass: 'STOCK' }) },
+      { type: 'put', item: override('ETFX.DE', { assetClass: 'ETF' }) },
+      { type: 'put', item: profile('ASML.AS', { name: 'ASML Holding', assetClass: 'STOCK', isin: 'NL0010273215' }) },
+    ]);
+    const built = await createEarningsInputs(store).build(DAY, NOW);
+    expect(built.holdings).toEqual([
+      { symbol: 'ASML.AS', name: 'ASML Holding', template: 'generic', currency: 'EUR', isin: 'NL0010273215' },
+      { symbol: 'FOO.DE', name: 'Salesforce', template: 'saas', currency: 'EUR' },
+      { symbol: 'M4I.DE', name: 'M4I.DE', template: 'generic' },
+    ]);
   });
 
   it('is empty without holdings and reads no calendar then', async () => {

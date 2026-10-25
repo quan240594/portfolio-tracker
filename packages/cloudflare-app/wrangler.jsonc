@@ -18,7 +18,7 @@
 // is billed without a paid plan) and the variable SEC_CONTACT, the complete User-Agent every request to the SEC declares, for example
 // "PortfolioTracker/1.0 (personal use; you@example.com)". It is passed at deploy time like ORIGIN (`SEC_CONTACT='...' pnpm run deploy:app`) and never committed;
 // without it the feature reports "not configured" and sends nothing. Optional: EARNINGS_AI_MODEL (default @cf/meta/llama-3.1-8b-instruct-fp8),
-// EARNINGS_AI_DAILY_NEURONS (default 6000, at most 8000) and the existing secret ALPHAVANTAGE_API_KEY (EPS estimates).
+// EARNINGS_AI_DAILY_NEURONS (default 6000, at most 8000), EARNINGS_BACKFILL_QUARTERS (releases read per holding, default 4, at most 8) and the existing secret ALPHAVANTAGE_API_KEY (EPS estimates).
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "portfolio-tracker",

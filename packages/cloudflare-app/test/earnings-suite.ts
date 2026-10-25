@@ -1,7 +1,7 @@
 import { METRIC_LIMITS } from '@portfolio/platform';
 import { createTestSubscriber } from '@portfolio/platform/testing';
 import { GENERIC_RELEASE, REIT_RELEASE, type FixtureRelease } from '@portfolio/earnings/testing';
-import { usageSnapshotSchema, type EarningsSummary } from '@portfolio/shared';
+import { usageSnapshotSchema, type EarningsStatusResponse, type EarningsSummary } from '@portfolio/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Browser, type Stack } from './browser.js';
 import type { EarningsStartOptions, StartStack } from './suite.js';
@@ -102,6 +102,7 @@ export function defineEarningsSuite(label: string, start: StartStack): void {
       const { stack, call } = await ownerOf({ releases: [release] });
       await hold(stack, call, release);
       expect(await stack.schedules()).not.toContain('earnings-watch');
+      expect(await stack.schedules()).not.toContain('earnings-backfill');
       await stack.enqueue('watchEarnings', { trigger: 'scheduled' });
       await stack.drain(settle);
       expect(stack.sec.requests).toEqual([]);
@@ -116,7 +117,7 @@ export function defineEarningsSuite(label: string, start: StartStack): void {
     it('keeps the earnings watch schedules when configured, and an ETF has no earnings to look for', async () => {
       const release = dated(GENERIC_RELEASE);
       const { stack, call } = await ownerOf({ releases: [release], contact: CONTACT, ai: true });
-      expect(await stack.schedules()).toEqual(expect.arrayContaining(['earnings-watch', 'earnings-watch-morning']));
+      expect(await stack.schedules()).toEqual(expect.arrayContaining(['earnings-watch', 'earnings-watch-morning', 'earnings-backfill']));
       const portfolio = (await call('POST', '/portfolios', { name: `Fund ${crypto.randomUUID().slice(0, 8)}` })).body.portfolioId as string;
       expect((await call('POST', '/transactions', { portfolioId: portfolio, date: '2025-06-02', type: 'BUY', symbol: 'VWRL.AS', quantity: 1, price: 100, currency: 'EUR' })).status).toBe(201);
       await stack.seed([{ PK: 'TICKER#VWRL.AS', SK: 'PROFILE', entityType: 'PROFILE', symbol: 'VWRL.AS', name: 'World Fund', assetClass: 'ETF', currency: 'EUR', profileSource: 'provider' }]);
@@ -125,6 +126,40 @@ export function defineEarningsSuite(label: string, start: StartStack): void {
       expect(stack.sec.requests).toEqual([]);
       const refresh = await call('POST', '/earnings/VWRL.AS/refresh');
       expect([refresh.status, refresh.body.error.code]).toEqual([422, 'NOT_ELIGIBLE']);
+    });
+
+    it('backfills the latest release of every holding silently, says what it checked, and "Fetch all now" is rate limited', async () => {
+      const older = (release: FixtureRelease): FixtureRelease => ({ ...release, filingDate: '2025-12-10' });
+      const releases = [older(GENERIC_RELEASE), older(REIT_RELEASE)];
+      const { stack, call } = await ownerOf({ releases, contact: CONTACT, ai: true });
+      for (const release of releases) await hold(stack, call, release);
+      const device = await createTestSubscriber(`https://fcm.googleapis.com/fcm/send/backfill-${crypto.randomUUID()}`);
+      expect((await call('POST', '/notifications/subscriptions', { ...device.subscription, label: 'Test phone' })).status).toBe(201);
+
+      await stack.enqueue('backfillEarnings', { trigger: 'scheduled' });
+      await stack.drain(settle);
+      expect(await stack.failedJobs()).toEqual([]);
+
+      const list = await call('GET', '/earnings');
+      expect(list.body.symbols).toEqual(['HSRT', 'LMFG']);
+      expect((list.body.summaries as EarningsSummary[]).map((summary) => [summary.symbol, summary.reportDate, summary.origin]).toSorted()).toEqual([['HSRT', '2025-12-10', 'backfill'], ['LMFG', '2025-12-10', 'backfill']]);
+      const status = (await call('GET', '/earnings/status')).body as EarningsStatusResponse;
+      expect(status.backfill).toMatchObject({ status: 'complete', quarters: 4, total: 2, done: 2, stored: 2, failed: 0 });
+      expect(status.symbols.map((entry) => [entry.symbol, entry.lastRun?.stage, entry.lastRun?.filing?.date])).toEqual([['HSRT', 'ok', '2025-12-10'], ['LMFG', 'ok', '2025-12-10']]);
+      expect(status.lastFullPassAt).toBeDefined();
+      expect(stack.push.to(device.subscription.endpoint)).toHaveLength(0);
+
+      const requests = stack.sec.requests.length;
+      await stack.enqueue('backfillEarnings', { trigger: 'scheduled' });
+      await stack.drain(settle);
+      expect(stack.sec.requests).toHaveLength(requests);
+
+      const all = await call('POST', '/earnings/backfill');
+      expect([all.status, all.body]).toEqual([202, { accepted: true }]);
+      await stack.drain(settle);
+      expect(await stack.failedJobs()).toEqual([]);
+      const again = await call('POST', '/earnings/backfill');
+      expect([again.status, again.body.error.code]).toEqual([429, 'RATE_LIMITED']);
     });
 
     it('queues an owner-triggered re-check once an hour per symbol', async () => {

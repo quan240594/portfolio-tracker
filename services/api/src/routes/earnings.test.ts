@@ -20,7 +20,7 @@ function setup(options: Parameters<typeof fakeEarningsDeps>[0] | 'none' = {}) {
     ctx.repo.earningsSummaries.push(made);
     return made;
   };
-  return { ...ctx, call, hold, summary, refreshed: earnings?.refreshed ?? [] };
+  return { ...ctx, call, hold, summary, refreshed: earnings?.refreshed ?? [], backfilled: earnings?.backfilled ?? [] };
 }
 
 describe('on a deployment without the feature (AWS)', () => {
@@ -28,7 +28,7 @@ describe('on a deployment without the feature (AWS)', () => {
     const { call } = setup('none');
     expect((await call('GET', '/earnings')).body).toEqual({ available: false, summaries: [], symbols: [] });
     expect((await call('GET', '/earnings/status')).body).toEqual({ available: false, configured: false, missing: [], estimatesConfigured: false, symbols: [] });
-    for (const [method, path] of [['GET', '/earnings/NWND/2026-10-21'], ['POST', '/earnings/NWND/refresh']] as const) {
+    for (const [method, path] of [['GET', '/earnings/NWND/2026-10-21'], ['POST', '/earnings/NWND/refresh'], ['POST', '/earnings/backfill']] as const) {
       const result = await call(method, path);
       expect([result.status, result.body.error.code]).toEqual([404, 'NOT_AVAILABLE']);
     }
@@ -99,6 +99,16 @@ describe('GET /earnings/status', () => {
     expect(body.symbols).toEqual([{ symbol: 'NWND', eligible: true }, { symbol: 'VWRL', eligible: false }]);
   });
 
+  it('an instrument whose class is not known counts unless its name reads like a fund', async () => {
+    const { call, hold, repo } = setup();
+    hold('FOO.DE');
+    repo.profiles['FOO.DE'] = { symbol: 'FOO.DE', name: 'Salesforce', assetClass: 'OTHER', currency: 'EUR' };
+    hold('VWRL');
+    repo.profiles.VWRL = { symbol: 'VWRL', name: 'Vanguard FTSE All-World UCITS ETF', assetClass: 'OTHER', currency: 'EUR' };
+    const { body } = (await call('GET', '/earnings/status')) as { body: EarningsStatusResponse };
+    expect(body.symbols).toEqual([{ symbol: 'FOO.DE', eligible: true }, { symbol: 'VWRL', eligible: false }]);
+  });
+
   it('says what is missing when the feature is not configured', async () => {
     const { call } = setup({ configured: false });
     expect((await call('GET', '/earnings/status')).body).toMatchObject({ available: true, configured: false, missing: ['sec-contact', 'ai-binding'] });
@@ -129,6 +139,22 @@ describe('POST /earnings/{symbol}/refresh', () => {
     const unconfigured = setup({ refusal: 'not-configured' });
     unconfigured.hold('NWND');
     const missing = await unconfigured.call('POST', '/earnings/NWND/refresh');
+    expect([missing.status, missing.body.error.code]).toEqual([503, 'NOT_CONFIGURED']);
+  });
+});
+
+describe('POST /earnings/backfill', () => {
+  it('accepts "Fetch all now"', async () => {
+    const { call, backfilled } = setup();
+    const result = await call('POST', '/earnings/backfill');
+    expect([result.status, result.body]).toEqual([202, { accepted: true }]);
+    expect(backfilled).toHaveLength(1);
+  });
+
+  it('is rate limited (once an hour) or not configured', async () => {
+    const limited = await setup({ refusal: 'rate-limited' }).call('POST', '/earnings/backfill');
+    expect([limited.status, limited.body.error.code, limited.body.error.details, limited.headers['retry-after']]).toEqual([429, 'RATE_LIMITED', { retryAfterSeconds: 1800 }, '1800']);
+    const missing = await setup({ refusal: 'not-configured' }).call('POST', '/earnings/backfill');
     expect([missing.status, missing.body.error.code]).toEqual([503, 'NOT_CONFIGURED']);
   });
 });
