@@ -4,6 +4,7 @@ import { ErrorState } from '../../components/ErrorState';
 import { PageHeader } from '../../components/Layout';
 import { LoadingRegion, Skeleton } from '../../components/Skeleton';
 import { PriceCoverageCard } from './PriceCoverageCard';
+import { ValuationReportCard } from './ValuationReportCard';
 import { usePriceCoverage, type PriceCoverageResult } from './usePriceCoverage';
 import { jobLine, formatDuration, formatInstant, retryLabel, RUN_STATUS_LABELS, statusOf, type RunStatus } from './runFormat';
 import { useAlarmDiagnostics } from './useAlarmDiagnostics';
@@ -172,6 +173,7 @@ function Loaded({ report, prices }: Readonly<{ report: AlarmDiagnosticsReport; p
   return (
     <div className="space-y-6">
       <CoverageSlot prices={prices} />
+      <ValuationReportCard />
       <Summary report={report} />
       <Runs runs={report.runs} />
       <Arms arms={report.arms} />
