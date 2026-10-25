@@ -2,7 +2,7 @@ import { addIsoDays, calendarMonthOf, type CalendarEvent } from '@portfolio/shar
 import { CompanyLogo } from '../../components/CompanyLogo';
 import { formatDate, formatDayOfMonth, formatMonthYear, formatWeekdayDate, formatWeekdayLong, formatWeekdayShort } from '../../lib/format';
 import { EVENT_META, eventAriaLabel, isDividend, isEstimated, monthGrid } from './calendarModel';
-import { chipClasses } from './calendarColours';
+import { eventClasses } from './calendarColours';
 import { EventMarker } from './EventMarker';
 import { expectedLabel } from './eventText';
 
@@ -28,8 +28,9 @@ function EventChip({ event, baseCurrency, onSelect }: Readonly<ChipProps>) {
       onClick={() => onSelect(event)}
       aria-label={eventAriaLabel(event, amount)}
       title={title}
-      className={`flex w-full min-w-0 items-center gap-1 rounded border-l-4 px-1 py-1.5 text-left sm:py-0.5 text-xs leading-tight hover:brightness-95 ${chipClasses(event.status)} ${italic}`}
+      className={`flex w-full min-w-0 items-center gap-1 rounded border-l-4 px-1 py-1.5 text-left sm:py-0.5 text-xs leading-tight hover:brightness-95 ${eventClasses(event.type, event.status)} ${italic}`}
       data-status={event.status}
+      data-type={event.type}
     >
       <CompanyLogo symbol={event.symbol} name={event.name} size={18} decorative badge={<EventMarker type={event.type} className="h-2.5 w-2.5" />} />
       <span className="truncate font-semibold">{event.symbol}</span>

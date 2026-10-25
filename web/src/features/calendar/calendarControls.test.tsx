@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import type { CalendarMonth, CalendarSummary } from '@portfolio/shared';
 import { ThemeProvider } from '../../theme/ThemeProvider';
 import { renderWithProviders, sp } from '../../test/utils';
-import { FilterBar, MonthNavigator, ScopeSelect, StatusFilter, ToggleGroup, TypeFilter, ViewToolbar } from './CalendarControls';
+import { ColourKey, FilterBar, MonthNavigator, ScopeSelect, StatusFilter, ToggleGroup, TypeFilter, ViewToolbar } from './CalendarControls';
 import { CalendarKpis, CoverageNotes, IncomeChart, IncomeChartCard } from './CalendarOverview';
 import { IncomeTooltip } from './IncomeTooltip';
 import { chipClasses, incomeColours } from './calendarColours';
@@ -235,6 +235,23 @@ describe('CalendarOverview', () => {
     expect(incomeColours('light').estimated.fill).toBe('#fde68a');
     expect(incomeColours('dark').paid.stroke).toBe('#6ee7a0');
     expect(incomeColours('dark').estimated.stroke).toBe('#facc15');
+  });
+
+  it('explains the colours in a native list: ex-dividend violet with its marker, then the three statuses', () => {
+    renderWithProviders(<ColourKey />);
+    const list = screen.getByRole('list', { name: /ex-dividend by type, everything else by status/ });
+    expect(list.tagName).toBe('UL');
+    const items = within(list).getAllByRole('listitem');
+    expect(items.map((i) => i.textContent)).toEqual(['EEx-dividend: violet', 'Received: green', 'Confirmed: blue', 'Estimated: yellow, dashed']);
+    expect(items[0]?.querySelector('svg[data-shape="circle"]')).not.toBeNull();
+    expect(items[0]?.querySelector('[aria-hidden="true"]')?.className).toContain('bg-[#e9d5ff]');
+    expect(items[3]?.querySelector('[aria-hidden="true"]')?.className).toContain('border-dashed');
+    expect(list.closest('[role]')).toBeNull();
+  });
+
+  it('shows the colour key in the filter bar', () => {
+    renderWithProviders(<FilterBar state={initial()} onChange={vi.fn()} onDownload={vi.fn()} downloading={false} downloadDisabled={false} />);
+    expect(screen.getByRole('list', { name: /Colours/ })).toBeInTheDocument();
   });
 
   it('shows a skeleton until the income data is there', () => {

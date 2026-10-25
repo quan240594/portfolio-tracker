@@ -280,6 +280,49 @@ describe('DayDialog', () => {
   });
 });
 
+describe('colour of the event type', () => {
+  it('draws the ex-dividend marker violet and every other marker neutral', () => {
+    const { container } = renderWithProviders(
+      <>
+        <EventMarker type="EX_DIVIDEND" />
+        <EventMarker type="DIVIDEND_PAY" />
+      </>,
+    );
+    const [exDividend, payment] = [...container.querySelectorAll('svg path')];
+    expect(exDividend?.getAttribute('class')).toContain('fill-[#6d28d9]');
+    expect(payment?.getAttribute('class')).toContain('fill-slate-700');
+  });
+
+  it('tints an ex-dividend row violet and a payment row of the same status with the status colour, both keeping the status chip', () => {
+    renderWithProviders(<EventList events={[event(), event({ id: 'pay', type: 'DIVIDEND_PAY' })]} baseCurrency="EUR" onSelect={vi.fn()} today={TODAY} />);
+    const [exDividend, payment] = screen.getAllByRole('button');
+    expect(exDividend).toHaveAttribute('data-type', 'EX_DIVIDEND');
+    expect(exDividend?.className).toContain('bg-[#e9d5ff]');
+    expect(exDividend?.className).toContain('border-[#3b6fd4]');
+    expect(payment).toHaveAttribute('data-type', 'DIVIDEND_PAY');
+    expect(payment?.className).toContain('bg-[#dbeafe]');
+    expect(payment?.className).not.toContain('bg-[#e9d5ff]');
+    for (const row of [exDividend, payment]) expect(within(row as HTMLElement).getByText('Confirmed')).toBeInTheDocument();
+  });
+
+  it('keeps an estimated ex-dividend dashed with the yellow border and readable status text', () => {
+    renderWithProviders(<EventList events={[event({ status: 'ESTIMATED' })]} baseCurrency="EUR" onSelect={vi.fn()} today={TODAY} />);
+    const row = screen.getByRole('button');
+    expect(row.className).toContain('bg-[#e9d5ff]');
+    expect(row.className).toContain('border-dashed');
+    expect(row.className).toContain('border-[#a16207]');
+    expect(within(row).getByText('Estimated')).toHaveClass('border-dashed');
+  });
+
+  it('colours month chips by type too', () => {
+    renderWithProviders(
+      <MonthGrid month="2026-10" today={TODAY} events={[event(), event({ id: 'pay', type: 'DIVIDEND_PAY', symbol: 'PAY' })]} baseCurrency="EUR" onSelectEvent={vi.fn()} onSelectDay={vi.fn()} />,
+    );
+    expect(screen.getByRole('button', { name: /^AAPL, Ex-dividend/ }).className).toContain('bg-[#e9d5ff]');
+    expect(screen.getByRole('button', { name: /^PAY, Dividend payment/ }).className).toContain('bg-[#dbeafe]');
+  });
+});
+
 describe('company logos in the calendar', () => {
   afterEach(() => act(() => resetLogoSession()));
 
