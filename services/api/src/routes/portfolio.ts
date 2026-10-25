@@ -1,4 +1,5 @@
 import {
+  alignEodScale,
   allocationQuerySchema,
   applyManagement,
   buildPositions,
@@ -26,13 +27,14 @@ import {
 import { ok, validate, type RouteResult } from '../lib/http.js';
 import type { Deps, RouteContext } from '../deps.js';
 import { loadProfiles } from '../lib/profiles.js';
+import { loadQuotes } from '../lib/quotes.js';
 import { assertCategoryScope, categoryAllocation } from './categories.js';
 import { loadManagementScope } from './management-data.js';
 import { resolveScope } from './portfolios.js';
 
 export const MAX_HISTORY_POINTS = 400;
 /** Extra days of EOD loaded before the range start so carry-forward closes are seeded. */
-const EOD_LOOKBACK_DAYS = 14;
+export const EOD_LOOKBACK_DAYS = 14;
 /** Days of ECB fixings loaded before the first transaction, so a trade on a weekend/holiday still has a prior fixing. */
 export const FX_LOOKBACK_DAYS = 7;
 
@@ -142,10 +144,10 @@ export async function getHistory(ctx: RouteContext): Promise<RouteResult> {
   // The stored quotes (one batched read) value the last day exactly like the headline total does.
   const [series, quotes, management] = await Promise.all([
     Promise.all(symbols.map((s) => repo.getEod(s, eodFrom, today))),
-    symbols.length ? repo.getQuotes(symbols) : {},
+    loadQuotes(repo, symbols),
     loadManagementScope(ctx, scope),
   ]);
-  const eod: Record<string, EodPrice[]> = Object.fromEntries(symbols.map((s, i) => [s, series[i]!]));
+  const eod: Record<string, EodPrice[]> = Object.fromEntries(symbols.map((s, i) => [s, alignEodScale(series[i]!, quotes[s])]));
   const extra = managementHistoryExtra({ transactions, ...management });
   const valued = buildValueSeries({ transactions, eod, fx, from, to: today, fxHistory, extra, quotes });
   const valuedAtCost = valuedAtCostOf(valued, today);

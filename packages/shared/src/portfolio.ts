@@ -1,4 +1,4 @@
-import { FxTimeline } from './fx.js';
+import { FxTimeline, type FxLookup } from './fx.js';
 import type {
   AllocationDimension,
   AllocationSlice,
@@ -285,6 +285,12 @@ const addDays = (date: string, days: number): string => {
 interface LastClose {
   close: number;
   date: string;
+  currency: string;
+}
+
+interface DayClose {
+  close: number;
+  currency: string;
 }
 
 /** Closes before `start`: the latest one per symbol seeds the carry-forward. */
@@ -292,7 +298,7 @@ function seedLastClose(eod: Readonly<Record<string, readonly EodPrice[]>>, start
   const lastClose = new Map<string, LastClose>();
   for (const [symbol, prices] of Object.entries(eod)) {
     const prior = prices.filter((p) => p.date < start).sort((a, b) => a.date.localeCompare(b.date)).at(-1);
-    if (prior) lastClose.set(symbol, { close: prior.close, date: prior.date });
+    if (prior) lastClose.set(symbol, { close: prior.close, date: prior.date, currency: prior.currency });
   }
   return lastClose;
 }
@@ -326,7 +332,7 @@ export interface CostValuedSpan {
 
 /** Everything the daily valuation reads and keeps while it walks the days. */
 interface Valuation {
-  closeIndex: ReadonlyMap<string, ReadonlyMap<string, number>>;
+  closeIndex: ReadonlyMap<string, ReadonlyMap<string, DayClose>>;
   lastClose: Map<string, LastClose>;
   timeline: FxTimeline;
   splits: ReadonlyMap<string, readonly SplitEvent[]>;
@@ -337,6 +343,7 @@ interface Valuation {
   atCost: Map<string, CostValuedSpan>;
   /** Symbols with an open position on at least one day of the series. */
   held: Set<string>;
+  onPosition: ((line: ValuedPosition) => void) | undefined;
 }
 
 function noteCostValued(atCost: Map<string, CostValuedSpan>, symbol: string, date: string): void {
@@ -355,29 +362,73 @@ function liveQuote(valuation: Valuation, symbol: string, date: string): Quote | 
   return quote.asOf.slice(0, 10) >= (valuation.lastClose.get(symbol)?.date ?? '') ? quote : undefined;
 }
 
+/** Where the price of a valued position comes from: that day's close, an older close carried forward, the live quote or the average cost. */
+export type ValuationSource = 'close' | 'carried' | 'quote' | 'cost';
+
+/** One open position valued on one day of a value series (what `ValueSeriesInput.onPosition` receives). */
+export interface ValuedPosition {
+  date: string;
+  symbol: string;
+  /** Currency the position is held in. */
+  currency: string;
+  /** Units on today's share basis (restated for later splits). */
+  units: number;
+  source: ValuationSource;
+  /** Price per unit as used, in `priceCurrency`. */
+  price: number;
+  priceCurrency: string;
+  /** Date of the close used; null for the average cost, and the date of the quote for a live quote. */
+  priceDate: string | null;
+  /** The rate that converted the value into the base currency, with its fixing date and why it is not that day's. */
+  fx: FxLookup;
+  /** Market value in the base currency. */
+  value: number;
+  /** Cost basis in the base currency. */
+  cost: number;
+}
+
 /** Market value and cost basis (base currency) of the open positions on `date`; updates `lastClose`. */
 function valuePositionsOn(positions: ReadonlyMap<string, Position>, valuation: Valuation, date: string): { value: number; invested: number } {
   let value = 0;
   let invested = 0;
   for (const p of positions.values()) {
     const close = valuation.closeIndex.get(p.symbol)?.get(date);
-    if (close !== undefined) valuation.lastClose.set(p.symbol, { close, date });
+    if (close !== undefined) valuation.lastClose.set(p.symbol, { ...close, date });
     if (p.quantity <= 0) continue;
     valuation.held.add(p.symbol);
     // Provider closes are split-adjusted (as if the latest share basis always applied), so units held before a
     // later split are restated to today's basis; the fallback price (cost / units) uses the same basis.
     const units = p.quantity * futureSplitFactor(valuation.splits.get(p.symbol), date);
-    const quote = liveQuote(valuation, p.symbol, date);
-    if (quote) {
-      value += valuation.timeline.toBase(units * quote.price, quote.currency);
-    } else {
-      const known = valuation.lastClose.get(p.symbol);
-      if (!known) noteCostValued(valuation.atCost, p.symbol, date);
-      value += valuation.timeline.toBase(units * (known?.close ?? p.costLocal / units), p.currency, date);
-    }
+    const price = priceOf(valuation, p, units, date);
+    const fx = valuation.timeline.lookup(price.currency, price.fxDate);
+    const positionValue = (units * price.value) / fx.rate;
+    value += positionValue;
     invested += p.costBase;
+    valuation.onPosition?.({ date, symbol: p.symbol, currency: p.currency, units, source: price.source, price: price.value, priceCurrency: price.currency, priceDate: price.date, fx, value: positionValue, cost: p.costBase });
   }
   return { value, invested };
+}
+
+interface PriceUsed {
+  source: ValuationSource;
+  value: number;
+  currency: string;
+  date: string | null;
+  /** The day whose FX fixing converts it (undefined: the latest rate, as the headline does). */
+  fxDate: string | undefined;
+}
+
+/** The price that values a position on `date`: the live quote on the last day, else the last known close, else the average cost. */
+function priceOf(valuation: Valuation, p: Position, units: number, date: string): PriceUsed {
+  const quote = liveQuote(valuation, p.symbol, date);
+  if (quote) return { source: 'quote', value: quote.price, currency: quote.currency, date: quote.asOf.slice(0, 10), fxDate: undefined };
+  const known = valuation.lastClose.get(p.symbol);
+  if (!known) {
+    noteCostValued(valuation.atCost, p.symbol, date);
+    return { source: 'cost', value: p.costLocal / units, currency: p.currency, date: null, fxDate: date };
+  }
+  // The close is valued in the currency of its own row, which is not always the one the position is held in.
+  return { source: known.date === date ? 'close' : 'carried', value: known.close, currency: known.currency, date: known.date, fxDate: date };
 }
 
 /** Extra value/cost on a date that does not come from positions (cash balances, custom assets). */
@@ -393,6 +444,8 @@ export interface ValueSeriesInput {
   extra?: ValueHistoryExtra;
   /** Latest stored quote per symbol: on the last day (`to`) a position is valued at it, like the headline total. */
   quotes?: Readonly<Record<string, Quote>>;
+  /** Called for every open position on every day with how it was valued (the chart reconciliation reads it). */
+  onPosition?: (line: ValuedPosition) => void;
 }
 
 export interface ValueSeries {
@@ -413,18 +466,18 @@ export interface ValueSeries {
  * Assumption: EOD closes are split-adjusted (Yahoo-style), so quantities held before a SPLIT are shown multiplied by the
  * split ratio; the value therefore does not jump on the split date. `extra` adds cash/custom-asset value and cost.
  */
-export function buildValueSeries({ transactions, eod, fx, from, to, fxHistory, extra, quotes = {} }: Readonly<ValueSeriesInput>): ValueSeries {
+export function buildValueSeries({ transactions, eod, fx, from, to, fxHistory, extra, quotes = {}, onPosition }: Readonly<ValueSeriesInput>): ValueSeries {
   const sorted = dropDuplicateSplits(sortTransactions(transactions));
   if (sorted.length === 0 || from > to) return { points: [], costValued: [], held: 0 };
   const timeline = new FxTimeline(fx, fxHistory);
   const start = from < sorted[0]!.date ? sorted[0]!.date : from;
 
-  const closeIndex = new Map<string, Map<string, number>>();
+  const closeIndex = new Map<string, Map<string, DayClose>>();
   for (const [symbol, prices] of Object.entries(eod)) {
-    closeIndex.set(symbol, new Map(prices.map((p) => [p.date, p.close])));
+    closeIndex.set(symbol, new Map(prices.map((p) => [p.date, { close: p.close, currency: p.currency }])));
   }
 
-  const valuation: Valuation = { closeIndex, lastClose: seedLastClose(eod, start), timeline, splits: splitsBySymbol(sorted), last: to, quotes, atCost: new Map(), held: new Set() };
+  const valuation: Valuation = { closeIndex, lastClose: seedLastClose(eod, start), timeline, splits: splitsBySymbol(sorted), last: to, quotes, atCost: new Map(), held: new Set(), onPosition };
   const points: ValuePoint[] = [];
   const positions = new Map<string, Position>();
   let next = 0;
