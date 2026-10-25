@@ -3309,9 +3309,10 @@ answers `available: false` and the web app hides the menu entry. Code: `packages
 ```mermaid
 flowchart LR
   subgraph Hub["Hub Durable Object (alarm steps)"]
-    W["watchEarnings: weekdays every 30 min 13:00-23:30 + 07:30 daily (Amsterdam)"] -->|"calendar date in [today-3, today], no summary yet; or daily discovery; or backfill"| Q["fetchEarningsSummary (one symbol)"]
-    Q --> T["strip HTML to text (<= 60,000 chars)"]
-    T --> X["Workers AI: extract values as printed, strict JSON (<= 2 calls)"]
+    W["watchEarnings: weekdays every 30 min 13:00-23:30 + 07:30 daily (Amsterdam)"] -->|"calendar date in [today-3, today], no summary yet; or daily discovery"| Q["fetchEarningsSummary (one symbol)"]
+    B["backfillEarnings: every 15 min while incomplete (marker row), newest quarter of every company first"] -->|"one release per step, daily AI allowance"| Q
+    Q --> T["strip HTML to text (<= 48,000 chars)"]
+    T --> X["Workers AI: extract values as printed, prompt carries the JSON shape (<= 2 calls)"]
     X --> V["verify: every number, quote and bullet must be in the text, else dropped"]
     V --> D["derive in code: YoY, QoQ, beat/miss, FCF, FCF per share, margins"]
     D --> S[("TICKER#sym / EARNSUM#date (keep 8)")]
@@ -3321,7 +3322,7 @@ flowchart LR
   Q -->|"1 + 1 + 1 requests, 4 req/s bucket, declared User-Agent"| SEC[("sec.gov / data.sec.gov")]
   X -->|"only the public release text"| AI[("Workers AI binding AI")]
   D -->|"EPS estimate, 1 call per release, key optional"| AV[("Alpha Vantage EARNINGS")]
-  S --> API["GET /earnings, /earnings/status, /earnings/{symbol}/{period}, POST /earnings/{symbol}/refresh"] --> UI["/earnings, asset detail, calendar"]
+  S --> API["GET /earnings, /earnings/status, /earnings/{symbol}/{period}, POST /earnings/{symbol}/refresh, POST /earnings/backfill"] --> UI["/earnings, asset detail, calendar"]
 ```
 
 ### Sources, terms and limits
@@ -3329,9 +3330,9 @@ flowchart LR
 | Source | What | Terms and limits | Handling |
 |---|---|---|---|
 | SEC `company_tickers.json` | ticker to CIK | free, keyless; fair access: declared `User-Agent` with contact, at most 10 requests/s | fetched once, cached per symbol in the symbol state; the CIK is looked up again after 30 days when it was missing |
-| SEC `data.sec.gov/submissions/CIK##########.json` | newest 8-K with item 2.02 (US issuers) or 6-K (foreign private issuers: ASML, Novo Nordisk, TSMC) | as above | 1 request per candidate symbol per check |
-| SEC `Archives/edgar/data/<cik>/<accession>/index.json` and the exhibit (EX-99.x, else the primary document) | the press release | as above | 1 + 1 requests per release; the filing URL is stored and shown ("Source: SEC filing") |
-| Cloudflare Workers AI (`env.AI.run`) | copies figures out of the text into JSON | Free plan: 10,000 neurons per day, reset 00:00 UTC, a call over the allowance **fails** (no billing without a paid plan) | `ai` binding; model `@cf/meta/llama-3.1-8b-instruct-fp8` (13,778 neurons per million input tokens, 26,128 per million output tokens; 32k context), JSON mode via `response_format: json_schema` |
+| SEC `data.sec.gov/submissions/CIK##########.json` | 8-Ks with item 2.02 (US issuers) or 6-Ks (foreign private issuers: ASML, Novo Nordisk, TSMC); `filings.recent` (up to 1,000 filings) | as above | 1 request per candidate symbol per check, 1 per symbol for its backfill plan |
+| SEC `Archives/edgar/data/<cik>/<accession>/index.json` and the exhibit (EX-99.1, other EX-99.x, files named press release / results / earnings, then the primary document; at most 4 tried, first that reads like results wins) | the press release | as above | 1 + 1 requests per release (up to 1 + 4); the filing URL is stored and shown ("Source: SEC filing"); the SEC's HTML "Request Rate Threshold" page with status 200 is treated as a block |
+| Cloudflare Workers AI (`env.AI.run`) | copies figures out of the text into JSON | Free plan: 10,000 neurons per day, reset 00:00 UTC, a call over the allowance **fails** (no billing without a paid plan) | `ai` binding; model `@cf/meta/llama-3.1-8b-instruct-fp8` (13,778 neurons per million input tokens, 26,128 per million output tokens; 32,000 tokens of context, re-checked 25-10-2026). It is **not** on the JSON Mode page's list of supported models, so the prompt itself carries the JSON shape and `response_format` is only a hint (see "What failed in production") |
 | Alpha Vantage `EARNINGS` | quarterly `reportedEPS` / `estimatedEPS` | optional secret `ALPHAVANTAGE_API_KEY`; 25 calls per day, shared with the price service (`DailyQuota('alphavantage')`) | one call per symbol per release, only when the quota allows |
 
 **SEC fair-access compliance.** Every request carries `User-Agent: <SEC_CONTACT>` (for example `PortfolioTracker/1.0 (personal use; you@example.com)`, set at
@@ -3353,18 +3354,89 @@ pinned-clock tests around both changes). Each run looks at the held symbols (cac
 |---|---|
 | calendar | a calendar earnings date in [today - 3, today] and no summary stored for that release |
 | discovery | once a day, when the calendar has no future date for the symbol and the newest stored release is 60 days old or older (or none): is there a newer 8-K 2.02 / 6-K? |
-| backfill | first run after deploy: the **most recent reported quarter** of up to 3 eligible symbols per run (`origin: 'backfill'`, silent) |
 | manual | `POST /earnings/{symbol}/refresh`, at most once per symbol per hour |
 
-ETFs, ETCs, commodities and crypto have no earnings and are skipped; an exchange-suffixed symbol (`ASML.AS`) is matched to its SEC ADR only when the SEC title shares a
-word with the holding's name (otherwise `not-in-sec`).
+The first quarters of every holding are **not** a mode of the watch any more: they are the `backfillEarnings` job (below). A found release is queued with `origin: 'live'` for the calendar and the
+manual mode, and for discovery when something is stored already; otherwise (and always in the backfill) the origin is `backfill`, **silent**, unless the release was published within the last 48 hours.
+A queued release is not looked for again for 1 hour (`PENDING_HOURS`): the summary job is *dropped*, not deferred, while the overall budget is above 60 %, so the wait stays short.
+
+**Which holdings count, and how a symbol becomes a CIK.** The Hub builds the holdings from the stored profile **with the owner's classification overrides on top**, exactly as the API does
+(`loadProfiles`): the Snowball classification import writes asset classes as overrides, so reading the profile alone left such holdings out. ETFs, ETCs, commodities, crypto, bonds and cash
+have no earnings; an instrument whose class is unknown (no profile yet, or the placeholder `OTHER`) counts unless its name reads like a fund (`hasEarnings(assetClass, name)`). The profile's ISIN and
+name go to the mapping (`packages/earnings/src/tickers.ts`): (1) the ticker itself (a class share `BRK.B` is `BRK-B` at the SEC); (2) the ticker without its exchange suffix (`ASML.AS` is `ASML`), only when
+the SEC title shares a word with the holding's name; (3) a curated alias table for the German spellings (`FOO` Salesforce, `M4I` Mastercard, `NFC` Netflix, `ADB` Adobe, `APC`, `MSF`, `AMZ`, `ABEA`, `FB2A`, `NVD`, `TL0`, `NOVC`, `TSFA`, `CMC`),
+again checked against the name; (4) the name against the SEC titles (same significant words in any order; with a US-prefixed ISIN the name may be the start of the title; an ambiguous name matches
+nothing). A symbol that matches nothing is `not-in-sec` for 30 days with the stage `ticker-map` on its status line.
+
+### What failed in production (Saturday 24 to Sunday 25 October 2026) and why
+
+Observed: the feature was configured on Saturday at about 10:30; on Sunday the page said "No earnings summaries yet" although the Hub had made outbound requests at the 07:30 watch and many holdings had reported.
+There was no log access, so the diagnosis is code reading plus fakes plus Miniflare. Each finding below is marked **proved** (a test fails before the fix) or **suspected** (cannot be settled without real SEC or AI responses; the status line of the symbol will settle it).
+
+| # | Finding | Status | Fix |
+|---|---|---|---|
+| 1 | The prompt never told the model the field names. They only existed in `response_format`, and `@cf/meta/llama-3.1-8b-instruct-fp8` is **not** on the JSON Mode page's list of supported models (`llama-3.3-70b-instruct-fp8-fast`, `llama-3-8b-instruct`, `llama-3.1-8b-instruct`, `hermes-2-pro-mistral-7b`, ...). A model that ignores `response_format` answers with field names of its own, every answer fails the schema twice, and the symbol ends `unreadable` after two attempts, silently. | proved for the prompt (`ai-robustness.test.ts`); **suspected** that the platform ignores `response_format` for this model | the prompt shows the whole JSON shape; the second attempt is plain text; a platform error on the JSON-mode attempt gets the plain attempt too; the answer is read leniently |
+| 2 | The Hub built the holdings from the stored profile **without the owner's classification overrides**, while the API (`/earnings/status`, `loadProfiles`) applied them. An owner whose classes come from the Snowball import (overrides) and whose profiles are missing or `OTHER` had every holding left out (`kpiTemplateFor` returns `null` for anything but `STOCK`) while the page listed them as eligible. | proved (`createEarningsInputs` tests) | overrides applied, ISIN and name passed on; an unknown class counts unless the name reads like a fund |
+| 3 | `FOO.DE`, `M4I.DE`, `NFC.DE`, `ADB.DE` (Xetra spellings of Salesforce, Mastercard, Netflix, Adobe) matched nothing at the SEC (`FOO` is no ticker): `not-in-sec` for 30 days, no reason shown. | proved | alias table plus name matching, `ticker-map` stage on the page |
+| 4 | The first run read the latest quarter of **3 symbols per run**, in alphabetical order, one run on the first day (the morning watch; weekdays only after the close). A symbol that failed, that was not in the SEC list or whose newest filing was no results release was marked `backfillDone` and **never tried again**; the page could only ever show a few companies. | proved | a resumable backfill job over every holding and several quarters |
+| 5 | A 6-K that was no results release (monthly revenue notice, meeting notice) ended the foreign issuer's only backfill attempt (`seenAccessions`, `backfillDone`). | proved | the backfill walks the 6-K candidates newest first and scores the first 3,000 characters |
+| 6 | The SEC's HTML "Request Rate Threshold Exceeded" page (status 200) was reported as "is not JSON" (a failed symbol with back-off), not as a block, and every other symbol went on asking. | proved | detected in every response (JSON and documents), recorded as a block |
+| 7 | The release text cap (60,000 characters, 20,000 tokens at 3 characters per token) left little room in a 32,000-token window (prompt, schema, 1,800 output tokens) and a platform refusal for a too long input counted as an AI error. | arithmetic | cap 48,000; a refusal is answered with the text cut to 55 %, at no neuron cost |
+| 8 | One giant paragraph (one `<p>` or one `<pre>` line holding a whole release) longer than the cap made `capText` return an **empty text** (no line fitted the budget); the release was then "not a results release" and given up. | proved (`text.test.ts`) | lines over 1,500 characters are cut at a space |
+| 9 | Inline XBRL hidden headers (`ix:header`, `display:none` blocks) with figures of their own were read as part of the release; a period label like `3Q26` (no four-digit year) was always dropped. | proved | skipped in the text; a label that is printed in the release and has a digit is accepted |
+| 10 | Every failure left only a fixed phrase in `lastReason` ("The check failed", "The model call failed"): nothing said which stage stopped. | proved | the structured `lastRun` (below) |
+| 11 | `fetchEarningsSummary` is dropped (not deferred) when the overall budget is above 60 %; the watcher had marked the symbol pending for 6 hours. | by design, a silent wait | pending for 1 hour; the backfill retries every 15 minutes |
+
+**Not settled without real responses:** whether the SEC accepts the Worker's egress addresses and the `User-Agent` (the status line will say `blocked by the SEC (HTTP 403)` or `the SEC list of filings could not be read`), the exact file names of the exhibits of each filer
+(the `index.json` lists names, not document types: the heuristic prefers EX-99.1 and names that say press release, and the text check decides), and whether the fp8 model answers well without JSON mode (`the AI could not read it (invalid JSON)` or `none of the AI's figures could be found in the text` would say so).
+If so, set `EARNINGS_AI_MODEL=@cf/meta/llama-3.1-8b-instruct` (listed for JSON Mode, 25,608 / 75,147 neurons per million tokens: about 2 to 3 times the neurons per release).
+
+### Observability: `EARNSTATE.lastRun`
+
+Every outcome of the watcher, the fetch job and the backfill leaves, per symbol, a structured and sanitised `lastRun` (`EarningsLastRun` in `packages/shared/src/earnings.ts`):
+`{ at, stage, detail?, filing?: { form, date, accession }, droppedNumbers?, neurons? }` with `stage` one of `ticker-map` (no CIK), `submissions` (the SEC list could not be read), `select-filing` (a release was found and is queued), `exhibit` (no press release document, index not found, SEC error),
+`text` (documents read, none reads like results), `ai` (invalid JSON, model error), `verify` (no headline figure found in the text), `store`, `budget` (allowance used up), `sec-blocked`, `not-eligible`, `no-release-found`, `ok`.
+`detail` is at most 120 characters, printable ASCII, **no URL** (anything starting with `http` is removed), never a secret, never a figure from a release. `GET /earnings/status` exposes it per symbol (additive), plus `releases { planned, stored, failed }` per symbol,
+`backfill { status, quarters, total, done, stored, failed, planned, companies, waitReason?, waitUntil?, completedAt? }` and `lastFullPassAt` (the oldest last run of the eligible companies: every one was looked at since).
+The Earnings page renders "What was checked" (a native `details`, **open by default while there is no summary**) with the totals, the last full pass, the backfill progress with its pause ("34 of 80 releases read. Resumes at 00:00 UTC (...) when the daily AI allowance is used up.") and one line per company,
+for example `MSFT: found 8-K from 29-10-2026, the AI could not read it (invalid JSON)`, `ASML.AS: no results release in the last 135 days`, `JPM: blocked by the SEC until 25-10-2026, 11:30`, `FOO.DE: not found in the SEC company list (...)`. The Settings diagnostics page does not repeat it (not trivial: it has no earnings endpoint).
+
+### Backfill (`backfillEarnings`, `packages/earnings/src/backfill.ts`)
+
+The latest `EARNINGS_BACKFILL_QUARTERS` (default 4, at most 8) quarterly releases of **every** eligible holding, **newest first across all companies**: the next release is always the one of the company with the fewest stored quarters (alphabetical among equals), so pass one is the latest quarter of every company and a partial run is already useful.
+It is a cloudflareOnly schedule `earnings-backfill` (every 15 minutes, every day, Europe/Amsterdam) plus `POST /earnings/backfill` ("Fetch all now", once per hour). State: one marker row `EARNINGS/BACKFILL` (`EarningsBackfillMarker`: `status running|complete`, `quarters`, counters, `waitUntil` and `waitReason` `allowance | sec-blocked | sec-error | attempts | ai-error`) and a **plan** on every symbol (`EARNSTATE.plan`, newest first: accession, form, dates, `todo | stored | skipped | failed`, tries, `nextTryAt`).
+
+- **No-op:** the first thing a scheduled step reads is the marker. `complete`, or `waitUntil` in the future: it returns after **one row read** (96 of those a day, nothing else). A new `EARNINGS_BACKFILL_QUARTERS` re-arms a finished backfill by itself.
+- **A step does one thing:** reopen failed releases after "Fetch all now"; map symbols to CIKs (one ticker table request); build the plans of up to 4 symbols (one `submissions` request each: 8-Ks with item 2.02, one per quarter (a second one within 45 days is no new quarter); for a foreign issuer its 6-Ks, up to 4 candidates per wanted quarter, any of which may be the results); or read **one** release (index, up to 4 documents, at most 2 model calls). The step reserves 8 subrequests (the alarm plans 45).
+- **Foreign issuers (6-K):** a 6-K counts as results only when its first 3,000 characters hold at least 3 of the keywords results / quarter / revenue / earnings per share / net income / operating income / three months ended (`headKeywordScore`); the other 6-Ks are `skipped` without any AI call.
+- **Quarter over quarter:** a summary is derived against the newest stored older one. When the backfill stores an older quarter after a newer one, the newer summary is re-derived against it (`withPrevious`, idempotent: stale figures are removed first).
+- **Silent:** backfilled summaries are stored with `origin: 'backfill'` (the ledger records them silently), except a release published within the last 48 hours, which is `live` and notifies normally. Only that live one asks Alpha Vantage for the EPS estimate: the 25 calls a day are shared with the price service and 80 old quarters would use them all (older quarters say "no estimate available").
+- **Allowance:** before a release is fetched the step checks that at least 150 neurons are left (`MIN_NEURONS_TO_READ`); the extractor never makes a call it cannot afford. When the allowance is used up the marker says `waitReason: 'allowance'` until 00:05 UTC and the page says so. Never more than the daily cap, never a silent stall.
+- **Bounded retries:** a release is tried at most 2 times per UTC day; an unreadable one is read again after 6 hours and `failed` after 2 tries, an SEC or model error is retried after 30 minutes and `failed` after 4 tries; three errors in a row pause the whole run for 30 minutes. A run is at most 400 steps. "Fetch all now" reopens `failed` releases but the tries of the day still count, so nothing loops within a day.
+- **SEC:** a 403, a 429 or the HTML rate-limit page records the shared block (an hour, doubling to a day, or `Retry-After`), the marker says `sec-blocked` until then and the step makes no request.
+
+**Pacing for the owner's portfolio (about 20 eligible companies, 4 quarters, about 80 releases):**
+
+| | Typical | Upper bound |
+|---|---|---|
+| Workers AI neurons per release | 90 to 120 (12,000 characters of text, about 4,000 tokens in, 800 out, plus about 600 tokens of prompt shape) | about 260 (48,000 characters) per call, twice that when the first answer is unusable |
+| Neurons for 80 releases | about 8,000 to 10,000 | about 20,000 |
+| Days at the 6,000 cap | 2 | 4 |
+| SEC requests | 1 + 20 + 80 x (1 index + 1 to 2 documents) = 180 to 260 | 380 |
+| Alarm invocations (45 subrequests each, 5 releases per alarm) | 16 to 25 | 40 |
+| Rows written | about 6 per release (summary, QoQ update of the newer one, state and plan patches, marker) = about 500, plus 40 for CIKs and plans | 700 |
+| Rows read | about 30 per step (26 states, marker, held cache) x 100 steps + 40 per release = 6,000 to 7,000 | 12,000 |
+
+All far below the daily caps (100,000 rows written, 5 million read, 100,000 requests, 13,000 GB-s); the AI allowance is the pace-setter. When it is used up the page says "N of 80 releases read, resumes at 00:00 UTC".
 
 ### Text, extraction and verification (the core safety rule)
 
-1. **Text** (`text.ts`, pure): scripts and styles dropped, tables become pipe-separated rows, whitespace collapsed, capped at 60,000 characters (headline and financial tables first).
+1. **Text** (`text.ts`, pure): scripts, styles, inline-XBRL headers (`ix:header`) and `display:none` blocks dropped, tables become pipe-separated rows, whitespace collapsed, lines over 1,500 characters cut at a space (one giant paragraph used to vanish from the cap), capped at 48,000 characters (about 16,000 tokens: headline and financial tables first, the cash flow statement kept).
 2. **Extraction** (`ai.ts`): the release is *data* between delimiters; the prompt says to ignore any instruction inside it, to copy values **as printed** (with units), never to
-   compute, and to answer in the strict schema. No tools, no URLs from the output. At most **2 calls per release** (second attempt: a different prompt after invalid JSON),
-   `max_tokens` 1,800. The output is validated with a strict zod schema with length caps.
+   compute, and **shows the JSON shape** (every field name, placeholders instead of numbers). No tools, no URLs from the output. At most **2 calls per release**: the first asks for
+   `response_format: json_schema`, the second is plain text with a shorter prompt (also used when the platform refuses `response_format`). A refusal for a too long input is answered with the text cut
+   to 55 % and costs no neurons. `max_tokens` 1,800. The answer (an object in JSON mode, else a string with or without a fence) is read leniently: numbers become text, one malformed field or list
+   entry is dropped instead of the whole answer, and the result is validated with a zod schema with length caps.
 3. **Verification** (`verify.ts`, `numbers.ts`): every number must be found in the text after normalisation (`$`, commas, million/billion/M/B and table scales such as "in millions",
    percent, parentheses or a minus for negatives, decimals); otherwise the field is **dropped** and counted in `verification.dropped` (the names go to `droppedFields`, never the values).
    The quote must appear verbatim (whitespace and quote characters normalised); a key-update bullet must share at least 60 % of its words with one sentence of the release and every number in it
@@ -3406,7 +3478,8 @@ generatedAt, status`. Writes are idempotent (same key).
 |---|---|
 | `GET /earnings?symbol=&limit=` | `{ available, summaries (newest first, limit 1 to 24, default 12), symbols }` |
 | `GET /earnings/{symbol}/{period}` | one summary (`period` = the report date, `YYYY-MM-DD`); 404 otherwise |
-| `GET /earnings/status` | `{ available, configured, missing: ('sec-contact' \| 'ai-binding')[], estimatesConfigured, secBlockedUntil?, neurons { used, dailyCap, allowance, state, resetsAt }, symbols [{ eligible, lastCheckedAt, lastResult, lastReason, retryAfter, latestReportDate }] }`, sanitised |
+| `GET /earnings/status` | `{ available, configured, missing: ('sec-contact' \| 'ai-binding')[], estimatesConfigured, secBlockedUntil?, neurons { used, dailyCap, allowance, state, resetsAt }, backfill { status, quarters, total, done, stored, failed, planned, companies, waitReason?, waitUntil?, completedAt? }, lastFullPassAt?, symbols [{ eligible, lastCheckedAt, lastResult, lastReason, retryAfter, latestReportDate, lastRun?, releases? }] }`, sanitised (see "Observability") |
+| `POST /earnings/backfill` | "Fetch all now": re-arms the backfill and reopens failed releases; `202 { accepted: true }`; `429 RATE_LIMITED` (once per hour) with `retry-after`; 503 `NOT_CONFIGURED` |
 | `POST /earnings/{symbol}/refresh` | `202 { accepted: true }`; `429 RATE_LIMITED` with `retry-after` and `details.retryAfterSeconds` (1 per symbol per hour); 404 for a symbol the user never held, 503 `NOT_CONFIGURED`, 422 `NOT_ELIGIBLE` (ETF, crypto) |
 
 ### Push
@@ -3421,7 +3494,7 @@ releases land late and go out in the 09:00 run), grouping above 3 items. Example
 
 `aiNeurons` is a new usage metric (limit 10,000 per day, warn 60 %, block 80 % like the others) listed in `GET /usage` and the usage panel. It is **scoped**: it never changes the overall state, never pauses the app, and only
 gates this feature (`BudgetGuard.aiAllowance()`). The extractor may spend `min(EARNINGS_AI_DAILY_NEURONS (default 6000, at most 8000), 80 % of 10,000) - used today` and never starts a call it cannot afford
-(neurons estimated from characters / 3 tokens, leaning high; recorded in the ledger). A release with no allowance left waits until 00:05 UTC. `guardJob` ceilings: `watchEarnings` and `fetchEarningsSummary` run only below 60 % of the overall budget (`ok`).
+(neurons estimated from characters / 3 tokens, leaning high; recorded in the ledger). A release with no allowance left waits until 00:05 UTC. `guardJob` ceilings: `watchEarnings`, `fetchEarningsSummary` and `backfillEarnings` run only below 60 % of the overall budget (`ok`; a dropped backfill step is found again by the next 15-minute schedule).
 
 | Per summary | Typical release (about 12,000 characters) | Worst case (60,000 characters, 2 calls) |
 |---|---|---|
@@ -3437,19 +3510,20 @@ the watcher itself costs 1 row read per run and no subrequest when nothing is du
 `/earnings` (Portfolio menu, shown only when `GET /earnings/status` says `available`): cards newest first with company filter chips, each card = scorecard table (Expected | Actual | Beat/Miss, stacked rows below 640 px), growth
 lines, FCF with a `reported` / `calculated` badge, EPS basis badge (`GAAP` / `adjusted`), template KPI rows, collapsible native `details` sections (operating, guidance, cash flow, segments, key updates, quote), the source link
 (`rel="noopener noreferrer"`) and the disclaimer "Auto-generated from the company's press release; every number was checked against the text. Check the source before acting." Dates are dd-mm-yyyy (`web/src/lib/format.ts`),
-numbers nl-NL, compact amounts English (`$20.71B`). States: not configured (explains `SEC_CONTACT` and the AI binding), none yet, blocked by the SEC, AI allowance used up (resumes at 00:00 UTC). The asset detail page has a
+numbers nl-NL, compact amounts English (`$20.71B`). States: not configured (explains `SEC_CONTACT` and the AI binding), none yet, blocked by the SEC, AI allowance used up (resumes at 00:00 UTC). Under the cards (and under "No earnings summaries yet") the section "What was checked" (native `details`, open while there is no summary): totals, last full pass, the backfill progress with a native `progress` bar, the button **Fetch all now** (`POST /earnings/backfill`, once per hour, also retries failed releases) and one line per company (`web/src/features/earnings/checked.ts`, `CheckedSection.tsx`), no wider than 320 px. The asset detail page has a
 "Latest earnings" section, the calendar's earnings dialog a "View summary" link. The GitHub Pages demo (MSW) has two **invented** summaries (a bank and a software company, fictional).
 
 ### Tests and how to run them
 
-`pnpm --filter @portfolio/earnings test` (text, numbers, schema, verification incl. hallucinated numbers/quotes, injection text, invalid JSON then valid retry, over-cap neurons, derive maths, thresholds, FCF, templates, SEC client with 403/429,
-token bucket, jobs windows with a pinned clock and DST, back-off, backfill, prune; six **invented** release fixtures incl. a REIT, a bank, a SaaS, an infra company and a 6-K), `@portfolio/shared`, `@portfolio/platform` (guard at 60 / 80 %),
+`pnpm --filter @portfolio/earnings test` (text, numbers, schema, verification incl. hallucinated numbers/quotes, injection text, invalid JSON then valid retry, over-cap neurons, derive maths, thresholds, FCF, templates, SEC client with 403/429 and the HTML rate-limit page,
+token bucket, jobs windows with a pinned clock and DST, back-off, prune; six **invented** release fixtures incl. a REIT, a bank, a SaaS, an infra company and a 6-K, plus five **messier** ones in `src/testing/messy-fixtures.ts`: inline XBRL with a hidden header and nested layout tables, a plain-text 6-K, a bank with signs and dollar marks in cells of their own, a REIT in thousands, prose-only SaaS;
+`backfill*.test.ts`: order across companies, pacing against the allowance, SEC blocks, bounded retries, 6-K scoring, QoQ recomputation, silent origin; `first-run.test.ts`: the 26-company owner scenario with Xetra spellings and an Amsterdam listing, over two days; `ai-robustness.test.ts`: string, fenced, object, numbers, one bad field, context refusal, JSON mode refused), `@portfolio/shared`, `@portfolio/platform` (guard at 60 / 80 %),
 `@portfolio/api` (routes, auth, scenario on every stack; AWS returns `available: false`, notification detection), `@portfolio/cloudflare-app` (`test/earnings-suite.ts` in Node and in real workerd: calendar date passes, fake SEC, fake AI, stored, API,
 push decrypted by the fake subscriber), `@portfolio/web` (unit tests and `e2e/earnings.spec.ts` in the mock suite at 320 and 1280 px, every template).
 
-**Not verified (cannot be here):** real SEC access from the Worker (the SEC blocks the developer's laptop; the exhibit file-name heuristic is only tested with fakes), real Workers AI output quality and JSON-mode behaviour of the fp8 model
-(the schema lists `response_format`; a failure is retried once and then reported as `unreadable`), the neuron estimate against the real dashboard, Alpha Vantage `EARNINGS` field names beyond the documented ones, and the push on a real phone.
-The owner judges the format on the phone after the first backfill.
+**Not verified (cannot be here):** real SEC access from the Worker (the SEC blocks the developer's laptop; the exhibit file-name heuristic is only tested with fakes), real Workers AI output quality (the prompt now carries the JSON shape; whether
+the fp8 model follows it is settled by the first status lines), the neuron estimate against the real dashboard, Alpha Vantage `EARNINGS` field names beyond the documented ones, and the push on a real phone.
+After the deploy the owner screenshots the Earnings page with "What was checked" open (it is open while there is no summary), after a few 15-minute steps and again the next morning: the lines say which stage stops which company.
 
 ## Price history coverage
 
