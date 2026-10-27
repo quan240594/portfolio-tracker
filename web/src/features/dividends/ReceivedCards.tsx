@@ -161,7 +161,7 @@ function ByHolding({ data, period }: Readonly<{ data: GetDividendsResponse; peri
   );
 }
 
-/** "Dividends received" over time and by holding: one period selector drives both cards. */
+/** "Dividends received" over time and by holding: one period selector drives both cards. Renders grid cells: the first spans the full width of the page's two-column card grid, the second sits in the next row. */
 export function ReceivedCards() {
   const { scope, ready } = usePortfolioScope();
   const query = useDividends(scope, { enabled: ready });
@@ -171,9 +171,10 @@ export function ReceivedCards() {
   const overviewQuery = useScopedDividendsOverview();
 
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+    <>
       <QueryCard
         id="div-received-time"
+        className="md:col-span-2"
         title="Dividends received"
         query={query}
         loadingLabel="Loading received dividends"
@@ -205,10 +206,10 @@ export function ReceivedCards() {
         query={query}
         loadingLabel="Loading received dividends"
         errorTitle="Could not load dividends"
-        info={<p>Net dividends received per holding in the period selected on the left, largest first. Holdings that were sold since still show the dividends they paid.</p>}
+        info={<p>Net dividends received per holding in the period selected in the Dividends received card above, largest first. Holdings that were sold since still show the dividends they paid.</p>}
       >
         {(data) => <ByHolding data={data} period={period} />}
       </QueryCard>
-    </div>
+    </>
   );
 }

@@ -8,6 +8,7 @@ import {
   estimatedKey,
   forecastLabel,
   signedMoney,
+  summaryItems,
   summaryParts,
   tableRows,
   timelineLegendItems,
@@ -209,6 +210,20 @@ describe('summary', () => {
     const parts = summaryParts(TIMELINE, 'EUR', { declared: 13, estimated: 13, total: 26 }).map(sp);
     expect(parts[0]).toBe('Forecast next 12 months: € 26,00 (declared € 13,00, estimated € 13,00)');
     expect(parts[1]).toMatch(/^Trend: [+−]€ \d+,\d{2}\/month per year$/);
+  });
+
+  it('lists the same figures as separate labelled items', () => {
+    const items = summaryItems(TIMELINE, 'EUR', { declared: 13, estimated: 13, total: 26 });
+    expect(items.map((i) => [i.key, i.label, sp(i.value)])).toEqual([
+      ['forecast', 'Forecast next 12 months', '€ 26,00'],
+      ['declared', 'Declared', '€ 13,00'],
+      ['estimated', 'Estimated', '€ 13,00'],
+      ['trend', 'Trend', expect.stringMatching(/^[+−]€ \d+,\d{2}$/)],
+    ]);
+    expect(items[3]!.unit).toBe('per month, per year');
+    const short = buildGrowthTimeline(history('2026-06', [3, 3, 3, 3]), FUTURE, TODAY);
+    expect(summaryItems(short, 'EUR', { declared: 13, estimated: 13, total: 26 }).map((i) => i.key)).toEqual(['forecast', 'declared', 'estimated']);
+    expect(summaryItems(short, 'EUR', null)).toEqual([]);
   });
 
   it('leaves out the forecast without data and the trend without 6 months', () => {

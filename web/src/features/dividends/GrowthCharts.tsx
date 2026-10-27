@@ -21,7 +21,7 @@ import {
   declaredKey,
   estimatedKey,
   forecastLabel,
-  summaryParts,
+  summaryItems,
   tableRows,
   timelineLegendItems,
   timelineRows,
@@ -41,6 +41,9 @@ type Theme = ReturnType<typeof useDividendTheme>;
 export function yearColour(c: Theme, years: readonly string[], year: string): string {
   return [c.received, c.base, c.previous][years.length - 1 - years.indexOf(year)]!;
 }
+
+/** Taller than the other dividend charts: the grouped bars and the forecast need the room. */
+const CHART_HEIGHT = 'h-80 md:h-[22rem]';
 
 const cell = (value: number | string | undefined, currency: string): string => (typeof value === 'number' ? formatMoney(value, currency) : '—');
 
@@ -130,29 +133,30 @@ export function YearChart({ data, timeline, showForecast, forecast, children }: 
   const forecastNote = model.forecastYears.length > 0 ? ` Forecast bars (declared and estimated) are stacked on the received amounts for ${model.forecastYears.join(' and ')}.` : '';
   const label = `Dividends received per calendar month, compared for ${shownYears.join(', ')}. Totals per year: ${totals}.${forecastNote}${average} ${summary}`.trim();
   const ahead = timeline.points.filter((p) => p.phase !== 'PAST');
+  // the average is context, not the message: a thin dashed line without markers, so the bars dominate
   const averageOpacity = focusOpacity(selection.focusKey, 'average');
   return (
     <>
       <ForecastBlock timeline={timeline} ccy={ccy} forecast={forecast} />
       <SelectableLegend entries={growthLegendEntries(items, c)} selection={selection} testId="growth-legend" />
-      <GrowthLegendNote items={items} />
       {selection.nothingSelected ? (
         <NothingSelected onShowAll={selection.reset} />
       ) : (
-        <ChartFrame label={label} testId="year-compare-chart" bars={Math.ceil(rows.length * (model.forecastYears.length > 0 ? 1.5 : 1))} height="h-72">
+        <ChartFrame label={label} testId="year-compare-chart" bars={Math.ceil(rows.length * (model.forecastYears.length > 0 ? 1.5 : 1))} height={CHART_HEIGHT}>
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barGap={2}>
+            <ComposedChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barGap={4} barCategoryGap="22%">
               <CartesianGrid stroke={c.grid} vertical={false} />
               <XAxis dataKey="month" stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval={0} />
               <YAxis tickFormatter={compactMoneyTick(ccy)} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={56} />
               <Tooltip cursor={{ fill: c.grid, opacity: 0.5 }} content={<YearTooltip model={model} ccy={ccy} c={c} colorOf={colorOf} />} />
               {yearBars(model, c, isDrawn, selection.focusKey)}
-              {model.hasAverage && isDrawn('average') && <Line dataKey="average" stroke={c.invested} strokeWidth={2} strokeOpacity={averageOpacity} strokeDasharray="5 4" dot={{ r: 2, fillOpacity: averageOpacity, strokeOpacity: averageOpacity }} isAnimationActive={false} />}
+              {model.hasAverage && isDrawn('average') && <Line dataKey="average" stroke={c.invested} strokeWidth={1.25} strokeOpacity={averageOpacity} strokeDasharray="5 4" dot={false} activeDot={false} isAnimationActive={false} />}
             </ComposedChart>
           </ResponsiveContainer>
         </ChartFrame>
       )}
       {children}
+      <GrowthLegendNote items={items} />
       <TrendMethod />
       <SelectableDataTable
         caption="Dividends received per calendar month and year"
@@ -228,13 +232,12 @@ export function TimelineChart({ data, timeline, showForecast, forecast, children
     <>
       <ForecastBlock timeline={timeline} ccy={ccy} forecast={forecast} />
       <SelectableLegend entries={growthLegendEntries(items, c)} selection={selection} testId="growth-legend" />
-      <GrowthLegendNote items={items} />
       {selection.nothingSelected ? (
         <NothingSelected onShowAll={selection.reset} />
       ) : (
-        <ChartFrame label={label} testId="growth-timeline-chart" scrollToEnd bars={Math.ceil(rows.length / 2)} height="h-72">
+        <ChartFrame label={label} testId="growth-timeline-chart" scrollToEnd bars={Math.ceil(rows.length / 2)} height={CHART_HEIGHT}>
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+            <ComposedChart data={rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }} barCategoryGap="22%">
               <CartesianGrid stroke={c.grid} vertical={false} />
               <XAxis dataKey="label" stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={8} />
               <YAxis tickFormatter={compactMoneyTick(ccy)} stroke={c.axis} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={56} />
@@ -245,6 +248,7 @@ export function TimelineChart({ data, timeline, showForecast, forecast, children
         </ChartFrame>
       )}
       {children}
+      <GrowthLegendNote items={items} />
       <TrendMethod />
       <SelectableDataTable
         caption="Dividends received, forecast and trend per month"
@@ -259,10 +263,10 @@ export function TimelineChart({ data, timeline, showForecast, forecast, children
 
 /** The summary line and the "needs history" note, between the toggles and the chart of both views. */
 export function ForecastBlock({ timeline, ccy, forecast }: Readonly<{ timeline: GrowthTimeline; ccy: string; forecast: ForecastTotals | null }>) {
-  const parts = summaryParts(timeline, ccy, forecast);
+  const items = summaryItems(timeline, ccy, forecast);
   return (
     <>
-      <ForecastSummary parts={parts} />
+      <ForecastSummary items={items} />
       {timeline.trend === null && <TrendNote />}
     </>
   );
