@@ -270,14 +270,15 @@ async function pickDetails(ctx: StepContext, state: State, now: Date, today: str
 /** At most this many symbols are handed to one enrichment job. */
 export const HEAL_MAX_SYMBOLS = 50;
 
-/** Hands the tracked symbols that were never enriched to an enrichment job, once a UTC day (it keeps the provider quota in check itself). */
+/** Hands the tracked symbols that were never enriched (or whose history symbol is still to fetch) to an enrichment job, once a UTC day (it keeps the provider quota in check itself). */
 async function healEnrichment(ctx: StepContext, state: State, today: string): Promise<void> {
   const enqueue = ctx.deps.enqueueEnrichment;
   if (enqueue === undefined || state.symbols.length === 0) return;
   try {
     if (await ctx.repo.healedOn(today)) return;
-    const enriched = await ctx.repo.enrichedSymbols(state.symbols);
-    const missing = state.symbols.filter((symbol) => !enriched.has(symbol) && isMarketSymbol(symbol));
+    const [enriched, overrides] = await Promise.all([ctx.repo.enrichedSymbols(state.symbols), ctx.repo.getHistorySymbols(state.symbols)]);
+    // A history symbol the owner set that was never fetched (the save could not start it, or its tries ran out) is handed over too.
+    const missing = state.symbols.filter((symbol) => (!enriched.has(symbol) || overrides.get(symbol)?.status === 'pending') && isMarketSymbol(symbol));
     if (missing.length === 0) return;
     await enqueue(missing.slice(0, HEAL_MAX_SYMBOLS));
     await ctx.repo.markHealed(today);

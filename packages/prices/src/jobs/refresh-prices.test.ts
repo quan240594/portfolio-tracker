@@ -396,6 +396,16 @@ describe('refreshPrices', () => {
       expect(enqueue).toHaveBeenCalledTimes(2);
     });
 
+    it('also hands over an enriched symbol whose history symbol was never fetched, but not one that was', async () => {
+      const h = harness({ fake: liveFake() });
+      track(h.store, 'AAPL', 'ASML.AS', 'FWRA.MI');
+      const record = (symbol: string, status: string): Item => ({ PK: `TICKER#${symbol}`, SK: 'HISTSYM', entityType: 'HISTORY_SYMBOL', historySymbol: 'X.DE', status, setAt: '2026-10-12T10:00:00.000Z' });
+      h.store.load([profile('AAPL'), profile('ASML.AS'), profile('FWRA.MI'), record('FWRA.MI', 'pending'), record('ASML.AS', 'applied'), record('AAPL', 'refused')]);
+      const enqueue = vi.fn(() => Promise.resolve());
+      await run(h, enqueue);
+      expect(enqueue).toHaveBeenCalledWith(['FWRA.MI']);
+    });
+
     it('starts nothing when every tracked symbol is enriched, and keeps going when the job cannot be started', async () => {
       const done = harness({ fake: liveFake() });
       track(done.store, 'AAPL');

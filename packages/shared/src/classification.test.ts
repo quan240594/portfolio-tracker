@@ -9,6 +9,7 @@ import {
   classificationPutSchema,
   classificationValues,
   hasClassification,
+  HISTORY_SYMBOL_MESSAGE,
   isProfileSource,
   matchClassificationRows,
   mergeProfile,
@@ -46,6 +47,37 @@ describe('contract', () => {
     expect(classificationPutSchema.safeParse({ domain: '' }).success).toBe(false);
     // An import row never carries a domain.
     expect(classificationImportSchema.safeParse({ rows: [{ ticker: 'A', domain: 'apple.com' }] }).success).toBe(false);
+  });
+
+  it('accepts a price history symbol, trimmed and upper-cased, alone or with other fields', () => {
+    expect(classificationPutSchema.safeParse({ historySymbol: ' fwra.de ' })).toMatchObject({ success: true, data: { historySymbol: 'FWRA.DE' } });
+    expect(classificationPutSchema.safeParse({ sector: 'x', historySymbol: 'BRK-B' })).toMatchObject({ success: true, data: { sector: 'x', historySymbol: 'BRK-B' } });
+    expect(classificationPutSchema.safeParse({ historySymbol: 'A'.repeat(20) }).success).toBe(true);
+    expect(classificationPutSchema.safeParse({ historySymbol: '9988.HK' }).success).toBe(true);
+  });
+
+  it.each(['FWRA/DE', 'FWRA DE', 'FWRA%2EDE', '.DE', '-X', 'A'.repeat(21), 'FWRÄ.DE', 'FWRA\nDE'])('refuses the price history symbol %j', (historySymbol) => {
+    const parsed = classificationPutSchema.safeParse({ sector: 'x', historySymbol });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0]).toMatchObject({ path: ['historySymbol'], message: HISTORY_SYMBOL_MESSAGE });
+  });
+
+  it('refuses a price history symbol that is not text', () => {
+    expect(classificationPutSchema.safeParse({ sector: 'x', historySymbol: 5 }).success).toBe(false);
+  });
+
+  it('clears the price history symbol with null or an empty text, leaving it out of the result', () => {
+    expect(classificationPutSchema.safeParse({ sector: 'x', historySymbol: null })).toMatchObject({ success: true, data: { sector: 'x' } });
+    expect(classificationPutSchema.safeParse({ sector: 'x', historySymbol: '  ' })).toEqual({ success: true, data: { sector: 'x' } });
+    // Only a clear is a valid body (the route then removes the override that has nothing left); an empty body is not.
+    expect(classificationPutSchema.safeParse({ historySymbol: null })).toEqual({ success: true, data: {} });
+    expect(classificationPutSchema.safeParse({ historySymbol: '' })).toEqual({ success: true, data: {} });
+    expect(classificationPutSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('counts the price history symbol as a classification field', () => {
+    expect(hasClassification({ historySymbol: 'FWRA.DE' })).toBe(true);
+    expect(classificationFieldsOf({ historySymbol: 'FWRA.DE', ...{ userId: 'u' } })).toEqual({ historySymbol: 'FWRA.DE' });
   });
 
   it('validates an import body and normalises tickers, ISINs and currencies', () => {

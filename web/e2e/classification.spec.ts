@@ -97,6 +97,31 @@ test.describe('Asset classification (mock mode)', () => {
     await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Technology');
   });
 
+  test('saves a price history symbol upper-cased, refuses an invalid one and forgets it when emptied', async ({ page }) => {
+    await page.goto('/assets/AAPL?portfolio=all');
+    const open = async () => {
+      await page.getByRole('region', { name: /^About / }).getByRole('button', { name: 'Edit classification' }).click();
+      return page.getByRole('dialog', { name: 'Edit classification of AAPL' });
+    };
+    let dialog = await open();
+    const input = dialog.getByLabel('Price history symbol');
+    await expect(input).toHaveAccessibleDescription(/The suffix is the exchange: \.DE Xetra, \.AS Amsterdam, \.PA Paris, \.MI Milan, \.L London\. Leave empty for automatic\./);
+    await input.fill('FWRA/DE');
+    await expect(dialog.getByText(/Enter a symbol such as FWRA\.DE/)).toBeVisible();
+    await dialog.getByRole('button', { name: 'Save classification' }).click();
+    await expect(dialog.getByRole('alert')).toContainText('Price history symbol: Enter a symbol such as FWRA.DE');
+    await input.fill('fwra.de');
+    await dialog.getByRole('button', { name: 'Save classification' }).click();
+    await expect(dialog).toBeHidden();
+
+    dialog = await open();
+    await expect(dialog.getByLabel('Price history symbol')).toHaveValue('FWRA.DE');
+    await dialog.getByRole('button', { name: 'Reset to automatic' }).click();
+    await expect(dialog).toBeHidden();
+    dialog = await open();
+    await expect(dialog.getByLabel('Price history symbol')).toHaveValue('');
+  });
+
   for (const width of [1440, 390, 320]) {
     test(`the preview and the edit dialog fit a ${width}px wide screen`, async ({ page }) => {
       await page.setViewportSize({ width, height: 800 });
@@ -117,6 +142,9 @@ test.describe('Asset classification (mock mode)', () => {
       await page.getByRole('region', { name: /^About / }).getByRole('button', { name: 'Edit classification' }).click();
       const edit = page.getByRole('dialog', { name: 'Edit classification of AAPL' });
       await expect(edit.getByLabel('Name')).toBeVisible();
+      // The longest accepted symbol and its refusal text must wrap inside the dialog.
+      await edit.getByLabel('Price history symbol').fill('A'.repeat(20));
+      await expect(edit.getByLabel('Price history symbol')).toBeVisible();
       expect(await edit.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
       expect(await overflow(page)).toBeLessThanOrEqual(0);
     });

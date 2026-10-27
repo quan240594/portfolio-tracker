@@ -6,7 +6,7 @@ import { alarmDiagnosticsSchema, usageSnapshotSchema, type AlarmDiagnosticsRepor
 import { defineApiScenarios } from '@portfolio/api/testing';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { Browser, type Stack } from './browser.js';
-import { AAPL_CLOSE, AAPL_T212_PRICE, AV_KEY, EODHD_KEY, SAP_PRICE, T212_KEY, T212_SECRET, TD_KEY, OTHER_ID, OWNER_ID, OWNER_LOGIN, TEST_VAPID } from './fakes.js';
+import { AAPL_CLOSE, AAPL_T212_PRICE, AV_KEY, EODHD_KEY, SAP_PRICE, T212_KEY, T212_SECRET, TD_KEY, OTHER_ID, OWNER_ID, OWNER_LOGIN, TEST_VAPID, XETRA_CLOSES } from './fakes.js';
 
 export interface SuiteStartOptions {
   /** Caps the budget guard measures against (the Hub's clock is pinned at `PINNED_NOW` whenever limits are given). */
@@ -457,6 +457,63 @@ export function defineAppSuite(label: string, start: StartStack): void {
         expect(Math.max(...points.map((point) => point.value))).toBeLessThan(400);
         expect(last.invested).toBeGreaterThan(340);
         expect(last.invested).toBeLessThan(360);
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('fetches the history of a held symbol under the listing the owner chose, as soon as it is saved, and keeps the rows when it is cleared', async () => {
+      const { stack, call, portfolio } = await signedIn({ prices: { ...keys, EODHD_API_KEY: EODHD_KEY } });
+      try {
+        const milan = { portfolioId: portfolio, date: '2026-01-05', type: 'BUY', symbol: 'FWRA.MI', quantity: 3, price: 10, currency: 'EUR' };
+        expect((await call('POST', '/transactions', milan)).status).toBe(201);
+        await stack.drain(); // the provider does not know the Milan line: nothing is stored
+        const coverage = async () => (await call('GET', '/prices/status')).body.history.symbols.find((row: { symbol: string }) => row.symbol === 'FWRA.MI');
+        expect(await coverage()).toMatchObject({ eodRows: 0, historyOverride: null });
+
+        const refused = await call('PUT', '/classification/FWRA.MI', { historySymbol: 'FWRA/DE' });
+        expect(refused).toMatchObject({ status: 400, body: { error: { code: 'VALIDATION_ERROR' } } });
+        const saved = await call('PUT', '/classification/FWRA.MI', { historySymbol: ' fwra.de ' });
+        expect(saved).toMatchObject({ status: 200, body: { symbol: 'FWRA.MI', held: true, override: { historySymbol: 'FWRA.DE' } } });
+        expect(await coverage()).toMatchObject({ historyOverride: { symbol: 'FWRA.DE', status: 'pending', reason: null } });
+
+        await stack.drain(); // the enrichment the save queued
+        expect(await stack.failedJobs()).toEqual([]);
+        expect(stack.prices.calls.filter((entry) => entry.endsWith('/api/eod/FWRA.XETRA'))).toHaveLength(1);
+        expect(await coverage()).toMatchObject({
+          eodRows: XETRA_CLOSES.length,
+          eodSources: ['eodhd:FWRA.DE'],
+          proxyListing: 'FWRA.DE',
+          historyOverride: { symbol: 'FWRA.DE', status: 'applied', reason: null },
+          reason: 'History symbol set by you: FWRA.DE',
+        });
+
+        const cleared = await call('PUT', '/classification/FWRA.MI', { historySymbol: null });
+        expect(cleared).toMatchObject({ status: 200, body: { override: null } });
+        await stack.drain();
+        expect(stack.prices.calls.filter((entry) => entry.endsWith('/api/eod/FWRA.XETRA'))).toHaveLength(1);
+        expect(await coverage()).toMatchObject({ eodRows: XETRA_CLOSES.length, historyOverride: null });
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('refuses a history symbol quoted in another currency than the holding and stores nothing from it', async () => {
+      const { stack, call, portfolio } = await signedIn({ prices: { ...keys, EODHD_API_KEY: EODHD_KEY } });
+      try {
+        const acme = { portfolioId: portfolio, date: '2026-01-05', type: 'BUY', symbol: 'ACME.MI', quantity: 3, price: 10, currency: 'EUR' };
+        expect((await call('POST', '/transactions', acme)).status).toBe(201);
+        await stack.drain();
+        // a bare symbol is a US listing: Twelve Data answers in USD
+        expect((await call('PUT', '/classification/ACME.MI', { historySymbol: 'ACME' })).status).toBe(200);
+        await stack.drain();
+        expect(await stack.failedJobs()).toEqual([]);
+        const row = (await call('GET', '/prices/status')).body.history.symbols.find((entry: { symbol: string }) => entry.symbol === 'ACME.MI');
+        expect(row).toMatchObject({
+          eodRows: 0,
+          historyOverride: { symbol: 'ACME', status: 'refused', reason: 'history symbol is quoted in USD, the holding in EUR' },
+          reason: 'History symbol set by you: ACME. Not used: history symbol is quoted in USD, the holding in EUR',
+        });
       } finally {
         await stack.dispose();
       }

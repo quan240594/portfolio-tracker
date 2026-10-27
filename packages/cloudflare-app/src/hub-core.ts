@@ -24,10 +24,11 @@ import { createMarketDataService } from '@portfolio/prices';
 import { parseImportObjectKey, type PriceHistoryCoverage } from '@portfolio/shared';
 import { readBodyBounded } from './body.js';
 import type { HubConfig } from './config.js';
+import { createHistorySymbolApi } from './history-symbol.js';
 import { createEarningsApi, earningsConfigured, neuronMeter } from './earnings.js';
 import { createHubLogoRoute, logoLookupGate } from './logos.js';
 import { alarmReport, finishOf, limitOf, triggerOf, type AlarmInfo } from './diagnostics.js';
-import { ALL_JOB_FACTORIES, createJobRegistry, eventsFor, priceJobDeps, schedulesFor, type JobContext, type JobFactories } from './jobs.js';
+import { ALL_JOB_FACTORIES, createJobRegistry, eventsFor, hasPriceService, priceJobDeps, schedulesFor, type JobContext, type JobFactories } from './jobs.js';
 import { loadPriceCoverage } from './price-coverage.js';
 import { pricesStatus } from './prices-status.js';
 import { pushConfig } from './push.js';
@@ -366,6 +367,7 @@ export class HubCore {
       events: eventsFor(jobs, this.factories),
       files,
       notify: { repo: new ItemNotificationRepository(items), push: pushConfig(this.config, this.fetchImpl) },
+      historySymbols: createHistorySymbolApi({ items, ...(hasPriceService(this.factories) ? { queue: jobs } : {}), guard: this.guard, now: this.now }),
       earnings: createEarningsApi({ items, config: this.config, ai: this.ai, queue: jobs, now: this.now, guard: this.guard }),
       broker: {
         store: new ItemBrokerStore(items),

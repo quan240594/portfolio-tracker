@@ -47,6 +47,11 @@ export interface ClassificationFields {
   domain?: string;
   /** The earnings summary template of the company (see earnings.ts); not a profile field either. */
   kpiTemplate?: KpiTemplateId;
+  /**
+   * The symbol (`FWRA.DE`, upper-case) the price history of the holding is fetched under when the market-data provider does not know the
+   * listing the broker uses; the suffix is the exchange. Only the Cloudflare price jobs use it, the AWS stack just stores and returns it.
+   */
+  historySymbol?: string;
 }
 
 export const CLASSIFICATION_FIELDS = ['name', 'assetClass', 'sector', 'country'] as const;
@@ -78,10 +83,35 @@ const domainField = z
     return domain ?? z.NEVER;
   });
 
-export const classificationFieldsSchema = z.object({ ...fieldShape, domain: domainField.optional(), kpiTemplate: z.enum(KPI_TEMPLATE_IDS).optional() }).strict();
+/** A listing symbol: letters and digits with dots and hyphens (`FWRA.DE`, `BRK-B`); never a slash, space or percent sign. */
+export const HISTORY_SYMBOL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9.-]{0,19}$/;
+export const HISTORY_SYMBOL_MESSAGE = 'Enter a symbol such as FWRA.DE (letters, digits, dots and hyphens, at most 20 characters)';
 
-/** `PUT` body: the fields to store, at least one. */
-export const classificationPutSchema = classificationFieldsSchema.refine((fields) => hasClassification(fields), 'Give at least one of name, assetClass, sector, country, website domain or earnings template');
+/** The history symbol, upper-cased; null or an empty text clears it (null in the output). */
+const historySymbolField = z.union([
+  z.null(),
+  z
+    .string()
+    .trim()
+    .transform((value, ctx): string | null => {
+      if (value === '') return null;
+      if (!HISTORY_SYMBOL_PATTERN.test(value)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: HISTORY_SYMBOL_MESSAGE });
+        return z.NEVER;
+      }
+      return value.toUpperCase();
+    }),
+]);
+
+export const classificationFieldsSchema = z.object({ ...fieldShape, domain: domainField.optional(), kpiTemplate: z.enum(KPI_TEMPLATE_IDS).optional(), historySymbol: historySymbolField.optional() }).strict();
+
+/**
+ * `PUT` body: the fields to store, at least one (a `historySymbol` that clears counts: it leaves the override without it, and one that
+ * has nothing else left is removed). The output carries no null: a cleared history symbol is simply absent.
+ */
+export const classificationPutSchema = classificationFieldsSchema
+  .refine((fields) => hasClassification({ ...fields, historySymbol: fields.historySymbol ?? undefined }) || fields.historySymbol === null, 'Give at least one of name, assetClass, sector, country, website domain, earnings template or price history symbol')
+  .transform(({ historySymbol, ...rest }): ClassificationFields => ({ ...rest, ...(historySymbol === null || historySymbol === undefined ? {} : { historySymbol }) }));
 
 const isin = z
   .string()
@@ -110,7 +140,7 @@ export const classificationImportSchema = z
   .strict();
 export type ClassificationImportRequest = z.input<typeof classificationImportSchema>;
 
-export const hasClassification = (fields: ClassificationFields): boolean => CLASSIFICATION_FIELDS.some((field) => fields[field] !== undefined) || fields.domain !== undefined || fields.kpiTemplate !== undefined;
+export const hasClassification = (fields: ClassificationFields): boolean => CLASSIFICATION_FIELDS.some((field) => fields[field] !== undefined) || fields.domain !== undefined || fields.kpiTemplate !== undefined || fields.historySymbol !== undefined;
 
 /** The fields that are set, nothing else (a stored item or a request body may carry other attributes). */
 export function classificationFieldsOf(source: ClassificationFields): ClassificationFields {
@@ -121,6 +151,7 @@ export function classificationFieldsOf(source: ClassificationFields): Classifica
   if (source.country !== undefined) out.country = source.country;
   if (source.domain !== undefined) out.domain = source.domain;
   if (source.kpiTemplate !== undefined) out.kpiTemplate = source.kpiTemplate;
+  if (source.historySymbol !== undefined) out.historySymbol = source.historySymbol;
   return out;
 }
 
@@ -242,8 +273,8 @@ export function applyClassificationOverrides(
 ): Record<string, InstrumentProfile> {
   const out: Record<string, InstrumentProfile> = { ...profiles };
   for (const [symbol, override] of Object.entries(overrides)) {
-    // The logo domain and the earnings template are not profile fields: only the four allocation fields are laid over the profile.
-    const { domain: _logoDomain, kpiTemplate: _kpiTemplate, ...fields } = classificationFieldsOf(override);
+    // The logo domain, the earnings template and the history symbol are not profile fields: only the four allocation fields are laid over the profile.
+    const { domain: _logoDomain, kpiTemplate: _kpiTemplate, historySymbol: _historySymbol, ...fields } = classificationFieldsOf(override);
     if (!CLASSIFICATION_FIELDS.some((field) => fields[field] !== undefined)) continue;
     const profile = profiles[symbol];
     if (profile !== undefined) out[symbol] = { ...profile, ...fields };

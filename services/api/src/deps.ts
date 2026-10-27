@@ -16,6 +16,15 @@ export interface EarningsDeps {
   backfill(): Promise<EarningsBackfillResponse>;
 }
 
+/**
+ * The price service's use of the owner's price history symbol (the Cloudflare app); the AWS stack has none, it only stores and returns the
+ * field. `changed` is awaited after the classification was stored and must not throw for a failure that leaves the stored value intact.
+ */
+export interface HistorySymbolDeps {
+  /** `historySymbol` is the new value (`null`: cleared) of the holding `symbol`. */
+  changed(symbol: string, historySymbol: string | null): Promise<void>;
+}
+
 /** Everything the handlers need from the platform: repositories, events, files, the clock. Built by the adapter. */
 export interface Deps {
   repo: Repository;
@@ -29,6 +38,8 @@ export interface Deps {
   notify?: NotifyDeps;
   /** Earnings summaries (status and refresh); routes answer `available: false` when absent. */
   earnings?: EarningsDeps;
+  /** The price history symbol override reaching the price jobs; absent = the field is only stored. */
+  historySymbols?: HistorySymbolDeps;
   config: Pick<Config, 'baseCurrency' | 'authMode' | 'demoUserId' | 'corsAllowedOrigin'>;
   now: () => Date;
   uuid: () => string;
