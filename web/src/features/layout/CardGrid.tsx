@@ -79,9 +79,9 @@ export function CardGrid({ pageId, cards, emptyHint = NO_CARDS, gap = 'gap-6' }:
         saveError={cardLayout.saveError}
         onRetry={cardLayout.retry}
       />
-      <output className="sr-only" aria-live="polite">
+      <span className="sr-only" aria-live="polite">
         {announcement}
-      </output>
+      </span>
       <div className={`grid grid-cols-1 ${gap} md:grid-cols-12`} data-card-list>
         {visible.map((card, index) => {
           const definition = byId.get(card.id)!;
