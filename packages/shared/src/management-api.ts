@@ -12,6 +12,7 @@
  */
 import type { AllocationSlice, AssetClass, Portfolio, Transaction } from './types.js';
 import type { ClassificationOverrideItem } from './classification.js';
+import type { PageLayoutItem } from './layout.js';
 import type { RebalanceMode, RebalanceResult } from './rebalance.js';
 
 export const MANAGEMENT_ROUTES = {
@@ -200,4 +201,6 @@ export interface BackupResponse {
   watchlist: WatchlistEntry[];
   /** The owner's classification overrides; absent in backups made before they existed. */
   classificationOverrides?: ClassificationOverrideItem[];
+  /** The owner's customised page layouts; absent in backups made before they existed. */
+  layouts?: PageLayoutItem[];
 }

@@ -1,4 +1,4 @@
-import type { Category, CategoryAssignment, ClassificationOverrideItem, CustomAsset, GoalItem, PortfolioSettings, WatchlistEntry } from '@portfolio/shared';
+import type { Category, CategoryAssignment, ClassificationOverrideItem, CustomAsset, GoalItem, LayoutBreakpoint, LayoutPageId, PageLayoutItem, PortfolioSettings, WatchlistEntry } from '@portfolio/shared';
 import type { ManagementRepository } from '../management-repository.js';
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -12,6 +12,7 @@ export class InMemoryManagementRepository implements ManagementRepository {
   watchlist: WatchlistEntry[] = [];
   goals: GoalItem[] = [];
   overrides: ClassificationOverrideItem[] = [];
+  layouts: PageLayoutItem[] = [];
 
   getSettings(userId: string, portfolioId: string) {
     return Promise.resolve(clone(this.settings.find((s) => s.userId === userId && s.portfolioId === portfolioId) ?? null));
@@ -99,6 +100,20 @@ export class InMemoryManagementRepository implements ManagementRepository {
   }
   deleteClassificationOverride(userId: string, symbol: string) {
     this.overrides = this.overrides.filter((o) => !(o.userId === userId && o.symbol === symbol));
+    return Promise.resolve();
+  }
+  getLayouts(userId: string, page: LayoutPageId) {
+    return Promise.resolve(clone(this.layouts.filter((l) => l.userId === userId && l.page === page)));
+  }
+  listLayouts(userId: string) {
+    return Promise.resolve(clone(this.layouts.filter((l) => l.userId === userId)));
+  }
+  putLayout(item: PageLayoutItem) {
+    this.layouts = [...this.layouts.filter((l) => !(l.userId === item.userId && l.page === item.page && l.breakpoint === item.breakpoint)), clone(item)];
+    return Promise.resolve();
+  }
+  deleteLayout(userId: string, page: LayoutPageId, breakpoint: LayoutBreakpoint) {
+    this.layouts = this.layouts.filter((l) => !(l.userId === userId && l.page === page && l.breakpoint === breakpoint));
     return Promise.resolve();
   }
   async deletePortfolioData(userId: string, portfolioId: string) {

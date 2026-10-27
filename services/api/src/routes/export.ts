@@ -19,7 +19,7 @@ export async function exportTransactions(ctx: RouteContext): Promise<RouteResult
 /** Everything the user stored, as one JSON document. Contains no credentials or secrets. */
 export async function exportBackup(ctx: RouteContext): Promise<RouteResult> {
   const { repo, mgmt, config, now } = ctx.deps;
-  const [portfolios, transactions, settings, categories, categoryAssignments, customAssets, watchlist, classificationOverrides] = await Promise.all([
+  const [portfolios, transactions, settings, categories, categoryAssignments, customAssets, watchlist, classificationOverrides, layouts] = await Promise.all([
     repo.listPortfolios(ctx.userId),
     repo.listTransactions(ctx.userId),
     mgmt.listSettings(ctx.userId),
@@ -28,6 +28,7 @@ export async function exportBackup(ctx: RouteContext): Promise<RouteResult> {
     mgmt.listCustomAssets(ctx.userId),
     mgmt.listWatchlist(ctx.userId),
     mgmt.listClassificationOverrides(ctx.userId),
+    mgmt.listLayouts(ctx.userId),
   ]);
   const sortedPortfolios = [...portfolios].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.portfolioId.localeCompare(b.portfolioId));
   const backup: BackupResponse = {
@@ -42,6 +43,7 @@ export async function exportBackup(ctx: RouteContext): Promise<RouteResult> {
     customAssets,
     watchlist,
     classificationOverrides,
+    layouts,
   };
   return ok(backup);
 }
