@@ -24,10 +24,10 @@ describe('EcbInflationSource', () => {
       },
     });
     const series = await source.fetchSeries('NL');
-    expect(urls).toEqual([`${ECB_DATA_URL}/HICP/M.NL.N.000000.4D0.ANR?format=jsondata&detail=dataonly&startPeriod=1999-01`]);
+    expect(urls).toEqual([`${ECB_DATA_URL}/ICP/M.NL.N.000000.4.ANR?format=jsondata&detail=dataonly&startPeriod=1999-01`]);
     expect(inits[0]?.signal).toBeInstanceOf(AbortSignal);
     expect(inits[0]?.headers).toEqual({ accept: 'application/json' });
-    expect(series.series).toBe('HICP.M.NL.N.000000.4D0.ANR');
+    expect(series.series).toBe('ICP.M.NL.N.000000.4.ANR');
     expect(series.points).toEqual(fakeInflationPoints('U2'));
   });
 

@@ -21,8 +21,8 @@ export const DEFAULT_INFLATION_AREA: InflationArea = 'U2';
 export const inflationQuerySchema = z.object({ area: z.enum(INFLATION_AREAS).default(DEFAULT_INFLATION_AREA) });
 
 /** ECB Data Portal dataflow and the series key per area: FREQ.REF_AREA.ADJUSTMENT.ICP_ITEM.DATA_PROVIDER.ICP_SUFFIX (HICP, overall index, annual rate of change). */
-export const ECB_INFLATION_FLOW = 'HICP';
-export const ecbInflationSeriesKey = (area: InflationArea): string => `M.${area}.N.000000.4D0.ANR`;
+export const ECB_INFLATION_FLOW = 'ICP';
+export const ecbInflationSeriesKey = (area: InflationArea): string => `M.${area}.N.000000.4.ANR`;
 /** The series is requested from this month on (the euro exists since January 1999). */
 export const INFLATION_START_MONTH = '1999-01';
 
@@ -34,7 +34,7 @@ export interface InflationPoint {
 
 export interface InflationResponse {
   area: InflationArea;
-  /** The ECB series that was read, e.g. `HICP.M.U2.N.000000.4D0.ANR`. */
+  /** The ECB series that was read, e.g. `ICP.M.U2.N.000000.4.ANR`. */
   series: string;
   /** Oldest first, one point per month. */
   points: InflationPoint[];

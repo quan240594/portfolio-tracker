@@ -342,12 +342,12 @@ export class FakeEcb {
     if (url.host !== 'data-api.ecb.europa.eu') return undefined;
     this.requests.push(request.url);
     if (this.failWith !== null) return { status: this.failWith, json: null };
-    const area = (['U2', 'NL'] as const).find((a) => url.pathname === `/service/data/HICP/${ecbInflationSeriesKey(a)}`);
+    const area = (['U2', 'NL'] as const).find((a) => url.pathname === `/service/data/ICP/${ecbInflationSeriesKey(a)}`);
     return area === undefined ? { status: 404, json: null } : { status: 200, json: JSON.parse(buildInflationReply(fakeInflationPoints(area))) };
   };
 
   /** Requests for one area's series. */
   to(area: 'U2' | 'NL'): string[] {
-    return this.requests.filter((url) => url.includes(`/HICP/${ecbInflationSeriesKey(area)}?`));
+    return this.requests.filter((url) => url.includes(`/ICP/${ecbInflationSeriesKey(area)}?`));
   }
 }

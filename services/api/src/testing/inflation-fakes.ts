@@ -35,7 +35,7 @@ export function fakeEcb(): FakeEcb {
       ecb.requests.push(url);
       if (ecb.failWith === 0) return Promise.reject(new TypeError('network down'));
       if (ecb.failWith !== null) return Promise.resolve(new Response('', { status: ecb.failWith }));
-      const area = (['U2', 'NL'] as const).find((a) => url.includes(`/HICP/${ecbInflationSeriesKey(a)}?`));
+      const area = (['U2', 'NL'] as const).find((a) => url.includes(`/ICP/${ecbInflationSeriesKey(a)}?`));
       if (!url.startsWith('https://data-api.ecb.europa.eu/service/data/') || area === undefined) return Promise.resolve(new Response('not found', { status: 404 }));
       return Promise.resolve(new Response(buildInflationReply(fakeInflationPoints(area)), { headers: { 'content-type': 'application/vnd.sdmx.data+json' } }));
     },

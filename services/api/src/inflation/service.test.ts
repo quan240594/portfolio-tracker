@@ -19,7 +19,7 @@ describe('InflationService', () => {
   it('fetches the series once, stores it as one item and serves it from there', async () => {
     const { store, ecb, service, clock } = setup();
     const first = await service.get('U2');
-    expect(first).toMatchObject({ area: 'U2', series: 'HICP.M.U2.N.000000.4D0.ANR', latestMonth: '2026-09', fetchedAt: '2026-10-01T09:00:00.000Z', stale: false });
+    expect(first).toMatchObject({ area: 'U2', series: 'ICP.M.U2.N.000000.4.ANR', latestMonth: '2026-09', fetchedAt: '2026-10-01T09:00:00.000Z', stale: false });
     expect(first.points).toEqual(fakeInflationPoints('U2'));
     clock.ms += INFLATION_TTL_MS - 1;
     expect(await service.get('U2')).toEqual(first);

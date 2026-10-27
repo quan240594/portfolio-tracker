@@ -4,7 +4,7 @@
  * (with a fake). The reply is validated strictly (`parseInflationReply` in @portfolio/shared); anything unexpected is an
  * `InflationSourceError`, never a guess.
  *
- * Request: `GET {base}/HICP/M.{area}.N.000000.4D0.ANR?format=jsondata&detail=dataonly&startPeriod=1999-01` (SDMX-JSON 1.0 reply).
+ * Request: `GET {base}/ICP/M.{area}.N.000000.4.ANR?format=jsondata&detail=dataonly&startPeriod=1999-01` (SDMX-JSON 1.0 reply).
  */
 import { ECB_INFLATION_FLOW, INFLATION_START_MONTH, ecbInflationSeriesKey, parseInflationReply, type InflationArea, type InflationPoint } from '@portfolio/shared';
 
@@ -28,7 +28,7 @@ export class InflationSourceError extends Error {
 }
 
 export interface InflationSeries {
-  /** The ECB series key that was read, `HICP.M.U2.N.000000.4D0.ANR`. */
+  /** The ECB series key that was read, `ICP.M.U2.N.000000.4.ANR`. */
   series: string;
   /** Oldest first, one point per month. */
   points: InflationPoint[];

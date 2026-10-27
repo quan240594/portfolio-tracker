@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_PAYERS_BELOW_YIELD_PCT,
+  DEFAULT_PAYERS_MIN,
   ECB_INFLATION_TARGET_PCT,
   MIN_GROWTH_COVERAGE,
   averageInflation,
+  defaultYieldPreset,
   ecbTargetInflation,
   suggestDividendGrowth,
   suggestYieldOnNewMoney,
+  yieldCandidates,
   type DividendGrowthHolding,
   type YieldHolding,
 } from './goal-assumptions.js';
@@ -105,6 +109,28 @@ describe('suggestYieldOnNewMoney', () => {
   it('is unavailable without forward income', () => {
     expect(suggestYieldOnNewMoney('portfolio', { ...summary, forward12m: 0 }, yieldHoldings, RANGE)).toEqual({ available: false, reason: 'NO_INCOME' });
     expect(suggestYieldOnNewMoney('portfolio', summary, [], RANGE)).toEqual({ available: false, reason: 'NO_INCOME' });
+  });
+});
+
+describe('default yield preset and candidates', () => {
+  const payer = (forward12m: number): YieldHolding => ({ forward12m, marketValue: 1000 });
+  const five = [payer(10), payer(10), payer(10), payer(10), payer(10), { forward12m: 0, marketValue: 90_000 }];
+
+  it('uses the payers yield for a low-yield portfolio with at least five payers, else the portfolio yield', () => {
+    expect(defaultYieldPreset({ ...summary, yieldOnValuePct: 0.58 }, five)).toBe('payers');
+    expect(defaultYieldPreset({ ...summary, yieldOnValuePct: 0.99 }, five)).toBe('payers');
+    expect(defaultYieldPreset({ ...summary, yieldOnValuePct: 1 }, five)).toBe('portfolio');
+    expect(defaultYieldPreset({ ...summary, yieldOnValuePct: 0.58 }, five.slice(1))).toBe('portfolio');
+    expect(DEFAULT_PAYERS_BELOW_YIELD_PCT).toBe(1);
+    expect(DEFAULT_PAYERS_MIN).toBe(5);
+  });
+
+  it('lists the figure of every preset side by side', () => {
+    const all = yieldCandidates({ forward12m: 50, yieldOnValuePct: 0.58, yieldOnCostPct: 0.69 }, five, RANGE);
+    expect(all.portfolio).toMatchObject({ available: true, pct: 0.58 });
+    expect(all.payers).toMatchObject({ available: true, pct: 1 });
+    expect(all.cost).toMatchObject({ available: true, pct: 0.69 });
+    expect(yieldCandidates({ ...summary, forward12m: 0 }, five, RANGE).payers).toEqual({ available: false, reason: 'NO_INCOME' });
   });
 });
 

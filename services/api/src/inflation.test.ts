@@ -32,10 +32,10 @@ describe('GET /inflation', () => {
     const euro = await call();
     expect(euro.status).toBe(200);
     const body = euro.body as InflationResponse;
-    expect(body).toMatchObject({ area: 'U2', series: 'HICP.M.U2.N.000000.4D0.ANR', latestMonth: '2026-09', stale: false, fetchedAt: '2026-06-15T12:00:00.000Z' });
+    expect(body).toMatchObject({ area: 'U2', series: 'ICP.M.U2.N.000000.4.ANR', latestMonth: '2026-09', stale: false, fetchedAt: '2026-06-15T12:00:00.000Z' });
     expect(body.points).toEqual(fakeInflationPoints('U2'));
     const dutch = await call({ area: 'NL' });
-    expect(dutch.body).toMatchObject({ area: 'NL', series: 'HICP.M.NL.N.000000.4D0.ANR' });
+    expect(dutch.body).toMatchObject({ area: 'NL', series: 'ICP.M.NL.N.000000.4.ANR' });
     await call();
     await call({ area: 'NL' });
     expect(ecb.requests).toHaveLength(2);

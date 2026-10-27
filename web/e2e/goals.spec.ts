@@ -82,4 +82,38 @@ test.describe('Goals (mock mode)', () => {
     await expect(page.getByTestId('goal-chart')).toBeVisible();
     await expect(page.getByRole('region', { name: 'Goal summary' })).toBeVisible();
   });
+
+  test('helpers suggest growth, yield and inflation from the demo portfolio and the mock ECB series, with explanations', async ({ page }) => {
+    await page.goto('/goals');
+    const form = page.getByRole('form', { name: 'Goal settings' });
+    await expect(page.locator('output').filter({ hasText: VERDICT })).toBeVisible();
+    await form.getByRole('button', { name: 'Returns and inflation' }).click();
+
+    // The demo portfolio yields under 1% with five or more payers: a goal nobody saved starts on "Dividend payers only".
+    await expect(form.getByRole('radio', { name: /Dividend payers only/ })).toBeChecked();
+    await expect(form.getByLabel('Yield on new money (%)')).not.toHaveValue('3,5');
+    await expect(form.getByText(/divided by the market value of only the \d+ holdings? that pay dividends/)).toBeVisible();
+    await form.getByRole('radio', { name: /Portfolio forward yield/ }).check({ force: true });
+    await expect(form.getByText(/divided by the market value of all holdings/)).toBeVisible();
+
+    await form.getByRole('radio', { name: /From my portfolio/ }).check({ force: true });
+    await expect(form.getByText(/dividend-paying holdings?/)).toBeVisible();
+
+    await form.getByRole('radio', { name: /ECB history/ }).check({ force: true });
+    await expect(form.getByText(/average over the last 10 years/)).toBeVisible();
+    await expect(form.getByLabel('Inflation per year (%)')).not.toHaveValue('2');
+    await form.getByLabel('Inflation period').selectOption('20y');
+    await expect(form.getByText(/average over the last 20 years/)).toBeVisible();
+    await form.getByRole('radio', { name: /ECB target/ }).check({ force: true });
+    await expect(form.getByLabel('Inflation per year (%)')).toHaveValue('2');
+
+    await form.getByLabel('Inflation per year (%)').fill('3');
+    await expect(form.getByRole('radio', { name: 'Manual' }).nth(2)).toBeChecked();
+
+    const tip = form.getByText('i', { exact: true }).first();
+    await tip.click();
+    await expect(form.getByText(/compound annual growth rate of the dividend paid per share/)).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(form.getByText(/compound annual growth rate of the dividend paid per share/)).toBeHidden();
+  });
 });

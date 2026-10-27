@@ -111,7 +111,7 @@ export function suggestDividendGrowth(holdings: readonly DividendGrowthHolding[]
 export const YIELD_PRESETS = ['portfolio', 'payers', 'cost'] as const;
 export type YieldPreset = (typeof YIELD_PRESETS)[number];
 export const YIELD_PRESET_LABELS: Record<YieldPreset, string> = {
-  portfolio: 'Portfolio forward yield (all holdings)',
+  portfolio: 'Portfolio forward yield',
   payers: 'Dividend payers only',
   cost: 'Yield on cost',
 };
@@ -142,6 +142,29 @@ export function suggestYieldOnNewMoney(preset: YieldPreset, summary: YieldSummar
   const raw = { portfolio: summary.yieldOnValuePct, cost: summary.yieldOnCostPct, payers: payersValue > 0 ? (payersIncome / payersValue) * 100 : 0 }[preset];
   const basis: YieldBasis = { preset, forward12m: preset === 'payers' ? roundTo(payersIncome) : summary.forward12m, payers: payers.length };
   return { available: true, basis, ...clampedPct(raw, range, YIELD_DIGITS) };
+}
+
+/** Below this portfolio yield (percent) and with at least `DEFAULT_PAYERS_MIN` payers, the payers' own yield is the default preset. */
+export const DEFAULT_PAYERS_BELOW_YIELD_PCT = 1;
+export const DEFAULT_PAYERS_MIN = 5;
+
+/**
+ * The preset chosen by default: a portfolio whose forward yield is tiny because much of it is accumulating funds or growth
+ * stocks says little about money put into dividend payers, so with a yield under 1 % and at least five payers the payers'
+ * yield is used; otherwise the portfolio forward yield (what the Dividends page shows).
+ */
+export function defaultYieldPreset(summary: YieldSummary, holdings: readonly YieldHolding[]): YieldPreset {
+  const payers = holdings.filter((h) => h.forward12m > 0).length;
+  return summary.yieldOnValuePct < DEFAULT_PAYERS_BELOW_YIELD_PCT && payers >= DEFAULT_PAYERS_MIN ? 'payers' : 'portfolio';
+}
+
+/** Every preset's suggestion, so the choice can show all the figures side by side. */
+export function yieldCandidates(summary: YieldSummary, holdings: readonly YieldHolding[], range: AssumptionRange): Record<YieldPreset, YieldSuggestion> {
+  return {
+    portfolio: suggestYieldOnNewMoney('portfolio', summary, holdings, range),
+    payers: suggestYieldOnNewMoney('payers', summary, holdings, range),
+    cost: suggestYieldOnNewMoney('cost', summary, holdings, range),
+  };
 }
 
 // --- Inflation -----------------------------------------------------------------------------------------------------------

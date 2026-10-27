@@ -192,12 +192,12 @@ export function defineAppSuite(label: string, start: StartStack): void {
       const before = stack.ecb.to('NL').length;
       const first = await call('GET', '/inflation', { query: { area: 'NL' } });
       expect(first.status).toBe(200);
-      expect(first.body.series).toBe('HICP.M.NL.N.000000.4D0.ANR');
+      expect(first.body.series).toBe('ICP.M.NL.N.000000.4.ANR');
       const second = await call('GET', '/inflation', { query: { area: 'NL' } });
       expect(second.body.fetchedAt).toBe(first.body.fetchedAt);
       // at most the one request of the very first lookup (an earlier scenario of this suite may have made it already)
       expect(stack.ecb.to('NL').length - before).toBeLessThanOrEqual(1);
-      expect(stack.ecb.requests.every((url) => url.startsWith('https://data-api.ecb.europa.eu/service/data/HICP/M.'))).toBe(true);
+      expect(stack.ecb.requests.every((url) => url.startsWith('https://data-api.ecb.europa.eu/service/data/ICP/M.'))).toBe(true);
       expect((await call('GET', '/inflation', { query: { area: 'XX' } })).status).toBe(400);
     });
 

@@ -209,13 +209,13 @@ export function defineApiScenarios(label: string, target: ApiScenarioTarget): vo
     it('serves the cached ECB inflation series per area and refuses an unknown area', async () => {
       const first = await call('GET', '/inflation', { query: { area: 'NL' } });
       expect(first.status).toBe(200);
-      expect(first.body).toMatchObject({ area: 'NL', series: 'HICP.M.NL.N.000000.4D0.ANR', latestMonth: FAKE_ECB_LATEST_MONTH, stale: false });
+      expect(first.body).toMatchObject({ area: 'NL', series: 'ICP.M.NL.N.000000.4.ANR', latestMonth: FAKE_ECB_LATEST_MONTH, stale: false });
       expect(first.body.points.length).toBeGreaterThan(300);
       expect(first.body.points[0]).toEqual({ month: '1999-01', ratePct: expect.any(Number) });
       // The second answer comes from the cache: the same copy, not a new fetch.
       expect((await call('GET', '/inflation', { query: { area: 'NL' } })).body.fetchedAt).toBe(first.body.fetchedAt);
       const euro = await call('GET', '/inflation');
-      expect(euro.body).toMatchObject({ area: 'U2', series: 'HICP.M.U2.N.000000.4D0.ANR' });
+      expect(euro.body).toMatchObject({ area: 'U2', series: 'ICP.M.U2.N.000000.4.ANR' });
       expect((await call('GET', '/inflation', { query: { area: 'DE' } })).status).toBe(400);
     });
 
