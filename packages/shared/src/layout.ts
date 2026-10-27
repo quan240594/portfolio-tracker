@@ -31,13 +31,16 @@ export const layoutKeys = {
 
 // --- Vocabulary -----------------------------------------------------------------------------------------------------------
 
-export const CARD_WIDTHS = ['full', 'half', 'third'] as const;
+export const CARD_WIDTHS = ['full', 'twothirds', 'half', 'third'] as const;
 export type CardWidth = (typeof CARD_WIDTHS)[number];
 
 export const LAYOUT_BREAKPOINTS = ['desktop', 'mobile'] as const;
 export type LayoutBreakpoint = (typeof LAYOUT_BREAKPOINTS)[number];
 
-/** The routes that can hold cards; a closed list, so a user never stores more than `MAX_LAYOUT_PAGES` pages. */
+/**
+ * The screens that can hold cards; a closed list, so a user never stores more than `MAX_LAYOUT_PAGES` pages. A tabbed page
+ * (analytics, asset detail) has one layout per tab: `<page>-<tab>`.
+ */
 export const LAYOUT_PAGE_IDS = [
   'dashboard',
   'holdings',
@@ -45,11 +48,18 @@ export const LAYOUT_PAGE_IDS = [
   'calendar',
   'earnings',
   'transactions',
-  'analytics',
+  'analytics-growth',
+  'analytics-metrics',
+  'analytics-returns',
+  'analytics-risk',
+  'analytics-benchmark',
+  'analytics-dividends',
+  'analytics-goal',
   'goals',
   'rebalance',
   'assets',
-  'asset-detail',
+  'asset-detail-overview',
+  'asset-detail-dividends',
   'watchlist',
   'brokers',
   'notifications',
@@ -58,7 +68,7 @@ export const LAYOUT_PAGE_IDS = [
 export type LayoutPageId = (typeof LAYOUT_PAGE_IDS)[number];
 
 export const MAX_LAYOUT_CARDS = 60;
-export const MAX_LAYOUT_PAGES = 20;
+export const MAX_LAYOUT_PAGES = 30;
 export const MAX_LAYOUT_BODY_BYTES = 8 * 1024;
 export const CARD_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,47}$/;
 

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useLayoutEffect, useState, type ReactNode } from 'react';
 import { positionOf, type CardWidth, type LayoutPageId, type ResolvedLayout } from '@portfolio/shared';
 import { CardFrame, WIDTH_LABEL } from './CardFrame';
 import { CustomizeBar } from './CustomizeBar';
@@ -19,6 +19,8 @@ interface Props {
   cards: readonly CardDefinition[];
   /** Replaces what is shown when every card is hidden. */
   emptyHint?: ReactNode;
+  /** The space between cards (the page's own spacing before it became a grid); 1.5 rem by default. */
+  gap?: 'gap-4' | 'gap-5' | 'gap-6';
 }
 
 const NO_CARDS = 'Every card is hidden. Show one again from the list above, or reset the layout.';
@@ -28,13 +30,20 @@ const NO_CARDS = 'Every card is hidden. Show one again from the list above, or r
  * "Customize layout" switch; its layout comes from `useCardLayout`, so a card that is new, renamed or removed in code never
  * breaks a saved layout.
  */
-export function CardGrid({ pageId, cards, emptyHint = NO_CARDS }: Readonly<Props>) {
+export function CardGrid({ pageId, cards, emptyHint = NO_CARDS, gap = 'gap-6' }: Readonly<Props>) {
   const cardLayout = useCardLayout(pageId, cards);
   const [editing, setEditing] = useState(false);
   const [announcement, setAnnouncement] = useState('');
+  const [toggleSlot, setToggleSlot] = useState<HTMLElement | null>(null);
   const titles = new Map(cards.map((card) => [card.id, card.title]));
   const byId = new Map(cards.map((card) => [card.id, card]));
   const titleOf = (id: string): string => titles.get(id) ?? id;
+
+  // The header is a sibling rendered in the same commit; looking it up after every commit also follows a header that mounts later.
+  useLayoutEffect(() => {
+    const slot = document.querySelector<HTMLElement>('[data-page-header-actions]');
+    setToggleSlot((current) => (current === slot ? current : slot));
+  });
 
   const announce = (id: string, layout: ResolvedLayout) => {
     const at = positionOf(layout, id);
@@ -54,6 +63,7 @@ export function CardGrid({ pageId, cards, emptyHint = NO_CARDS }: Readonly<Props
       <CustomizeBar
         editing={editing}
         onToggle={() => setEditing((on) => !on)}
+        toggleSlot={toggleSlot}
         isDefault={cardLayout.isDefault}
         onReset={() => {
           cardLayout.reset();
@@ -72,7 +82,7 @@ export function CardGrid({ pageId, cards, emptyHint = NO_CARDS }: Readonly<Props
       <output className="sr-only" aria-live="polite">
         {announcement}
       </output>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-12" data-card-list>
+      <div className={`grid grid-cols-1 ${gap} md:grid-cols-12`} data-card-list>
         {visible.map((card, index) => {
           const definition = byId.get(card.id)!;
           const target = drag.target?.id === card.id ? drag.target : null;

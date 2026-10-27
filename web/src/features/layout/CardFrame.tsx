@@ -5,11 +5,12 @@ import type { CardDrag, DropTarget } from './useCardDrag';
 /** Grid columns of a card from `md` on (12 columns); below it every card is full width. */
 export const WIDTH_CLASS: Record<CardWidth, string> = {
   full: 'md:col-span-12',
+  twothirds: 'md:col-span-8',
   half: 'md:col-span-6',
   third: 'md:col-span-4',
 };
 
-export const WIDTH_LABEL: Record<CardWidth, string> = { full: 'Full width', half: 'Half width', third: 'One third' };
+export const WIDTH_LABEL: Record<CardWidth, string> = { full: 'Full width', twothirds: 'Two thirds', half: 'Half width', third: 'One third' };
 
 const isCardWidth = (value: string): value is CardWidth => (CARD_WIDTHS as readonly string[]).includes(value);
 
@@ -55,7 +56,9 @@ export function CardFrame({ id, title, width, editing, canResize, position, tota
   const onWidthChange = (event: ChangeEvent<HTMLSelectElement>) => {
     if (isCardWidth(event.target.value)) onWidth(id, event.target.value);
   };
-  const classes = ['relative min-w-0', WIDTH_CLASS[width], dragging ? 'opacity-60' : '', drop ? DROP_MARK[drop.axis][drop.edge] : ''].filter(Boolean).join(' ');
+  // A card whose content is empty (nothing to show right now) takes no room, until the page is being customized.
+  const emptyClass = editing ? '' : 'has-[>[data-card-body]:empty]:hidden';
+  const classes = ['relative flex min-w-0 flex-col', WIDTH_CLASS[width], emptyClass, dragging ? 'opacity-60' : '', drop ? DROP_MARK[drop.axis][drop.edge] : ''].filter(Boolean).join(' ');
 
   return (
     <div className={classes} data-card-id={id} data-width={width}>
@@ -89,7 +92,10 @@ export function CardFrame({ id, title, width, editing, canResize, position, tota
           </button>
         </fieldset>
       )}
-      {children}
+      {/* A grid, so the card stretches to the height of its row like a grid cell did. */}
+      <div data-card-body className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)]">
+        {children}
+      </div>
     </div>
   );
 }

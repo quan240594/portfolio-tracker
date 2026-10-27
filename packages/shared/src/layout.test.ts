@@ -59,6 +59,10 @@ describe('vocabulary', () => {
     expect(new Set(LAYOUT_PAGE_IDS).size).toBe(LAYOUT_PAGE_IDS.length);
     expect(LAYOUT_PAGE_IDS.every((id) => isCardId(id))).toBe(true);
     expect(isLayoutPageId('dashboard')).toBe(true);
+    expect(isLayoutPageId('analytics-growth')).toBe(true);
+    expect(isLayoutPageId('asset-detail-dividends')).toBe(true);
+    expect(isLayoutPageId('analytics')).toBe(false);
+    expect(pageLayoutSchema.safeParse(stored({ widths: { a: 'twothirds' } })).success).toBe(true);
     expect(isLayoutPageId('nope')).toBe(false);
   });
 
@@ -303,7 +307,7 @@ describe('toStored', () => {
 });
 
 describe('properties over random edits', () => {
-  const WIDTHS: CardWidth[] = ['full', 'half', 'third'];
+  const WIDTHS: CardWidth[] = ['full', 'twothirds', 'half', 'third'];
 
   function edit(layout: ResolvedLayout, next: () => number): ResolvedLayout {
     const id = DEFAULTS[Math.floor(next() * DEFAULTS.length)]!.id;
