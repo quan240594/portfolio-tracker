@@ -52,6 +52,31 @@ export const COVERAGE_REASONS = {
 /** The note of a history that comes from another listing of the same fund. */
 export const proxyReason = (listing: string): string => `History from another listing of the same fund (${listingExchangeName(listing)}); prices can differ by a few tenths of a percent`;
 
+/** What became of the price history symbol the owner set for a holding (see `ClassificationFields.historySymbol`). */
+export const HISTORY_OVERRIDE_STATUSES = ['pending', 'applied', 'refused', 'no-data', 'own'] as const;
+export type HistoryOverrideStatus = (typeof HISTORY_OVERRIDE_STATUSES)[number];
+
+export interface HistoryOverrideState {
+  /** The symbol the owner chose (`FWRA.DE`). */
+  symbol: string;
+  /**
+   * `pending`: not tried yet; `applied`: its history is stored; `refused`: it was not used, `reason` says why (another currency);
+   * `no-data`: the provider has none for it; `own`: it is the held symbol itself (no other listing is tried).
+   */
+  status: HistoryOverrideStatus;
+  reason: string | null;
+}
+
+/** The note of a price history symbol set by the owner, as the coverage reason shows it. */
+export function historyOverrideNote({ symbol, status, reason }: Readonly<HistoryOverrideState>): string {
+  const lead = `History symbol set by you: ${symbol}`;
+  if (status === 'refused') return `${lead}. Not used: ${reason ?? 'refused'}`;
+  if (status === 'no-data') return `${lead}. Not used: the provider has no data for it`;
+  if (status === 'pending') return `${lead}. Waiting for the next price run`;
+  if (status === 'own') return `${lead}. This is the held listing, so no other listing is tried`;
+  return lead;
+}
+
 /** What the history job last did for the symbol (the `ENRICH_STATE` item). `error` is sanitised and short. */
 export interface CoverageAttempt {
   day: string;
@@ -83,6 +108,8 @@ export interface HeldSymbolCoverage {
   eodSources: string[];
   /** The listing (`FWRA.DE`) the stored history was fetched under, because the provider has no data for this symbol; null for the symbol's own history. */
   proxyListing: string | null;
+  /** The price history symbol the owner set and what became of it; null when none is set. */
+  historyOverride: HistoryOverrideState | null;
   /** Date of the first transaction of the symbol. */
   firstTransaction: string;
   lastQuoteAt: string | null;
@@ -165,10 +192,12 @@ export interface CoverageReasonInput {
   providerBlocked: boolean;
   attempt: CoverageAttempt | null;
   proxyListing?: string | null;
+  historyOverride?: HistoryOverrideState | null;
 }
 
 /** A short hint why the history is incomplete (or that it is not). */
-export function coverageReason({ state, keyConfigured, providerBlocked, attempt, proxyListing = null }: Readonly<CoverageReasonInput>): string {
+export function coverageReason({ state, keyConfigured, providerBlocked, attempt, proxyListing = null, historyOverride = null }: Readonly<CoverageReasonInput>): string {
+  if (historyOverride !== null) return historyOverrideNote(historyOverride);
   if (proxyListing !== null && state !== 'missing') return proxyReason(proxyListing);
   if (state === 'complete') return COVERAGE_REASONS.complete;
   if (!keyConfigured) return COVERAGE_REASONS.noKey;
@@ -188,12 +217,14 @@ export interface SymbolCoverageInput {
   eod: EodSummary;
   quote: Readonly<{ asOf: string; source: string }> | null;
   attempt: CoverageAttempt | null;
+  historyOverride?: HistoryOverrideState | null;
 }
 
 export function symbolCoverage(input: Readonly<SymbolCoverageInput>, today: string): HeldSymbolCoverage {
   const { eod, attempt } = input;
   const historyState = historyStateOf(eod, input.firstTransaction, today);
   const proxyListing = proxyListingOf(eod.sources);
+  const historyOverride = input.historyOverride ?? null;
   return {
     symbol: input.symbol,
     name: input.name,
@@ -204,12 +235,13 @@ export function symbolCoverage(input: Readonly<SymbolCoverageInput>, today: stri
     lastEod: eod.last,
     eodSources: eod.sources,
     proxyListing,
+    historyOverride,
     firstTransaction: input.firstTransaction,
     lastQuoteAt: input.quote?.asOf ?? null,
     lastQuoteSource: input.quote?.source || null,
     historyState,
     lastAttempt: attempt,
-    reason: coverageReason({ state: historyState, keyConfigured: input.keyConfigured, providerBlocked: input.providerBlocked, attempt, proxyListing }),
+    reason: coverageReason({ state: historyState, keyConfigured: input.keyConfigured, providerBlocked: input.providerBlocked, attempt, proxyListing, historyOverride }),
   };
 }
 
@@ -281,6 +313,7 @@ export const priceHistoryCoverageSchema = z.object({
       lastEod: day.nullable(),
       eodSources: z.array(z.string()),
       proxyListing: z.string().nullable().default(null),
+      historyOverride: z.object({ symbol: z.string(), status: z.enum(HISTORY_OVERRIDE_STATUSES), reason: z.string().nullable() }).nullable().default(null),
       firstTransaction: day,
       lastQuoteAt: z.string().nullable(),
       lastQuoteSource: z.string().nullable(),

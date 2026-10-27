@@ -137,6 +137,30 @@ export function defineApiScenarios(label: string, target: ApiScenarioTarget): vo
       expect((await call('DELETE', `/portfolios/${id}`, { query: { force: 'true' } })).status).toBe(204);
     });
 
+    it('stores, upper-cases, validates and clears the price history symbol of a classification', async () => {
+      const id = await createPortfolio();
+      expect((await call('POST', '/transactions', { body: { portfolioId: id, ...BUY } })).status).toBe(201);
+      const path = `/classification/${BUY.symbol}`;
+      const put = await call('PUT', path, { body: { sector: 'Scenario sector', historySymbol: ' fwra.de ' } });
+      expect(put.status).toBe(200);
+      expect(put.body.override).toMatchObject({ sector: 'Scenario sector', historySymbol: 'FWRA.DE' });
+      for (const bad of ['FWRA/DE', 'FWRA DE', 'FWRA%DE', '.DE', 'A'.repeat(21)]) {
+        const refused = await call('PUT', path, { body: { sector: 'x', historySymbol: bad } });
+        expect(refused.status).toBe(400);
+        expect(refused.body.error.code).toBe('VALIDATION_ERROR');
+      }
+      const kept = await call('GET', '/classification');
+      expect(kept.body.instruments.find((i: { symbol: string }) => i.symbol === BUY.symbol).override).toMatchObject({ historySymbol: 'FWRA.DE' });
+      const cleared = await call('PUT', path, { body: { sector: 'Scenario sector', historySymbol: '' } });
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.override).toEqual({ sector: 'Scenario sector' });
+      expect((await call('PUT', path, { body: { historySymbol: 'FWRA.DE' } })).body.override).toEqual({ historySymbol: 'FWRA.DE' });
+      const onlyCleared = await call('PUT', path, { body: { historySymbol: null } });
+      expect(onlyCleared.status).toBe(200);
+      expect(onlyCleared.body.override).toBeNull();
+      expect((await call('DELETE', `/portfolios/${id}`, { query: { force: 'true' } })).status).toBe(204);
+    });
+
     it('serves earnings summaries, or reports the feature unavailable', async () => {
       const list = await call('GET', '/earnings');
       const status = await call('GET', '/earnings/status');

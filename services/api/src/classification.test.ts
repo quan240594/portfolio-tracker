@@ -114,6 +114,87 @@ describe('PUT and DELETE /classification/{symbol}', () => {
     expect((await put(s, 'AAA', {})).status).toBe(400);
   });
 
+  describe('price history symbol', () => {
+    const recorder = (s: ReturnType<typeof setup>) => {
+      const calls: [string, string | null][] = [];
+      s.deps.historySymbols = {
+        changed: (symbol, historySymbol) => {
+          calls.push([symbol, historySymbol]);
+          return Promise.resolve();
+        },
+      };
+      return calls;
+    };
+
+    it('is stored upper-cased next to the other fields, kept out of the allocation values and refused when invalid', async () => {
+      const s = setup();
+      const { status, body } = await put(s, 'FUND.MI', { sector: 'Funds', historySymbol: ' fwra.de ' });
+      expect(status).toBe(200);
+      expect(body).toMatchObject({ symbol: 'FUND.MI', effective: { name: 'Invented World Fund', sector: 'Funds' }, override: { sector: 'Funds', historySymbol: 'FWRA.DE' } });
+      expect(s.mgmt.overrides).toEqual([{ userId: 'demo', symbol: 'FUND.MI', sector: 'Funds', historySymbol: 'FWRA.DE', createdAt: NOW, updatedAt: NOW }]);
+      const profiles = await loadProfiles({ deps: s.deps, userId: 'demo' } as never, ['FUND.MI']);
+      expect(profiles['FUND.MI']).toMatchObject({ name: 'Invented World Fund', sector: 'Funds' });
+      expect(profiles['FUND.MI']).not.toHaveProperty('historySymbol');
+      for (const bad of ['FWRA/DE', 'FWRA DE', 'FWRA%2EDE', 'X'.repeat(21), 7]) {
+        const refused = await put(s, 'FUND.MI', { sector: 'Funds', historySymbol: bad });
+        expect(refused).toMatchObject({ status: 400, body: { error: { code: 'VALIDATION_ERROR' } } });
+      }
+      expect(s.mgmt.overrides).toHaveLength(1);
+    });
+
+    it('is cleared by null or an empty text, and an override with nothing else left is removed', async () => {
+      const s = setup();
+      await put(s, 'FUND.MI', { sector: 'Funds', historySymbol: 'FWRA.DE' });
+      const cleared = await put(s, 'FUND.MI', { sector: 'Funds', historySymbol: '' });
+      expect(cleared.body.override).toEqual({ sector: 'Funds' });
+      expect(s.mgmt.overrides).toEqual([{ userId: 'demo', symbol: 'FUND.MI', sector: 'Funds', createdAt: NOW, updatedAt: NOW }]);
+      await put(s, 'FUND.MI', { historySymbol: 'FWRA.DE' });
+      const onlyClear = await put(s, 'FUND.MI', { historySymbol: null });
+      expect(onlyClear).toMatchObject({ status: 200, body: { symbol: 'FUND.MI', override: null } });
+      expect(s.mgmt.overrides).toEqual([]);
+      expect((await put(s, 'FUND.MI', {})).status).toBe(400);
+    });
+
+    it('tells the price service when it changes, not when it stays the same, and when the override is deleted', async () => {
+      const s = setup();
+      const calls = recorder(s);
+      await put(s, 'FUND.MI', { historySymbol: 'FWRA.DE' });
+      await put(s, 'FUND.MI', { sector: 'Funds', historySymbol: 'FWRA.DE' });
+      await put(s, 'FUND.MI', { sector: 'Funds' });
+      await put(s, 'FUND.MI', { historySymbol: 'FWRA.AS' });
+      await put(s, 'FUND.MI', { historySymbol: null });
+      await put(s, 'AAA', { sector: 'Tech' });
+      await put(s, 'AAA', { historySymbol: 'AAA.DE' });
+      expect((await s.call('DELETE', '/classification/AAA')).status).toBe(204);
+      expect((await s.call('DELETE', '/classification/AAA')).status).toBe(204);
+      expect(calls).toEqual([
+        ['FUND.MI', 'FWRA.DE'],
+        ['FUND.MI', null],
+        ['FUND.MI', 'FWRA.AS'],
+        ['FUND.MI', null],
+        ['AAA', 'AAA.DE'],
+        ['AAA', null],
+      ]);
+    });
+
+    it('does not tell the price service about a rejected body, and works without one (the AWS stack)', async () => {
+      const s = setup();
+      const calls = recorder(s);
+      await put(s, 'FUND.MI', { historySymbol: 'FWRA/DE', sector: 'x' });
+      expect(calls).toEqual([]);
+      delete s.deps.historySymbols;
+      expect((await put(s, 'FUND.MI', { historySymbol: 'FWRA.DE' })).status).toBe(200);
+      expect((await s.call('DELETE', '/classification/FUND.MI')).status).toBe(204);
+    });
+
+    it('is kept when an import changes other fields of the holding', async () => {
+      const s = setup();
+      await put(s, 'AAA', { historySymbol: 'AAA.DE' });
+      await s.call('POST', '/classification/import', { body: { rows: [{ ticker: 'AAA', sector: 'Software' }] } });
+      expect(s.mgmt.overrides).toMatchObject([{ symbol: 'AAA', sector: 'Software', historySymbol: 'AAA.DE' }]);
+    });
+  });
+
   it('is applied by holdings, allocation and asset detail, and removed again by DELETE', async () => {
     const s = setup();
     const before = await s.call('GET', '/allocation', { query: { by: 'assetClass' } });

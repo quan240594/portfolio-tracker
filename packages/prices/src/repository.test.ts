@@ -228,5 +228,37 @@ describe('PriceRepository', () => {
       expect(await repo.newestEod('AAA', 10)).toHaveLength(3);
       expect(await repo.newestEod('NONE', 10)).toEqual([]);
     });
+
+    it('marks the EOD rows that the owner’s history symbol served', async () => {
+      const row = (date: string, extra: Record<string, unknown> = {}) => ({ PK: 'TICKER#AAA', SK: `EOD#${date}`, entityType: 'EOD', symbol: 'AAA', date, close: 1, currency: 'EUR', ...extra });
+      const repo = new PriceRepository(new MemoryItemStore().load([row('2026-10-01', { source: 'eodhd:AAA.DE', override: true }), row('2026-10-02', { source: 'eodhd:AAA.DE', override: false }), row('2026-10-03')]));
+      expect(await repo.newestEod('AAA', 10)).toEqual([{ date: '2026-10-03' }, { date: '2026-10-02', source: 'eodhd:AAA.DE' }, { date: '2026-10-01', source: 'eodhd:AAA.DE', override: true }]);
+    });
+  });
+
+  describe('history symbol of the owner', () => {
+    const record = { symbol: 'FWRA.MI', historySymbol: 'FWRA.DE', status: 'pending' as const, reason: null, setAt: '2026-10-13T10:00:00.000Z' };
+
+    it('stores, reads and forgets it per held symbol', async () => {
+      const repo = new PriceRepository(new MemoryItemStore());
+      await repo.putHistorySymbol(record);
+      await repo.putHistorySymbol({ symbol: 'AAA', historySymbol: 'AAA.AS', status: 'refused', reason: 'history symbol is quoted in USD, the holding in EUR', setAt: '2026-10-13T11:00:00.000Z' });
+      expect(await repo.getHistorySymbol('FWRA.MI')).toEqual(record);
+      expect((await repo.getHistorySymbol('AAA'))?.reason).toBe('history symbol is quoted in USD, the holding in EUR');
+      expect([...(await repo.getHistorySymbols(['AAA', 'FWRA.MI', 'FWRA.MI', 'NONE'])).keys()].toSorted((a, b) => a.localeCompare(b))).toEqual(['AAA', 'FWRA.MI']);
+      expect(await repo.getHistorySymbols([])).toEqual(new Map());
+      await repo.clearHistorySymbol('FWRA.MI');
+      expect(await repo.getHistorySymbol('FWRA.MI')).toBeUndefined();
+      expect(await repo.getHistorySymbol('AAA')).toBeDefined();
+    });
+
+    it('ignores an item that is not a history symbol record', async () => {
+      const store = new MemoryItemStore().load([
+        { PK: 'TICKER#A', SK: 'HISTSYM', historySymbol: 'A.DE', status: 'unknown', setAt: 'x' },
+        { PK: 'TICKER#B', SK: 'HISTSYM', status: 'pending', setAt: 'x' },
+        { PK: 'TICKER#C', SK: 'HISTSYM', historySymbol: 'C.DE', status: 'pending' },
+      ]);
+      expect(await new PriceRepository(store).getHistorySymbols(['A', 'B', 'C'])).toEqual(new Map());
+    });
   });
 });

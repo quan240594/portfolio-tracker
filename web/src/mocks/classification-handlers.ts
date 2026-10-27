@@ -4,6 +4,7 @@ import {
   classificationImportSchema,
   classificationPutSchema,
   classificationValues,
+  hasClassification,
   matchClassificationRows,
   sourceOf,
   type ClassificationImportResponse,
@@ -76,7 +77,9 @@ export const classificationHandlers: HttpHandler[] = [
       const symbol = knownSymbol(params.symbol);
       const parsed = classificationPutSchema.safeParse(await request.json().catch(() => null));
       if (!parsed.success) throw new MockHttpError(400, 'VALIDATION_ERROR', parsed.error.issues[0]?.message ?? 'Invalid classification', parsed.error.issues);
-      setOverride(db.getSeed(), symbol, parsed.data, new Date().toISOString());
+      // Like the API: a body that only clears the price history symbol leaves nothing to override.
+      if (hasClassification(parsed.data)) setOverride(db.getSeed(), symbol, parsed.data, new Date().toISOString());
+      else overridesOf(db.getSeed()).delete(symbol);
       return HttpResponse.json<ClassificationInstrument>(instruments().find((i) => i.symbol === symbol)!);
     })();
   }),

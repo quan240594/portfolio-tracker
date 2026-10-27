@@ -4,6 +4,7 @@ import {
   coverageReason,
   coverageTotals,
   coverageWindowStart,
+  historyOverrideNote,
   historyStateOf,
   isProxySource,
   listingExchangeName,
@@ -18,6 +19,7 @@ import {
   symbolCoverage,
   valuedAtCostOf,
   type CoverageAttempt,
+  type HistoryOverrideState,
   type EodSummary,
   type SymbolCoverageInput,
 } from './price-coverage.js';
@@ -248,5 +250,36 @@ describe('history from another listing of the same fund', () => {
     expect(priceHistoryCoverageSchema.parse(report).symbols[0]!.proxyListing).toBe('FWRA.DE');
     const { proxyListing: _dropped, ...older } = report.symbols[0]!;
     expect(priceHistoryCoverageSchema.parse({ ...report, symbols: [older] }).symbols[0]!.proxyListing).toBeNull();
+  });
+});
+
+describe('the price history symbol the owner set', () => {
+  const state = (over: Partial<HistoryOverrideState> = {}): HistoryOverrideState => ({ symbol: 'FWRA.DE', status: 'applied', reason: null, ...over });
+
+  it('is worded by what became of it', () => {
+    expect(historyOverrideNote(state())).toBe('History symbol set by you: FWRA.DE');
+    expect(historyOverrideNote(state({ status: 'refused', reason: 'history symbol is quoted in USD, the holding in EUR' }))).toBe(
+      'History symbol set by you: FWRA.DE. Not used: history symbol is quoted in USD, the holding in EUR',
+    );
+    expect(historyOverrideNote(state({ status: 'refused' }))).toBe('History symbol set by you: FWRA.DE. Not used: refused');
+    expect(historyOverrideNote(state({ status: 'no-data' }))).toBe('History symbol set by you: FWRA.DE. Not used: the provider has no data for it');
+    expect(historyOverrideNote(state({ status: 'pending' }))).toBe('History symbol set by you: FWRA.DE. Waiting for the next price run');
+    expect(historyOverrideNote(state({ status: 'own', symbol: 'FWRA.MI' }))).toBe('History symbol set by you: FWRA.MI. This is the held listing, so no other listing is tried');
+  });
+
+  it('leads the coverage reason, over the automatic proxy note and over a missing history', () => {
+    const proxied = eod(['2026-03-02', '2026-10-22'], 'eodhd:FWRA.DE');
+    const row = symbolCoverage(input({ symbol: 'FWRA.MI', provider: 'eodhd', eod: proxied, historyOverride: state() }), TODAY);
+    expect(row).toMatchObject({ proxyListing: 'FWRA.DE', historyOverride: state(), reason: 'History symbol set by you: FWRA.DE' });
+    const refused = symbolCoverage(input({ eod: eod([]), historyOverride: state({ status: 'refused', reason: 'history symbol is quoted in USD, the holding in EUR' }) }), TODAY);
+    expect(refused).toMatchObject({ historyState: 'missing', reason: 'History symbol set by you: FWRA.DE. Not used: history symbol is quoted in USD, the holding in EUR' });
+    expect(symbolCoverage(input(), TODAY).historyOverride).toBeNull();
+  });
+
+  it('is part of the stored report schema, and an older report without it reads as none', () => {
+    const report = { asOf: 'x', symbols: [symbolCoverage(input({ historyOverride: state() }), TODAY)], totals: coverageTotals([], 0, TODAY), rowsRead: 1 };
+    expect(priceHistoryCoverageSchema.parse(report).symbols[0]!.historyOverride).toEqual(state());
+    const { historyOverride: _dropped, ...older } = report.symbols[0]!;
+    expect(priceHistoryCoverageSchema.parse({ ...report, symbols: [older] }).symbols[0]!.historyOverride).toBeNull();
   });
 });

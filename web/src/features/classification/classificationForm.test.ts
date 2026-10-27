@@ -1,5 +1,5 @@
 import type { ClassificationInstrument } from '@portfolio/shared';
-import { fieldsToSend, initialForm, NOTHING_TO_SAVE, validateFields } from './classificationForm';
+import { fieldsToSend, historySymbolProblem, initialForm, NOTHING_TO_SAVE, validateFields } from './classificationForm';
 import { valueLabel } from './labels';
 
 const instrument = (patch: Partial<ClassificationInstrument> = {}): ClassificationInstrument => ({
@@ -17,8 +17,8 @@ const instrument = (patch: Partial<ClassificationInstrument> = {}): Classificati
 
 describe('initialForm', () => {
   it('starts at the effective values, a missing sector or country as an empty field', () => {
-    expect(initialForm(instrument())).toEqual({ name: 'Acme Corp', assetClass: 'STOCK', sector: 'Industrials', country: 'Germany', domain: '', kpiTemplate: '' });
-    expect(initialForm({ effective: { name: 'X', assetClass: 'ETF', sector: null, country: null } })).toEqual({ name: 'X', assetClass: 'ETF', sector: '', country: '', domain: '', kpiTemplate: '' });
+    expect(initialForm(instrument())).toEqual({ name: 'Acme Corp', assetClass: 'STOCK', sector: 'Industrials', country: 'Germany', domain: '', kpiTemplate: '', historySymbol: '' });
+    expect(initialForm({ effective: { name: 'X', assetClass: 'ETF', sector: null, country: null } })).toEqual({ name: 'X', assetClass: 'ETF', sector: '', country: '', domain: '', kpiTemplate: '', historySymbol: '' });
     expect(initialForm(instrument({ override: { domain: 'acme.example.com' } })).domain).toBe('acme.example.com');
   });
 });
@@ -31,11 +31,11 @@ describe('fieldsToSend', () => {
   });
 
   it('sends only the fields that differ from the automatic value, trimmed', () => {
-    expect(fieldsToSend({ name: ' Acme Group ', assetClass: 'ETF', sector: 'Industrials', country: ' France', domain: '', kpiTemplate: '' }, base)).toEqual({ name: 'Acme Group', assetClass: 'ETF', country: 'France' });
+    expect(fieldsToSend({ name: ' Acme Group ', assetClass: 'ETF', sector: 'Industrials', country: ' France', domain: '', kpiTemplate: '', historySymbol: '' }, base)).toEqual({ name: 'Acme Group', assetClass: 'ETF', country: 'France' });
   });
 
   it('does not override a field that was emptied or typed back to the automatic value', () => {
-    expect(fieldsToSend({ name: '  ', assetClass: 'STOCK', sector: '', country: 'Germany', domain: '   ', kpiTemplate: '' }, base)).toEqual({});
+    expect(fieldsToSend({ name: '  ', assetClass: 'STOCK', sector: '', country: 'Germany', domain: '   ', kpiTemplate: '', historySymbol: '' }, base)).toEqual({});
   });
 
   it('sends the website domain as typed, trimmed, and nothing when it is empty', () => {
@@ -52,8 +52,23 @@ describe('fieldsToSend', () => {
     expect(validateFields({ kpiTemplate: 'nonsense' as never })).toBe('Earnings template: Invalid enum value. Expected \'generic\' | \'reit\' | \'bank\' | \'saas\' | \'infra\', received \'nonsense\'');
   });
 
+  it('sends the price history symbol trimmed and nothing when it is empty', () => {
+    expect(fieldsToSend({ ...initialForm(instrument()), historySymbol: ' fwra.de ' }, base)).toEqual({ historySymbol: 'fwra.de' });
+    expect(fieldsToSend({ ...initialForm(instrument()), historySymbol: '  ' }, base)).toEqual({});
+    expect(initialForm({ ...instrument(), override: { historySymbol: 'FWRA.DE' } }).historySymbol).toBe('FWRA.DE');
+    expect(initialForm(instrument()).historySymbol).toBe('');
+  });
+
+  it('explains why a price history symbol would be refused, and accepts an empty one', () => {
+    expect(historySymbolProblem('')).toBeNull();
+    expect(historySymbolProblem(' fwra.de ')).toBeNull();
+    for (const bad of ['FWRA/DE', 'FWRA DE', '100%', '.DE', 'A'.repeat(21)]) expect(historySymbolProblem(bad)).toMatch(/^Enter a symbol such as FWRA\.DE/);
+    expect(validateFields({ historySymbol: 'FWRA DE' })).toMatch(/^Price history symbol: Enter a symbol such as FWRA\.DE/);
+    expect(validateFields({ historySymbol: 'FWRA.DE' })).toBeNull();
+  });
+
   it('overrides a field the profile has no value for', () => {
-    expect(fieldsToSend({ name: 'Acme Corp', assetClass: 'STOCK', sector: 'Mining', country: '', domain: '', kpiTemplate: '' }, { ...base, sector: null, country: null })).toEqual({ sector: 'Mining' });
+    expect(fieldsToSend({ name: 'Acme Corp', assetClass: 'STOCK', sector: 'Mining', country: '', domain: '', kpiTemplate: '', historySymbol: '' }, { ...base, sector: null, country: null })).toEqual({ sector: 'Mining' });
   });
 });
 

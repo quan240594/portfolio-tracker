@@ -6,7 +6,7 @@ export { createApp, errorToResult } from './app.js';
 export type { BrokerDeps } from './broker-deps.js';
 export { verifyWithTrading212 } from './broker-deps.js';
 export { loadConfig, type Config } from './config.js';
-export type { Deps, EarningsDeps, RouteContext } from './deps.js';
+export type { Deps, EarningsDeps, HistorySymbolDeps, RouteContext } from './deps.js';
 export { ItemManagementRepository, type ManagementRepository } from './management-repository.js';
 export { ItemRepository, type Repository } from './repository.js';
 export type { ConfiguredPush, NotifyDeps, PushConfig } from './notifications/deps.js';

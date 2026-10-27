@@ -59,9 +59,9 @@ async function resolveListing(ctx: StepContext, wanted: Readonly<ProxyWanted>, t
   return listing;
 }
 
-/** The rows of the proxy history on days the symbol has no row of its own (a provider's or the broker's); a proxy row is replaced. */
+/** The rows of the proxy history on days the symbol has no row of its own (a provider's or the broker's, or one of the history symbol the owner set); an automatic proxy row is replaced. */
 async function newDays(ctx: StepContext, symbol: string, rows: readonly EodPrice[]): Promise<EodPrice[]> {
-  const own = new Set((await ctx.repo.newestEod(symbol, OWN_ROWS_READ)).filter((row) => !isProxySource(row.source)).map((row) => row.date));
+  const own = new Set((await ctx.repo.newestEod(symbol, OWN_ROWS_READ)).filter((row) => row.override === true || !isProxySource(row.source)).map((row) => row.date));
   return rows.filter((row) => !own.has(row.date));
 }
 

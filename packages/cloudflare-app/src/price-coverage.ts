@@ -1,6 +1,6 @@
 import { ItemRepository } from '@portfolio/api';
 import type { ItemStore } from '@portfolio/platform';
-import { PriceRepository, providerOf, type LastAttempt, type PricesConfig } from '@portfolio/prices';
+import { PriceRepository, providerOf, type HistorySymbolRecord, type LastAttempt, type PricesConfig } from '@portfolio/prices';
 import {
   MAX_COVERAGE_ROWS,
   MAX_COVERAGE_SYMBOLS,
@@ -12,6 +12,7 @@ import {
   summarizeEod,
   symbolCoverage,
   type CoverageAttempt,
+  type HistoryOverrideState,
   type PriceHistoryCoverage,
   type Quote,
   type Transaction,
@@ -39,6 +40,9 @@ function heldSymbols(transactions: readonly Transaction[]): Map<string, string> 
 const attemptOf = (attempt: LastAttempt | undefined): CoverageAttempt | null =>
   attempt === undefined ? null : { day: attempt.day, attempts: attempt.attempts, outcome: attempt.outcome, error: sanitizeAttemptError(attempt.error) };
 
+const overrideOf = (record: HistorySymbolRecord | undefined): HistoryOverrideState | null =>
+  record === undefined ? null : { symbol: record.historySymbol, status: record.status, reason: record.reason };
+
 const quoteOf = (quote: Quote | undefined): { asOf: string; source: string } | null => (quote === undefined ? null : { asOf: quote.asOf, source: quote.source });
 
 /**
@@ -53,12 +57,13 @@ export async function loadPriceCoverage({ items, config, now }: Readonly<Coverag
   const symbols = [...held.keys()].sort((a, b) => a.localeCompare(b)).slice(0, MAX_COVERAGE_SYMBOLS);
   const prices = new PriceRepository(items);
   const providers = [...new Set(symbols.map((symbol) => providerOf(symbol)))];
-  const [eod, quotes, profiles, attempts, blocked] = await Promise.all([
+  const [eod, quotes, profiles, attempts, blocked, overrides] = await Promise.all([
     Promise.all(symbols.map((symbol) => prices.newestEod(symbol, MAX_COVERAGE_ROWS + 1))),
     prices.latestQuotes(symbols),
     new ItemRepository(items).getProfiles(symbols),
     prices.lastAttempts(symbols),
     prices.blockedProviders(providers, now()),
+    prices.getHistorySymbols(symbols),
   ]);
   const rows = symbols.map((symbol, index) => {
     const read = eod[index]!;
@@ -75,10 +80,11 @@ export async function loadPriceCoverage({ items, config, now }: Readonly<Coverag
         eod: summarizeEod(capped ? read.slice(0, MAX_COVERAGE_ROWS) : read, capped),
         quote: quoteOf(quotes.get(symbol)),
         attempt: attemptOf(attempts.get(symbol)),
+        historyOverride: overrideOf(overrides.get(symbol)),
       },
       today,
     );
   });
-  const rowsRead = transactions.length + eod.reduce((sum, read) => sum + read.length, 0) + quotes.size + Object.keys(profiles).length + attempts.size;
+  const rowsRead = transactions.length + eod.reduce((sum, read) => sum + read.length, 0) + quotes.size + Object.keys(profiles).length + attempts.size + overrides.size;
   return { asOf: now().toISOString(), symbols: sortCoverage(rows), totals: coverageTotals(rows, held.size, today), rowsRead };
 }

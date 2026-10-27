@@ -151,6 +151,45 @@ describe('EditClassificationDialog', () => {
     expect(puts).toEqual([]);
   });
 
+  it('offers a price history symbol with its help, prefilled from the override', () => {
+    const { dialog } = open({ ...AAPL, override: { historySymbol: 'FWRA.DE' } });
+    const input = dialog.getByLabelText('Price history symbol');
+    expect(input).toHaveValue('FWRA.DE');
+    expect(input).toHaveAccessibleDescription(/^Use this when the price provider has no data for the listing Trading 212 uses\. The suffix is the exchange: \.DE Xetra, \.AS Amsterdam, \.PA Paris, \.MI Milan, \.L London\. Leave empty for automatic\.$/);
+    expect(input).toHaveAttribute('aria-invalid', 'false');
+    expect(dialog.queryByRole('group')).toBeNull();
+  });
+
+  it('saves the price history symbol alone as typed', async () => {
+    const puts = recordPuts();
+    const { user, dialog, onClose } = open(AAPL);
+    await user.type(dialog.getByLabelText('Price history symbol'), ' fwra.de ');
+    await user.click(dialog.getByRole('button', { name: 'Save classification' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(puts).toEqual([{ path: '/api/classification/AAPL', body: { historySymbol: 'fwra.de' } }]);
+  });
+
+  it('stops sending the price history symbol once the input is emptied', async () => {
+    const puts = recordPuts();
+    const { user, dialog } = open({ ...OVERRIDDEN, override: { ...OVERRIDDEN.override, historySymbol: 'FWRA.DE' } });
+    await user.clear(dialog.getByLabelText('Price history symbol'));
+    await user.click(dialog.getByRole('button', { name: 'Save classification' }));
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]!.body).toEqual({ assetClass: 'COMMODITY', sector: 'Invented Sector' });
+  });
+
+  it('says why a price history symbol is refused, next to the input and on saving', async () => {
+    const puts = recordPuts();
+    const { user, dialog } = open(AAPL);
+    const input = dialog.getByLabelText('Price history symbol');
+    await user.type(input, 'FWRA/DE');
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAccessibleDescription(/Enter a symbol such as FWRA\.DE/);
+    await user.click(dialog.getByRole('button', { name: 'Save classification' }));
+    expect(dialog.getByRole('alert')).toHaveTextContent('Price history symbol: Enter a symbol such as FWRA.DE');
+    expect(puts).toEqual([]);
+  });
+
   it('asks for a change instead of sending an empty override', async () => {
     const puts = recordPuts();
     const { user, dialog, onClose } = open(AAPL);

@@ -45,6 +45,7 @@ const row = (over: Record<string, unknown>) => ({
   lastEod: '2026-10-19',
   eodSources: ['eodhd'],
   proxyListing: null,
+  historyOverride: null,
   firstTransaction: '2024-03-02',
   lastQuoteAt: '2026-10-19T08:15:00.000Z',
   lastQuoteSource: 't212',
@@ -60,6 +61,19 @@ const COVERAGE = {
   symbols: [
     row({ symbol: 'NOVO-B.CO', name: 'Novo Nordisk A/S Class B Shares (a rather long company name)', eodRows: 0, firstEod: null, lastEod: null, eodSources: [], lastQuoteAt: null, lastQuoteSource: null, historyState: 'missing', reason: 'No provider key for this exchange' }),
     row({
+      symbol: 'IWDA.AS',
+      name: 'iShares Core MSCI World UCITS ETF USD (Acc)',
+      eodRows: 0,
+      firstEod: null,
+      lastEod: null,
+      eodSources: [],
+      lastQuoteAt: null,
+      lastQuoteSource: null,
+      historyState: 'missing',
+      historyOverride: { symbol: 'IWDA.L', status: 'refused', reason: 'history symbol is quoted in GBP, the holding in EUR' },
+      reason: 'History symbol set by you: IWDA.L. Not used: history symbol is quoted in GBP, the holding in EUR',
+    }),
+    row({
       symbol: 'MSFT',
       name: 'Microsoft',
       provider: 'twelvedata',
@@ -71,9 +85,10 @@ const COVERAGE = {
       reason: 'Daily quota used up, retries after reset',
     }),
     row({ symbol: 'ASML.AS', name: 'ASML Holding' }),
-    row({ symbol: 'FWRA.MI', name: 'Invesco FTSE All-World Acc', eodSources: ['eodhd:FWRA.DE'], proxyListing: 'FWRA.DE', reason: 'History from another listing of the same fund (XETRA); prices can differ by a few tenths of a percent' }),
+    row({ symbol: 'FWRA.MI', name: 'Invesco FTSE All-World Acc', eodSources: ['eodhd:FWRA.DE'], proxyListing: 'FWRA.DE', historyOverride: { symbol: 'FWRA.DE', status: 'applied', reason: null }, reason: 'History symbol set by you: FWRA.DE' }),
+    row({ symbol: 'VWCE.DE', name: 'Vanguard FTSE All-World Acc', eodSources: ['eodhd:VWCE.AS'], proxyListing: 'VWCE.AS', reason: 'History from another listing of the same fund (Amsterdam); prices can differ by a few tenths of a percent' }),
   ],
-  totals: { held: 4, complete: 2, partial: 1, missing: 1, valuedAtCostSince: '2026-01-05', valuedAtCostUntil: '2026-10-19', truncated: false },
+  totals: { held: 6, complete: 3, partial: 1, missing: 2, valuedAtCostSince: '2026-01-05', valuedAtCostUntil: '2026-10-19', truncated: false },
   rowsRead: 330,
 };
 
@@ -190,14 +205,16 @@ for (const viewport of [
       await page.goto('/settings/diagnostics#price-coverage');
       const card = page.getByRole('region', { name: 'Price data coverage' });
       await expect(card).toBeVisible();
-      await expect(card).toContainText('4 held symbols: 2 complete, 1 partial, 1 missing.');
+      await expect(card).toContainText('6 held symbols: 3 complete, 1 partial, 2 missing.');
       await expect(card).toContainText('from 05-01-2026 until 19-10-2026');
       const symbols = card.getByRole('table').getByRole('row').filter({ has: page.getByRole('rowheader') });
-      await expect(symbols).toHaveCount(4);
+      await expect(symbols).toHaveCount(6);
       await expect(symbols.nth(0)).toContainText('Missing');
-      await expect(symbols.nth(1)).toContainText('Partial');
-      await expect(symbols.nth(2)).toContainText('Complete');
+      await expect(symbols.nth(1)).toContainText('Missing');
+      await expect(symbols.nth(2)).toContainText('Partial');
       await expect(symbols.nth(3)).toContainText('Complete');
+      await expect(symbols.nth(4)).toContainText('Complete');
+      await expect(symbols.nth(5)).toContainText('Complete');
       await expect(card.getByText('No provider key for this exchange').locator('visible=true')).toBeVisible();
       await expect(card.getByText(/Daily credits exhausted/).locator('visible=true')).toBeVisible();
       expect(await overflow(page)).toBeLessThanOrEqual(0);
@@ -242,8 +259,19 @@ for (const viewport of [
       await mockWorker(page);
       await page.goto('/settings/diagnostics#price-coverage');
       const card = page.getByRole('region', { name: 'Price data coverage' });
-      await expect(card.getByText(/History from another listing of the same fund \(XETRA\)/).locator('visible=true')).toBeVisible();
+      await expect(card.getByText(/History from another listing of the same fund \(Amsterdam\)/).locator('visible=true')).toBeVisible();
       expect(await overflow(page)).toBeLessThanOrEqual(0);
+    });
+
+    test('shows the history symbol the owner set and the reason when it was refused', async ({ page }) => {
+      await mockWorker(page);
+      await page.goto('/settings/diagnostics#price-coverage');
+      const card = page.getByRole('region', { name: 'Price data coverage' });
+      await expect(card.getByText('History symbol set by you: FWRA.DE', { exact: true }).locator('visible=true')).toBeVisible();
+      await expect(card.getByText(/History symbol set by you: IWDA\.L\. Not used: history symbol is quoted in GBP, the holding in EUR/).locator('visible=true')).toBeVisible();
+      expect(await overflow(page)).toBeLessThanOrEqual(0);
+      const box = await card.boundingBox();
+      expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
     });
   });
 }

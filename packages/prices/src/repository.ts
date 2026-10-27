@@ -1,5 +1,5 @@
 import { cond, queryAll, type BatchOp, type Item, type ItemStore } from '@portfolio/platform';
-import { CALENDAR_ENTITY, ENTITY, calendarKeys, isProfileSource, keys, majorDividend, majorEod, majorQuote, mergeProfile, minorUnit, sourceOf, type DividendEvent, type EodPrice, type FxDay, type FxRates, type InstrumentProfile, type ProfileSource, type Quote, type StoredEarningsEvent, type StoredSplitEvent } from '@portfolio/shared';
+import { CALENDAR_ENTITY, ENTITY, HISTORY_OVERRIDE_STATUSES, calendarKeys, isProfileSource, keys, majorDividend, majorEod, majorQuote, mergeProfile, minorUnit, sourceOf, type DividendEvent, type EodPrice, type FxDay, type FxRates, type HistoryOverrideStatus, type InstrumentProfile, type ProfileSource, type Quote, type StoredEarningsEvent, type StoredSplitEvent } from '@portfolio/shared';
 import { BlockBook, StoreQuotaLedger, type ProviderBlock } from './limits.js';
 import { profileDetails } from './models.js';
 import { byText, definedOnly } from './parse.js';
@@ -14,8 +14,8 @@ export const stateKey = (symbol: string) => ({ PK: calendarKeys.tickerPk(symbol)
 export const budgetKey = (provider: string) => ({ PK: BUDGET_PK, SK: `BUDGET#${provider}` });
 
 export const ENRICH_STATE_ENTITY = 'ENRICH_STATE';
-/** What an attempt counter counts: the enrichment of a symbol (`core`) or the lookup of its provider profile (`profile`). */
-export type AttemptKind = 'core' | 'profile';
+/** What an attempt counter counts: the enrichment of a symbol (`core`), the lookup of its provider profile (`profile`) or the fetch of its history under the owner's history symbol (`override`). */
+export type AttemptKind = 'core' | 'profile' | 'override';
 /** How a try ended: `retry` (a transient failure, worth trying again later) or `skipped` (the symbol is unknown or unavailable: trying again changes nothing). */
 export type AttemptOutcome = 'retry' | 'skipped';
 
@@ -69,6 +69,19 @@ export interface ProxyRecord {
 /** The listing chosen for an ISIN when the provider has no data for the held symbol (see `proxyHistory`). */
 export const PROXY_LISTING_ENTITY = 'PROXY_LISTING';
 export const proxyKey = (isin: string) => ({ PK: `ISIN#${isin}`, SK: 'PROXY' });
+/** The price history symbol the owner set for a held symbol and what became of it (one item per held symbol, written when the owner saves it). */
+export interface HistorySymbolRecord {
+  symbol: string;
+  historySymbol: string;
+  status: HistoryOverrideStatus;
+  reason: string | null;
+  /** When the owner set it. */
+  setAt: string;
+}
+
+export const HISTORY_SYMBOL_ENTITY = 'HISTORY_SYMBOL';
+export const historySymbolKey = (symbol: string) => ({ PK: calendarKeys.tickerPk(symbol), SK: 'HISTSYM' });
+
 export const attemptKey = (symbol: string, kind: AttemptKind) => ({ PK: calendarKeys.tickerPk(symbol), SK: `ENRICH#${kind}` });
 const MAX_ERROR_CHARS = 200;
 
@@ -241,10 +254,35 @@ export class PriceRepository {
     return new Map(found.map((item) => [symbolOfPk(item), { day: String(item.day), attempts: Number(item.attempts), outcome: item.outcome === 'skipped' ? 'skipped' : 'retry', error: typeof item.lastError === 'string' ? item.lastError : '' }]));
   }
 
-  /** The newest `limit` EOD rows of `symbol` in ONE query: their dates (newest first) and sources (absent: a market-data provider's row). */
-  async newestEod(symbol: string, limit: number): Promise<{ date: string; source?: string }[]> {
+  /** The newest `limit` EOD rows of `symbol` in ONE query: their dates (newest first), sources (absent: a market-data provider's row) and whether the owner's history symbol served them. */
+  async newestEod(symbol: string, limit: number): Promise<{ date: string; source?: string; override?: true }[]> {
     const page = await this.store.query({ pk: keys.tickerPk(symbol), sk: { beginsWith: keys.eodPrefix }, reverse: true, limit });
-    return page.items.map((item) => ({ date: item.SK.slice(keys.eodPrefix.length), ...(typeof item.source === 'string' ? { source: item.source } : {}) }));
+    return page.items.map((item) => ({ date: item.SK.slice(keys.eodPrefix.length), ...(typeof item.source === 'string' ? { source: item.source } : {}), ...(item.override === true ? { override: true as const } : {}) }));
+  }
+
+  /** The history symbols of the owner for these held symbols, by held symbol. */
+  async getHistorySymbols(symbols: readonly string[]): Promise<Map<string, HistorySymbolRecord>> {
+    const items = symbols.length === 0 ? [] : await this.store.getMany([...new Set(symbols)].map((symbol) => historySymbolKey(symbol)));
+    const out = new Map<string, HistorySymbolRecord>();
+    for (const item of items) {
+      const status = HISTORY_OVERRIDE_STATUSES.find((candidate) => candidate === item.status);
+      if (status === undefined || typeof item.historySymbol !== 'string' || typeof item.setAt !== 'string') continue;
+      out.set(symbolOfPk(item), { symbol: symbolOfPk(item), historySymbol: item.historySymbol, status, reason: typeof item.reason === 'string' ? item.reason : null, setAt: item.setAt });
+    }
+    return out;
+  }
+
+  async getHistorySymbol(symbol: string): Promise<HistorySymbolRecord | undefined> {
+    return (await this.getHistorySymbols([symbol])).get(symbol);
+  }
+
+  async putHistorySymbol(record: HistorySymbolRecord): Promise<void> {
+    await this.store.put({ ...historySymbolKey(record.symbol), entityType: HISTORY_SYMBOL_ENTITY, ...definedOnly({ historySymbol: record.historySymbol, status: record.status, reason: record.reason ?? undefined, setAt: record.setAt }) });
+  }
+
+  /** Forgets the owner's history symbol of `symbol` (the rows it stored stay, marked as from an override). */
+  async clearHistorySymbol(symbol: string): Promise<void> {
+    await this.store.delete(historySymbolKey(symbol));
   }
 
   /** Stores the number of tries of `day`, how the last one ended and why. */

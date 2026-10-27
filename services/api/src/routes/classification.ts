@@ -6,6 +6,7 @@ import {
   classificationImportSchema,
   classificationPutSchema,
   classificationValues,
+  hasClassification,
   isMarketSymbol,
   matchClassificationRows,
   sourceOf,
@@ -73,21 +74,36 @@ export async function listClassification(ctx: RouteContext): Promise<RouteResult
   return ok({ instruments } satisfies ClassificationListResponse);
 }
 
+/** Tells the price service (when the deployment has one) that the history symbol of `symbol` changed; nothing happens when it did not. */
+async function notifyHistorySymbol(ctx: RouteContext, symbol: string, previous: string | undefined, next: string | undefined): Promise<void> {
+  if (previous === next) return;
+  await ctx.deps.historySymbols?.changed(symbol, next ?? null);
+}
+
 export async function putClassification(ctx: RouteContext): Promise<RouteResult> {
   const symbol = pathSymbol(ctx);
   const fields = validate(classificationPutSchema.safeParse(parseJsonBody(ctx.body)), 'Invalid classification');
   const { mgmt, now } = ctx.deps;
   const existing = (await mgmt.getClassificationOverrides(ctx.userId, [symbol]))[symbol];
   const ts = now().toISOString();
-  // Identity comes from the authenticated context and the path only, never from the body.
-  const item: ClassificationOverrideItem = { ...fields, userId: ctx.userId, symbol, createdAt: existing?.createdAt ?? ts, updatedAt: ts };
-  await mgmt.putClassificationOverrides([item]);
+  if (hasClassification(fields)) {
+    // Identity comes from the authenticated context and the path only, never from the body.
+    const item: ClassificationOverrideItem = { ...fields, userId: ctx.userId, symbol, createdAt: existing?.createdAt ?? ts, updatedAt: ts };
+    await mgmt.putClassificationOverrides([item]);
+  } else {
+    // Only a cleared price history symbol was sent: nothing is left to override.
+    await mgmt.deleteClassificationOverride(ctx.userId, symbol);
+  }
+  await notifyHistorySymbol(ctx, symbol, existing?.historySymbol, fields.historySymbol);
   const { instruments } = await loadUniverse(ctx, [symbol]);
   return ok(instruments.find((instrument) => instrument.symbol === symbol));
 }
 
 export async function deleteClassification(ctx: RouteContext): Promise<RouteResult> {
-  await ctx.deps.mgmt.deleteClassificationOverride(ctx.userId, pathSymbol(ctx));
+  const symbol = pathSymbol(ctx);
+  const existing = (await ctx.deps.mgmt.getClassificationOverrides(ctx.userId, [symbol]))[symbol];
+  await ctx.deps.mgmt.deleteClassificationOverride(ctx.userId, symbol);
+  await notifyHistorySymbol(ctx, symbol, existing?.historySymbol, undefined);
   return ok(undefined, 204);
 }
 

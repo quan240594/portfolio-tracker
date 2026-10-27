@@ -94,6 +94,8 @@ export interface EodPrice {
   currency: string;
   /** Where the row comes from, when it is not a market-data provider's close (`t212`: the Trading 212 quote at the end of the day). */
   source?: string;
+  /** The row was fetched under the history symbol the owner set (see `ClassificationFields.historySymbol`): it replaces automatic proxy rows, never a row of the symbol's own provider. */
+  override?: boolean;
 }
 
 /** A corporate dividend event announced for an instrument (per-share amounts). */

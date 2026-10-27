@@ -4,11 +4,13 @@ import { errorMessage } from '../../api/client';
 import { useResetClassification, useSaveClassification } from '../../api/classificationHooks';
 import { Dialog } from '../../components/Dialog';
 import { ASSET_CLASS_LABELS } from '../assets/AssetDialog';
-import { DOMAIN_LABEL, KPI_TEMPLATE_LABEL, fieldsToSend, initialForm, validateFields, type ClassificationForm } from './classificationForm';
+import { DOMAIN_LABEL, HISTORY_SYMBOL_LABEL, KPI_TEMPLATE_LABEL, fieldsToSend, historySymbolProblem, initialForm, validateFields, type ClassificationForm } from './classificationForm';
 import { BASE_LABELS, FIELD_LABELS, SOURCE_LABELS, valueLabel } from './labels';
 
 const ALERT_CLASS = 'rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200';
-const TEXT_LIMITS = { name: 120, sector: 60, country: 60, domain: 300 } as const;
+const TEXT_LIMITS = { name: 120, sector: 60, country: 60, domain: 300, historySymbol: 20 } as const;
+const HISTORY_SYMBOL_HELP =
+  'Use this when the price provider has no data for the listing Trading 212 uses. The suffix is the exchange: .DE Xetra, .AS Amsterdam, .PA Paris, .MI Milan, .L London. Leave empty for automatic.';
 
 interface FieldProps {
   field: ClassificationField;
@@ -37,11 +39,13 @@ function Field({ field, instrument, children }: Readonly<FieldProps>) {
 export function EditClassificationDialog({ instrument, onClose }: Readonly<{ instrument: ClassificationInstrument; onClose: () => void }>) {
   const domainId = useId();
   const templateId = useId();
+  const historyId = useId();
   const save = useSaveClassification();
   const reset = useResetClassification();
   const [form, setForm] = useState<ClassificationForm>(() => initialForm(instrument));
   const [error, setError] = useState<string | null>(null);
   const pending = save.isPending || reset.isPending;
+  const historyProblem = historySymbolProblem(form.historySymbol);
   const set = <K extends keyof ClassificationForm>(key: K, value: ClassificationForm[K]) => setForm((current) => ({ ...current, [key]: value }));
 
   const onSubmit = async (e: FormEvent) => {
@@ -121,6 +125,32 @@ export function EditClassificationDialog({ instrument, onClose }: Readonly<{ ins
           <p id={`${domainId}-hint`} className="muted mt-1 text-xs break-words">
             Optional. The company website the logo is looked up by, for when the logo is missing or wrong. Leave it empty to detect it automatically.
           </p>
+        </div>
+        <div>
+          <label className="label" htmlFor={historyId}>
+            {HISTORY_SYMBOL_LABEL}
+          </label>
+          <input
+            id={historyId}
+            className="input"
+            value={form.historySymbol}
+            maxLength={TEXT_LIMITS.historySymbol}
+            placeholder="FWRA.DE"
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck={false}
+            aria-invalid={historyProblem !== null}
+            aria-describedby={historyProblem === null ? `${historyId}-hint` : `${historyId}-hint ${historyId}-error`}
+            onChange={(e) => set('historySymbol', e.target.value)}
+          />
+          <p id={`${historyId}-hint`} className="muted mt-1 text-xs break-words">
+            {HISTORY_SYMBOL_HELP}
+          </p>
+          {historyProblem !== null && (
+            <p id={`${historyId}-error`} className="mt-1 text-xs break-words text-red-700 dark:text-red-300">
+              {historyProblem}
+            </p>
+          )}
         </div>
         <div>
           <label className="label" htmlFor={templateId}>

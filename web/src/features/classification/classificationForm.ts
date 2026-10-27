@@ -10,16 +10,20 @@ export interface ClassificationForm {
   domain: string;
   /** The earnings summary template; empty = automatic (the table of known tickers, then the sector). */
   kpiTemplate: KpiTemplateId | '';
+  /** The symbol the price history is fetched under (`FWRA.DE`); empty = automatic. */
+  historySymbol: string;
 }
 
 /** What the domain input is called in the dialog and in validation messages. */
 export const DOMAIN_LABEL = 'Website domain';
+/** What the price history symbol input is called in the dialog and in validation messages. */
+export const HISTORY_SYMBOL_LABEL = 'Price history symbol';
 /** What the template select is called in the dialog and in validation messages. */
 export const KPI_TEMPLATE_LABEL = 'Earnings template';
 
 /** The form starts at what the screens show today (the override where there is one). */
 export function initialForm({ effective, override }: Pick<ClassificationInstrument, 'effective'> & Partial<Pick<ClassificationInstrument, 'override'>>): ClassificationForm {
-  return { name: effective.name, assetClass: effective.assetClass, sector: effective.sector ?? '', country: effective.country ?? '', domain: override?.domain ?? '', kpiTemplate: override?.kpiTemplate ?? '' };
+  return { name: effective.name, assetClass: effective.assetClass, sector: effective.sector ?? '', country: effective.country ?? '', domain: override?.domain ?? '', kpiTemplate: override?.kpiTemplate ?? '', historySymbol: override?.historySymbol ?? '' };
 }
 
 /**
@@ -39,6 +43,9 @@ export function fieldsToSend(form: ClassificationForm, base: ClassificationValue
   const domain = form.domain.trim();
   if (domain !== '') fields.domain = domain;
   if (form.kpiTemplate !== '') fields.kpiTemplate = form.kpiTemplate;
+  // Like the domain: what is typed is what is stored (the API upper-cases it), empty means automatic.
+  const historySymbol = form.historySymbol.trim();
+  if (historySymbol !== '') fields.historySymbol = historySymbol;
   return fields;
 }
 
@@ -55,8 +62,15 @@ export function validateFields(fields: ClassificationFields): string | null {
   return `${label}: ${issue.message}`;
 }
 
+/** Why the text typed as price history symbol would be refused, or null (empty is fine: it means automatic). */
+export function historySymbolProblem(text: string): string | null {
+  const parsed = classificationPutSchema.safeParse({ historySymbol: text });
+  return parsed.success ? null : parsed.error.issues[0]!.message;
+}
+
 function fieldLabel(field: unknown): string {
   if (field === 'domain') return DOMAIN_LABEL;
   if (field === 'kpiTemplate') return KPI_TEMPLATE_LABEL;
+  if (field === 'historySymbol') return HISTORY_SYMBOL_LABEL;
   return typeof field === 'string' && field in FIELD_LABELS ? FIELD_LABELS[field as keyof typeof FIELD_LABELS] : 'Classification';
 }
