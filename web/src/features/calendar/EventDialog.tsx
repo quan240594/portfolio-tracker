@@ -5,10 +5,10 @@ import { CompanyLogo } from '../../components/CompanyLogo';
 import { Dialog } from '../../components/Dialog';
 import { formatDate, formatMoney, formatQuantity, formatWeekdayDate } from '../../lib/format';
 import { SummaryLink } from '../earnings/SummaryLink';
-import { EVENT_META, STATUS_LABELS, isDividend, sourceLabel } from './calendarModel';
+import { EVENT_META, isDividend, sourceLabel, statusLabel } from './calendarModel';
 import { EventMarker } from './EventMarker';
 import { EventRow } from './EventList';
-import { perShareLabel, TIME_OF_DAY_LABELS } from './eventText';
+import { earningsPhaseLabel, perShareLabel, TIME_OF_DAY_LABELS } from './eventText';
 
 function Row({ label, children }: Readonly<{ label: string; children: ReactNode }>) {
   return (
@@ -38,8 +38,10 @@ function DividendRows({ event, baseCurrency }: Readonly<{ event: CalendarEvent; 
 }
 
 function EarningsRows({ event }: Readonly<{ event: CalendarEvent }>) {
+  const phase = earningsPhaseLabel(event);
   return (
     <>
+      {phase && <Row label="Results">{phase}</Row>}
       <Row label="Fiscal period ending">{event.fiscalPeriodEnd ? formatDate(event.fiscalPeriodEnd) : 'Not available'}</Row>
       <Row label="EPS estimate">{event.epsEstimate === undefined ? 'Not available' : formatMoney(event.epsEstimate, event.currency ?? 'USD')}</Row>
       <Row label="Time of day">{TIME_OF_DAY_LABELS[event.timeOfDay ?? 'unknown']}</Row>
@@ -60,6 +62,12 @@ function TypeRows({ event, baseCurrency }: Readonly<{ event: CalendarEvent; base
   if (isDividend(event)) return <DividendRows event={event} baseCurrency={baseCurrency} />;
   if (event.type === 'EARNINGS') return <EarningsRows event={event} />;
   return <SplitRows event={event} />;
+}
+
+function estimateNote(event: CalendarEvent): string {
+  if (event.earningsPhase === 'projected') return 'No date is announced yet. This is a projection from the previous report (about 91 days later) and may be days off.';
+  if (event.type === 'EARNINGS') return 'The date comes from a data provider and may change once the company confirms it.';
+  return 'This date is a projection and may change once the company announces it.';
 }
 
 interface Props {
@@ -102,10 +110,10 @@ export function EventDialog({ event, baseCurrency, onClose, withScope }: Readonl
         <Row label="Type">{meta.label}</Row>
         <Row label="Date">{formatDate(event.date)}</Row>
         <TypeRows event={event} baseCurrency={baseCurrency} />
-        <Row label="Status">{STATUS_LABELS[event.status]}</Row>
-        <Row label="Source">{sourceLabel(event.source)}</Row>
+        <Row label="Status">{statusLabel(event)}</Row>
+        <Row label="Source">{sourceLabel(event.source, event.type)}</Row>
       </dl>
-      {event.status === 'ESTIMATED' && <p className="muted mt-3 text-xs">This date is a projection and may change once the company announces it.</p>}
+      {event.status === 'ESTIMATED' && <p className="muted mt-3 text-xs">{estimateNote(event)}</p>}
     </Dialog>
   );
 }

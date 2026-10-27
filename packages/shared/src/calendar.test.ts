@@ -15,6 +15,7 @@ import {
   calendarSplitKind,
   calendarSplitLabel,
   defaultCalendarRange,
+  projectedEarningsDate,
   type CalendarData,
   type CalendarEvent,
   type CalendarQuery,
@@ -370,6 +371,90 @@ describe('earnings and splits', () => {
   });
 });
 
+describe('reported and projected earnings', () => {
+  const noProviderAhead = earnings.filter((e) => e.symbol !== 'AAPL' || e.date < TODAY);
+  const earningsOnly = (override: Partial<CalendarData>): CalendarEvent[] => eventsOf({ types: ['EARNINGS'] }, override).filter((e) => e.symbol === 'AAPL');
+
+  it('shows a stored summary as reported earnings: CONFIRMED, labelled Reported, with its own source', () => {
+    const events = earningsOnly({ reportedEarnings: [{ symbol: 'AAPL', reportDate: '2026-04-30', period: 'Q2 2026' }] });
+    expect(byId(events, 'earn:AAPL:2026-04-30')).toEqual({
+      id: 'earn:AAPL:2026-04-30',
+      date: '2026-04-30',
+      type: 'EARNINGS',
+      status: 'CONFIRMED',
+      symbol: 'AAPL',
+      name: 'Apple Inc.',
+      origin: 'HOLDING',
+      source: 'earnings-summary',
+      description: 'Reported results for Q2 2026',
+      period: 'Q2 2026',
+      timeOfDay: 'unknown',
+      earningsPhase: 'reported',
+    });
+    // The provider still lists the next date: nothing is projected.
+    expect(events.map((e) => e.earningsPhase)).toEqual(['reported', 'scheduled']);
+  });
+
+  it('a released report replaces the provider date it matches and keeps its fiscal period, estimate and time of day', () => {
+    const provider: StoredEarningsEvent = { symbol: 'AAPL', date: '2026-05-01', fiscalPeriodEnd: '2026-03-31', epsEstimate: 1.1, currency: 'USD', timeOfDay: 'AMC', source: 'alphavantage' };
+    const events = earningsOnly({ earnings: [provider], reportedEarnings: [{ symbol: 'AAPL', reportDate: '2026-04-30' }] });
+    expect(events.filter((e) => e.date < TODAY)).toEqual([expect.objectContaining({ id: 'earn:AAPL:2026-04-30', description: 'Reported results', fiscalPeriodEnd: '2026-03-31', epsEstimate: 1.1, timeOfDay: 'AMC', earningsPhase: 'reported' })]);
+    expect(byId(events, 'earn:AAPL:2026-05-01')).toBeUndefined();
+  });
+
+  it('keeps a provider date that is more than four days from the released report', () => {
+    const provider: StoredEarningsEvent = { symbol: 'AAPL', date: '2026-05-06', source: 'alphavantage' };
+    const events = earningsOnly({ earnings: [provider], reportedEarnings: [{ symbol: 'AAPL', reportDate: '2026-04-30' }] });
+    expect(events.map((e) => e.id).filter((id) => id.startsWith('earn:'))).toEqual(['earn:AAPL:2026-04-30', 'earn:AAPL:2026-05-06']);
+  });
+
+  it('projects the next date a quarter (91 days) after the previous report when the provider has none, labelled as an estimate', () => {
+    const events = earningsOnly({ earnings: noProviderAhead, reportedEarnings: [{ symbol: 'AAPL', reportDate: '2026-05-14', period: 'Q2 2026' }] });
+    expect(events.find((e) => e.earningsPhase === 'projected')).toEqual({
+      id: 'earn-est:AAPL:2026-08-13',
+      date: '2026-08-13',
+      type: 'EARNINGS',
+      status: 'ESTIMATED',
+      symbol: 'AAPL',
+      name: 'Apple Inc.',
+      origin: 'HOLDING',
+      source: 'estimate',
+      description: 'Estimated next report, about 91 days after the previous one (2026-05-14). A projection, not an announced date.',
+      timeOfDay: 'unknown',
+      earningsPhase: 'projected',
+    });
+  });
+
+  it('projects from the latest of several reports, and for a watched company too', () => {
+    const reports = [
+      { symbol: 'MSFT', reportDate: '2026-01-20' },
+      { symbol: 'MSFT', reportDate: '2026-04-21' },
+    ];
+    const projection = eventsOf({ types: ['EARNINGS'] }, { earnings: noProviderAhead.filter((e) => e.symbol !== 'MSFT'), reportedEarnings: reports }).find((e) => e.id.startsWith('earn-est:MSFT'));
+    expect(projection).toMatchObject({ date: '2026-07-21', origin: 'WATCHLIST', status: 'ESTIMATED' });
+  });
+
+  it('skips whole quarters that are long gone, but not a report that is only a few days overdue, nor one older than a year', () => {
+    expect(projectedEarningsDate('2026-05-14', TODAY)).toBe('2026-08-13');
+    expect(projectedEarningsDate('2026-03-17', TODAY)).toBe('2026-06-16');
+    expect(projectedEarningsDate('2026-01-10', TODAY)).toBe('2026-07-11');
+    expect(projectedEarningsDate('2026-03-10', TODAY)).toBeNull();
+    expect(projectedEarningsDate('2024-01-01', TODAY)).toBeNull();
+  });
+
+  it('projects nothing while the provider has a date ahead, and nothing for symbols that are neither held nor watched', () => {
+    const events = eventsOf({ types: ['EARNINGS'] }, { reportedEarnings: [{ symbol: 'AAPL', reportDate: '2026-04-30' }, { symbol: 'NOPE', reportDate: '2026-04-30' }] });
+    expect(events.some((e) => e.earningsPhase === 'projected')).toBe(false);
+    expect(events.some((e) => e.symbol === 'NOPE')).toBe(false);
+  });
+
+  it('honours the status and type filters and counts for no income', () => {
+    const result = buildCalendar({ ...data, earnings: noProviderAhead, reportedEarnings: [{ symbol: 'AAPL', reportDate: '2026-05-14' }] }, { ...wide, types: ['EARNINGS'], statuses: ['ESTIMATED'], scope: 'holdings' });
+    expect(result.events.filter((e) => e.symbol === 'AAPL').map((e) => e.id)).toEqual(['earn-est:AAPL:2026-08-13']);
+    expect(result.events.every((e) => e.countsAsIncome === undefined)).toBe(true);
+  });
+});
+
 describe('filters', () => {
   it('limits events to the date range, inclusive', () => {
     const ids = eventsOf({ from: '2026-07-10', to: '2026-07-21' }).map((e) => e.id);
@@ -456,7 +541,8 @@ describe('summary and monthly income', () => {
 
   it('describes what is and is not covered', () => {
     expect(result.coverage).toEqual(CALENDAR_COVERAGE);
-    expect(result.coverage.earnings).toMatch(/US-listed/);
+    expect(result.coverage.earnings).toMatch(/Alpha Vantage earnings calendar/);
+    expect(result.coverage.earnings).toMatch(/projected from the previous report/);
     expect(result.coverage.corporateActions).toMatch(/Mergers, spin-offs, symbol changes/);
     expect(result.from).toBe('2025-01-01');
     expect(result.to).toBe('2027-12-31');

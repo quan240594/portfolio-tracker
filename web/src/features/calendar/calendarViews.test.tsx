@@ -13,6 +13,7 @@ import { EventList, EventRow } from './EventList';
 import { MAX_CHIPS_PER_DAY, MonthGrid } from './MonthGrid';
 import { DayDialog, EventDialog } from './EventDialog';
 import { eventDetailLine, expectedLabel, perShareLabel } from './eventText';
+import { sourceLabel, statusLabel } from './calendarModel';
 
 const TODAY = '2026-10-15';
 
@@ -71,7 +72,64 @@ describe('event text', () => {
     expect(eventDetailLine(event({ type: 'EARNINGS', timeOfDay: 'BMO' }))).toBe('Earnings · Before market open');
     expect(eventDetailLine(event({ type: 'EARNINGS', timeOfDay: 'unknown' }))).toBe('Earnings');
     expect(eventDetailLine(event({ type: 'EARNINGS' }))).toBe('Earnings');
+    expect(eventDetailLine(event({ type: 'EARNINGS', earningsPhase: 'reported', period: 'Q3 2026', timeOfDay: 'AMC' }))).toBe('Earnings · Reported Q3 2026 · After market close');
+    expect(eventDetailLine(event({ type: 'EARNINGS', earningsPhase: 'reported' }))).toBe('Earnings · Reported');
+    expect(eventDetailLine(event({ type: 'EARNINGS', earningsPhase: 'projected' }))).toBe('Earnings · Projected date');
+    expect(eventDetailLine(event({ type: 'EARNINGS', earningsPhase: 'scheduled', timeOfDay: 'BMO' }))).toBe('Earnings · Before market open');
     expect(eventDetailLine(event({ type: 'SPLIT', description: '4-for-1 stock split' }))).toBe('4-for-1 stock split');
+  });
+});
+
+describe('reported and projected earnings', () => {
+  const reported = event({ id: 'earn:AAPL:2026-10-14', date: '2026-10-14', type: 'EARNINGS', status: 'CONFIRMED', source: 'earnings-summary', earningsPhase: 'reported', period: 'Q3 2026', description: 'Reported results for Q3 2026', expectedAmount: undefined });
+  const projected = event({ id: 'earn-est:AAPL:2027-01-13', date: '2027-01-13', type: 'EARNINGS', status: 'ESTIMATED', source: 'estimate', earningsPhase: 'projected', expectedAmount: undefined });
+
+  it('says Reported for released results (CONFIRMED underneath) and keeps the status words of every other event', () => {
+    expect(statusLabel(reported)).toBe('Reported');
+    expect(statusLabel(projected)).toBe('Estimated');
+    expect(statusLabel(event())).toBe('Confirmed');
+    expect(statusLabel(event({ status: 'PAID' }))).toBe('Received');
+  });
+
+  it('labels the source of a projected earnings date as the previous report, and of a projected dividend as your payments', () => {
+    expect(sourceLabel('estimate', 'EARNINGS')).toBe('Projected from the previous report');
+    expect(sourceLabel('estimate', 'DIVIDEND_PAY')).toBe('Projected from your payment history');
+    expect(sourceLabel('estimate')).toBe('Projected from your payment history');
+    expect(sourceLabel('earnings-summary', 'EARNINGS')).toBe('Earnings summary (company release)');
+    expect(sourceLabel('something-new')).toBe('something-new');
+  });
+
+  it('shows the Reported chip and the period in the row, and Estimated with a dashed border for a projection', () => {
+    renderWithProviders(<EventList events={[reported, projected]} baseCurrency="EUR" onSelect={vi.fn()} today={TODAY} />);
+    const rows = screen.getAllByRole('button');
+    expect(rows[0]).toHaveAccessibleName('AAPL, Earnings, reported');
+    expect(rows[0]).toHaveTextContent('Earnings · Reported Q3 2026');
+    expect(within(rows[0]!).getByText('Reported')).toBeInTheDocument();
+    expect(rows[1]).toHaveAccessibleName('AAPL, Earnings, estimated');
+    expect(rows[1]).toHaveTextContent('Earnings · Projected date');
+    expect(within(rows[1]!).getByText('Estimated')).toHaveClass('border-dashed');
+  });
+
+  it('explains a projection in the dialog and does not claim it was announced', () => {
+    renderWithProviders(<EventDialog event={projected} baseCurrency="EUR" onClose={vi.fn()} withScope={(to) => to} />);
+    const dialog = screen.getByRole('dialog', { name: 'AAPL · Earnings' });
+    expect(dialog).toHaveTextContent('Projected date');
+    expect(dialog).toHaveTextContent('Projected from the previous report');
+    expect(dialog).toHaveTextContent('No date is announced yet. This is a projection from the previous report (about 91 days later)');
+  });
+
+  it('shows a reported release with its summary link on the report date', async () => {
+    server.use(
+      http.get(api('/earnings/status'), () => HttpResponse.json(DEMO_EARNINGS_STATUS)),
+      http.get(api('/earnings'), () => HttpResponse.json({ available: true, summaries: [sampleSummary({ symbol: 'AAPL', reportDate: '2026-10-14' })], symbols: ['AAPL'] })),
+    );
+    renderWithProviders(<EventDialog event={reported} baseCurrency="EUR" onClose={vi.fn()} withScope={(to) => to} />);
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent('Reported Q3 2026');
+    expect(dialog).toHaveTextContent('StatusReported');
+    expect(dialog).toHaveTextContent('Earnings summary (company release)');
+    expect(dialog).not.toHaveTextContent('projection');
+    expect(await screen.findByRole('link', { name: 'View summary' })).toHaveAttribute('href', '/earnings/AAPL');
   });
 });
 
@@ -233,7 +291,7 @@ describe('EventDialog', () => {
     expect(dialog).toHaveTextContent(sp('US$ 1,85'));
     expect(dialog).toHaveTextContent('After market close');
     expect(dialog).toHaveTextContent('Alpha Vantage');
-    expect(dialog).toHaveTextContent('This date is a projection');
+    expect(dialog).toHaveTextContent('The date comes from a data provider and may change once the company confirms it.');
   });
 
   it('copes with missing earnings details', () => {
@@ -241,7 +299,7 @@ describe('EventDialog', () => {
     const dialog = screen.getByRole('dialog');
     expect(dialog).toHaveTextContent('Not specified');
     expect(within(dialog).getAllByText('Not available')).toHaveLength(2);
-    expect(dialog).not.toHaveTextContent('This date is a projection');
+    expect(dialog).not.toHaveTextContent('may change');
   });
 
   it('shows the ratio of a split and of other corporate actions', () => {

@@ -17,6 +17,13 @@ describe('PriceRepository', () => {
     expect(await new PriceRepository(new MemoryItemStore()).listTracked()).toEqual([]);
   });
 
+  it('reads the names of the stored profiles and leaves out symbols without a profile or a name', async () => {
+    const store = new MemoryItemStore().load([profile('AAA', { name: 'Alpha Corp' }), profile('BBB', { name: '  ' }), profile('CCC', { name: undefined })]);
+    const repo = new PriceRepository(store);
+    expect(await repo.profileNames(['AAA', 'BBB', 'CCC', 'NONE'])).toEqual(new Map([['AAA', 'Alpha Corp']]));
+    expect(await repo.profileNames([])).toEqual(new Map());
+  });
+
   it('finds the symbols that have a profile and the stale details, never-fetched first', async () => {
     const store = new MemoryItemStore().load([profile('AAA'), profile('BBB', { detailsAsOf: '2026-09-01' }), profile('CCC', { detailsAsOf: '2026-10-10' })]);
     const repo = new PriceRepository(store);

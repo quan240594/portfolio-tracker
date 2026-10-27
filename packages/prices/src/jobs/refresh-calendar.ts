@@ -3,7 +3,7 @@ import type { CalendarRefreshSummary, JobHandler, JobPayloads } from '@portfolio
 import { z } from 'zod';
 import { errorMessage, errorName, RateLimitError } from '../errors.js';
 import { byText } from '../parse.js';
-import { alphaVantageSymbol } from '../providers/calendar.js';
+import { earningsTargets } from '../providers/calendar.js';
 import type { CalendarState } from '../repository.js';
 import { isCrypto } from '../symbols.js';
 import { addDays, utcDay } from '../time.js';
@@ -59,8 +59,8 @@ export function dueSymbols(symbols: readonly string[], states: ReadonlyMap<strin
 async function refreshEarnings(ctx: StepContext, state: State, today: string, stamp: string): Promise<NonNullable<State['earnings']>> {
   const source = ctx.md.earnings;
   if (source === undefined) return { status: 'no-provider' };
-  const eligible = state.symbols.filter((symbol) => alphaVantageSymbol(symbol) !== null);
-  if (eligible.length === 0) return { status: 'no-symbols' };
+  const eligible = state.symbols.filter((symbol) => !isCrypto(symbol));
+  if (earningsTargets(eligible).size === 0) return { status: 'no-symbols' };
   const { calendar } = ctx.deps.config;
   // The token is the run's stamp: a step delivered again does not pay twice, and is not refused for having paid before.
   if (source.budgeted && !(await ctx.repo.consumeBudget(source.name, today, 1, calendar.alphavantageDailyCalls, `${stamp}#earnings`))) {
@@ -68,7 +68,7 @@ async function refreshEarnings(ctx: StepContext, state: State, today: string, st
     return { status: 'budget-exhausted' };
   }
   try {
-    const events = await source.fetch(eligible, today);
+    const events = await source.fetch(eligible, today, await ctx.repo.profileNames(eligible));
     const written = await ctx.repo.putEarnings(events, stamp);
     const stale = await dropMovedReports(ctx, events, today);
     return { status: 'ok', symbols: new Set(events.map((event) => event.symbol)).size, events: written, staleDeleted: stale };

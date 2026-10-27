@@ -135,7 +135,7 @@ describe('refreshCalendar', () => {
 
       const earnings = new FakeEarnings();
       const noUs = fakeHarness({ earnings });
-      track(noUs, 'ASML.AS', 'BTC-EUR');
+      track(noUs, 'BTC-EUR');
       expect((await run(noUs)).result.earnings).toEqual({ status: 'no-symbols' });
       expect(earnings.calls).toEqual([]);
       const empty = fakeHarness({ earnings });
@@ -147,7 +147,7 @@ describe('refreshCalendar', () => {
       const h = fakeHarness({ earnings });
       track(h, 'AAPL', 'ASML.AS');
       expect((await run(h)).result.earnings).toEqual({ status: 'ok', symbols: 1, events: 1, staleDeleted: 0 });
-      expect(earnings.calls).toEqual([['AAPL']]);
+      expect(earnings.calls).toEqual([['AAPL', 'ASML.AS']]);
       h.clock.advance(60_000);
       expect((await run(h)).result.earnings.status).toBe('budget-exhausted');
       h.clock.advance(DAY);
@@ -179,6 +179,43 @@ describe('refreshCalendar', () => {
       const { result } = await run(h);
       expect(result.earnings).toEqual({ status: 'failed', error: error.name });
       expect(result.corporateActions).toMatchObject({ checkedSymbols: ['AAPL'] });
+    });
+  });
+
+  describe('earnings of suffixed listings and failures (live Alpha Vantage source, no scripted source)', () => {
+    const XETRA_CSV = `symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay
+CRM,SALESFORCE INC,2026-12-03,2026-10-31,2.41,USD,post-market
+MA,MASTERCARD INC,2026-10-29,2026-09-30,3.6,USD,pre-market
+ASML,ASML HOLDING NV,2027-01-28,2026-12-31,6.9,EUR,pre-market
+AMZN,AMAZON COM INC,2026-10-30,2026-09-30,1.5,USD,post-market
+`;
+    const profile = (symbol: string, name: string): Item => ({ PK: `TICKER#${symbol}`, SK: 'PROFILE', entityType: 'PROFILE', symbol, name });
+    const liveHarness = (fake: FakeFetch): Harness => harness({ fake, start: NOW, env: { ALPHAVANTAGE_API_KEY: 'av-key' } });
+
+    it('stores the dates of Xetra and Euronext listings under the symbols of the holdings, with one call', async () => {
+      const fake = new FakeFetch().add('alphavantage.co', { text: XETRA_CSV });
+      const h = liveHarness(fake);
+      track(h, 'AMZN', 'FOO.DE', 'M4I.DE', 'ASML.AS', 'BTC-EUR');
+      h.store.load([profile('ASML.AS', 'ASML Holding'), profile('FOO.DE', 'FOO.DE')]);
+      const { result } = await run(h);
+      expect(result.earnings).toEqual({ status: 'ok', symbols: 4, events: 4, staleDeleted: 0 });
+      expect(fake.urls.filter((url) => url.includes('alphavantage.co'))).toHaveLength(1);
+      expect(keysWith(h, 'EARN#')).toEqual(['TICKER#AMZN|EARN#2026-10-30', 'TICKER#ASML.AS|EARN#2027-01-28', 'TICKER#FOO.DE|EARN#2026-12-03', 'TICKER#M4I.DE|EARN#2026-10-29']);
+    });
+
+    it('does not retry a failed call the same day, tries once the next day', async () => {
+      const note = { text: JSON.stringify({ Information: 'Our standard API rate limit is 25 requests per day.' }) };
+      const fake = new FakeFetch().add('alphavantage.co', note, { text: XETRA_CSV });
+      const h = liveHarness(fake);
+      track(h, 'AMZN');
+      expect((await run(h)).result.earnings).toEqual({ status: 'failed', error: 'RateLimitError' });
+      h.clock.advance(6 * 3_600_000);
+      expect((await run(h)).result.earnings.status).toBe('budget-exhausted');
+      expect(fake.urls.filter((url) => url.includes('alphavantage.co'))).toHaveLength(1);
+      expect(keysWith(h, 'EARN#')).toEqual([]);
+      h.clock.advance(DAY);
+      expect((await run(h)).result.earnings).toMatchObject({ status: 'ok', events: 1 });
+      expect(keysWith(h, 'EARN#')).toEqual(['TICKER#AMZN|EARN#2026-10-30']);
     });
   });
 

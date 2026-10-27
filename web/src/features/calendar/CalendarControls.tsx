@@ -86,7 +86,7 @@ export function StatusFilter({ value, onChange }: Readonly<{ value: readonly Cal
 const KEY_ITEMS: readonly { id: string; label: string; swatch: string; marker?: CalendarEventType }[] = [
   { id: 'ex-dividend', label: 'Ex-dividend: violet', swatch: KEY_SWATCH.exDividend, marker: 'EX_DIVIDEND' },
   { id: 'paid', label: 'Received: green', swatch: KEY_SWATCH.PAID },
-  { id: 'confirmed', label: 'Confirmed: blue', swatch: KEY_SWATCH.CONFIRMED },
+  { id: 'confirmed', label: 'Confirmed or reported: blue', swatch: KEY_SWATCH.CONFIRMED },
   { id: 'estimated', label: 'Estimated: yellow, dashed', swatch: KEY_SWATCH.ESTIMATED },
 ];
 

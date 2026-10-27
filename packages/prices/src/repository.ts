@@ -154,6 +154,12 @@ export class PriceRepository {
     return out;
   }
 
+  /** The names of the stored profiles of `symbols` (a symbol without a profile, or whose profile has no name, is absent). */
+  async profileNames(symbols: readonly string[]): Promise<Map<string, string>> {
+    const items = symbols.length === 0 ? [] : await this.store.getMany(symbols.map((symbol) => keys.profile(symbol)));
+    return new Map(items.filter((item) => typeof item.name === 'string' && item.name.trim() !== '').map((item) => [symbolOfPk(item), String(item.name)]));
+  }
+
   /** The symbols among `symbols` that already have a PROFILE item. */
   async symbolsWithProfile(symbols: readonly string[]): Promise<Set<string>> {
     const items = symbols.length === 0 ? [] : await this.store.getMany(symbols.map((symbol) => keys.profile(symbol)));

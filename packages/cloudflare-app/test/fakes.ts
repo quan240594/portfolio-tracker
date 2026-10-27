@@ -167,6 +167,7 @@ export function route(services: readonly FakeService[], request: FakeRequest): F
 export const TD_KEY = 'test-twelvedata-key';
 export const AV_KEY = 'test-alphavantage-key';
 export const AAPL_CLOSE = 230.12;
+const CALENDAR_AHEAD_DAYS = 21;
 export const EODHD_KEY = 'test-eodhd-key';
 /** A London ETF: EODHD quotes its history in pence (GBX), the app must hold it in pounds. */
 export const LONDON_EODHD_SYMBOL = 'SMGB.LSE';
@@ -182,6 +183,8 @@ export const londonPenceCloses = (clockMs: number): [string, number][] =>
 export class FakePrices {
   /** `host path` of every call, in order. */
   readonly calls: string[] = [];
+  /** The `horizon` of every Alpha Vantage `EARNINGS_CALENDAR` call. */
+  readonly calendarRequests: string[] = [];
 
   constructor(private readonly clock: () => number) {}
 
@@ -217,16 +220,31 @@ export class FakePrices {
       if (url.pathname.startsWith('/api/div/')) return { status: 200, json: [] };
       return { status: 404, json: { message: 'not available' } };
     },
-    'www.alphavantage.co': () => ({
-      status: 200,
-      json: { Symbol: 'AAPL', AssetType: 'Common Stock', Name: 'Apple Inc.', Exchange: 'NASDAQ', Currency: 'USD', Country: 'USA', Sector: 'TECHNOLOGY' },
-    }),
+    'www.alphavantage.co': (url) => {
+      if (url.searchParams.get('function') !== 'EARNINGS_CALENDAR') return this.overview();
+      this.calendarRequests.push(url.searchParams.get('horizon') ?? '');
+      return { status: 200, bytes: new TextEncoder().encode(this.earningsCsv()), headers: { 'content-type': 'text/csv' } };
+    },
     'api.frankfurter.dev': (url) => {
       const range = /\/v1\/(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})$/.exec(url.pathname);
       if (url.pathname === '/v1/latest') return { status: 200, json: { base: 'EUR', date: new Date(this.clock()).toISOString().slice(0, 10), rates: { USD: 1.16, GBP: 0.87 } } };
       return range ? { status: 200, json: { base: 'EUR', rates: { [range[1]!]: { USD: 1.15, GBP: 0.86 } } } } : { status: 404 };
     },
   };
+
+  private overview(): FakeReply {
+    return { status: 200, json: { Symbol: 'AAPL', AssetType: 'Common Stock', Name: 'Apple Inc.', Exchange: 'NASDAQ', Currency: 'USD', Country: 'USA', Sector: 'TECHNOLOGY' } };
+  }
+
+  /** The earnings calendar lists a US ticker, the US tickers of a Xetra and a Euronext listing, and an unheld company, three weeks after the clock's day. */
+  earningsDate(): string {
+    return new Date(this.clock() + CALENDAR_AHEAD_DAYS * 86_400_000).toISOString().slice(0, 10);
+  }
+
+  private earningsCsv(): string {
+    const date = this.earningsDate();
+    return ['symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay', `AAPL,APPLE INC,${date},2025-12-31,2.1,USD,post-market`, `CRM,SALESFORCE INC,${date},2025-10-31,2.4,USD,post-market`, `ASML,ASML HOLDING NV,${date},2025-12-31,6.9,EUR,pre-market`, `NOHOLD,INVENTED CORP,${date},2025-12-31,0.5,USD,pre-market`, ''].join('\n');
+  }
 
   private history(): { datetime: string; close: string }[] {
     return Array.from({ length: 5 }, (_, i) => ({ datetime: new Date(this.clock() - (4 - i) * 86_400_000).toISOString().slice(0, 10), close: String(100 + i) }));

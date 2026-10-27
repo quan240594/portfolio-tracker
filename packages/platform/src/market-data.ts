@@ -71,7 +71,8 @@ export interface EarningsSource {
   readonly name: string;
   /** Whether the daily call budget applies (false for the offline mock). */
   readonly budgeted: boolean;
-  fetch(symbols: readonly string[], today: string): Promise<StoredEarningsEvent[]>;
+  /** `names` are the profile names of the symbols, used to vouch for a listing that is not the source's own ticker. */
+  fetch(symbols: readonly string[], today: string, names?: ReadonlyMap<string, string>): Promise<StoredEarningsEvent[]>;
 }
 
 export interface CorporateActionsSource {

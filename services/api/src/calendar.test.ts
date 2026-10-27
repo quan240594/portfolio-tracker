@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 import { createHandler } from './lambda/handler.js';
 import type { Deps } from './deps.js';
+import { sampleSummary } from '@portfolio/shared';
 import { apiEvent, fakeDeps, portfolio, txn } from './testing/fakes.js';
 
 const json = (res: APIGatewayProxyStructuredResultV2) => (res.body ? JSON.parse(res.body) : undefined);
@@ -84,7 +85,7 @@ describe('GET /calendar', () => {
       ['2026-11', 3.4],
       ['2027-02', 3.4],
     ]);
-    expect(body.coverage.earnings).toMatch(/US-listed/);
+    expect(body.coverage.earnings).toMatch(/Alpha Vantage earnings calendar/);
     expect(body.coverage.corporateActions).toMatch(/Mergers/);
   });
 
@@ -170,6 +171,67 @@ describe('GET /calendar', () => {
     repo.profiles = {};
     const body = json(await handler(apiEvent('GET', '/calendar', { query: { types: 'EARNINGS' } })));
     expect(body.events.map((e: { name: string }) => e.name)).toEqual(['MSFT', 'AAPL']);
+  });
+});
+
+describe('earnings of the holdings', () => {
+  const held = (symbol: string, name: string, currency: string) => ({ symbol, name, assetClass: 'STOCK' as const, currency });
+
+  /** Held through Xetra, Euronext and US listings; the price service stored the dates under the symbols as they are held. */
+  function holdingsWithEarnings() {
+    const ctx = setup();
+    const { repo } = ctx;
+    for (const [symbol, name, currency] of [['FOO.DE', 'Salesforce', 'EUR'], ['M4I.DE', 'Mastercard', 'EUR'], ['ASML.AS', 'ASML Holding', 'EUR'], ['AMZN', 'Amazon.com', 'USD']] as const) {
+      repo.transactions.push(txn({ id: `b-${symbol}`, date: '2025-01-02', type: 'BUY', symbol, quantity: 3, price: 100, currency }));
+      repo.profiles[symbol] = held(symbol, name, currency);
+    }
+    repo.earningsEvents = [
+      { symbol: 'FOO.DE', date: '2026-08-26', timeOfDay: 'AMC', source: 'alphavantage' },
+      { symbol: 'M4I.DE', date: '2026-07-30', timeOfDay: 'BMO', source: 'alphavantage' },
+      { symbol: 'ASML.AS', date: '2026-07-15', source: 'alphavantage' },
+      { symbol: 'AMZN', date: '2026-07-30', timeOfDay: 'AMC', source: 'alphavantage' },
+    ];
+    return ctx;
+  }
+
+  it('returns the earnings dates of every held company, whichever exchange spelling it is held under, in the next 12 months', async () => {
+    const { handler } = holdingsWithEarnings();
+    const body = json(await handler(apiEvent('GET', '/calendar', { query: { types: 'EARNINGS', scope: 'holdings', from: '2026-06-15', to: '2027-06-14' } })));
+    expect(body.events.map((e: { id: string }) => e.id)).toEqual(['earn:ASML.AS:2026-07-15', 'earn:AMZN:2026-07-30', 'earn:M4I.DE:2026-07-30', 'earn:FOO.DE:2026-08-26']);
+    expect(body.events.map((e: { origin: string }) => e.origin)).toEqual(['HOLDING', 'HOLDING', 'HOLDING', 'HOLDING']);
+    expect(body.events.find((e: { symbol: string }) => e.symbol === 'FOO.DE')).toMatchObject({ name: 'Salesforce', status: 'ESTIMATED', source: 'alphavantage', timeOfDay: 'AMC', earningsPhase: 'scheduled' });
+  });
+
+  it('shows each stored summary as reported earnings and projects the next date of a company the provider has no date for', async () => {
+    const { handler, repo } = holdingsWithEarnings();
+    repo.earningsEvents = repo.earningsEvents.filter((e) => e.symbol !== 'FOO.DE');
+    repo.earningsSummaries.push(
+      sampleSummary({ symbol: 'FOO.DE', reportDate: '2026-05-28', period: 'Q1 FY27' }),
+      sampleSummary({ symbol: 'FOO.DE', reportDate: '2026-02-25', period: 'Q4 FY26' }),
+      sampleSummary({ symbol: 'AMZN', reportDate: '2026-04-30', period: 'Q1 2026' }),
+      sampleSummary({ symbol: 'KO', reportDate: '2026-04-21', period: 'Q1 2026' }),
+    );
+    const body = json(await handler(apiEvent('GET', '/calendar', { query: { types: 'EARNINGS', from: '2026-02-01', to: '2026-12-31' } })));
+    const rows = body.events.map((e: { id: string; status: string; earningsPhase: string; source: string }) => [e.id, e.status, e.earningsPhase, e.source]);
+    expect(rows).toEqual([
+      ['earn:FOO.DE:2026-02-25', 'CONFIRMED', 'reported', 'earnings-summary'],
+      ['earn:AMZN:2026-04-30', 'CONFIRMED', 'reported', 'earnings-summary'],
+      ['earn:FOO.DE:2026-05-28', 'CONFIRMED', 'reported', 'earnings-summary'],
+      ['earn:ASML.AS:2026-07-15', 'ESTIMATED', 'scheduled', 'alphavantage'],
+      ['earn:AMZN:2026-07-30', 'ESTIMATED', 'scheduled', 'alphavantage'],
+      ['earn:M4I.DE:2026-07-30', 'ESTIMATED', 'scheduled', 'alphavantage'],
+      ['earn-est:FOO.DE:2026-08-27', 'ESTIMATED', 'projected', 'estimate'],
+    ]);
+    const reported = body.events.find((e: { id: string }) => e.id === 'earn:FOO.DE:2026-05-28');
+    expect(reported).toMatchObject({ description: 'Reported results for Q1 FY27', period: 'Q1 FY27', name: 'Salesforce' });
+    expect(body.events.at(-1).description).toContain('Estimated next report');
+  });
+
+  it('gives another user’s companies no earnings and no projection', async () => {
+    const { handler, repo } = holdingsWithEarnings();
+    repo.earningsSummaries.push(sampleSummary({ symbol: 'KO', reportDate: '2026-04-21' }));
+    const body = json(await handler(apiEvent('GET', '/calendar', { query: { types: 'EARNINGS', from: '2026-02-01', to: '2026-12-31' } })));
+    expect(body.events.some((e: { symbol: string }) => e.symbol === 'KO')).toBe(false);
   });
 });
 

@@ -80,15 +80,22 @@ export const EVENT_META: Readonly<Record<CalendarEventType, EventMeta>> = {
 export const STATUS_LABELS: Readonly<Record<CalendarStatus, string>> = { CONFIRMED: 'Confirmed', ESTIMATED: 'Estimated', PAID: 'Received' };
 export const SCOPE_LABELS: Readonly<Record<CalendarScope, string>> = { holdings: 'My holdings', watchlist: 'Watchlist', all: 'Holdings and watchlist' };
 
+/** What the status chip and the accessible name say: released results are "Reported" (CONFIRMED underneath; there is no separate status). */
+export const statusLabel = (e: Pick<CalendarEvent, 'status' | 'earningsPhase'>): string => (e.earningsPhase === 'reported' ? 'Reported' : STATUS_LABELS[e.status]);
+
 const SOURCE_LABELS: Readonly<Record<string, string>> = {
   alphavantage: 'Alpha Vantage',
   eodhd: 'EODHD',
   'market-data': 'Market data provider',
   transactions: 'Your transactions',
   estimate: 'Projected from your payment history',
+  'earnings-summary': 'Earnings summary (company release)',
   mock: 'Demo data',
 };
-export const sourceLabel = (source: string): string => SOURCE_LABELS[source] ?? source;
+const EARNINGS_ESTIMATE_LABEL = 'Projected from the previous report';
+
+/** Where an event's date comes from; a projected earnings date is projected from the previous report, a projected dividend from your payments. */
+export const sourceLabel = (source: string, type?: CalendarEventType): string => (source === 'estimate' && type === 'EARNINGS' ? EARNINGS_ESTIMATE_LABEL : (SOURCE_LABELS[source] ?? source));
 
 export const isDividend = (e: Pick<CalendarEvent, 'type'>): boolean => e.type === 'EX_DIVIDEND' || e.type === 'DIVIDEND_PAY';
 
@@ -202,7 +209,7 @@ export const isEstimated = (e: Pick<CalendarEvent, 'status'>): boolean => e.stat
 
 /** `AAPL · Ex-dividend · Confirmed` — the accessible name of a chip or row. */
 export function eventAriaLabel(e: CalendarEvent, amount: string | undefined): string {
-  const parts = [e.symbol, EVENT_META[e.type].label, STATUS_LABELS[e.status].toLowerCase()];
+  const parts = [e.symbol, EVENT_META[e.type].label, statusLabel(e).toLowerCase()];
   if (amount) parts.push(amount);
   return parts.join(', ');
 }

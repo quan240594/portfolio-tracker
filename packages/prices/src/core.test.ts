@@ -1,7 +1,7 @@
 import { MemoryItemStore, type Logger } from '@portfolio/platform';
 import { describe, expect, it, vi } from 'vitest';
 import { makeQuote, normalizeCurrency } from './models.js';
-import { DEFAULT_CALENDAR_SETTINGS, parseCalendarSettings, parsePricesConfig } from './config.js';
+import { DEFAULT_CALENDAR_SETTINGS, alphaVantageGeneralLimit, parseCalendarSettings, parsePricesConfig } from './config.js';
 import { csvRecords, parseCsv } from './csv.js';
 import { errorMessage, errorName, ProviderError, RateLimitError, RetryableProviderError, SubrequestBudgetError, SymbolNotFoundError } from './errors.js';
 import { HttpClient, budgetedFetch, buildUrl, redactUrl, type FetchLike } from './http.js';
@@ -336,5 +336,12 @@ describe('configuration', () => {
     expect(parseCalendarSettings({ CALENDAR_EARNINGS_HORIZON: ' 3Month ', CALENDAR_ALPHAVANTAGE_DAILY_CALLS: '2', CALENDAR_EODHD_DAILY_CALLS: '0', CALENDAR_RECHECK_DAYS: '0', CALENDAR_REFRESH_DIVIDENDS: 'No', CALENDAR_SPLIT_LOOKBACK_DAYS: '30' })).toEqual({ earningsHorizon: '3month', alphavantageDailyCalls: 2, eodhdDailyCalls: 0, recheckDays: 1, refreshDividends: false, splitLookbackDays: 30 });
     expect(parseCalendarSettings({ CALENDAR_EARNINGS_HORIZON: 'forever', CALENDAR_EODHD_DAILY_CALLS: 'lots', CALENDAR_REFRESH_DIVIDENDS: 'yes' })).toEqual({ ...DEFAULT_CALENDAR_SETTINGS });
     expect(parseCalendarSettings({ CALENDAR_REFRESH_DIVIDENDS: 'on' }).refreshDividends).toBe(true);
+  });
+
+  it('keeps the calendar its Alpha Vantage calls out of the limit that profiles and estimates may use', () => {
+    expect(alphaVantageGeneralLimit(parsePricesConfig({}))).toBe(24);
+    expect(alphaVantageGeneralLimit(parsePricesConfig({ ALPHAVANTAGE_DAILY_LIMIT: '25', CALENDAR_ALPHAVANTAGE_DAILY_CALLS: '3' }))).toBe(22);
+    expect(alphaVantageGeneralLimit(parsePricesConfig({ ALPHAVANTAGE_DAILY_LIMIT: '1' }))).toBe(0);
+    expect(alphaVantageGeneralLimit(parsePricesConfig({ ALPHAVANTAGE_DAILY_LIMIT: '1', CALENDAR_ALPHAVANTAGE_DAILY_CALLS: '5' }))).toBe(0);
   });
 });

@@ -119,6 +119,11 @@ export function CalendarPage() {
     <>
       <PageHeader title="Calendar" description={description} />
       <div className="space-y-6">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+          <CalendarKpis summary={data?.summary} currency={currency} loading={calendar.isPending} />
+          <IncomeChartCard monthly={data?.monthly} summary={data?.summary} currency={currency} loading={calendar.isPending} />
+        </div>
+
         <section className="card space-y-4 p-4" aria-label="Calendar filters">
           <FilterBar state={state} onChange={update} onDownload={onDownload} downloading={download.isPending} downloadDisabled={state.types.length === 0 || state.statuses.length === 0} />
           <output className="block text-xs empty:hidden" aria-live="polite">
@@ -130,11 +135,6 @@ export function CalendarPage() {
             </p>
           )}
         </section>
-
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-          <CalendarKpis summary={data?.summary} currency={currency} loading={calendar.isPending} />
-          <IncomeChartCard monthly={data?.monthly} summary={data?.summary} currency={currency} loading={calendar.isPending} />
-        </div>
 
         <section className="card space-y-4 p-4" aria-label="Events">
           <ViewToolbar state={state} today={today} onChange={update} />

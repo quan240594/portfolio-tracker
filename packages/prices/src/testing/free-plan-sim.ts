@@ -5,7 +5,8 @@ import { createPriceJobs } from '../service.js';
 
 /**
  * Deterministic simulation of the owner's situation on the FREE plans: Twelve Data (8 credits per minute, `/profile` is not on
- * the plan), EODHD (20 calls a day, HTTP 402 afterwards), no Alpha Vantage key. A portfolio of invented symbols is enriched and
+ * the plan), EODHD (20 calls a day, HTTP 402 afterwards), Alpha Vantage (25 calls a day, answered with an `Information` note
+ * afterwards; only used when the environment holds a key). A portfolio of invented symbols is enriched and
  * refreshed by the real jobs, driven like the Durable Object alarm queue (a step per alarm, the `delayMs` of a step moves the
  * clock, a failing step is retried with the queue's capped backoff). It counts what the Hub would burn per hour: alarm steps,
  * outbound subrequests and SQLite rows written. No network, no real clock.
@@ -23,6 +24,7 @@ const MINUTE = 60_000;
 
 const TD_CREDITS_PER_MINUTE = 8;
 const EODHD_CALLS_PER_DAY = 20;
+const ALPHAVANTAGE_CALLS_PER_DAY = 25;
 const QUEUE_MAX_ATTEMPTS = 5;
 const QUEUE_BASE_BACKOFF_MS = 5000;
 const QUEUE_MAX_BACKOFF_MS = 15 * MINUTE;
@@ -44,7 +46,7 @@ export interface FreePlanReport {
   missing: string[];
   minimal: string[];
   /** Provider calls answered with a limit error. */
-  limited: { twelvedata: number; eodhd: number };
+  limited: { twelvedata: number; eodhd: number; alphavantage: number };
   failedJobs: number;
   /** Every outbound request, with the simulated time it was made. */
   requests: { at: number; url: string }[];
@@ -71,7 +73,7 @@ const queryOf = (url: string, name: string): string => new URL(url).searchParams
 export interface FreeProviders {
   fetch: (url: string, init?: RequestInit) => Promise<Response>;
   fetched: () => number;
-  limited: () => { twelvedata: number; eodhd: number };
+  limited: () => { twelvedata: number; eodhd: number; alphavantage: number };
   /** Every outbound request, with the simulated time it was made. */
   log: () => { at: number; url: string }[];
 }
@@ -80,9 +82,10 @@ export interface FreeProviders {
 export function freePlanProviders(now: () => number, universe: readonly string[] = SIM_SYMBOLS): FreeProviders {
   let fetched = 0;
   const requests: { at: number; url: string }[] = [];
-  const limited = { twelvedata: 0, eodhd: 0 };
+  const limited = { twelvedata: 0, eodhd: 0, alphavantage: 0 };
   const td = { minute: -1, credits: 0 };
   const eod = { day: '', calls: 0 };
+  const av = { day: '', calls: 0 };
   const isFund = (code: string): boolean => code.startsWith('ETF');
 
   const twelveCredits = (cost: number): Response | undefined => {
@@ -139,6 +142,26 @@ export function freePlanProviders(now: () => number, universe: readonly string[]
     return json(codes.length === 1 ? row(codes[0]!) : codes.map(row));
   };
 
+  /** The earnings calendar lists every US symbol of the universe, two weeks after the clock's day. */
+  const earningsCsv = (): string => {
+    const date = dayOf(now() + 14 * 86_400_000);
+    const rows = universe.filter((symbol) => !symbol.includes('.') && !isFund(symbol)).map((symbol) => `${symbol},INVENTED ${symbol} INC,${date},${dayOf(now())},1.25,USD,post-market`);
+    return ['symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay', ...rows].join('\n');
+  };
+
+  const alphaVantage = (url: string): Response => {
+    const day = dayOf(now());
+    if (av.day !== day) Object.assign(av, { day, calls: 0 });
+    if (av.calls >= ALPHAVANTAGE_CALLS_PER_DAY) {
+      limited.alphavantage += 1;
+      return json({ Information: 'Thank you for using Alpha Vantage! Our standard API rate limit is 25 requests per day. Please subscribe to any of the premium plans to remove all daily rate limits.' });
+    }
+    av.calls += 1;
+    if (queryOf(url, 'function') === 'EARNINGS_CALENDAR') return new Response(earningsCsv(), { status: 200 });
+    const symbol = queryOf(url, 'symbol');
+    return json({ Symbol: symbol, Name: `Invented ${symbol} Inc`, AssetType: 'Common Stock', Currency: 'USD', Exchange: 'NASDAQ', Country: 'USA', Sector: 'TECHNOLOGY' });
+  };
+
   const frankfurter = (url: string): Response => {
     const range = /(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})/.exec(url);
     if (range === null) return json({ base: 'EUR', date: dayOf(now()), rates: { USD: 1.16, GBP: 0.87 } });
@@ -153,6 +176,7 @@ export function freePlanProviders(now: () => number, universe: readonly string[]
       requests.push({ at: now(), url });
       if (url.includes('api.twelvedata.com')) return Promise.resolve(twelveData(url));
       if (url.includes('eodhd.com')) return Promise.resolve(eodhd(url));
+      if (url.includes('alphavantage.co')) return Promise.resolve(alphaVantage(url));
       if (url.includes('frankfurter')) return Promise.resolve(frankfurter(url));
       return Promise.reject(new Error(`unexpected request ${url}`));
     },

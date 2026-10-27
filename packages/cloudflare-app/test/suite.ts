@@ -396,6 +396,46 @@ export function defineAppSuite(label: string, start: StartStack): void {
       }
     });
 
+    it('stores the earnings dates of held companies (US, Xetra and Euronext listings) from one 12-month Alpha Vantage call and serves them, once a day', async () => {
+      const { stack, call, portfolio } = await signedIn({ prices: keys });
+      try {
+        const listed = [
+          { symbol: 'FOO.DE', name: 'Salesforce' },
+          { symbol: 'ASML.AS', name: 'ASML Holding' },
+        ];
+        expect((await call('POST', '/transactions', { portfolioId: portfolio, ...buy })).status).toBe(201);
+        const created = await Promise.all(listed.map(({ symbol }) => call('POST', '/transactions', { portfolioId: portfolio, ...buy, symbol, currency: 'EUR' })));
+        expect(created.map((response) => response.status)).toEqual([201, 201]);
+        await stack.drain();
+        // The exchange-listed symbols have no price provider key here: their tracked marker and profile are what the price service would have stored.
+        await stack.seed(
+          listed.flatMap(({ symbol, name }) => [
+            { PK: 'TRACKED', SK: `TICKER#${symbol}`, entityType: 'TRACKED_TICKER', symbol },
+            { PK: `TICKER#${symbol}`, SK: 'PROFILE', entityType: 'PROFILE', symbol, name, assetClass: 'STOCK', currency: 'EUR' },
+          ]),
+        );
+        await stack.enqueue('refreshPrices', { trigger: 'scheduled' });
+        await stack.enqueue('refreshCalendar', { trigger: 'scheduled' });
+        await stack.drain();
+        // A second run later the same day (the pinned clock of the Node stack must move, a run's stamp is its budget token).
+        stack.advance?.(60_000);
+        await stack.enqueue('refreshCalendar', { trigger: 'scheduled' });
+        await stack.drain();
+        expect(await stack.failedJobs()).toEqual([]);
+        expect(stack.prices.calendarRequests).toEqual(['12month']);
+
+        const calendar = await call('GET', `/calendar?portfolioId=${portfolio}&types=EARNINGS`);
+        expect(calendar.status, JSON.stringify(calendar.body)).toBe(200);
+        const earnings = calendar.body.events as { symbol: string; date: string; status: string; source: string; timeOfDay: string; earningsPhase: string }[];
+        expect(earnings.map((event) => [event.symbol, event.date, event.status, event.source, event.earningsPhase])).toEqual(
+          ['AAPL', 'ASML.AS', 'FOO.DE'].map((symbol) => [symbol, stack.prices.earningsDate(), 'ESTIMATED', 'alphavantage', 'scheduled']),
+        );
+        expect(earnings.find((event) => event.symbol === 'AAPL')?.timeOfDay).toBe('AMC');
+      } finally {
+        await stack.dispose();
+      }
+    });
+
     it('values a London ETF in pounds, not pence: pence history from the provider never reaches the portfolio history', async () => {
       const { stack, call, portfolio } = await signedIn({ prices: { ...keys, EODHD_API_KEY: EODHD_KEY } });
       try {
