@@ -148,14 +148,24 @@ describe('parts', () => {
   it('renders the summary, the note and the method', () => {
     const { container } = renderWithProviders(
       <>
-        <ForecastSummary parts={[]} />
-        <ForecastSummary parts={['A', 'B']} />
+        <ForecastSummary items={[]} />
+        <ForecastSummary
+          items={[
+            { key: 'forecast', label: 'Forecast next 12 months', value: '€ 10,00' },
+            { key: 'trend', label: 'Trend', value: '+€ 1,00', unit: 'per month, per year' },
+          ]}
+        />
         <TrendNote />
         <TrendMethod />
       </>,
     );
-    expect(screen.getByTestId('forecast-summary')).toHaveTextContent('A · B');
+    const summary = screen.getByTestId('forecast-summary');
     expect(screen.getAllByTestId('forecast-summary')).toHaveLength(1);
+    // a description list: every figure has its own label, so the data points are separate items
+    expect(summary.tagName).toBe('DL');
+    expect(within(summary).getAllByRole('term').map((t) => t.textContent)).toEqual(['Forecast next 12 months', 'Trend']);
+    expect(within(summary).getAllByRole('definition').map((d) => d.textContent)).toEqual(['€ 10,00', '+€ 1,00per month, per year']);
+    expect(summary).toHaveClass('gap-x-10', 'gap-y-4');
     expect(screen.getByTestId('trend-note')).toHaveTextContent('Needs at least 6 months of dividend history');
     const method = screen.getByTestId('trend-method');
     expect(method).toHaveTextContent('least squares');
@@ -187,8 +197,11 @@ describe('DividendGrowthCard forecast and trend', () => {
     const chart = await screen.findByTestId('year-compare-chart');
     const summary = await within(card()).findByTestId('forecast-summary');
     const { forward12m, declared, estimated } = overview.summary;
-    expect(sp(summary.textContent!)).toContain(sp(`Forecast next 12 months: ${formatMoney(forward12m, 'EUR')} (declared ${formatMoney(declared, 'EUR')}, estimated ${formatMoney(estimated, 'EUR')})`));
-    expect(sp(summary.textContent!)).toMatch(/ · Trend: [+−]€ \d+,\d{2}\/month per year$/);
+    const value = (key: string) => sp(within(within(summary).getByTestId(`forecast-summary-${key}`)).getByRole('definition').textContent!);
+    expect(value('forecast')).toBe(sp(formatMoney(forward12m, 'EUR')));
+    expect(value('declared')).toBe(sp(formatMoney(declared, 'EUR')));
+    expect(value('estimated')).toBe(sp(formatMoney(estimated, 'EUR')));
+    expect(value('trend')).toMatch(/^[+−]€ \d+,\d{2}per month, per year$/);
     expect(sp((await screen.findByTestId('future-total')).textContent!)).toBe(sp(formatMoney(forward12m, 'EUR')));
 
     const legend = within(card()).getByTestId('growth-legend');
@@ -248,7 +261,7 @@ describe('DividendGrowthCard forecast and trend', () => {
     growthWith(growth.byMonth.slice(-3));
     renderWithProviders(<DividendGrowthCard />);
     expect(await screen.findByTestId('trend-note')).toHaveTextContent('Needs at least 6 months of dividend history');
-    expect(within(card()).getByTestId('forecast-summary')).not.toHaveTextContent('Trend:');
+    expect(within(card()).getByTestId('forecast-summary')).not.toHaveTextContent('Trend');
     expect(within(card()).getByTestId('growth-legend')).not.toHaveTextContent('Average of years');
     await user.click(screen.getByRole('radio', { name: 'Timeline' }));
     expect(screen.getByTestId('trend-note')).toBeInTheDocument();

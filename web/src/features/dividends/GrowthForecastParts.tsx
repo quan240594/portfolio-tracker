@@ -2,7 +2,6 @@ import { useId, type CSSProperties } from 'react';
 import { formatMoney } from '../../lib/format';
 import type { LegendEntry } from '../../components/charts/selection';
 import { ToggleGroup } from '../calendar/CalendarControls';
-import { ForecastNote } from './ForecastNote';
 import { useDividendTheme } from './chartParts';
 import {
   GROWTH_VIEWS,
@@ -12,6 +11,7 @@ import {
   yearTooltipLines,
   type GrowthView,
   type LegendItem,
+  type SummaryItem,
   type SwatchKind,
   type TimelineRow,
   type TooltipLine,
@@ -54,10 +54,18 @@ export function growthLegendEntries(items: readonly LegendItem[], c: Theme): Leg
   return items.map((item) => ({ key: item.key, label: item.label, swatch: <Swatch kind={item.swatch} color={item.color} c={c} /> }));
 }
 
-/** The line under the legend that says what Declared, Estimated and a "(forecast)" year mean; nothing while no forecast is shown. */
+/** What Declared, Estimated and a "(forecast)" year mean, in a details element after the chart so it does not sit between the legend and the bars; nothing while no forecast is shown. */
 export function GrowthLegendNote({ items }: Readonly<{ items: readonly LegendItem[] }>) {
   const note = legendNote(items);
-  return note ? <ForecastNote text={note} testId="growth-legend-note" /> : null;
+  if (!note) return null;
+  return (
+    <details className="mt-4 text-xs text-slate-700 dark:text-slate-300" data-testid="growth-legend-details">
+      <summary className="w-fit cursor-pointer rounded font-medium text-brand-700 select-none hover:underline dark:text-brand-400">What do the forecast bars mean?</summary>
+      <p className="muted mt-2 break-words" data-testid="growth-legend-note">
+        {note}
+      </p>
+    </details>
+  );
 }
 
 interface TooltipEntry {
@@ -148,19 +156,27 @@ export function GrowthControls({ view, onView, showForecast, onShowForecast, for
   );
 }
 
-/** "Forecast next 12 months: … · Trend: …" under the chart. */
-export function ForecastSummary({ parts }: Readonly<{ parts: readonly string[] }>) {
-  if (parts.length === 0) return null;
+/** "Forecast next 12 months", "Declared", "Estimated" and "Trend" as separate labelled values with room between them, between the toggles and the legend. */
+export function ForecastSummary({ items }: Readonly<{ items: readonly SummaryItem[] }>) {
+  if (items.length === 0) return null;
   return (
-    <p className="mt-2 text-xs font-medium tabular-nums" data-testid="forecast-summary">
-      {parts.join(' · ')}
-    </p>
+    <dl className="mt-4 mb-6 flex flex-wrap gap-x-10 gap-y-4" data-testid="forecast-summary">
+      {items.map((item) => (
+        <div key={item.key} className="min-w-0" data-testid={`forecast-summary-${item.key}`}>
+          <dt className="muted text-xs">{item.label}</dt>
+          <dd className="m-0 text-lg font-semibold tabular-nums">
+            {item.value}
+            {item.unit && <span className="muted ml-1.5 text-xs font-normal">{item.unit}</span>}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
 export function TrendNote() {
   return (
-    <p className="muted mt-2 text-xs" data-testid="trend-note">
+    <p className="muted mt-4 mb-2 text-xs" data-testid="trend-note">
       {NEEDS_HISTORY_NOTE}
     </p>
   );

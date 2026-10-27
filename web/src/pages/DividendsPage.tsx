@@ -136,11 +136,11 @@ export function DividendsPage() {
           </div>
           <DiversificationCard />
           <ConsistencyCard />
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <AverageGrowthCard />
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+            <ReceivedCards />
             <FuturePaymentsCard />
+            <AverageGrowthCard className="md:col-span-2" />
           </div>
-          <ReceivedCards />
           <DividendGrowthCard />
           <PaymentHistory query={query} />
         </div>

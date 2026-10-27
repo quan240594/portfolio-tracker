@@ -26,8 +26,10 @@ test.describe('Dividend growth: forecast and trend', () => {
 
     const future = (await page.getByTestId('future-total').textContent())!;
     const summary = growth.getByTestId('forecast-summary');
-    await expect(summary).toContainText(`Forecast next 12 months: ${normalise(future)} (declared`);
-    await expect(summary).toHaveText(/Forecast next 12 months: €\s[\d.]+,\d{2} \(declared €\s[\d.]+,\d{2}, estimated €\s[\d.]+,\d{2}\) · Trend: [+−]€\s[\d.]+,\d{2}\/month per year/);
+    await expect(summary.getByTestId('forecast-summary-forecast')).toHaveText(new RegExp(`^Forecast next 12 months\\s*${normalise(future).replace('€ ', '€\\s')}$`));
+    await expect(summary.getByTestId('forecast-summary-declared')).toHaveText(/^Declared\s*€\s[\d.]+,\d{2}$/);
+    await expect(summary.getByTestId('forecast-summary-estimated')).toHaveText(/^Estimated\s*€\s[\d.]+,\d{2}$/);
+    await expect(summary.getByTestId('forecast-summary-trend')).toHaveText(/^Trend\s*[+−]€\s[\d.]+,\d{2}\s*per month, per year$/);
     await expect(chart).toHaveAttribute('aria-label', /Forecast bars \(declared and estimated\) are stacked on the received amounts for 2026 and 2027\./);
   });
 
@@ -102,7 +104,7 @@ test.describe('Dividend growth: forecast and trend', () => {
     await page.goto('/dividends');
     const growth = card(page);
     await expect(growth.getByTestId('trend-note')).toHaveText('Needs at least 6 months of dividend history to show a trend.');
-    await expect(growth.getByTestId('forecast-summary')).not.toContainText('Trend:');
+    await expect(growth.getByTestId('forecast-summary-trend')).toHaveCount(0);
     await expect(growth.getByTestId('forecast-summary')).toContainText('Forecast next 12 months');
     await growth.getByText('Timeline', { exact: true }).click();
     await expect(growth.getByTestId('trend-note')).toBeVisible();
@@ -115,6 +117,7 @@ test.describe('Dividend growth: forecast and trend', () => {
     await expect(growth.getByTestId('year-compare-chart')).toBeVisible();
     const legend = growth.getByTestId('growth-legend');
     const note = growth.getByTestId('growth-legend-note');
+    await growth.getByTestId('growth-legend-details').getByText('What do the forecast bars mean?').click();
 
     await expect(legend.getByRole('button', { name: '2027 (forecast)', exact: true })).toBeVisible();
     await expect(legend.getByRole('button', { name: 'Declared (announced)', exact: true })).toBeVisible();
@@ -158,6 +161,7 @@ test.describe('Dividend growth: forecast and trend', () => {
       expect(legend!.x + legend!.width).toBeLessThanOrEqual(frame!.x + frame!.width + 1);
       await growth.getByRole('checkbox', { name: 'Show forecast' }).check();
       await growth.getByText('By year', { exact: true }).click();
+      await growth.getByTestId('growth-legend-details').getByText('What do the forecast bars mean?').click();
       const note = await growth.getByTestId('growth-legend-note').boundingBox();
       expect(note!.x + note!.width).toBeLessThanOrEqual(frame!.x + frame!.width + 1);
       expect(await overflow(page)).toBeLessThanOrEqual(0);

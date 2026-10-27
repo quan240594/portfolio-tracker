@@ -96,11 +96,12 @@ function AverageGrowth({ data }: Readonly<{ data: DividendsOverviewResponse }>) 
   return <GrowthBars bars={bars} skipped={data.holdings.length - bars.length} />;
 }
 
-export function AverageGrowthCard() {
+export function AverageGrowthCard({ className }: Readonly<{ className?: string }>) {
   const query = useScopedDividendsOverview();
   return (
     <QueryCard
       id="div-growth-cagr"
+      className={className}
       title="Average annual growth"
       query={query}
       loadingLabel="Loading dividend growth"

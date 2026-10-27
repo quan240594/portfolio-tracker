@@ -21,15 +21,19 @@ function twrHint(p: Performance): string {
 
 const ReturnValue = ({ pct }: Readonly<{ pct: number | null }>) => (pct === null ? '—' : <Change pct={pct} />);
 
-/** Money-weighted and time-weighted return plus the forward passive income, from GET /analytics/summary. */
-export function AnalyticsKpis() {
+/** Money-weighted and time-weighted return cards (grid cells), from GET /analytics/summary. */
+export function ReturnKpis() {
   const { scope, ready } = usePortfolioScope();
   const { data, isPending, isError, error, refetch } = useAnalyticsSummary(scope, { enabled: ready });
-  if (isError) return <ErrorState error={error} onRetry={() => void refetch()} title="Could not load return analytics" />;
-  const ccy = data?.baseCurrency ?? 'EUR';
-  const income = data?.passiveIncome;
+  if (isError) {
+    return (
+      <div className="sm:col-span-2 lg:col-span-2">
+        <ErrorState error={error} onRetry={() => void refetch()} title="Could not load return analytics" className="h-full" />
+      </div>
+    );
+  }
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy={isPending || undefined}>
+    <>
       <KpiCard
         loading={isPending}
         label="Money-weighted return (IRR)"
@@ -42,15 +46,32 @@ export function AnalyticsKpis() {
         value={data && <ReturnValue pct={data.performance.twrPct} />}
         hint={data && twrHint(data.performance)}
       />
-      <KpiCard
-        loading={isPending}
-        label="Passive income (next 12 months)"
-        value={income && formatMoney(income.forward12m, ccy)}
-        hint={
-          income &&
-          `${formatPercent(income.yieldOnValuePct)} yield on value · ${formatPercent(income.yieldOnCostPct)} on cost · ${formatMoney(income.declared, ccy)} declared`
-        }
-      />
-    </div>
+    </>
+  );
+}
+
+/** Forward passive income card (a grid cell), from GET /analytics/summary. */
+export function PassiveIncomeKpi() {
+  const { scope, ready } = usePortfolioScope();
+  const { data, isPending, isError, error, refetch } = useAnalyticsSummary(scope, { enabled: ready });
+  if (isError) return <ErrorState error={error} onRetry={() => void refetch()} title="Could not load passive income" className="h-full" />;
+  const ccy = data?.baseCurrency ?? 'EUR';
+  const income = data?.passiveIncome;
+  return (
+    <KpiCard
+      loading={isPending}
+      label="Passive income (next 12 months)"
+      value={income && formatMoney(income.forward12m, ccy)}
+      hint={
+        income &&
+        `${formatPercent(income.yieldOnValuePct)} yield on value · ${formatPercent(income.yieldOnCostPct)} on cost · ${formatMoney(income.declared, ccy)} declared`
+      }
+      info={
+        <>
+          <p>Forward income: declared dividends (announced, with an ex-date in the next 12 months) plus an estimate for the payments your history implies but that are not announced yet, net of withholding tax.</p>
+          <p>It looks ahead. The Dividend yield (TTM) card looks back at what you actually received in the last 12 months.</p>
+        </>
+      }
+    />
   );
 }

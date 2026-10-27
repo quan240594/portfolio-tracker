@@ -122,8 +122,8 @@ export function SelectableLegend({ entries, selection, label = 'Legend', testId 
     if (!focusPresent) setFocus?.(null);
   }, [focusPresent, setFocus]);
   return (
-    <div className={`mb-2 ${className}`} data-testid={testId}>
-      <ul aria-label={label} className="m-0 flex list-none flex-wrap items-center justify-center gap-x-2 gap-y-1 p-0 text-xs">
+    <div className={`mb-4 ${className}`} data-testid={testId}>
+      <ul aria-label={label} className="m-0 flex list-none flex-wrap items-center justify-center gap-x-4 gap-y-1.5 p-0 text-xs">
         {entries.map((entry) => (
           <li key={entry.key}>
             {entry.toggleable === false ? (

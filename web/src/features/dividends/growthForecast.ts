@@ -219,6 +219,28 @@ export function summaryParts(timeline: GrowthTimeline, ccy: string, forecast: Fo
   return parts;
 }
 
+export interface SummaryItem {
+  key: 'forecast' | 'declared' | 'estimated' | 'trend';
+  label: string;
+  value: string;
+  /** Small text after the value. */
+  unit?: string;
+}
+
+/** The same figures as `summaryParts`, one labelled value per data point, for the summary row above the chart. */
+export function summaryItems(timeline: GrowthTimeline, ccy: string, forecast: ForecastTotals | null): SummaryItem[] {
+  const items: SummaryItem[] = [];
+  if (forecast) {
+    items.push(
+      { key: 'forecast', label: 'Forecast next 12 months', value: formatMoney(forecast.total, ccy) },
+      { key: 'declared', label: 'Declared', value: formatMoney(forecast.declared, ccy) },
+      { key: 'estimated', label: 'Estimated', value: formatMoney(forecast.estimated, ccy) },
+    );
+  }
+  if (timeline.trend) items.push({ key: 'trend', label: 'Trend', value: signedMoney(timeline.trend.slopePerYear, ccy), unit: 'per month, per year' });
+  return items;
+}
+
 /** Text alternative of the forecast and trend, appended to the chart's label. */
 export function forecastLabel(timeline: GrowthTimeline, ccy: string, forecast: ForecastTotals | null): string {
   const parts = summaryParts(timeline, ccy, forecast);

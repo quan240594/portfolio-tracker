@@ -528,9 +528,10 @@ same sanity check (rate must agree with the row's amounts, otherwise it is dropp
 ## Dividends page
 
 `/dividends` is a dashboard (top to bottom): Yield and Dividends KPIs next to a Yield / payout chart; passive income
-diversification; dividend safety (payment consistency); average annual growth next to future payments; dividends received over time next to
-received by holding; calendar-month comparison of the last three years (`GET /analytics/dividend-growth`); and the payment
-history (received and upcoming, collapsible). Every card has an info tip with the metric, source and assumptions, loading /
+diversification; dividend safety (payment consistency); one two-column card grid (from `md`; one column on phones, same order):
+**Dividends received over time first and full width** (so the upcoming months fit without a horizontal scroll), then received by
+holding next to future payments, then average annual growth in its own full-width row; calendar-month comparison of the last three
+years (`GET /analytics/dividend-growth`, full width); and the payment history (received and upcoming, collapsible). Every card has an info tip with the metric, source and assumptions, loading /
 error (retry) / empty states, a chart text alternative and a "Show data table" disclosure. Everything follows the portfolio
 scope (`?portfolioId=`, omitted or `all` = combined). Code: `web/src/features/dividends/`.
 
@@ -545,12 +546,34 @@ same error envelope and scope rules as the other reads, no new infrastructure):
 | Field | Meaning |
 |---|---|
 | `summary` | `forward12m` (= `passiveIncome.forward12m` of `/analytics/summary`), `declared`, `estimated`, `monthlyAverage`, `yieldOnValuePct`, `yieldOnCostPct`, `last12m` (net received in the last 12 months) and `growthVsLast12mPct` (forward vs `last12m`; null without `last12m`) |
+| `summary` (trailing, additive) | `previous12m` (net received in days 366 to 730 back), `ttmGrowthPct` (`last12m` vs `previous12m`; null without dividends in `previous12m`), `previous12mPartial` (the first dividend ever received lies inside that earlier period, so it is only partly covered), `ttmYieldOnValuePct` (`last12m` / current market value), `ttmYieldOnCostPct` (`last12m` / cost basis) and `ttmPayers` (symbols that paid in the last 12 months, sold holdings included) |
 | `holdings[]` | current holdings that pay or paid dividends, largest forward income first: forward income (declared / estimated / share), yield on value and on cost, market value, cost basis, net received (12 months / ever), `growthPct` (per-share CAGR) and `consistency` |
 | `futureMonths[]` | 12 months from the current one: declared and estimated income per month; sums to `summary.forward12m`. Declared income sits in the pay month (or ex-month without pay date). Estimated income takes the schedule of the last payment shifted a year (`paymentsPerYear` slots), minus the slots announced events fill. The window is 365 days, so a payment in this calendar month next year counts in the first bar |
 
 Forward income is declared plus estimated, net of the withholding tax seen in the last 12 months (see `calculatePassiveIncome`).
 EODHD dividend events cover about two years of history, which is why the per-holding history merges the received payments with
 the stored *past* events (an event within 20 days of a received payment is the same payment).
+
+### Dashboard stat grid and trailing (TTM) dividend figures
+
+The Dashboard shows one grid of twelve stat cards (`data-testid="kpi-grid"`: 3 columns from `lg`, 2 from `sm`, 1 on phones), in this
+order: Total value, Day change, Unrealized P&L, Currency effect, Total return, Dividends received, Realized P&L, Money-weighted return
+(IRR), Time-weighted return (TWR), **Dividend yield (TTM)**, **Dividend growth (TTM)**, Passive income (next 12 months). Cash and
+Custom assets cards, only for portfolios that hold them, follow after the twelve so those keep their rows. `KpiCard` takes an optional
+`info` (the shared `InfoTip`, now in `web/src/components/InfoTip.tsx`).
+
+**TTM = trailing twelve months, net of withholding tax, in the base currency.** The figures come from `summary` of
+`GET /dividends/overview` (same request and cache as the Dividends page; no new endpoint, additive fields only, computed by the shared
+`computeDividendsOverview`, so the AWS and Cloudflare stacks and the demo mock agree). The windows are day-based like `last12m`: "last
+12 months" = payment dates after today minus 365 days, "previous 12 months" = the 365 days before that.
+
+| Card | Definition |
+|---|---|
+| Dividend yield (TTM) | `last12m` / current market value of the holdings, with `ttmYieldOnCostPct` ("x,xx% on cost") and the basis "Trailing 12 months, n dividend-paying holdings". It looks back at what was received; the forward Passive income card looks ahead at declared plus estimated payments, so the two differ. A recently bought holding has not had a full year to pay and pulls it down. |
+| Dividend growth (TTM) | `ttmGrowthPct` = `last12m` / `previous12m` - 1, shown with sign and arrow (one decimal) and the two amounts. **n/a with the reason** (never a number) when nothing was received in the previous 12 months ("No dividends received in the previous 12 months to compare with", or "... in the last 24 months" when there is nothing at all). When `previous12mPartial`, the hint says that period is only partly covered, so the growth can look high. |
+
+Note the Dividends page "Dividends" KPI compares the *forward* 12 months with `last12m` (`growthVsLast12mPct`); the TTM growth compares
+two periods that already happened.
 
 ### Dividend safety score (payment consistency)
 
@@ -1038,6 +1061,13 @@ declared/estimated schedules), which is what the overview already does; two serv
 the view models in `web/src/features/dividends/growthForecast.ts`, the components in `GrowthCharts.tsx` / `GrowthForecastParts.tsx`.
 "Today" is `overview.asOf` (falls back to `growthStats.asOf`, then the browser date), so the forecast and the history use the same current month.
 While the overview loads the card shows the chart without forecast ("Loading forecast…"); when it fails: "Forecast unavailable" with a retry.
+
+**Layout (spacing).** Above the chart the summary is a description list (`forecast-summary`): *Forecast next 12 months*, *Declared*,
+*Estimated* and *Trend* (+€ x per month, per year) as separate label / value pairs with at least 2.5rem between them (`gap-x-10`), then
+the legend (one row on desktop, wider gaps), then the chart (320 px, 352 px from `md`, wider group gap). The explanation of the forecast
+bars is a details element ("What do the forecast bars mean?") after the chart, not a line between legend and chart. The dashed
+"Average of years" line is thin and has no markers. The chart's accessible label still uses the one-sentence `summaryParts` text.
+Other dividend charts only share the wider legend gap (`SelectableLegend`); the same spacing for them is a follow-up.
 
 **Definitions** (all amounts are net, base currency, per calendar month; months without dividends are 0):
 
