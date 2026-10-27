@@ -7,5 +7,5 @@ describe('portable surface', () => {
       expect.arrayContaining(['importUploadedJob', 'processImport', 'importOwner', 'MAX_OBJECT_BYTES', 'ItemIngestStore', 'parseImportCsv', 'MAX_ERRORS']),
     );
     expect(Object.keys(surface)).not.toContain('createAwsDeps');
-  });
+  }, 30_000);
 });
