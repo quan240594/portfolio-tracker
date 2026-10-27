@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { LayoutBreakpoint, LayoutPageId, PageLayout, PageLayoutsResponse } from '@portfolio/shared';
 import { CardGrid, type CardDefinition } from './CardGrid';
+import { PageHeader } from '../../components/Layout';
 import { LayoutStoreProvider, type LayoutStore } from './layoutStore';
 import { SAVE_DEBOUNCE_MS } from './useCardLayout';
 
@@ -241,5 +242,43 @@ describe('CardGrid', () => {
     await user.click(screen.getByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
     expect(save).toHaveBeenLastCalledWith('dashboard', 'desktop', stored({ hidden: ['c', 'd'] }));
+  });
+});
+
+describe('CardGrid in a page', () => {
+  function renderPage(store: LayoutStore, list: CardDefinition[], gap?: 'gap-4' | 'gap-10') {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <LayoutStoreProvider store={store}>
+          <PageHeader title="Demo" />
+          <CardGrid pageId="dashboard" cards={list} gap={gap} />
+        </LayoutStoreProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it('puts the Customize switch in the page header and adds nothing else to the page until it is pressed', async () => {
+    renderPage(memoryStore().store, cards);
+    const toggle = await screen.findByRole('button', { name: 'Customize layout' });
+    expect(toggle.closest('[data-page-header-actions]')).not.toBeNull();
+    expect(screen.queryByTestId('customize-bar')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-card-list]')?.previousElementSibling?.getAttribute('aria-live')).toBe('polite');
+  });
+
+  it('shows a saved two-thirds width and the page spacing, and lets an empty card take no room until customizing', async () => {
+    const list: CardDefinition[] = [
+      { id: 'a', title: 'Alpha', defaultWidth: 'third', render: () => <p>Alpha body</p> },
+      { id: 'e', title: 'Empty', defaultWidth: 'full', render: () => null },
+    ];
+    const { store } = memoryStore({ desktop: stored({ widths: { a: 'twothirds' } }) });
+    renderPage(store, list, 'gap-10');
+    await waitFor(() => expect(document.querySelector('[data-card-id="a"]')).toHaveClass('md:col-span-8'));
+    expect(document.querySelector('[data-card-list]')).toHaveClass('gap-10');
+    expect(document.querySelector('[data-card-id="e"]')?.className).toContain('has-[>[data-card-body]:empty]:hidden');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Customize layout' }));
+    expect(document.querySelector('[data-card-id="e"]')?.className).not.toContain('has-[>[data-card-body]:empty]:hidden');
+    expect(screen.getByRole('combobox', { name: 'Width of Alpha' })).toHaveDisplayValue('Two thirds');
   });
 });

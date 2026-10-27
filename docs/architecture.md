@@ -3790,13 +3790,13 @@ web app's code (the cards in their default order, each with a default width); wh
 ### Contract (`packages/shared/src/layout.ts`)
 
 ```ts
-type CardWidth = 'full' | 'half' | 'third';            // 12, 6 or 4 columns of the 12-column grid from `md` (768 px); every card is full width below it
+type CardWidth = 'full' | 'twothirds' | 'half' | 'third';  // 12, 8, 6 or 4 columns of the 12-column grid from `md` (768 px); every card is full width below it
 type LayoutBreakpoint = 'desktop' | 'mobile';          // desktop: >= 768 px, mobile: below; each has its own layout
 interface PageLayout { version: 1; breakpoint: LayoutBreakpoint; order: string[]; widths: Record<string, CardWidth>; hidden: string[] }
 ```
 
 `order` is empty when the order is the default one; `widths` holds only widths that differ from the card's default; `hidden` lists hidden card ids. Card ids match `^[a-z0-9][a-z0-9-]{0,47}$` (at most 60 per layout, no duplicates). Pages are a closed list
-(`LAYOUT_PAGE_IDS`: dashboard, holdings, dividends, calendar, earnings, transactions, analytics, goals, rebalance, assets, asset-detail, watchlist, brokers, notifications, diagnostics), so a user holds at most 15 pages x 2 breakpoints = 30 small items.
+(`LAYOUT_PAGE_IDS`: dashboard, holdings, dividends, calendar, earnings, transactions, goals, rebalance, assets, watchlist, brokers, notifications, diagnostics, and one id per tab of the tabbed screens: `analytics-growth|metrics|returns|risk|benchmark|dividends|goal`, `asset-detail-overview|asset-detail-dividends`), so a user holds at most 22 pages x 2 breakpoints = 44 small items (cap `MAX_LAYOUT_PAGES` 30).
 Pure helpers (all immutable): `resolveLayout(defaults, stored?)` (unknown ids ignored, first occurrence wins; a card missing from the stored order appears after its default predecessor, so new cards land where the page declares them),
 `moveCard(layout, id, 'up'|'down')`, `moveCardTo(layout, id, index)`, `setWidth`, `hideCard`, `showCard` (a hidden card keeps its slot), `resetLayout`, `isDefaultLayout`, `positionOf` and `toStored(defaults, layout, breakpoint)`, which answers
 `null` when the layout equals the defaults (nothing is stored then). Moves act on the visible cards; hidden ones stay in their slots.
@@ -3825,6 +3825,42 @@ The routes are in `services/api/src/routes/layouts.ts`; layouts are part of `GET
 
 Converting a page (phase 2): keep the header, scope selector, tabs and range controls outside the grid; wrap each independent block as a `CardDefinition` with a stable id (never derived from data), in the page's current order, with the nearest default width; render `<CardGrid pageId="..." cards={cards} />`.
 A card that depends on state shared with another card must keep that state in the page and be passed through `render`.
+
+### Phase 2a: the pages on the grid
+
+Converted: holdings, dividends, calendar, earnings, transactions, rebalance, assets, watchlist, brokers, notifications, diagnostics, every tab of analytics and of asset detail. **Not yet** the dashboard and goals (phase 2b, after the branches that edit them have merged).
+With the default layout a page renders the same elements in the same DOM order as before (each page's test asserts the order of `[data-card-id]`), so existing tests and e2e specs run unchanged.
+
+- **Switch.** `PageHeader` always renders an actions area (`data-page-header-actions`); `CardGrid` portals its "Customize layout" button into it (asset detail has its own header and provides the same attribute). Without a header the button sits above the grid. Outside editing the grid adds nothing else to the page; while editing it shows the bar (reset, hidden cards, save state).
+- **Widths.** `CardWidth` gained `twothirds` (8 columns) so the 1/3 + 2/3 rows keep their look. Side-by-side rows now start at `md` (768 px) instead of the old per-page `lg` (1024 px); from 1024 px up they look as before. `CardGrid` takes `gap` (`gap-4|5|6|10`) to reproduce the page's old spacing.
+- **Frames.** A frame is a flex column whose body is a one-column grid, so a card stretches to the height of its row like a grid cell did (a card can opt out with `self-start`); a frame whose body renders nothing is hidden by CSS unless customizing.
+- **Tabs.** One layout per tab (`analytics-growth`, `asset-detail-overview`, ...); tab bars, benchmark/range/period selectors that drive several cards, notices and whole-page empty, loading and error states stay outside the grid.
+- **Shared state.** State that two cards share lives in the page or tab component, never in a card's render closure (a hidden card's `render` is not called): the received-dividends period (`useReceivedControls`), the rebalance query, the goal form values, chart legend selections.
+
+| Page (layout id) | Cards in default order (id: width) |
+| --- | --- |
+| holdings | `holdings-table`: full |
+| dividends | `kpis`: third, `yield-payout`: twothirds, `diversification`, `consistency`, `received-over-time`: full, `received-by-holding`: half, `future-payments`: half, `average-growth`: full, `dividend-growth`, `payment-history`: full |
+| calendar | `calendar-kpis`: third, `income-chart`: twothirds, `calendar-filters`, `calendar-events`, `coverage-notes`: full |
+| earnings | `earnings-summaries`, `earnings-checked`: full (notices and symbol chips above the grid) |
+| transactions | `transactions-table`: full |
+| rebalance | `category-editor`: full, `rebalance-form`: third, `rebalance-result`: twothirds |
+| assets | `securities`, `classification`, `custom-assets`: full |
+| watchlist | `watchlist-add`, `watchlist-table`: full |
+| brokers | `broker-connection`, `broker-instructions`: full |
+| notifications | `this-device`, `settings`, `devices`: full |
+| diagnostics | `price-coverage`, `valuation-report`, `alarm-summary`, `alarm-runs`, `alarm-arms`: full |
+| analytics-growth | `value`, `performance`, `dynamics`, `holdings`: full |
+| analytics-metrics | `twr`, `pe`, `volatility`, `sharpe`: half, `sortino`: full |
+| analytics-returns | `returns-chart`, `returns-table`: full |
+| analytics-risk | `risk-metrics`: full |
+| analytics-benchmark | `benchmark-chart`, `benchmark-stats`: full |
+| analytics-dividends | `year-chart`, `month-chart`, `year-table`, `per-share-table`: half |
+| analytics-goal | `goal-form`: third, `goal-results`: twothirds |
+| asset-detail-overview | `price-history`: twothirds, `stats`: third, `latest-earnings`, `positions`, `about`: full |
+| asset-detail-dividends | `div-kpis`, `div-per-year`: full, `div-history`, `div-received`: half |
+
+The Playwright spec `web/e2e/layout.spec.ts` (mock mode) covers customize, move, reload (persisted in `localStorage`), hide, resize, reset and the separate narrow-screen layout on `/watchlist`: `pnpm --filter @portfolio/web exec playwright test e2e/layout.spec.ts` (set `E2E_PORT` to a free port).
 
 ### Tests
 
