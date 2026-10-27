@@ -629,37 +629,56 @@ function projectedEarnings(ctx: Ctx, symbol: string, lastReport: ReportedEarning
   };
 }
 
-/**
- * Earnings of every symbol the user holds or watches: the provider's dates, the released reports (which replace the provider date
- * they match), and, for a company with a released report but no provider date still ahead, one projected next date.
- */
-function earningsEntries(ctx: Ctx, stored: readonly StoredEarningsEvent[], reports: readonly ReportedEarnings[]): CalendarEvent[] {
-  const out: CalendarEvent[] = [];
+/** The most recent released report of each symbol. */
+function latestReports(reports: readonly ReportedEarnings[]): Map<string, ReportedEarnings> {
   const latest = new Map<string, ReportedEarnings>();
   for (const report of reports) {
     if (report.reportDate > (latest.get(report.symbol)?.reportDate ?? '')) latest.set(report.symbol, report);
   }
+  return latest;
+}
+
+/** The released reports as events, and the provider dates they replace. */
+function reportedEntries(ctx: Ctx, stored: readonly StoredEarningsEvent[], reports: readonly ReportedEarnings[]): { events: CalendarEvent[]; matched: Set<StoredEarningsEvent> } {
+  const events: CalendarEvent[] = [];
   const matched = new Set<StoredEarningsEvent>();
   for (const report of reports) {
     const origin = ctx.originOf(report.symbol);
     if (!origin) continue;
     const provider = stored.find((e) => e.symbol === report.symbol && Math.abs(daysBetween(e.date, report.reportDate)) <= REPORT_MATCH_DAYS);
     if (provider) matched.add(provider);
-    out.push(reportedEarnings(ctx, report, origin, provider));
+    events.push(reportedEarnings(ctx, report, origin, provider));
   }
+  return { events, matched };
+}
+
+/** The provider dates that no released report replaced, and the symbols that have one still ahead. */
+function scheduledEntries(ctx: Ctx, stored: readonly StoredEarningsEvent[], matched: ReadonlySet<StoredEarningsEvent>): { events: CalendarEvent[]; ahead: Set<string> } {
+  const events: CalendarEvent[] = [];
   const ahead = new Set<string>();
   for (const e of stored) {
     const origin = ctx.originOf(e.symbol);
     if (!origin || matched.has(e)) continue;
     if (e.date >= ctx.today) ahead.add(e.symbol);
-    out.push(providerEarnings(ctx, e, origin));
+    events.push(providerEarnings(ctx, e, origin));
   }
-  for (const [symbol, report] of latest) {
+  return { events, ahead };
+}
+
+/**
+ * Earnings of every symbol the user holds or watches: the provider's dates, the released reports (which replace the provider date
+ * they match), and, for a company with a released report but no provider date still ahead, one projected next date.
+ */
+function earningsEntries(ctx: Ctx, stored: readonly StoredEarningsEvent[], reports: readonly ReportedEarnings[]): CalendarEvent[] {
+  const reported = reportedEntries(ctx, stored, reports);
+  const scheduled = scheduledEntries(ctx, stored, reported.matched);
+  const projections: CalendarEvent[] = [];
+  for (const [symbol, report] of latestReports(reports)) {
     const origin = ctx.originOf(symbol);
-    const projection = origin && !ahead.has(symbol) ? projectedEarnings(ctx, symbol, report, origin) : null;
-    if (projection) out.push(projection);
+    const projection = origin && !scheduled.ahead.has(symbol) ? projectedEarnings(ctx, symbol, report, origin) : null;
+    if (projection) projections.push(projection);
   }
-  return out;
+  return [...reported.events, ...scheduled.events, ...projections];
 }
 
 interface SplitSource {
