@@ -36,7 +36,7 @@ const holding = (n: number, over: Partial<DividendOverviewHolding> = {}): Divide
 const overview = (over: Partial<DividendsOverviewResponse['summary']> = {}, holdings = [1, 2, 3, 4, 5, 6].map((n) => holding(n))): DividendsOverviewResponse => ({
   baseCurrency: 'EUR',
   asOf: '2026-10-27',
-  summary: { forward12m: 240, declared: 240, estimated: 0, monthlyAverage: 20, yieldOnValuePct: 0.26, yieldOnCostPct: 5, last12m: 240, growthVsLast12mPct: null, ...over },
+  summary: { forward12m: 240, declared: 240, estimated: 0, monthlyAverage: 20, yieldOnValuePct: 0.26, yieldOnCostPct: 5, last12m: 240, growthVsLast12mPct: null, previous12m: 0, ttmGrowthPct: null, previous12mPartial: false, ttmYieldOnValuePct: 0.26, ttmYieldOnCostPct: 5, ttmPayers: 6, ...over },
   holdings,
   futureMonths: [],
 });

@@ -2,7 +2,6 @@ import type { ReactNode } from 'react';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { InfoTip } from '../../components/InfoTip';
 import { QueryBoundary } from '../../components/QueryBoundary';
-import { InfoTip } from '../../components/InfoTip';
 
 export { InfoTip };
 
