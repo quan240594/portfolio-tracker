@@ -3781,3 +3781,52 @@ the ex-dividend, green received, blue confirmed or reported, yellow dashed estim
 
 **Tests.** `pnpm --filter @portfolio/shared test` (`analytics-period.test.ts`), `@portfolio/api` (`analytics.test.ts`), `@portfolio/web` unit (`features/dashboard/*.test.ts(x)`, `mocks/analyticsPeriod.test.ts`, `calendarModel.test.ts`) and
 Playwright `e2e/dashboard-period-calendar.spec.ts` (`E2E_PORT=<free port> pnpm exec playwright test e2e/dashboard-period-calendar.spec.ts`). Clocks are pinned.
+
+## Modular page layouts
+
+Every page can become a grid of **cards** the owner reorders, resizes and hides. Phase 1 (this section) ships the contract, the API, the storage and the web building blocks; no existing page uses them yet. The default layout of a page is declared in the
+web app's code (the cards in their default order, each with a default width); what is stored per user is only the owner's **overrides**, one layout per page and breakpoint, so a card added, renamed or removed in code never breaks a saved layout.
+
+### Contract (`packages/shared/src/layout.ts`)
+
+```ts
+type CardWidth = 'full' | 'half' | 'third';            // 12, 6 or 4 columns of the 12-column grid from `md` (768 px); every card is full width below it
+type LayoutBreakpoint = 'desktop' | 'mobile';          // desktop: >= 768 px, mobile: below; each has its own layout
+interface PageLayout { version: 1; breakpoint: LayoutBreakpoint; order: string[]; widths: Record<string, CardWidth>; hidden: string[] }
+```
+
+`order` is empty when the order is the default one; `widths` holds only widths that differ from the card's default; `hidden` lists hidden card ids. Card ids match `^[a-z0-9][a-z0-9-]{0,47}$` (at most 60 per layout, no duplicates). Pages are a closed list
+(`LAYOUT_PAGE_IDS`: dashboard, holdings, dividends, calendar, earnings, transactions, analytics, goals, rebalance, assets, asset-detail, watchlist, brokers, notifications, diagnostics), so a user holds at most 15 pages x 2 breakpoints = 30 small items.
+Pure helpers (all immutable): `resolveLayout(defaults, stored?)` (unknown ids ignored, first occurrence wins; a card missing from the stored order appears after its default predecessor, so new cards land where the page declares them),
+`moveCard(layout, id, 'up'|'down')`, `moveCardTo(layout, id, index)`, `setWidth`, `hideCard`, `showCard` (a hidden card keeps its slot), `resetLayout`, `isDefaultLayout`, `positionOf` and `toStored(defaults, layout, breakpoint)`, which answers
+`null` when the layout equals the defaults (nothing is stored then). Moves act on the visible cards; hidden ones stay in their slots.
+
+### API (additive, owner only, same on AWS and the Cloudflare Hub)
+
+| Route | Meaning |
+| --- | --- |
+| `GET /layouts/{page}` | `{ desktop: PageLayout \| null, mobile: PageLayout \| null }`; `null` = never customised (a damaged stored item is treated as `null`) |
+| `PUT /layouts/{page}/{breakpoint}` | body = the `PageLayout` of that breakpoint (max 8 KB, else 413 `PAYLOAD_TOO_LARGE`), or `null`/an empty layout to clear it; 204 |
+| `DELETE /layouts/{page}` | clears both breakpoints; 204, also when nothing was stored |
+
+Unknown page or breakpoint, a breakpoint that differs from the path, unknown fields, malformed or duplicate ids: 400 `VALIDATION_ERROR`. The user comes from the authenticated context only, never from the body. Storage is the single-table item
+`PK USER#<id>`, `SK LAYOUT#<page>#<breakpoint>`, `entityType LAYOUT` (`ItemManagementRepository`), so the Lambda API over DynamoDB and the Hub's SQLite items serve it through the same handler; AWS needs no infrastructure change (`$default` route).
+The routes are in `services/api/src/routes/layouts.ts`; layouts are part of `GET /export/backup` (`layouts`).
+
+### Web (`web/src/features/layout`)
+
+- `CardGrid` (`pageId`, `cards: { id, title, defaultWidth, render }[]`, optional `emptyHint`): the page grid and the "Customize layout" switch. A hidden card is not rendered (its `render` is not called, so its queries do not run).
+- `CardFrame`: one grid cell; while customizing it adds a drag handle, move up/down, width select (desktop only) and hide, all native buttons/select with `aria-label`s ("Move Beta up", "Width of Beta", ...), a "2 of 5" position and a polite live region that announces every change.
+- `CustomizeBar`: the switch, "Reset to default", the list of hidden cards ("Show Beta"), the save state and a retry button.
+- `useCardLayout(pageId, defaults)`: resolves the stored overrides for the current breakpoint (`matchMedia('(min-width: 768px)')`), applies edits optimistically and saves them 600 ms after the last edit (one request chain, so an older save never lands after a newer one; unsaved edits are sent when the page is left). The page always renders: while loading, or when loading fails, the defaults (or this browser's last copy) are shown.
+- `useCardDrag`: drag and drop with pointer events only (mouse, pen, touch; no dependency): the handle captures the pointer, the card under it is found by position, the target shows a bar on the side where the card would land, Escape cancels, the page scrolls near the top and bottom edge. Keyboard users and screen readers use the buttons.
+- `layoutStore.tsx`: `apiLayoutStore` (the layouts API, plus a copy in `localStorage` so a revisit renders the saved layout at once; a deployment without the routes answers 404 and falls back to this browser) and `localLayoutStore` (mock/demo mode: `localStorage` only, keys `portfolio-tracker.layout.<page>.<breakpoint>`). `LayoutStoreProvider` swaps the store in tests.
+- The mock API (`web/src/mocks/layoutHandlers.ts`) serves the three routes in memory for the unit tests.
+
+Converting a page (phase 2): keep the header, scope selector, tabs and range controls outside the grid; wrap each independent block as a `CardDefinition` with a stable id (never derived from data), in the page's current order, with the nearest default width; render `<CardGrid pageId="..." cards={cards} />`.
+A card that depends on state shared with another card must keep that state in the page and be passed through `render`.
+
+### Tests
+
+`pnpm --filter @portfolio/shared test` (`layout.test.ts`), `pnpm --filter @portfolio/api test` (`layouts.test.ts`, the shared scenarios), `pnpm --filter @portfolio/cloudflare-app test` (`layouts.test.ts`: the same routes through the Hub's SQLite store),
+`pnpm --filter @portfolio/web test` (`src/features/layout/*.test.ts(x)`). All clocks are pinned; the drag tests stub `elementFromPoint`, element rectangles and `PointerEvent` (jsdom has none).
