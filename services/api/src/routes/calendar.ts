@@ -9,6 +9,7 @@ import {
   type CalendarData,
   type CalendarResponse,
   type GetCalendarResponse,
+  type ReportedEarnings,
 } from '@portfolio/shared';
 import { ok, validate, type RouteResult } from '../lib/http.js';
 import type { RouteContext } from '../deps.js';
@@ -18,6 +19,15 @@ import { heldSymbols, loadFx } from './portfolio.js';
 import { resolveScope } from './portfolios.js';
 
 const isoDay = (d: Date): string => d.toISOString().slice(0, 10);
+
+/** Quarters read per held company: the ones in the calendar window and the latest, which anchors the projected next date. */
+const REPORTS_PER_SYMBOL = 6;
+
+/** The report date and fiscal period of the stored earnings summaries of `symbols`. */
+async function loadReports(ctx: RouteContext, symbols: readonly string[]): Promise<ReportedEarnings[]> {
+  const lists = await Promise.all(symbols.map((symbol) => ctx.deps.repo.getEarningsSummaries(symbol, REPORTS_PER_SYMBOL)));
+  return lists.flat().map((summary) => ({ symbol: summary.symbol, reportDate: summary.reportDate, period: summary.period }));
+}
 
 /**
  * Loads what the calendar needs for the caller only (`ctx.userId`): the transactions of the read scope, the stored
@@ -38,9 +48,10 @@ async function loadCalendar(ctx: RouteContext): Promise<CalendarResponse> {
   const symbols = [...new Set([...held, ...watchlist])];
   const profileSymbols = [...new Set([...marketSymbols(transactions.map((t) => t.symbol)), ...watchlist])];
   const window = calendarDataWindow(query, today);
-  const [dividendEvents, stored, quotes, profiles, { fx, fxHistory }] = await Promise.all([
+  const [dividendEvents, stored, reportedEarnings, quotes, profiles, { fx, fxHistory }] = await Promise.all([
     Promise.all(symbols.map((s) => repo.getDividendEvents(s))),
     symbols.length > 0 ? repo.getCalendarEvents(symbols, window.from, window.to) : { earnings: [], splits: [] },
+    loadReports(ctx, held),
     held.length > 0 ? repo.getQuotes(held) : {},
     profileSymbols.length > 0 ? loadProfiles(ctx, profileSymbols) : {},
     loadFx(ctx.deps, transactions),
@@ -54,6 +65,7 @@ async function loadCalendar(ctx: RouteContext): Promise<CalendarResponse> {
     fxHistory,
     dividendEvents: dividendEvents.flat(),
     earnings: stored.earnings,
+    reportedEarnings,
     splits: stored.splits,
     watchlist,
   };
