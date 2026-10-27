@@ -92,7 +92,7 @@ export function CompactMonthGrid({ month, today, events, baseCurrency }: Readonl
               calendarMonthOf(date) === month ? (
                 <Day key={date} date={date} today={today} events={byDate.get(date) ?? []} baseCurrency={baseCurrency} />
               ) : (
-                <td key={date} className="h-14 border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950/60" aria-hidden="true" />
+                <td key={date} className="h-14 border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950/60" />
               ),
             )}
           </tr>

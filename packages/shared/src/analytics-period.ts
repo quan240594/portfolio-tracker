@@ -44,7 +44,13 @@ function totalsOf(positions: ReadonlyMap<string, Position>): Totals {
   return totals;
 }
 
-const valueOn = (ctx: Context, date: string): number => ctx.history.filter((p) => p.date <= date).at(-1)?.value ?? 0;
+function valueOn(ctx: Context, date: string): number {
+  for (let i = ctx.history.length - 1; i >= 0; i--) {
+    const point = ctx.history[i];
+    if (point && point.date <= date) return point.value;
+  }
+  return 0;
+}
 
 export const emptyPeriodPerformance = (period: DashboardPeriod, today: string): PeriodPerformance => ({
   period,
