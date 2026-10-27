@@ -51,6 +51,21 @@ describe('CalendarPage', () => {
     expect(screen.getByText('What does this calendar cover?')).toBeInTheDocument();
   });
 
+  it('puts the filters and the colour key between the income section and the calendar, so the tab order follows the page', async () => {
+    open();
+    const annual = await screen.findByRole('region', { name: 'Annual income' });
+    const chart = await screen.findByRole('img', { name: /^Dividend income per month over 12 months/ });
+    const filters = screen.getByRole('region', { name: 'Calendar filters' });
+    const calendar = events();
+    const follows = (earlier: Element, later: Element) => (earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    expect(follows(annual, filters)).toBe(true);
+    expect(follows(chart, filters)).toBe(true);
+    expect(follows(filters, calendar)).toBe(true);
+    expect(within(filters).getByRole('button', { name: /Download \.ics/ })).toBeInTheDocument();
+    expect(within(filters).getByRole('group', { name: /Event types/ })).toBeInTheDocument();
+    expect(follows(filters, screen.getByText('What does this calendar cover?'))).toBe(true);
+  });
+
   it('defaults to the list on small screens and shows the events of the month grouped by date', async () => {
     open();
     expect(await screen.findByRole('radio', { name: 'List' })).toBeChecked();

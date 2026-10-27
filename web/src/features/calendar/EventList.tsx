@@ -1,7 +1,7 @@
 import type { CalendarEvent } from '@portfolio/shared';
 import { CompanyLogo } from '../../components/CompanyLogo';
 import { formatWeekdayDate } from '../../lib/format';
-import { STATUS_LABELS, eventAriaLabel, groupByDate } from './calendarModel';
+import { eventAriaLabel, groupByDate, statusLabel } from './calendarModel';
 import { STATUS_CHIP, eventClasses } from './calendarColours';
 import { EventMarker } from './EventMarker';
 import { eventDetailLine, expectedLabel } from './eventText';
@@ -44,7 +44,7 @@ export function EventRow({ event, baseCurrency, onSelect }: Readonly<RowProps>) 
                 {amount}
               </span>
             )}
-            <span className={`rounded-full border px-2 py-px text-[11px] font-medium ${STATUS_CHIP[event.status]} ${event.status === 'ESTIMATED' ? 'border-dashed' : ''}`}>{STATUS_LABELS[event.status]}</span>
+            <span className={`rounded-full border px-2 py-px text-[11px] font-medium ${STATUS_CHIP[event.status]} ${event.status === 'ESTIMATED' ? 'border-dashed' : ''}`}>{statusLabel(event)}</span>
           </span>
         </span>
       </button>

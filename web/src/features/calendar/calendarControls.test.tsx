@@ -242,7 +242,7 @@ describe('CalendarOverview', () => {
     const list = screen.getByRole('list', { name: /ex-dividend by type, everything else by status/ });
     expect(list.tagName).toBe('UL');
     const items = within(list).getAllByRole('listitem');
-    expect(items.map((i) => i.textContent)).toEqual(['EEx-dividend: violet', 'Received: green', 'Confirmed: blue', 'Estimated: yellow, dashed']);
+    expect(items.map((i) => i.textContent)).toEqual(['EEx-dividend: violet', 'Received: green', 'Confirmed or reported: blue', 'Estimated: yellow, dashed']);
     expect(items[0]?.querySelector('svg[data-shape="circle"]')).not.toBeNull();
     expect(items[0]?.querySelector('[aria-hidden="true"]')?.className).toContain('bg-[#e9d5ff]');
     expect(items[3]?.querySelector('[aria-hidden="true"]')?.className).toContain('border-dashed');
