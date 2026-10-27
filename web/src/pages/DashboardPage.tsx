@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ALL_PORTFOLIOS, HISTORY_RANGES, isMarketSymbol, type AllocationDimension, type GetPortfolioResponse, type HistoryRange } from '@portfolio/shared';
+import { ALL_PORTFOLIOS, HISTORY_RANGES, isMarketSymbol, type AllocationDimension, type DashboardPeriod, type GetPortfolioResponse, type HistoryRange } from '@portfolio/shared';
 import { useAllocation, useHistory, useHoldings, usePortfolio } from '../api/hooks';
 import { KpiCard } from '../components/KpiCard';
 import { Change } from '../components/Change';
@@ -20,6 +20,9 @@ import { PassiveIncomeKpi, ReturnKpis } from '../features/analytics/AnalyticsKpi
 import { TrailingDividendKpis } from '../features/dividends/TrailingKpis';
 import { InsightsSection } from '../features/analytics/InsightsSection';
 import { MoversSection } from '../features/analytics/MoversSection';
+import { DashboardCalendarCard } from '../features/dashboard/DashboardCalendarCard';
+import { PERIOD_OPTIONS, useDashboardPeriod } from '../features/dashboard/dashboardPeriod';
+import { PortfolioKpis } from '../features/dashboard/PortfolioKpis';
 import { BASE_CURRENCY, formatDateTime, formatMoney, formatPercent, formatWeight } from '../lib/format';
 
 type AllocationTab = Exclude<AllocationDimension, 'symbol'> | 'category';
@@ -34,68 +37,6 @@ const ALLOCATION_TABS: { value: AllocationTab; label: string }[] = [
 
 const RANGE_OPTIONS = HISTORY_RANGES.map((r) => ({ value: r, label: r }));
 
-
-/** The first seven stat cards (grid cells, rendered inside the dashboard's single stat grid). */
-function PortfolioKpis() {
-  const { scope, ready } = usePortfolioScope();
-  const { data, isPending, isError, error, refetch } = usePortfolio(scope, { enabled: ready });
-  if (isError) {
-    return (
-      <div className="sm:col-span-2 lg:col-span-3">
-        <ErrorState error={error} onRetry={() => void refetch()} title="Could not load portfolio summary" />
-      </div>
-    );
-  }
-  const ccy = data?.baseCurrency ?? BASE_CURRENCY;
-  return (
-    <>
-      <KpiCard
-        loading={isPending}
-        label="Total value"
-        value={data && formatMoney(data.totalValue, ccy)}
-        hint={data && `${data.holdingsCount} holdings · cost ${formatMoney(data.totalCost, ccy)}`}
-      />
-      <KpiCard
-        loading={isPending}
-        label="Day change"
-        value={data && formatMoney(data.dayChange, ccy, { signed: true })}
-        change={data && <Change pct={data.dayChangePct} value={data.dayChange} />}
-      />
-      <KpiCard
-        loading={isPending}
-        label="Unrealized P&L"
-        value={data && formatMoney(data.unrealizedPnl, ccy, { signed: true })}
-        change={data && <Change pct={data.unrealizedPnlPct} value={data.unrealizedPnl} />}
-        hint={data && `Incl. ${formatMoney(data.currencyEffect, ccy, { signed: true })} currency effect`}
-      />
-      <KpiCard
-        loading={isPending}
-        label="Currency effect"
-        value={data && <Change amount={data.currencyEffect} currency={ccy} />}
-        hint={`Part of the unrealized P&L caused by exchange-rate moves since purchase — e.g. a weaker US dollar lowers the ${ccy} value of US shares. Already included in Unrealized P&L.`}
-      />
-      <KpiCard
-        loading={isPending}
-        label="Total return"
-        value={data && formatMoney(data.totalReturn, ccy, { signed: true })}
-        change={data && <Change pct={data.totalReturnPct} value={data.totalReturn} />}
-        hint={data && `Incl. ${formatMoney(data.realizedPnl, ccy, { signed: true })} realized, ${formatMoney(data.dividendsReceived, ccy)} dividends`}
-      />
-      <KpiCard
-        loading={isPending}
-        label="Dividends received"
-        value={data && formatMoney(data.dividendsReceived, ccy)}
-        hint="Net of withholding tax, all time"
-      />
-      <KpiCard
-        loading={isPending}
-        label="Realized P&L"
-        value={data && formatMoney(data.realizedPnl, ccy, { signed: true })}
-        hint="Gains and losses on positions you sold, after fees. Not included in Unrealized P&L."
-      />
-    </>
-  );
-}
 
 /** Cash and custom assets, only for portfolios that hold them: after the twelve standard cards, so those keep their rows. */
 function HoldingsBreakdownKpis() {
@@ -115,11 +56,11 @@ function HoldingsBreakdownKpis() {
 }
 
 /** One grid of twelve stat cards: three per row on desktop, two on tablets, one on phones. */
-function KpiGrid() {
+function KpiGrid({ period }: Readonly<{ period: DashboardPeriod }>) {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="kpi-grid">
-      <PortfolioKpis />
-      <ReturnKpis />
+      <PortfolioKpis period={period} />
+      <ReturnKpis period={period} />
       <TrailingDividendKpis />
       <PassiveIncomeKpi />
       <HoldingsBreakdownKpis />
@@ -276,10 +217,15 @@ export function DashboardPage() {
   const { scope, ready, scopeName, withScope, current } = usePortfolioScope();
   const portfolio = usePortfolio(scope, { enabled: ready });
   const isEmpty = portfolio.data?.holdingsCount === 0 && portfolio.data.totalReturn === 0;
+  const [period, setPeriod] = useDashboardPeriod();
 
   return (
     <>
-      <PageHeader title="Dashboard" description={dashboardDescription(portfolio.data, scopeName)} />
+      <PageHeader
+        title="Dashboard"
+        description={dashboardDescription(portfolio.data, scopeName)}
+        actions={isEmpty ? undefined : <SegmentedControl label="Period" options={PERIOD_OPTIONS} value={period} onChange={setPeriod} />}
+      />
       {isEmpty ? (
         <EmptyState
           title={current ? `No transactions in ${current.name} yet` : 'No transactions yet'}
@@ -297,7 +243,7 @@ export function DashboardPage() {
         />
       ) : (
         <div className="space-y-6">
-          <KpiGrid />
+          <KpiGrid period={period} />
           <InsightsSection />
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             <PerformanceCard />
@@ -305,7 +251,10 @@ export function DashboardPage() {
           </div>
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
             <TopHoldingsCard />
-            <WatchlistWidget />
+            <DashboardCalendarCard />
+            <div className="empty:hidden lg:col-span-2">
+              <WatchlistWidget />
+            </div>
           </div>
           <MoversSection />
           {portfolio.data && (

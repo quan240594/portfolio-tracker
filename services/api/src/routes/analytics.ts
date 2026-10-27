@@ -3,6 +3,7 @@ import {
   analyticsBenchmarkQuerySchema,
   analyticsGoalQuerySchema,
   analyticsReturnsQuerySchema,
+  analyticsSummaryQuerySchema,
   analyticsRiskQuerySchema,
   computeAnalyticsSummary,
   computeBenchmark,
@@ -76,8 +77,9 @@ export async function loadAnalyticsData(ctx: RouteContext, needs: Needs): Promis
 }
 
 export async function getSummary(ctx: RouteContext): Promise<RouteResult> {
+  const { period } = validate(analyticsSummaryQuerySchema.safeParse(ctx.query), 'Invalid query parameters');
   const data = await loadAnalyticsData(ctx, { holdings: true, events: true, eod: true });
-  return ok(computeAnalyticsSummary(data) satisfies AnalyticsSummaryResponse);
+  return ok(computeAnalyticsSummary(data, period) satisfies AnalyticsSummaryResponse);
 }
 
 export async function getReturns(ctx: RouteContext): Promise<RouteResult> {

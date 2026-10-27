@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import type { AnalyticsGoalParams, HistoryRange, ReturnPeriod } from '@portfolio/shared';
+import type { AnalyticsGoalParams, DashboardPeriod, HistoryRange, ReturnPeriod } from '@portfolio/shared';
 import { analyticsApi } from './analyticsClient';
 
 /**
@@ -9,7 +9,7 @@ import { analyticsApi } from './analyticsClient';
 export const ANALYTICS_ROOT_KEY = 'analytics';
 
 export const analyticsKeys = {
-  summary: (scope: string) => [ANALYTICS_ROOT_KEY, scope, 'summary'] as const,
+  summary: (scope: string, period?: DashboardPeriod) => [ANALYTICS_ROOT_KEY, scope, 'summary', ...(period ? [period] : [])] as const,
   returns: (scope: string, period: ReturnPeriod) => [ANALYTICS_ROOT_KEY, scope, 'returns', period] as const,
   risk: (scope: string, benchmark: string) => [ANALYTICS_ROOT_KEY, scope, 'risk', benchmark] as const,
   benchmark: (scope: string, benchmark: string, range: HistoryRange) => [ANALYTICS_ROOT_KEY, scope, 'benchmark', benchmark, range] as const,
@@ -23,8 +23,13 @@ interface ReadOptions {
   enabled?: boolean;
 }
 
-export const useAnalyticsSummary = (scope: string, { enabled = true }: ReadOptions = {}) =>
-  useQuery({ queryKey: analyticsKeys.summary(scope), queryFn: ({ signal }) => analyticsApi.summary(scope, signal), enabled });
+interface SummaryOptions extends ReadOptions {
+  /** A dashboard window: the response then carries `periodPerformance`. Omit for the all-time summary. */
+  period?: DashboardPeriod;
+}
+
+export const useAnalyticsSummary = (scope: string, { enabled = true, period }: SummaryOptions = {}) =>
+  useQuery({ queryKey: analyticsKeys.summary(scope, period), queryFn: ({ signal }) => analyticsApi.summary(scope, signal, period), enabled });
 
 export const useAnalyticsReturns = (scope: string, period: ReturnPeriod, { enabled = true }: ReadOptions = {}) =>
   useQuery({

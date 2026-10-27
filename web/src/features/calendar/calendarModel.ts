@@ -205,6 +205,11 @@ export function monthIncome(events: readonly CalendarEvent[], month: string): nu
   return roundTo(events.filter((e) => e.countsAsIncome && calendarMonthOf(e.date) === month).reduce((s, e) => s + (e.expectedAmount ?? 0), 0));
 }
 
+/** Income still to come between two dates (inclusive): declared and estimated dividends; what was already received (PAID) is left out. */
+export function remainingIncome(events: readonly CalendarEvent[], from: string, to: string): number {
+  return roundTo(events.filter((e) => e.countsAsIncome && e.status !== 'PAID' && e.date >= from && e.date <= to).reduce((s, e) => s + (e.expectedAmount ?? 0), 0));
+}
+
 export const isEstimated = (e: Pick<CalendarEvent, 'status'>): boolean => e.status === 'ESTIMATED';
 
 /** `AAPL · Ex-dividend · Confirmed` — the accessible name of a chip or row. */

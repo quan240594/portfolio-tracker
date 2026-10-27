@@ -5,6 +5,7 @@ import {
   analyticsGoalQuerySchema,
   analyticsReturnsQuerySchema,
   analyticsRiskQuerySchema,
+  analyticsSummaryQuerySchema,
   computeAnalyticsSummary,
   computeBenchmark,
   computeDividendGrowth,
@@ -48,7 +49,7 @@ export async function respond<S extends z.ZodTypeAny>(request: Request, schema: 
 }
 
 export const analyticsHandlers: HttpHandler[] = [
-  http.get(api('/summary'), ({ request }) => respond(request, portfolioScopeSchema, (_q, data) => computeAnalyticsSummary(data))),
+  http.get(api('/summary'), ({ request }) => respond(request, analyticsSummaryQuerySchema, (q, data) => computeAnalyticsSummary(data, q.period))),
   http.get(api('/returns'), ({ request }) => respond(request, analyticsReturnsQuerySchema, (q, data) => computeReturns(data, q.period))),
   http.get(api('/risk'), ({ request }) => respond(request, analyticsRiskQuerySchema, (q, data) => computeRisk(data, q.benchmark))),
   http.get(api('/benchmark'), ({ request }) => respond(request, analyticsBenchmarkQuerySchema, (q, data) => computeBenchmark(data, q.benchmark, q.range))),

@@ -43,11 +43,13 @@ import {
   type BenchmarkComparison,
   type BenchmarkInfo,
   type BenchmarkPoint,
+  type DashboardPeriod,
   type PerformanceSummary,
   type ReturnPeriodRow,
 } from './analytics-api.js';
 import { calculateDividendGrowth, calculatePassiveIncome, type DividendGrowth, type PassiveIncome } from './analytics-income.js';
 import { generateInsights } from './analytics-insights.js';
+import { computePeriodPerformance } from './analytics-period.js';
 import { buildValueHistory, calculatePortfolio, historyRangeStart, sortTransactions, type PortfolioResult } from './portfolio.js';
 import type { HistoryRange } from './schemas.js';
 import type { DividendEvent, EodPrice, FxDay, FxRates, InstrumentProfile, Quote, Transaction, ValuePoint } from './types.js';
@@ -133,10 +135,11 @@ function performanceOf(ctx: Context, terminalValue: number, today: string): Perf
   };
 }
 
-export function computeAnalyticsSummary(data: AnalyticsData): AnalyticsSummaryResponse {
+export function computeAnalyticsSummary(data: AnalyticsData, period?: DashboardPeriod): AnalyticsSummaryResponse {
   const ctx = buildContext(data);
   const portfolio = currentPortfolio(data);
   const passiveIncome = passiveIncomeOf(data, portfolio);
+  const periodPerformance = period && computePeriodPerformance(period, { ctx, transactions: scopedTransactions(data), portfolio, today: data.today });
   return {
     baseCurrency: data.fx.base,
     asOf: portfolio.summary.asOf,
@@ -144,6 +147,7 @@ export function computeAnalyticsSummary(data: AnalyticsData): AnalyticsSummaryRe
     passiveIncome,
     ...topMovers(portfolio.holdings),
     insights: generateInsights(portfolio.holdings, passiveIncome),
+    ...(periodPerformance && { periodPerformance }),
   };
 }
 
