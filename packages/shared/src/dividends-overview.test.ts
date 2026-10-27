@@ -229,7 +229,25 @@ describe('computeDividendsOverview', () => {
       yieldOnCostPct: 1.23, // 46.8 / (1000 + 800 + 1000 + 1000)
       last12m: 51.8, // AAA 40 + BBB 6.8 + DDD 5 (sold holding)
       growthVsLast12mPct: -9.65,
+      previous12m: 36, // AAA 4 payments of 0.09 between 2024-06-15 and 2025-06-15
+      ttmGrowthPct: 43.89,
+      previous12mPartial: false,
+      ttmYieldOnValuePct: 1.25, // 51.8 / 4160
+      ttmYieldOnCostPct: 1.36, // 51.8 / 3800
+      ttmPayers: 3,
     });
+  });
+
+  it('flags the previous 12 months as partial when the first dividend arrived inside that period', () => {
+    const young = computeDividendsOverview(
+      data({ transactions: [tx({ symbol: 'AAA', date: '2024-12-01' }), div('AAA', '2025-01-02', 0.1), div('AAA', '2025-10-01', 0.2)] }),
+    );
+    expect(young.summary).toMatchObject({ last12m: 20, previous12m: 10, ttmGrowthPct: 100, previous12mPartial: true, ttmPayers: 1 });
+  });
+
+  it('has no trailing growth without dividends in the previous 12 months', () => {
+    const fresh = computeDividendsOverview(data({ transactions: [tx({ symbol: 'AAA', date: '2026-01-01' }), div('AAA', '2026-03-01', 0.1)] }));
+    expect(fresh.summary).toMatchObject({ last12m: 10, previous12m: 0, ttmGrowthPct: null, previous12mPartial: false });
   });
 
   it('lists current payers with their yield, income share, growth and consistency, largest income first', () => {
@@ -336,7 +354,7 @@ describe('computeDividendsOverview', () => {
     expect(future.holdings).toEqual([]);
     const empty = computeDividendsOverview(data({ transactions: [], quotes: {}, profiles: {}, dividendEvents: [] }));
     expect(empty.holdings).toEqual([]);
-    expect(empty.summary).toEqual({ forward12m: 0, declared: 0, estimated: 0, monthlyAverage: 0, yieldOnValuePct: 0, yieldOnCostPct: 0, last12m: 0, growthVsLast12mPct: null });
+    expect(empty.summary).toEqual({ forward12m: 0, declared: 0, estimated: 0, monthlyAverage: 0, yieldOnValuePct: 0, yieldOnCostPct: 0, last12m: 0, growthVsLast12mPct: null, previous12m: 0, ttmGrowthPct: null, previous12mPartial: false, ttmYieldOnValuePct: 0, ttmYieldOnCostPct: 0, ttmPayers: 0 });
     expect(empty.futureMonths).toHaveLength(12);
     expect(empty.futureByHolding).toEqual([]);
     expect(empty.futureMonths.every((m) => m.declared === 0 && m.estimated === 0)).toBe(true);

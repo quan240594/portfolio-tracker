@@ -42,7 +42,7 @@ describe('GET /dividends/overview', () => {
     expect(body.baseCurrency).toBe('EUR');
     expect(body.asOf).toBe('2026-06-15');
     // VWRL: 100 shares; 0.5 declared for September and one estimated payment (semi-annual: 2025-09, 2026-03)
-    expect(body.summary).toMatchObject({ forward12m: 100, declared: 50, estimated: 50, monthlyAverage: 8.33, last12m: 100, growthVsLast12mPct: 0 });
+    expect(body.summary).toMatchObject({ forward12m: 100, declared: 50, estimated: 50, monthlyAverage: 8.33, last12m: 100, growthVsLast12mPct: 0, previous12m: 0, ttmGrowthPct: null, previous12mPartial: false, ttmYieldOnValuePct: 0.87, ttmPayers: 1 });
     expect(body.holdings.map((h) => h.symbol)).toEqual(['VWRL.AS']);
     expect(body.holdings[0]).toMatchObject({ name: 'Vanguard All-World', marketValue: 11000, yieldPct: 0.91, sharePct: 100 });
     // the stored past event (2025-03-01) extends the received history

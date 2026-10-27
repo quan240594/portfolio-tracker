@@ -239,6 +239,18 @@ export interface DividendOverviewSummary {
   last12m: number;
   /** Forward 12-month income compared with `last12m`, percent; null when nothing was received in the last 12 months. */
   growthVsLast12mPct: number | null;
+  /** Net received in the 12 months before `last12m` (days 366 to 730 back). */
+  previous12m: number;
+  /** Trailing growth: `last12m` compared with `previous12m`, percent; null when nothing was received in `previous12m`. */
+  ttmGrowthPct: number | null;
+  /** True when the first dividend ever received is inside the previous 12 months, so that period is only partly covered by your history. */
+  previous12mPartial: boolean;
+  /** Trailing yield: `last12m` / current market value, percent (0 without market value). */
+  ttmYieldOnValuePct: number;
+  /** Trailing yield: `last12m` / cost basis, percent (0 without cost basis). */
+  ttmYieldOnCostPct: number;
+  /** Holdings that paid a dividend in the last 12 months. */
+  ttmPayers: number;
 }
 
 export interface FutureMonth {
@@ -447,7 +459,19 @@ function buildRow(
   };
 }
 
-function summaryOf(passive: PassiveIncome, last12m: number): DividendOverviewSummary {
+interface Trailing {
+  last12m: number;
+  previous12m: number;
+  firstDividend: string | null;
+  value: number;
+  cost: number;
+  payers: number;
+}
+
+const percentOf = (num: number, den: number) => (den > 0 ? ratioToPct(num / den) : 0);
+
+function summaryOf(passive: PassiveIncome, t: Trailing, today: string): DividendOverviewSummary {
+  const { last12m, previous12m } = t;
   return {
     forward12m: passive.forward12m,
     declared: passive.declared,
@@ -457,6 +481,12 @@ function summaryOf(passive: PassiveIncome, last12m: number): DividendOverviewSum
     yieldOnCostPct: passive.yieldOnCostPct,
     last12m: roundTo(last12m),
     growthVsLast12mPct: last12m > 0 ? ratioToPct(passive.forward12m / last12m - 1) : null,
+    previous12m: roundTo(previous12m),
+    ttmGrowthPct: previous12m > 0 ? ratioToPct(last12m / previous12m - 1) : null,
+    previous12mPartial: previous12m > 0 && t.firstDividend !== null && t.firstDividend > addIsoDays(today, -2 * DAYS_PER_YEAR),
+    ttmYieldOnValuePct: percentOf(last12m, t.value),
+    ttmYieldOnCostPct: percentOf(last12m, t.cost),
+    ttmPayers: t.payers,
   };
 }
 
@@ -483,16 +513,25 @@ export function computeDividendsOverview(data: AnalyticsData): DividendsOverview
   const rows = holdings
     .map((h) => buildRow(h, incomeBySymbol.get(h.symbol), dividendsBySymbol.get(h.symbol) ?? [], eventsBySymbol.get(h.symbol) ?? [], timeline, data.today))
     .filter((r): r is Row => r !== null);
-  const last12m = netReceived(
-    [...dividendsBySymbol.values()].flat(),
-    timeline,
-    addIsoDays(data.today, -DAYS_PER_YEAR),
-  );
+  const allDividends = [...dividendsBySymbol.values()].flat();
+  const yearAgo = addIsoDays(data.today, -DAYS_PER_YEAR);
+  const trailing: Trailing = {
+    last12m: netReceived(allDividends, timeline, yearAgo),
+    previous12m: netReceived(
+      allDividends.filter((t) => t.date <= yearAgo),
+      timeline,
+      addIsoDays(data.today, -2 * DAYS_PER_YEAR),
+    ),
+    firstDividend: allDividends.reduce<string | null>((first, t) => (first === null || t.date < first ? t.date : first), null),
+    value: holdings.reduce((s, h) => s + h.marketValue, 0),
+    cost: holdings.reduce((s, h) => s + h.costBasis, 0),
+    payers: [...dividendsBySymbol.values()].filter((list) => list.some((t) => t.date > yearAgo)).length,
+  };
 
   return {
     baseCurrency: timeline.base,
     asOf: data.today,
-    summary: summaryOf(passive, last12m),
+    summary: summaryOf(passive, trailing, data.today),
     holdings: rows.map((r) => r.holding).sort((a, b) => b.forward12m - a.forward12m || a.symbol.localeCompare(b.symbol)),
     futureMonths: futureMonths(rows.map((r) => r.schedule), data.today),
     futureByHolding: futureByHolding(rows, data.today),
