@@ -144,8 +144,10 @@ export function defineApiScenarios(label: string, target: ApiScenarioTarget): vo
       const put = await call('PUT', path, { body: { sector: 'Scenario sector', historySymbol: ' fwra.de ' } });
       expect(put.status).toBe(200);
       expect(put.body.override).toMatchObject({ sector: 'Scenario sector', historySymbol: 'FWRA.DE' });
-      for (const bad of ['FWRA/DE', 'FWRA DE', 'FWRA%DE', '.DE', 'A'.repeat(21)]) {
-        const refused = await call('PUT', path, { body: { sector: 'x', historySymbol: bad } });
+      const refusals = await Promise.all(
+        ['FWRA/DE', 'FWRA DE', 'FWRA%DE', '.DE', 'A'.repeat(21)].map((bad) => call('PUT', path, { body: { sector: 'x', historySymbol: bad } })),
+      );
+      for (const refused of refusals) {
         expect(refused.status).toBe(400);
         expect(refused.body.error.code).toBe('VALIDATION_ERROR');
       }
