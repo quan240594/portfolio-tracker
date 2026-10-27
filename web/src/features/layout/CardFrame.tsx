@@ -2,12 +2,12 @@ import type { ChangeEvent, ReactNode } from 'react';
 import { CARD_WIDTHS, type CardWidth } from '@portfolio/shared';
 import type { CardDrag, DropTarget } from './useCardDrag';
 
-/** Grid columns of a card from `md` on (12 columns); below it every card is full width. */
+/** Grid columns of a card from `lg` on (12 columns); below it every card is full width. */
 export const WIDTH_CLASS: Record<CardWidth, string> = {
-  full: 'md:col-span-12',
-  twothirds: 'md:col-span-8',
-  half: 'md:col-span-6',
-  third: 'md:col-span-4',
+  full: 'lg:col-span-12',
+  twothirds: 'lg:col-span-8',
+  half: 'lg:col-span-6',
+  third: 'lg:col-span-4',
 };
 
 export const WIDTH_LABEL: Record<CardWidth, string> = { full: 'Full width', twothirds: 'Two thirds', half: 'Half width', third: 'One third' };
@@ -58,7 +58,9 @@ export function CardFrame({ id, title, width, editing, canResize, position, tota
   };
   // A card whose content is empty (nothing to show right now) takes no room, until the page is being customized.
   const emptyClass = editing ? '' : 'has-[>[data-card-body]:empty]:hidden';
-  const classes = ['relative flex min-w-0 flex-col', WIDTH_CLASS[width], emptyClass, dragging ? 'opacity-60' : '', drop ? DROP_MARK[drop.axis][drop.edge] : ''].filter(Boolean).join(' ');
+  // Positioned only while a drop mark is drawn: a positioned frame would become the containing block of the page's visually hidden
+  // (absolutely positioned) texts and let those extend the document past the viewport.
+  const classes = ['flex min-w-0 flex-col', WIDTH_CLASS[width], emptyClass, dragging ? 'opacity-60' : '', drop ? `relative ${DROP_MARK[drop.axis][drop.edge]}` : ''].filter(Boolean).join(' ');
 
   return (
     <div className={classes} data-card-id={id} data-width={width}>

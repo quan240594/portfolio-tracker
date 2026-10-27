@@ -7,7 +7,7 @@ import { PageHeader } from '../../components/Layout';
 import { LayoutStoreProvider, type LayoutStore } from './layoutStore';
 import { SAVE_DEBOUNCE_MS } from './useCardLayout';
 
-const DESKTOP = '(min-width: 768px)';
+const DESKTOP = '(min-width: 1024px)';
 
 function stubViewport(desktop: boolean) {
   vi.stubGlobal('matchMedia', (query: string) => ({
@@ -66,7 +66,7 @@ describe('CardGrid', () => {
     expect(await screen.findByText('Alpha body')).toBeInTheDocument();
     expect(order()).toEqual(['a', 'b', 'c', 'd']);
     expect(screen.queryByRole('button', { name: /^Move/ })).not.toBeInTheDocument();
-    expect(document.querySelector('[data-card-id="b"]')).toHaveClass('md:col-span-6');
+    expect(document.querySelector('[data-card-id="b"]')).toHaveClass('lg:col-span-6');
 
     const user = userEvent.setup();
     await customize(user);
@@ -108,7 +108,7 @@ describe('CardGrid', () => {
     const user = userEvent.setup();
     await customize(user);
     await user.selectOptions(screen.getByRole('combobox', { name: 'Width of Beta' }), 'full');
-    expect(document.querySelector('[data-card-id="b"]')).toHaveClass('md:col-span-12');
+    expect(document.querySelector('[data-card-id="b"]')).toHaveClass('lg:col-span-12');
     expect(screen.getByText('Beta is now full width')).toBeInTheDocument();
     await user.selectOptions(screen.getByRole('combobox', { name: 'Width of Delta' }), 'half');
     await waitFor(() => expect(save).toHaveBeenCalled(), { timeout: SAVE_DEBOUNCE_MS * 4 });
@@ -156,7 +156,7 @@ describe('CardGrid', () => {
     const { store } = memoryStore({ desktop: stored({ order: ['d', 'gone', 'b'], widths: { d: 'full', gone: 'half' }, hidden: ['c', 'gone'] }) });
     const { rerenderWith } = setup(store);
     await waitFor(() => expect(order()).toEqual(['a', 'd', 'b']));
-    expect(document.querySelector('[data-card-id="d"]')).toHaveClass('md:col-span-12');
+    expect(document.querySelector('[data-card-id="d"]')).toHaveClass('lg:col-span-12');
 
     // A card added to the page later shows at its default place; the saved layout keeps working.
     rerenderWith([...cards, { id: 'e', title: 'Epsilon', defaultWidth: 'full', render: () => <p>Epsilon body</p> }]);
@@ -273,7 +273,7 @@ describe('CardGrid in a page', () => {
     ];
     const { store } = memoryStore({ desktop: stored({ widths: { a: 'twothirds' } }) });
     renderPage(store, list, 'gap-10');
-    await waitFor(() => expect(document.querySelector('[data-card-id="a"]')).toHaveClass('md:col-span-8'));
+    await waitFor(() => expect(document.querySelector('[data-card-id="a"]')).toHaveClass('lg:col-span-8'));
     expect(document.querySelector('[data-card-list]')).toHaveClass('gap-10');
     expect(document.querySelector('[data-card-id="e"]')?.className).toContain('has-[>[data-card-body]:empty]:hidden');
     const user = userEvent.setup();

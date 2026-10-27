@@ -26,7 +26,7 @@ interface Props {
 const NO_CARDS = 'Every card is hidden. Show one again from the list above, or reset the layout.';
 
 /**
- * A page as a grid of cards the owner can reorder, resize and hide (12 columns from `md`, one column below). It owns the
+ * A page as a grid of cards the owner can reorder, resize and hide (12 columns from `lg`, one column below). It owns the
  * "Customize layout" switch; its layout comes from `useCardLayout`, so a card that is new, renamed or removed in code never
  * breaks a saved layout.
  */
@@ -83,7 +83,7 @@ export function CardGrid({ pageId, cards, emptyHint = NO_CARDS, gap = 'gap-6' }:
       <span className="sr-only" aria-live="polite">
         {announcement}
       </span>
-      <div className={`grid grid-cols-1 ${gap} md:grid-cols-12`} data-card-list>
+      <div className={`grid grid-cols-1 ${gap} lg:grid-cols-12`} data-card-list>
         {visible.map((card, index) => {
           const definition = byId.get(card.id)!;
           const target = drag.target?.id === card.id ? drag.target : null;

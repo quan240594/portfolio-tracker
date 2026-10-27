@@ -62,7 +62,7 @@ class TestPointerEvent extends MouseEvent {
 beforeEach(() => {
   vi.stubGlobal('PointerEvent', TestPointerEvent);
   vi.stubGlobal('scrollBy', vi.fn());
-  vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(min-width: 768px)', media: query, addEventListener: () => {}, removeEventListener: () => {} }));
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(min-width: 1024px)', media: query, addEventListener: () => {}, removeEventListener: () => {} }));
   elementUnderPointer = null;
   Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => elementUnderPointer });
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
