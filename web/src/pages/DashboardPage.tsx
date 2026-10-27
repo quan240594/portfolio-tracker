@@ -16,7 +16,8 @@ import { AllocationDonut } from '../components/charts/AllocationDonut';
 import { StaleBadge } from '../features/holdings/HoldingsTable';
 import { WatchlistWidget } from '../features/watchlist/WatchlistWidget';
 import { usePortfolioScope } from '../features/portfolios/usePortfolioScope';
-import { AnalyticsKpis } from '../features/analytics/AnalyticsKpis';
+import { PassiveIncomeKpi, ReturnKpis } from '../features/analytics/AnalyticsKpis';
+import { TrailingDividendKpis } from '../features/dividends/TrailingKpis';
 import { InsightsSection } from '../features/analytics/InsightsSection';
 import { MoversSection } from '../features/analytics/MoversSection';
 import { BASE_CURRENCY, formatDateTime, formatMoney, formatPercent, formatWeight } from '../lib/format';
@@ -34,13 +35,20 @@ const ALLOCATION_TABS: { value: AllocationTab; label: string }[] = [
 const RANGE_OPTIONS = HISTORY_RANGES.map((r) => ({ value: r, label: r }));
 
 
-function KpiGrid() {
+/** The first seven stat cards (grid cells, rendered inside the dashboard's single stat grid). */
+function PortfolioKpis() {
   const { scope, ready } = usePortfolioScope();
   const { data, isPending, isError, error, refetch } = usePortfolio(scope, { enabled: ready });
-  if (isError) return <ErrorState error={error} onRetry={() => void refetch()} title="Could not load portfolio summary" />;
+  if (isError) {
+    return (
+      <div className="sm:col-span-2 lg:col-span-3">
+        <ErrorState error={error} onRetry={() => void refetch()} title="Could not load portfolio summary" />
+      </div>
+    );
+  }
   const ccy = data?.baseCurrency ?? BASE_CURRENCY;
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy={isPending || undefined}>
+    <>
       <KpiCard
         loading={isPending}
         label="Total value"
@@ -73,18 +81,48 @@ function KpiGrid() {
         change={data && <Change pct={data.totalReturnPct} value={data.totalReturn} />}
         hint={data && `Incl. ${formatMoney(data.realizedPnl, ccy, { signed: true })} realized, ${formatMoney(data.dividendsReceived, ccy)} dividends`}
       />
-      {data?.cashValue !== undefined && (
-        <KpiCard label="Cash" value={formatMoney(data.cashValue, ccy)} hint={`Included in total value. Interest and fees: ${formatMoney(data.cashIncome ?? 0, ccy, { signed: true })}`} />
-      )}
-      {data?.customAssetsValue !== undefined && (
-        <KpiCard label="Custom assets" value={formatMoney(data.customAssetsValue, ccy)} hint="Real estate, savings and other manually valued assets. Included in total value." />
-      )}
       <KpiCard
         loading={isPending}
         label="Dividends received"
         value={data && formatMoney(data.dividendsReceived, ccy)}
         hint="Net of withholding tax, all time"
       />
+      <KpiCard
+        loading={isPending}
+        label="Realized P&L"
+        value={data && formatMoney(data.realizedPnl, ccy, { signed: true })}
+        hint="Gains and losses on positions you sold, after fees. Not included in Unrealized P&L."
+      />
+    </>
+  );
+}
+
+/** Cash and custom assets, only for portfolios that hold them: after the twelve standard cards, so those keep their rows. */
+function HoldingsBreakdownKpis() {
+  const { scope, ready } = usePortfolioScope();
+  const { data } = usePortfolio(scope, { enabled: ready });
+  const ccy = data?.baseCurrency ?? BASE_CURRENCY;
+  return (
+    <>
+      {data?.cashValue !== undefined && (
+        <KpiCard label="Cash" value={formatMoney(data.cashValue, ccy)} hint={`Included in total value. Interest and fees: ${formatMoney(data.cashIncome ?? 0, ccy, { signed: true })}`} />
+      )}
+      {data?.customAssetsValue !== undefined && (
+        <KpiCard label="Custom assets" value={formatMoney(data.customAssetsValue, ccy)} hint="Real estate, savings and other manually valued assets. Included in total value." />
+      )}
+    </>
+  );
+}
+
+/** One grid of twelve stat cards: three per row on desktop, two on tablets, one on phones. */
+function KpiGrid() {
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="kpi-grid">
+      <PortfolioKpis />
+      <ReturnKpis />
+      <TrailingDividendKpis />
+      <PassiveIncomeKpi />
+      <HoldingsBreakdownKpis />
     </div>
   );
 }
@@ -260,7 +298,6 @@ export function DashboardPage() {
       ) : (
         <div className="space-y-6">
           <KpiGrid />
-          <AnalyticsKpis />
           <InsightsSection />
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             <PerformanceCard />
