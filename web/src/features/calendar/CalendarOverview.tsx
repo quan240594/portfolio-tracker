@@ -22,12 +22,15 @@ import { IncomeTooltip } from './IncomeTooltip';
 import { INCOME_SERIES, incomeRows, selectMonths, selectedAverage, seriesName, useNarrowScreen, type IncomeRow, type IncomeSeries } from './incomeChartModel';
 
 export function CalendarKpis({ summary, currency, loading }: Readonly<{ summary?: CalendarSummary; currency: string; loading: boolean }>) {
+  // Two tiles per row, except in the third-width card of the grid (from `lg`) when it is too narrow for a money amount at the tile's size.
   return (
-    <div className="grid grid-cols-2 gap-3">
-      <KpiCard loading={loading} label="Annual income" value={summary && formatMoney(summary.annualIncome, currency)} hint="Next 12 months, net" />
-      <KpiCard loading={loading} label="Monthly average" value={summary && formatMoney(summary.monthlyAverage, currency)} hint="Annual income ÷ 12" />
-      <KpiCard loading={loading} label="Daily average" value={summary && formatMoney(summary.dailyAverage, currency)} hint="Annual income ÷ 365" />
-      <KpiCard loading={loading} label="Yield" value={summary && formatPercent(summary.yieldPct)} hint={summary && `${formatPercent(summary.yieldOnCostPct)} on cost`} />
+    <div className="@container">
+      <div className="grid h-full grid-cols-2 gap-3 lg:@max-sm:grid-cols-1">
+        <KpiCard loading={loading} label="Annual income" value={summary && formatMoney(summary.annualIncome, currency)} hint="Next 12 months, net" />
+        <KpiCard loading={loading} label="Monthly average" value={summary && formatMoney(summary.monthlyAverage, currency)} hint="Annual income ÷ 12" />
+        <KpiCard loading={loading} label="Daily average" value={summary && formatMoney(summary.dailyAverage, currency)} hint="Annual income ÷ 365" />
+        <KpiCard loading={loading} label="Yield" value={summary && formatPercent(summary.yieldPct)} hint={summary && `${formatPercent(summary.yieldOnCostPct)} on cost`} />
+      </div>
     </div>
   );
 }
