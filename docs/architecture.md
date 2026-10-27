@@ -737,7 +737,7 @@ flowchart LR
 |---|---|---|
 | `EX_DIVIDEND` | ex-date | stored `DIV#` item (estimated ones: pay date minus the usual ex-to-pay lag) |
 | `DIVIDEND_PAY` | pay date (the ex-date when no pay date is known) | stored `DIV#` item, your own `DIVIDEND` transaction (`PAID`), or a projection (`ESTIMATED`) |
-| `EARNINGS` | report date; fiscal period end, EPS estimate, time of day `BMO`/`AMC`/`unknown` when the source has them | stored `EARN#` item |
+| `EARNINGS` | report date; fiscal period end, EPS estimate, time of day `BMO`/`AMC`/`unknown` when the source has them; `earningsPhase` `scheduled` (a provider date), `reported` (a stored earnings summary, `source: earnings-summary`) or `projected` (previous report + 91 days, `source: estimate`) | stored `EARN#` item, stored `EARNSUM` summaries, a projection |
 | `SPLIT` | ex-split date, ratio `toFactor`-for-`fromFactor` (forward and reverse) | stored `SPLIT#` item, or your own `SPLIT` transaction |
 | `CORPORATE_ACTION` | the date of an irregular share adjustment | a `SPLIT#` item whose ratio is not a plain split |
 
@@ -749,15 +749,15 @@ has `origin` `HOLDING` (the symbol is in your transactions) or `WATCHLIST`, a st
 at most 20, or 1-for-N up to 100) are `SPLIT`. EODHD also records stock dividends, spin-off adjustments and reorganisations in
 its split feed with ratios such as 104/100 or 1281/1000; those are shown as `CORPORATE_ACTION` ("Share adjustment …").
 **Mergers, spin-offs as such, symbol changes and rights issues are not available from any free source and are not shown.**
-Earnings dates are US-listed companies only: `ASML.AS`, `SAP.DE`, … get none (Alpha Vantage lists the US ADR `ASML`, which is
-a different instrument and is deliberately not mapped). The same notes ship in every response as `coverage` and in the page's
-"What does this calendar cover?" section.
+Earnings dates come from a calendar that lists US tickers. The Python service (AWS) still asks for US-style symbols only. The
+TypeScript price service (Cloudflare) also reads suffixed listings, see "Earnings dates: what the personal deployment showed and
+why" below. The same notes ship in every response as `coverage` and in the page's "What does this calendar cover?" section.
 
 ### Free data sources (researched 15 Oct 2026)
 
 | Candidate | Result |
 |---|---|
-| **Alpha Vantage `EARNINGS_CALENDAR`** (used) | One CSV call returns every company's expected report for `horizon=3month\|6month\|12month` (`symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay`; the live `demo` key returned ~4,600 rows for 3 months, `timeOfTheDay` is `pre-market`, `post-market` or empty, `estimate` often empty). Free tier: 25 API requests/day ("Support" FAQ), shared with the profile enrichment that already uses it. One call a day serves every tracked ticker. US-listed only. Throttling comes back as HTTP 200 with a JSON `Information`/`Note` body, which the parser turns into a rate-limit error. |
+| **Alpha Vantage `EARNINGS_CALENDAR`** (used) | One CSV call returns every company's expected report for `horizon=3month\|6month\|12month` (`symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay`; the live `demo` key returned ~4,600 rows for 3 months, `timeOfTheDay` is `pre-market`, `post-market` or empty, `estimate` often empty). Free tier: 25 API requests/day ("Support" FAQ), shared with the profile enrichment that already uses it. One call a day serves every tracked ticker; the calendar lists US tickers (and ADRs), so a suffixed listing is matched to its US ticker. Throttling comes back as HTTP 200 with a JSON `Information`/`Note` body, which the parser turns into a rate-limit error. |
 | **EODHD `/splits/{symbol}`** (used) and `/div/{symbol}` (re-used) | Both are in the Free plan (history limited to 1 year), 1 API call each. Free plan: **20 calls/day and 20/min** (pricing page); the same key also serves the quote refresh and enrichment. Split ratio is `"new/old"` (`"4.000000/1.000000"`). Unverified: whether the free plan returns future-dated splits for every exchange; the stored ones are whatever the feed lists. |
 | EODHD calendar API (`/calendar/earnings`, `/calendar/splits`, …) | **Not free**: "Corporate calendar" is included from the Fundamentals plan up (pricing page). |
 | Twelve Data `/earnings_calendar`, `/splits`, `/splits_calendar`, `/dividends_calendar` | Splits and dividend calendars need the **Grow plan** (docs); `earnings_calendar` costs 40 credits per request against the Basic plan's 8 credits/minute, and Basic data may not be displayed to users. Not used. |
@@ -768,8 +768,10 @@ a different instrument and is deliberately not mapped). The same notes ship in e
 Both budgets are **per UTC day, persisted in DynamoDB** (`CALENDAR` / `BUDGET#{provider}`: `{day, used}`, spent with a conditional
 `UpdateItem`), so Lambda retries, manual runs and concurrent invocations cannot overspend a provider's free tier.
 
-* **Alpha Vantage**: `CALENDAR_ALPHAVANTAGE_DAILY_CALLS` (default 1). The call is skipped when no tracked symbol is a US ticker.
-  A failed call is not retried the same day (the budget stays spent); the next daily run tries again.
+* **Alpha Vantage**: `CALENDAR_ALPHAVANTAGE_DAILY_CALLS` (default 1). The call is skipped when no tracked symbol is a candidate (crypto
+  has none). A failed call is not retried the same day (the budget stays spent); the next daily run tries again. In the TypeScript
+  price service the profile lookups and the EPS estimates use the same 25 calls a day through `alphaVantageGeneralLimit`: the limit
+  minus the calendar's calls, so a day of enrichment can never leave the calendar without its call.
 * **EODHD**: `CALENDAR_EODHD_DAILY_CALLS` (default 8 of the 20): a symbol check costs 2 calls (splits + dividends; 1 with
   `CALENDAR_REFRESH_DIVIDENDS=false`), so about 4 symbols a day. Symbols are checked **round-robin, oldest first**: each
   symbol's `CAL#STATE` marker holds `splitsCheckedAt`; a symbol is due again after `CALENDAR_RECHECK_DAYS` (default 7) and a
@@ -796,6 +798,45 @@ out for US tickers, an upcoming split for `NVDA` and `AAPL`, the mock market's d
 Dividend events stay `DIV#{exDate}` (`DIVIDEND_EVENT`). Keys for the first two live in `calendarKeys`
 (`packages/shared/src/calendar.ts`) and `prices/calendar_models.py`. All symbols come from the `TRACKED` registry, which holds
 holdings and watchlist symbols alike.
+
+### Earnings dates: what the personal deployment showed and why
+
+On the personal Cloudflare deployment (about 20 holdings: US tickers plus Xetra and Euronext listings) the Calendar showed no earnings
+at all. Traced end to end with fakes (provider call, CSV parsing, mapping to the held symbols, stored items, the API route, the page):
+
+| Link | Finding | Status |
+|---|---|---|
+| Alpha Vantage CSV parsing | `parseEarningsCsv` reads the documented columns, the `None`/empty estimate and `pre-market`/`post-market`/empty time of day (invented fixtures in `providers/earnings-mapping.test.ts`, the Python parity cases). | works |
+| Mapping to held symbols | **Defect, proved**: `alphaVantageSymbol` returned null for every suffixed symbol, so `FOO.DE` (Salesforce), `M4I.DE`, `NFC.DE`, `ADB.DE`, `ASML.AS` ... were never looked up, and the ticker list was empty for a portfolio with only such holdings. Fixed: `earningsTargets` maps a suffixed listing through `TICKER_ALIASES` (now in `@portfolio/shared`, shared with the SEC ticker map of the earnings summaries) and through its bare ticker (`ASML.AS` -> `ASML`). An alias must agree with the holding's name when it has a real one; a bare ticker only counts when the row's company name shares a word with the holding's name (`DTE.DE` Deutsche Telekom is not `DTE` DTE Energy). | fixed, tested |
+| Daily quota | **Defect, proved in the free-plan simulation** (`free-plan.test.ts`, with a 25-calls-a-day Alpha Vantage): the calendar's call and the profile lookups drew on the same counter, so a day of enrichment (one `OVERVIEW` call per US holding) used all 25 and a calendar run later that day got a rate-limit error and recorded `failed`. Fixed: profiles and estimates stop one call short (`alphaVantageGeneralLimit`); the calendar's call is always there. A failed call is still not repeated the same day and is tried again the next day (tested). | fixed, tested |
+| Cloudflare end-to-end fake | The suite's Alpha Vantage fake answered every function with an `OVERVIEW` JSON, so the earnings path had never been exercised against a CSV: the calendar call failed in every scenario without anyone noticing. It now serves a CSV for `EARNINGS_CALENDAR` and `cloudflare-app/test/suite.ts` runs the whole path (a US, a Xetra and a Euronext holding, `refreshCalendar` twice, `GET /calendar`) on the Node stack and in workerd. | fixed |
+| API route and page | The route reads `TICKER#{symbol}/EARN#` for the held and watched symbols in the data window and the page lists them; both were correct. | works |
+| Real provider responses | **Not provable offline**: whether the live Alpha Vantage free key answers `EARNINGS_CALENDAR` as documented (CSV, ~4,600 rows for 12 months) and whether it carries the owner's foreign companies under the ADR ticker. Without a successful call no date can exist, and the previous run may have run before the key was set (`no-provider`, nothing stored). | open |
+
+**What shows now.** Per symbol, in this order of precedence:
+
+* *Reported* (`earningsPhase: reported`): every stored earnings summary (`EARNSUM`, report date from the SEC filing) is an `EARNINGS`
+  event on its report date, `status: CONFIRMED` (there is no "reported" status; `PAID` is for dividends you received), `source:
+  earnings-summary`, labelled **Reported** (chip, accessible name, "Reported Q3 2026" in the row) and linked to `/earnings` through
+  the dialog's "View summary". It replaces a provider date within 4 days and keeps that date's fiscal period end, EPS estimate
+  and time of day. The route reads the latest 6 summaries of each held symbol.
+* *Scheduled* (`scheduled`): the provider's date, `ESTIMATED` until the day has passed, `source: alphavantage`, with "Before market
+  open" / "After market close" when the provider says so.
+* *Projected* (`projected`): when a company has a reported summary but no provider date ahead, the next date is the latest report
+  plus 91 days (`projectedEarningsDate`; a quarter further while the date is long past, nothing when it is only up to 14 days
+  overdue or the report is older than a year), `ESTIMATED`, `source: estimate`, drawn dashed, labelled "Projected date" and described
+  as "A projection, not an announced date". A date is never shown without its `source`.
+
+The refresh makes **one** `EARNINGS_CALENDAR` call per UTC day with `horizon=12month` (the default of `CALENDAR_EARNINGS_HORIZON`), filters it to
+the tracked symbols (holdings and watchlist) and replaces the upcoming dates a company moved. Tests: `pnpm --filter @portfolio/prices test`,
+`pnpm --filter @portfolio/shared test`, `pnpm --filter @portfolio/api test`, `pnpm --filter @portfolio/cloudflare-app test`.
+
+### Page layout
+
+The Calendar page reads top to bottom: the income section (the four cards and "Income per month"), then **one card with the filters**
+(event types, status, "Show", "Download .ics" and the colour key), then the calendar card (month header, "This month" / "Next 12
+months", Calendar / List) and the coverage notes. The tab order follows. `web/e2e/calendar-layout.spec.ts` checks the order by
+geometry at 320 and 1280 px (income above the filters, the filter card's bottom above the calendar card's top, no horizontal overflow).
 
 ### Building the calendar (`buildCalendar`)
 
