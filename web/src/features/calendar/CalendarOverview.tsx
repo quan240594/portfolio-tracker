@@ -22,10 +22,11 @@ import { IncomeTooltip } from './IncomeTooltip';
 import { INCOME_SERIES, incomeRows, selectMonths, selectedAverage, seriesName, useNarrowScreen, type IncomeRow, type IncomeSeries } from './incomeChartModel';
 
 export function CalendarKpis({ summary, currency, loading }: Readonly<{ summary?: CalendarSummary; currency: string; loading: boolean }>) {
-  // Two tiles per row, except in the third-width card of the grid (from `lg`) when it is too narrow for a money amount at the tile's size.
+  // Two tiles per row, except in the third-width card of the grid (from `lg`) while it is narrower than 32 rem: a tile would then be
+  // too narrow for a six-figure amount in a wide font (the page is at most 80 rem wide, so that card is one column wide in practice).
   return (
     <div className="@container">
-      <div className="grid h-full grid-cols-2 gap-3 lg:@max-sm:grid-cols-1">
+      <div className="grid h-full grid-cols-2 gap-3 lg:@max-lg:grid-cols-1">
         <KpiCard loading={loading} label="Annual income" value={summary && formatMoney(summary.annualIncome, currency)} hint="Next 12 months, net" />
         <KpiCard loading={loading} label="Monthly average" value={summary && formatMoney(summary.monthlyAverage, currency)} hint="Annual income ÷ 12" />
         <KpiCard loading={loading} label="Daily average" value={summary && formatMoney(summary.dailyAverage, currency)} hint="Annual income ÷ 365" />

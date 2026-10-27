@@ -1,6 +1,6 @@
 /** MSW handlers of /layouts: the stored page layouts live in memory, like the API (empty body or `null` clears a breakpoint). */
 import { http, HttpResponse, type HttpHandler } from 'msw';
-import { LAYOUT_BREAKPOINTS, isLayoutPageId, layoutPutSchema, type PageLayout, type PageLayoutsResponse } from '@portfolio/shared';
+import { LAYOUT_BREAKPOINTS, isLayoutBreakpoint, isLayoutPageId, layoutPutSchema, type PageLayout, type PageLayoutsResponse } from '@portfolio/shared';
 import * as db from './db';
 import { api, errorResponse } from './utils';
 
@@ -31,7 +31,7 @@ export const layoutHandlers: HttpHandler[] = [
   http.put(api('/layouts/:page/:breakpoint'), async ({ params, request }) => {
     const page = String(params.page);
     const breakpoint = String(params.breakpoint);
-    if (!isLayoutPageId(page) || !LAYOUT_BREAKPOINTS.some((candidate) => candidate === breakpoint)) {
+    if (!isLayoutPageId(page) || !isLayoutBreakpoint(breakpoint)) {
       return errorResponse(400, 'VALIDATION_ERROR', 'Unknown page or breakpoint');
     }
     const parsed = layoutPutSchema.safeParse(await request.json().catch(() => undefined));

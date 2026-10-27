@@ -9,6 +9,7 @@ import {
   hideCard,
   isCardId,
   isDefaultLayout,
+  isLayoutBreakpoint,
   isLayoutPageId,
   layoutKeys,
   layoutOfItem,
@@ -62,6 +63,8 @@ describe('vocabulary', () => {
     expect(isLayoutPageId('analytics-growth')).toBe(true);
     expect(isLayoutPageId('asset-detail-dividends')).toBe(true);
     expect(isLayoutPageId('analytics')).toBe(false);
+    expect(isLayoutBreakpoint('mobile')).toBe(true);
+    expect(isLayoutBreakpoint('tablet')).toBe(false);
     expect(pageLayoutSchema.safeParse(stored({ widths: { a: 'twothirds' } })).success).toBe(true);
     expect(isLayoutPageId('nope')).toBe(false);
   });

@@ -73,6 +73,7 @@ export const MAX_LAYOUT_BODY_BYTES = 8 * 1024;
 export const CARD_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,47}$/;
 
 export const isLayoutPageId = (value: string): value is LayoutPageId => (LAYOUT_PAGE_IDS as readonly string[]).includes(value);
+export const isLayoutBreakpoint = (value: string): value is LayoutBreakpoint => (LAYOUT_BREAKPOINTS as readonly string[]).includes(value);
 export const isCardId = (value: string): boolean => CARD_ID_PATTERN.test(value);
 
 // --- Stored layout -----------------------------------------------------------------------------------------------------------
@@ -227,7 +228,8 @@ const mapCard = (layout: ResolvedLayout, id: string, change: (card: ResolvedCard
   if (index === -1) return layout;
   const current = layout.cards[index]!;
   const changed = change(current);
-  return changed === current ? layout : { cards: layout.cards.map((card, at) => (at === index ? changed : card)) };
+  if (changed === current) return layout;
+  return { cards: layout.cards.map((card, at) => (at === index ? changed : card)) };
 };
 
 export const setWidth = (layout: ResolvedLayout, id: string, width: CardWidth): ResolvedLayout =>

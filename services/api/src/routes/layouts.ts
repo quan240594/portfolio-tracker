@@ -1,6 +1,7 @@
 import {
   LAYOUT_BREAKPOINTS,
   MAX_LAYOUT_BODY_BYTES,
+  isLayoutBreakpoint,
   isLayoutPageId,
   layoutOfItem,
   layoutPutSchema,
@@ -24,8 +25,8 @@ function pagePath(ctx: RouteContext): LayoutPageId {
 }
 
 function breakpointPath(ctx: RouteContext): LayoutBreakpoint {
-  const breakpoint = LAYOUT_BREAKPOINTS.find((candidate) => candidate === ctx.pathParams.breakpoint);
-  if (breakpoint === undefined) throw new HttpError(400, 'VALIDATION_ERROR', `Unknown breakpoint "${ctx.pathParams.breakpoint}"`);
+  const breakpoint = ctx.pathParams.breakpoint ?? '';
+  if (!isLayoutBreakpoint(breakpoint)) throw new HttpError(400, 'VALIDATION_ERROR', `Unknown breakpoint "${breakpoint}"`);
   return breakpoint;
 }
 
