@@ -55,3 +55,28 @@ describe('WatchlistPage', () => {
     expect(await screen.findByRole('heading', { name: 'Your watchlist is empty' })).toBeInTheDocument();
   });
 });
+
+const cardOrder = () => [...document.querySelectorAll<HTMLElement>('[data-card-id]')].map((el) => el.dataset.cardId);
+
+describe('WatchlistPage layout', () => {
+  it('keeps the default card order and puts the customize toggle in the page header', async () => {
+    renderApp('/watchlist');
+    await screen.findByRole('table', { name: 'Watchlist' });
+    expect(cardOrder()).toEqual(['watchlist-add', 'watchlist-table']);
+    const actions = document.querySelector<HTMLElement>('[data-page-header-actions]')!;
+    expect(within(actions).getByRole('button', { name: 'Customize layout' })).toBeInTheDocument();
+  });
+
+  it('puts the table above the form and the form keeps working', async () => {
+    const user = userEvent.setup();
+    renderApp('/watchlist');
+    await screen.findByRole('table', { name: 'Watchlist' });
+    await user.click(screen.getByRole('button', { name: 'Customize layout' }));
+    await user.click(screen.getByRole('button', { name: 'Move Watchlist up' }));
+    expect(cardOrder()).toEqual(['watchlist-table', 'watchlist-add']);
+
+    await user.type(screen.getByLabelText('Symbol'), 'zzzz');
+    await user.click(screen.getByRole('button', { name: 'Add to watchlist' }));
+    expect(await screen.findByRole('rowheader', { name: /ZZZZ/ })).toBeInTheDocument();
+  });
+});

@@ -20,7 +20,7 @@ interface Props {
   /** Replaces what is shown when every card is hidden. */
   emptyHint?: ReactNode;
   /** The space between cards (the page's own spacing before it became a grid); 1.5 rem by default. */
-  gap?: 'gap-4' | 'gap-5' | 'gap-6';
+  gap?: 'gap-4' | 'gap-5' | 'gap-6' | 'gap-10';
 }
 
 const NO_CARDS = 'Every card is hidden. Show one again from the list above, or reset the layout.';

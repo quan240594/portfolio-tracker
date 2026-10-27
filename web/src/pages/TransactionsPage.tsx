@@ -8,6 +8,7 @@ import { Dialog } from '../components/Dialog';
 import { ErrorState } from '../components/ErrorState';
 import { EmptyState } from '../components/EmptyState';
 import { LoadingRegion, Skeleton } from '../components/Skeleton';
+import { CardGrid } from '../features/layout/CardGrid';
 import { TransactionForm } from '../features/transactions/TransactionForm';
 import { CsvImport } from '../features/transactions/CsvImport';
 import { PortfolioSettingsDialog } from '../features/management/PortfolioSettingsDialog';
@@ -224,7 +225,10 @@ export function TransactionsPage() {
         </p>
       )}
 
-      {body}
+      <CardGrid
+        pageId="transactions"
+        cards={[{ id: 'transactions-table', title: 'Transactions', defaultWidth: 'full', render: () => body }]}
+      />
 
       {action === 'settings' && current && (
         <PortfolioSettingsDialog portfolioId={current.portfolioId} portfolioName={current.name} onClose={() => setAction(null)} />

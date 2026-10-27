@@ -17,6 +17,7 @@ import { ErrorState } from '../../components/ErrorState';
 import { PageHeader } from '../../components/Layout';
 import { LoadingRegion, Skeleton } from '../../components/Skeleton';
 import { USE_MOCKS } from '../../config';
+import { CardGrid } from '../layout/CardGrid';
 import { formatDateTime } from '../../lib/format';
 import {
   PERMISSION_DENIED_MESSAGE,
@@ -296,9 +297,14 @@ function Loaded({ state }: Readonly<{ state: NotificationsResponse }>) {
   const changed = useCallback(() => setRefreshKey((key) => key + 1), []);
   return (
     <div className="space-y-6">
-      <ThisDevice state={state} thisDeviceId={thisDeviceId} onChanged={changed} />
-      <SettingsForm state={state} />
-      <Devices state={state} thisDeviceId={thisDeviceId} onChanged={changed} />
+      <CardGrid
+        pageId="notifications"
+        cards={[
+          { id: 'this-device', title: 'This device', defaultWidth: 'full', render: () => <ThisDevice state={state} thisDeviceId={thisDeviceId} onChanged={changed} /> },
+          { id: 'settings', title: 'Notify me about', defaultWidth: 'full', render: () => <SettingsForm state={state} /> },
+          { id: 'devices', title: 'Devices', defaultWidth: 'full', render: () => <Devices state={state} thisDeviceId={thisDeviceId} onChanged={changed} /> },
+        ]}
+      />
       <section aria-label="About notifications" className="muted space-y-1 text-xs">
         <p>Messages are encrypted end to end: the push service of your browser only carries ciphertext and never sees amounts or names.</p>
         <p>On an iPhone or iPad, notifications only work for an app added to the Home Screen (Share, then Add to Home Screen).</p>

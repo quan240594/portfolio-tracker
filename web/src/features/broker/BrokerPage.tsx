@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { invalidatePortfolioData, usePortfolios } from '../../api/hooks';
 import { ErrorState } from '../../components/ErrorState';
 import { PageHeader } from '../../components/Layout';
+import { CardGrid } from '../layout/CardGrid';
 import { LoadingRegion, Skeleton } from '../../components/Skeleton';
 import { USE_MOCKS } from '../../config';
 import { ConnectForm } from './ConnectForm';
@@ -72,10 +73,13 @@ export function BrokerPage() {
           Demo mode: the connection is simulated. Trading 212 is never contacted from this page, and nothing you type leaves your browser.
         </p>
       )}
-      <div className="space-y-6">
-        {body}
-        <Instructions />
-      </div>
+      <CardGrid
+        pageId="brokers"
+        cards={[
+          { id: 'broker-connection', title: 'Connection', defaultWidth: 'full', render: () => body },
+          { id: 'broker-instructions', title: 'How to connect', defaultWidth: 'full', render: () => <Instructions /> },
+        ]}
+      />
     </>
   );
 }

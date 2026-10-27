@@ -138,3 +138,25 @@ describe('AssetsPage', () => {
     expect(await screen.findByRole('heading', { name: 'Savings account' })).toBeInTheDocument();
   });
 });
+
+const cardOrder = () => [...document.querySelectorAll<HTMLElement>('[data-card-id]')].map((el) => el.dataset.cardId);
+
+describe('AssetsPage layout', () => {
+  it('keeps the default card order and puts the customize toggle in the page header', async () => {
+    await openAssets();
+    expect(cardOrder()).toEqual(['securities', 'classification', 'custom-assets']);
+    const actions = document.querySelector<HTMLElement>('[data-page-header-actions]')!;
+    expect(within(actions).getByRole('button', { name: 'Customize layout' })).toBeInTheDocument();
+  });
+
+  it('moves and hides cards', async () => {
+    const user = await openAssets();
+    await user.click(screen.getByRole('button', { name: 'Customize layout' }));
+    await user.click(screen.getByRole('button', { name: 'Move Custom assets up' }));
+    expect(cardOrder()).toEqual(['securities', 'custom-assets', 'classification']);
+
+    await user.click(screen.getByRole('button', { name: 'Hide Custom assets' }));
+    expect(cardOrder()).toEqual(['securities', 'classification']);
+    expect(screen.queryByRole('heading', { name: 'Savings account' })).not.toBeInTheDocument();
+  });
+});

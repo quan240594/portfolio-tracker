@@ -10,6 +10,7 @@ import { LoadingRegion, Skeleton } from '../components/Skeleton';
 import { AssetDialog, ASSET_CLASS_LABELS } from '../features/assets/AssetDialog';
 import { SecuritiesSection } from '../features/assets/SecuritiesSection';
 import { ValuationsDialog } from '../features/assets/ValuationsDialog';
+import { CardGrid, type CardDefinition } from '../features/layout/CardGrid';
 import { ClassificationSection } from '../features/classification/ClassificationSection';
 import { RequirePortfolio } from '../features/management/RequirePortfolio';
 import { formatDate, formatMoney, formatPercent } from '../lib/format';
@@ -92,19 +93,29 @@ function Assets({ portfolioId }: Readonly<{ portfolioId: string }>) {
   );
 }
 
+function CustomAssetsSection() {
+  return (
+    <section aria-labelledby="custom-assets-title">
+      <h2 id="custom-assets-title" className="mb-1 text-lg font-semibold">
+        Custom assets
+      </h2>
+      <p className="muted mb-4 text-sm">Manual values, included in your totals and allocation.</p>
+      <RequirePortfolio what="Custom assets">{({ portfolioId }) => <Assets portfolioId={portfolioId} />}</RequirePortfolio>
+    </section>
+  );
+}
+
+const CARDS: CardDefinition[] = [
+  { id: 'securities', title: 'Securities', defaultWidth: 'full', render: () => <SecuritiesSection /> },
+  { id: 'classification', title: 'Classification', defaultWidth: 'full', render: () => <ClassificationSection /> },
+  { id: 'custom-assets', title: 'Custom assets', defaultWidth: 'full', render: () => <CustomAssetsSection /> },
+];
+
 export function AssetsPage() {
   return (
     <>
       <PageHeader title="Assets" description="The securities you hold, plus real estate, savings, P2P loans and private equity that you value by hand." />
-      <SecuritiesSection />
-      <ClassificationSection />
-      <section aria-labelledby="custom-assets-title">
-        <h2 id="custom-assets-title" className="mb-1 text-lg font-semibold">
-          Custom assets
-        </h2>
-        <p className="muted mb-4 text-sm">Manual values, included in your totals and allocation.</p>
-        <RequirePortfolio what="Custom assets">{({ portfolioId }) => <Assets portfolioId={portfolioId} />}</RequirePortfolio>
-      </section>
+      <CardGrid pageId="assets" cards={CARDS} gap="gap-10" />
     </>
   );
 }

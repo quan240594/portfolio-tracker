@@ -265,7 +265,7 @@ export function SecuritiesSection() {
   }
 
   return (
-    <section aria-labelledby="securities-title" className="mb-10">
+    <section aria-labelledby="securities-title">
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 id="securities-title" className="text-lg font-semibold">

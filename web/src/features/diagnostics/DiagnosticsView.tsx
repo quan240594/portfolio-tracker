@@ -3,6 +3,7 @@ import { EmptyState } from '../../components/EmptyState';
 import { ErrorState } from '../../components/ErrorState';
 import { PageHeader } from '../../components/Layout';
 import { LoadingRegion, Skeleton } from '../../components/Skeleton';
+import { CardGrid } from '../layout/CardGrid';
 import { PriceCoverageCard } from './PriceCoverageCard';
 import { ValuationReportCard } from './ValuationReportCard';
 import { usePriceCoverage, type PriceCoverageResult } from './usePriceCoverage';
@@ -172,11 +173,16 @@ function CoverageSlot({ prices }: Readonly<{ prices: PriceCoverageResult }>) {
 function Loaded({ report, prices }: Readonly<{ report: AlarmDiagnosticsReport; prices: PriceCoverageResult }>) {
   return (
     <div className="space-y-6">
-      <CoverageSlot prices={prices} />
-      <ValuationReportCard />
-      <Summary report={report} />
-      <Runs runs={report.runs} />
-      <Arms arms={report.arms} />
+      <CardGrid
+        pageId="diagnostics"
+        cards={[
+          { id: 'price-coverage', title: 'Price data coverage', defaultWidth: 'full', render: () => <CoverageSlot prices={prices} /> },
+          { id: 'valuation-report', title: 'Valuation report', defaultWidth: 'full', render: () => <ValuationReportCard /> },
+          { id: 'alarm-summary', title: 'Last 24 hours', defaultWidth: 'full', render: () => <Summary report={report} /> },
+          { id: 'alarm-runs', title: 'Alarm runs', defaultWidth: 'full', render: () => <Runs runs={report.runs} /> },
+          { id: 'alarm-arms', title: 'Alarm changes', defaultWidth: 'full', render: () => <Arms arms={report.arms} /> },
+        ]}
+      />
       <section aria-label="About these diagnostics" className="muted space-y-1 text-xs">
         <p>The Hub records every alarm run (start and end) in a small log of its own, the last 300 runs. Nothing here is sent anywhere.</p>
         <p>Times are in your time zone. Hover a time to see it in UTC.</p>

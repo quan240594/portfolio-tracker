@@ -119,3 +119,30 @@ describe('Diagnostics page', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled());
   });
 });
+
+const cardOrder = () => [...document.querySelectorAll<HTMLElement>('[data-card-id]')].map((el) => el.dataset.cardId);
+
+describe('Diagnostics page layout', () => {
+  it('keeps the default card order and puts the customize toggle in the page header', async () => {
+    serve();
+    renderApp('/settings/diagnostics');
+    await screen.findByRole('region', { name: 'Last 24 hours' });
+    expect(cardOrder()).toEqual(['price-coverage', 'valuation-report', 'alarm-summary', 'alarm-runs', 'alarm-arms']);
+    const actions = document.querySelector<HTMLElement>('[data-page-header-actions]')!;
+    expect(within(actions).getByRole('button', { name: 'Customize layout' })).toBeInTheDocument();
+    expect(within(actions).getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
+  });
+
+  it('moves the runs above the summary and hides the arms', async () => {
+    serve();
+    const user = userEvent.setup();
+    renderApp('/settings/diagnostics');
+    await screen.findByRole('region', { name: 'Last 24 hours' });
+    await user.click(screen.getByRole('button', { name: 'Customize layout' }));
+    await user.click(screen.getByRole('button', { name: 'Move Alarm runs up' }));
+    expect(cardOrder()).toEqual(['price-coverage', 'valuation-report', 'alarm-runs', 'alarm-summary', 'alarm-arms']);
+
+    await user.click(screen.getByRole('button', { name: 'Hide Alarm changes' }));
+    expect(screen.queryByRole('heading', { name: 'Alarm changes outside a normal run' })).not.toBeInTheDocument();
+  });
+});

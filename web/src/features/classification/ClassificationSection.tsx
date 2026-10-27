@@ -5,7 +5,7 @@ import { ClassificationImportDialog } from './ClassificationImportDialog';
 export function ClassificationSection() {
   const [open, setOpen] = useState(false);
   return (
-    <section aria-labelledby="classification-title" className="mb-10">
+    <section aria-labelledby="classification-title">
       <h2 id="classification-title" className="mb-1 text-lg font-semibold">
         Asset classification
       </h2>
