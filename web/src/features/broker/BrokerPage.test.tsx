@@ -274,6 +274,8 @@ describe('Trading 212 page layout', () => {
     expect(cardOrder()).toEqual(['broker-connection', 'broker-instructions']);
     const actions = document.querySelector<HTMLElement>('[data-page-header-actions]')!;
     expect(within(actions).getByRole('button', { name: 'Customize layout' })).toBeInTheDocument();
+    // The cards can be reordered, so the instructions must not point "above" or "below".
+    expect(screen.getByRole('region', { name: 'How to connect' })).not.toHaveTextContent(/\b(above|below)\b/);
   });
 
   it('moves the instructions above the connection and hides them', async () => {

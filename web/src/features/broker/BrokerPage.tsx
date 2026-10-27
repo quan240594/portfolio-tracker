@@ -22,7 +22,7 @@ function Instructions() {
           Enable only these scopes: <strong>account</strong>, <strong>metadata</strong>, <strong>portfolio</strong>, <strong>history:orders</strong>,{' '}
           <strong>history:dividends</strong> and <strong>history:transactions</strong>. Do <em>not</em> enable order execution or pies.
         </li>
-        <li>Copy the key and the secret (shown once) into the form above.</li>
+        <li>Copy the key and the secret (shown once) into the connection form.</li>
       </ol>
       <ul className="muted list-disc space-y-1 pl-5 text-xs">
         <li>Trading 212 only allows the API for your own account: connect your own Invest or Stocks ISA account, not someone else&apos;s.</li>
