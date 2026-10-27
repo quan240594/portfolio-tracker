@@ -7,7 +7,7 @@ import { parseAllowedHosts, parseLogosConfig, type Logger, type MetricLimits } f
 import { parsePricesConfig } from '@portfolio/prices';
 import { parseEarningsConfig } from '@portfolio/earnings';
 import { fakeAiFor, secFor } from './earnings-fakes.js';
-import { FakeGithub, FakeLogos, FakePrices, FakePush, FakeTrading212, ORIGIN, OWNER_ID, TEST_CLIENT_ID, TEST_CLIENT_SECRET, TEST_SECRETS_KEY, TEST_SESSION_SECRET, TEST_VAPID, route, type FakeRequest, type FakeService } from './fakes.js';
+import { FakeEcb, FakeGithub, FakeLogos, FakePrices, FakePush, FakeTrading212, ORIGIN, OWNER_ID, TEST_CLIENT_ID, TEST_CLIENT_SECRET, TEST_SECRETS_KEY, TEST_SESSION_SECRET, TEST_VAPID, route, type FakeRequest, type FakeService } from './fakes.js';
 import type { Stack } from './browser.js';
 import type { EarningsStartOptions } from './suite.js';
 
@@ -49,7 +49,8 @@ export async function createNodeStack(options: NodeStackOptions = {}): Promise<S
   const logos = new FakeLogos();
   const push = new FakePush();
   const sec = secFor(options.earnings);
-  const services = [...(options.services ?? []), github.service, trading212.service, sec.service, prices.service, logos.service, push.service];
+  const ecb = new FakeEcb();
+  const services = [...(options.services ?? []), github.service, trading212.service, sec.service, prices.service, logos.service, push.service, ecb.service];
   const outbound = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const reply = route(services, await asFakeRequest(input, init));
     if (reply.bytes !== undefined) return new Response(reply.bytes as Uint8Array<ArrayBuffer>, { status: reply.status, headers: reply.headers });
@@ -96,6 +97,7 @@ export async function createNodeStack(options: NodeStackOptions = {}): Promise<S
     logos,
     push,
     sec,
+    ecb,
     storage,
     core,
     clock,

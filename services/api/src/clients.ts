@@ -11,11 +11,12 @@ import { EVENT_SOURCES } from '@portfolio/shared';
 import { verifyWithTrading212, type BrokerDeps } from './broker-deps.js';
 import type { Config } from './config.js';
 import type { Deps } from './deps.js';
+import type { InflationFetch } from './inflation/source.js';
 import { ItemManagementRepository } from './management-repository.js';
 import { ItemRepository } from './repository.js';
 
-/** The AWS adapters of the API: DynamoDB, EventBridge, S3 presigned uploads, Secrets Manager + Lambda for the sync. */
-export function createAwsDeps(config: Config): Deps {
+/** The AWS adapters of the API: DynamoDB, EventBridge, S3 presigned uploads, Secrets Manager + Lambda for the sync. `fetch` is the outbound call (the ECB inflation series); tests inject a fake. */
+export function createAwsDeps(config: Config, outbound: InflationFetch = (url, init) => fetch(url, init)): Deps {
   const connection = { region: config.region, endpointUrl: config.endpointUrl };
   // Interactive requests: fewer, shorter retries than the background jobs, and no jitter.
   const items = createDynamoItemStore(connection, config.tableName, { maxAttempts: 9, maxDelayMs: 2000, jitter: false });
@@ -25,6 +26,7 @@ export function createAwsDeps(config: Config): Deps {
     events: createEventBridgePublisher(connection, config.eventBusName, EVENT_SOURCES.api),
     files: createS3FileStore(connection, config.importBucket),
     broker: createBrokerDeps(config),
+    inflation: { items, fetch: outbound },
     config,
     now: () => new Date(),
     uuid: () => crypto.randomUUID(),

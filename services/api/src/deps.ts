@@ -1,7 +1,8 @@
-import type { EventPublisher, FileStore } from '@portfolio/platform';
+import type { EventPublisher, FileStore, ItemStore } from '@portfolio/platform';
 import type { EarningsBackfillResponse, EarningsRefreshResponse, EarningsStatusResponse } from '@portfolio/shared';
 import type { BrokerDeps } from './broker-deps.js';
 import type { Config } from './config.js';
+import type { InflationFetch } from './inflation/source.js';
 import type { ManagementRepository } from './management-repository.js';
 import type { NotifyDeps } from './notifications/deps.js';
 import type { Repository } from './repository.js';
@@ -25,6 +26,12 @@ export interface HistorySymbolDeps {
   changed(symbol: string, historySymbol: string | null): Promise<void>;
 }
 
+/** The inflation series feature (ECB): where the monthly copy is cached and the outbound `fetch` (the only way out; it is counted against the platform's budget). */
+export interface InflationDeps {
+  items: ItemStore;
+  fetch: InflationFetch;
+}
+
 /** Everything the handlers need from the platform: repositories, events, files, the clock. Built by the adapter. */
 export interface Deps {
   repo: Repository;
@@ -40,6 +47,8 @@ export interface Deps {
   earnings?: EarningsDeps;
   /** The price history symbol override reaching the price jobs; absent = the field is only stored. */
   historySymbols?: HistorySymbolDeps;
+  /** ECB inflation series (`GET /inflation`); the route answers 503 when absent. */
+  inflation?: InflationDeps;
   config: Pick<Config, 'baseCurrency' | 'authMode' | 'demoUserId' | 'corsAllowedOrigin'>;
   now: () => Date;
   uuid: () => string;

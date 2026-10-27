@@ -1,5 +1,5 @@
 import type { Item } from '@portfolio/platform';
-import type { FakeGithub, FakeLogos, FakePrices, FakePush, FakeSecService, FakeTrading212 } from './fakes.js';
+import type { FakeEcb, FakeGithub, FakeLogos, FakePrices, FakePush, FakeSecService, FakeTrading212 } from './fakes.js';
 
 export interface DrainOptions {
   /**
@@ -18,6 +18,7 @@ export interface Stack {
   readonly logos: FakeLogos;
   readonly push: FakePush;
   readonly sec: FakeSecService;
+  readonly ecb: FakeEcb;
   /** Sends a request to the Worker exactly as a browser would reach it. */
   send(path: string, init?: RequestInit): Promise<Response>;
   /** Runs the Hub's alarm until no job is left (Node), or waits until the Hub reports no pending job (workerd). */
