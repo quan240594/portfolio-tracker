@@ -40,6 +40,7 @@ export function CardGrid({ pageId, cards, emptyHint = NO_CARDS, gap = 'gap-6' }:
   const titleOf = (id: string): string => titles.get(id) ?? id;
 
   // The header is a sibling rendered in the same commit; looking it up after every commit also follows a header that mounts later.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately without dependencies: the state only changes when the slot element does
   useLayoutEffect(() => {
     const slot = document.querySelector<HTMLElement>('[data-page-header-actions]');
     setToggleSlot((current) => (current === slot ? current : slot));
