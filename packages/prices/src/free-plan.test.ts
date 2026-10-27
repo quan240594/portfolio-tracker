@@ -40,7 +40,7 @@ describe('free-plan simulation', () => {
     expect(Math.max(...exhausted.map((hour) => hour.rowsWritten))).toBeLessThan(100);
     expect(Math.max(...exhausted.map((hour) => hour.fetches))).toBeLessThan(10);
     // No provider was ever asked beyond its free limits (a 402 / 429 answer would be counted).
-    expect(report.limited).toEqual({ twelvedata: 0, eodhd: 0 });
+    expect(report.limited).toEqual({ twelvedata: 0, eodhd: 0, alphavantage: 0 });
     expect(report.failedJobs).toBe(0);
     // A symbol is tried at most MAX_ATTEMPTS_PER_DAY times a day.
     const histories = symbolsOf(requestsOn(report, '2026-10-20', /time_series|\/api\/eod\//), /(?:symbol=|\/api\/eod\/)([^&?/]+)/);
@@ -59,11 +59,54 @@ describe('free-plan simulation', () => {
     });
     expect(report.missing).toEqual([]);
     expect(report.minimal).toEqual([]);
-    expect(report.limited).toEqual({ twelvedata: 0, eodhd: 0 });
+    expect(report.limited).toEqual({ twelvedata: 0, eodhd: 0, alphavantage: 0 });
     expect(report.total.steps).toBeLessThan(40);
     expect(report.maxStepsPerMinute).toBeLessThanOrEqual(2);
     // Day two used only what the day-one quota left undone.
     expect(requestsOn(report, '2026-10-21', /eodhd\.com/).length).toBeLessThanOrEqual(20);
     expect(Math.max(...report.perHour.map((hour) => hour.rowsWritten))).toBeLessThan(400);
+  });
+
+  describe('with a free Alpha Vantage key (25 calls a day, shared by profiles and the calendar)', () => {
+    const US_SYMBOLS = Array.from({ length: 70 }, (_, i) => `UX${String(i).padStart(2, '0')}`);
+    const calendar = (iso: string): SimJob => ({ name: 'refreshCalendar', payload: { trigger: 'scheduled' }, at: Date.parse(iso) });
+    const env = { ALPHAVANTAGE_API_KEY: 'av-free-key' };
+    // The day the key is set the first enrichment looks up one profile per US holding; a calendar run later that day (a late alarm, a manual run) still needs its call.
+    const enrichUs = (at: number): SimJob => ({ name: 'enrichTransactions', payload: { userId: 'u', portfolioId: 'p', reason: 'CREATED', symbols: US_SYMBOLS }, at });
+    const earningsKeys = (store: MemoryItemStore): string[] => store.snapshot().filter((item) => item.SK.startsWith('EARN#')).map((item) => item.PK);
+    const callsOn = (report: FreePlanReport, day: string, fn: string): number => requestsOn(report, day, new RegExp(`alphavantage\\.co.*function=${fn}`)).length;
+
+    it('the calendar still gets its one call the day profile lookups use up the rest, and the next day too', async () => {
+      const store = new MemoryItemStore().load(US_SYMBOLS.map((symbol) => ({ PK: 'TRACKED', SK: `TICKER#${symbol}`, entityType: 'TRACKED_TICKER', symbol })));
+      const report = await simulateFreePlan({
+        hours: 100,
+        symbols: US_SYMBOLS,
+        store,
+        env,
+        jobs: [enrichUs(SIM_START), calendar('2026-10-20T12:00:00Z'), calendar('2026-10-21T03:30:00Z')],
+      });
+      // Profiles stop one call short of the limit, so the calendar's call is always there; no provider answered with a limit.
+      expect(callsOn(report, '2026-10-20', 'EARNINGS_CALENDAR')).toBe(1);
+      expect(callsOn(report, '2026-10-21', 'EARNINGS_CALENDAR')).toBe(1);
+      expect(report.limited).toEqual({ twelvedata: 0, eodhd: 0, alphavantage: 0 });
+      expect(callsOn(report, '2026-10-20', 'OVERVIEW')).toBe(24);
+      expect(new Set(earningsKeys(store)).size).toBe(US_SYMBOLS.length);
+      expect(report.failedJobs).toBe(0);
+    });
+
+    it('spends one call a day on the calendar however often it runs', async () => {
+      const store = new MemoryItemStore().load(US_SYMBOLS.map((symbol) => ({ PK: 'TRACKED', SK: `TICKER#${symbol}`, entityType: 'TRACKED_TICKER', symbol })));
+      const report = await simulateFreePlan({
+        hours: 80,
+        symbols: US_SYMBOLS,
+        store,
+        env,
+        jobs: [calendar('2026-10-20T09:00:00Z'), calendar('2026-10-20T15:00:00Z'), calendar('2026-10-21T03:30:00Z'), calendar('2026-10-21T15:00:00Z')],
+      });
+      expect(callsOn(report, '2026-10-20', 'EARNINGS_CALENDAR')).toBe(1);
+      expect(callsOn(report, '2026-10-21', 'EARNINGS_CALENDAR')).toBe(1);
+      expect(report.limited.alphavantage).toBe(0);
+      expect(new Set(earningsKeys(store)).size).toBe(US_SYMBOLS.length);
+    });
   });
 });

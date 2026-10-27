@@ -18,7 +18,7 @@ import {
   type NeuronMeter,
   type NeuronsToday,
 } from '@portfolio/earnings';
-import { DailyQuota, StoreQuotaLedger } from '@portfolio/prices';
+import { DailyQuota, StoreQuotaLedger, alphaVantageGeneralLimit } from '@portfolio/prices';
 import { classificationFieldsOf, heldQuantities, isMarketSymbol, kpiTemplateFor, type EarningsHolding } from '@portfolio/shared';
 import type { HubConfig } from './config.js';
 
@@ -115,7 +115,7 @@ export function earningsJobDeps(context: EarningsContext): EarningsJobDeps {
     config: earnings,
     ...(earnings.secUserAgent === undefined ? {} : { sec: new SecClient({ userAgent: earnings.secUserAgent, fetch: fetchFn, now, sleep: context.sleep }) }),
     ...(context.ai === undefined ? {} : { extractor: new WorkersAiExtractor({ ai: context.ai, meter: context.neurons, model: earnings.model }) }),
-    estimates: new AlphaVantageEstimates({ apiKey: config.prices.keys.alphavantage, fetch: fetchFn, quota: new DailyQuota(new StoreQuotaLedger(items), 'alphavantage', config.prices.dailyLimits.alphavantage, today) }),
+    estimates: new AlphaVantageEstimates({ apiKey: config.prices.keys.alphavantage, fetch: fetchFn, quota: new DailyQuota(new StoreQuotaLedger(items), 'alphavantage', alphaVantageGeneralLimit(config.prices), today) }),
     queue: context.queue,
     now,
   };

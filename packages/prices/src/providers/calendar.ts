@@ -1,4 +1,4 @@
-import type { DividendEvent, StoredEarningsEvent, StoredSplitEvent } from '@portfolio/shared';
+import { TICKER_ALIASES, significantWords, type DividendEvent, type StoredEarningsEvent, type StoredSplitEvent } from '@portfolio/shared';
 import type { CorporateActionsSource, EarningsSource } from '@portfolio/platform';
 import { csvRecords, parseCsv } from '../csv.js';
 import { ProviderError, RateLimitError, SymbolNotFoundError } from '../errors.js';
@@ -43,39 +43,101 @@ function raiseForJsonBody(body: string): void {
 const estimate = (value: string | undefined): number | undefined => asFloat((value ?? '').trim() || null) ?? undefined;
 
 /**
- * Rows of the `EARNINGS_CALENDAR` CSV for the symbols in `mapping` (Alpha Vantage symbol -> canonical). Columns:
+ * How an app symbol relates to the Alpha Vantage ticker it was matched through: `direct` (a US ticker), `alias` (a suffixed
+ * listing with a curated spelling: `FOO.DE` is `CRM`) or `base` (the suffixed listing without its suffix: `ASML.AS` is `ASML`).
+ */
+export interface EarningsTarget {
+  symbol: string;
+  via: 'direct' | 'alias' | 'base';
+  /** The holding's name when the profile has a real one (not the symbol itself). */
+  name?: string;
+}
+
+/** Alpha Vantage ticker -> the app symbols it stands for. */
+export type EarningsTargets = ReadonlyMap<string, readonly EarningsTarget[]>;
+
+const hasRealName = (name: string | undefined, symbol: string): name is string => name !== undefined && name.trim() !== '' && name.trim().toUpperCase() !== symbol;
+
+/** Whether the company of a calendar row is the holding: they share a word of their names (`Salesforce Inc` and `SALESFORCE INC`). */
+function sameCompany(rowName: string, holdingName: string): boolean {
+  const wanted = new Set(significantWords(holdingName));
+  return significantWords(rowName).some((word) => wanted.has(word));
+}
+
+/** Whether a calendar row (`ticker`, company `rowName`) is the company of `target`; an alias or a bare ticker of another exchange is checked against the names. */
+function vouches(target: EarningsTarget, rowName: string): boolean {
+  if (target.via === 'direct') return true;
+  if (!hasRealName(target.name, target.symbol)) return target.via === 'alias';
+  return sameCompany(rowName, target.name);
+}
+
+/**
+ * The calendar tickers of the tracked symbols. A US ticker is its own; a suffixed listing (`FOO.DE`, `ASML.AS`) is looked up through the
+ * curated alias table (the spelling the SEC and Alpha Vantage use) and by its bare ticker. Crypto has no earnings. `names` are the profile
+ * names: they decide whether a row of the calendar is the holding when the ticker is not its own.
+ */
+export function earningsTargets(symbols: readonly string[], names: ReadonlyMap<string, string> = new Map()): Map<string, EarningsTarget[]> {
+  const targets = new Map<string, EarningsTarget[]>();
+  const add = (ticker: string, target: EarningsTarget): void => {
+    const list = targets.get(ticker) ?? [];
+    if (!list.some((entry) => entry.symbol === target.symbol)) targets.set(ticker, [...list, target]);
+  };
+  for (const symbol of symbols) {
+    if (isCrypto(symbol)) continue;
+    const name = names.get(symbol);
+    if (!hasExchangeSuffix(symbol)) {
+      add(symbol.replaceAll('-', '.'), { symbol, via: 'direct', name });
+      continue;
+    }
+    const base = symbol.slice(0, symbol.indexOf('.'));
+    const alias = TICKER_ALIASES.get(base);
+    if (alias !== undefined) add(alias, { symbol, via: 'alias', name });
+    add(base, { symbol, via: 'base', name });
+  }
+  return targets;
+}
+
+/**
+ * Rows of the `EARNINGS_CALENDAR` CSV for the tickers in `targets` (see `earningsTargets`). Columns:
  * `symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay`. Rows without a valid report date are skipped,
  * an empty/"None"/malformed estimate is absent and the time of day is `pre-market`, `post-market` or empty.
  */
-export function parseEarningsCsv(input: string, mapping: ReadonlyMap<string, string>): StoredEarningsEvent[] {
+export function parseEarningsRows(input: string, targets: EarningsTargets): StoredEarningsEvent[] {
   const body = input.replace(/^\uFEFF/, '');
   if (body.trimStart().startsWith('{')) raiseForJsonBody(body);
   const { header, records } = csvRecords(parseCsv(body));
   if (!header.includes('symbol') || !header.includes('reportDate')) throw new ProviderError('alphavantage: unexpected response for EARNINGS_CALENDAR', { provider: 'alphavantage' });
   const events = new Map<string, StoredEarningsEvent>();
   for (const row of records) {
-    const event = earningsEvent(row, mapping);
-    if (event !== null) events.set(`${event.symbol}\u0000${event.date}`, event);
+    for (const event of earningsEvents(row, targets)) events.set(`${event.symbol}\u0000${event.date}`, event);
   }
   return [...events.keys()].toSorted(byText).map((key) => events.get(key)!);
 }
 
-/** One CSV row as an event; null for rows of untracked symbols and rows without a valid report date. */
-function earningsEvent(row: Record<string, string | undefined>, mapping: ReadonlyMap<string, string>): StoredEarningsEvent | null {
-  const symbol = mapping.get((row.symbol ?? '').trim().toUpperCase());
+/** `parseEarningsRows` for tickers that are their own app symbols (Alpha Vantage ticker -> symbol), as the Python service reads the calendar. */
+export function parseEarningsCsv(input: string, mapping: ReadonlyMap<string, string>): StoredEarningsEvent[] {
+  return parseEarningsRows(input, new Map([...mapping].map(([ticker, symbol]) => [ticker, [{ symbol, via: 'direct' as const }]])));
+}
+
+/** One CSV row as an event per matching app symbol; none for rows of untracked companies and rows without a valid report date. */
+function earningsEvents(row: Record<string, string | undefined>, targets: EarningsTargets): StoredEarningsEvent[] {
   const date = isoDateOrNull(row.reportDate);
-  if (symbol === undefined || date === null) return null;
+  const rowName = (row.name ?? '').trim();
+  const matched = (targets.get((row.symbol ?? '').trim().toUpperCase()) ?? []).filter((target) => vouches(target, rowName));
+  if (date === null || matched.length === 0) return [];
   const currency = (row.currency ?? '').trim().toUpperCase();
-  return definedOnly<StoredEarningsEvent>({
-    symbol,
-    date,
-    name: (row.name ?? '').trim() || undefined,
-    fiscalPeriodEnd: isoDateOrNull(row.fiscalDateEnding) ?? undefined,
-    epsEstimate: estimate(row.estimate),
-    currency: /^[A-Z]{3}$/.test(currency) ? currency : undefined,
-    timeOfDay: ownValue(TIME_OF_DAY, (row.timeOfTheDay ?? '').trim().toLowerCase()) ?? 'unknown',
-    source: 'alphavantage',
-  });
+  return matched.map((target) =>
+    definedOnly<StoredEarningsEvent>({
+      symbol: target.symbol,
+      date,
+      name: rowName || undefined,
+      fiscalPeriodEnd: isoDateOrNull(row.fiscalDateEnding) ?? undefined,
+      epsEstimate: estimate(row.estimate),
+      currency: /^[A-Z]{3}$/.test(currency) ? currency : undefined,
+      timeOfDay: ownValue(TIME_OF_DAY, (row.timeOfTheDay ?? '').trim().toLowerCase()) ?? 'unknown',
+      source: 'alphavantage',
+    }),
+  );
 }
 
 export interface AlphaVantageEarningsOptions {
@@ -87,24 +149,20 @@ export interface AlphaVantageEarningsOptions {
   horizon?: string;
 }
 
-/** One call lists the upcoming earnings of every US company; only the tracked symbols are kept. */
+/** One call lists the upcoming earnings of every listed company Alpha Vantage covers; only the tracked symbols are kept. */
 export class AlphaVantageEarnings implements EarningsSource {
   readonly name = 'alphavantage';
   readonly budgeted = true;
 
   constructor(private readonly options: AlphaVantageEarningsOptions) {}
 
-  async fetch(symbols: readonly string[], today: string): Promise<StoredEarningsEvent[]> {
-    const mapping = new Map<string, string>();
-    for (const symbol of symbols) {
-      const av = alphaVantageSymbol(symbol);
-      if (av !== null) mapping.set(av, symbol);
-    }
-    if (mapping.size === 0) return [];
+  async fetch(symbols: readonly string[], today: string, names?: ReadonlyMap<string, string>): Promise<StoredEarningsEvent[]> {
+    const targets = earningsTargets(symbols, names);
+    if (targets.size === 0) return [];
     await this.options.quota.consume(1);
     await this.options.bucket.acquire(1);
     const body = await this.options.http.getText(ALPHAVANTAGE_URL, { function: 'EARNINGS_CALENDAR', horizon: this.options.horizon ?? '12month', apikey: this.options.apiKey }, { Accept: 'text/csv, */*' });
-    return parseEarningsCsv(body, mapping).filter((event) => event.date >= today);
+    return parseEarningsRows(body, targets).filter((event) => event.date >= today);
   }
 }
 

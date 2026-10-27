@@ -17,7 +17,7 @@ import { TwelveDataProvider, assetClassFromType } from './providers/twelvedata.j
 import { dividendItem, earningsItem, eodItem, fxDayItem, fxItem, profileItem, quoteItem, splitItem, trackedItem } from './repository.js';
 import { FakeFetch, type FakeRoute } from './testing/fake-fetch.js';
 import { collect } from './testing/harness.js';
-import { countryFor, currencyFor, exchangeFor, exchangeSuffix, baseTicker, isCrypto, minimalProfile, priceCurrencyFor } from './symbols.js';
+import { countryFor, currencyFor, exchangeFor, exchangeSuffix, baseTicker, hasExchangeSuffix, isCrypto, minimalProfile, priceCurrencyFor } from './symbols.js';
 import { amsterdamHour, utcDay } from './time.js';
 
 /**
@@ -113,8 +113,17 @@ async function invoke(provider: unknown, call: Call): Promise<unknown> {
     case 'get_splits':
       return target.getSplits!(...args);
     default:
-      return target.fetch!(...args);
+      return target.fetch!(...withoutSuffixedListings(args));
   }
+}
+
+/**
+ * The Python service looks up US tickers only. The TypeScript earnings source also reads suffixed listings (`FOO.DE`, `ASML.AS`) through the
+ * alias table (covered by calendar.test.ts), so the parity cases hand it the symbols the Python code looks at.
+ */
+function withoutSuffixedListings(args: readonly unknown[]): unknown[] {
+  const [symbols, ...rest] = args;
+  return Array.isArray(symbols) ? [symbols.filter((symbol) => !hasExchangeSuffix(String(symbol))), ...rest] : [...args];
 }
 
 /** A quote failure kind as the error class the Python side recorded. */

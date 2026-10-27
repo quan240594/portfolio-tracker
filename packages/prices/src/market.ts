@@ -1,5 +1,5 @@
 import { silentLogger, type CorporateActionsSource, type EarningsSource, type ItemStore, type Logger } from '@portfolio/platform';
-import type { PricesConfig } from './config.js';
+import { alphaVantageGeneralLimit, type PricesConfig } from './config.js';
 import { HttpClient, type FetchLike, type Sleep } from './http.js';
 import { BlockBook, DailyQuota, MinuteQuota, ProviderGate, StorePlanMemory, StoreQuotaLedger, TokenBucket } from './limits.js';
 import { AlphaVantageProvider } from './providers/alphavantage.js';
@@ -74,14 +74,16 @@ export function createMarketData(deps: MarketDataDeps, fetch: FetchLike = deps.f
     : undefined;
   const eodhd = keys.eodhd ? new EodhdProvider({ apiKey: keys.eodhd, http: http('eodhd'), now: clock, bucket: bucket(5, 1), quota: quota('eodhd', config.dailyLimits.eodhd), gate: gate('eodhd'), logger }) : undefined;
   const coingecko = keys.coingecko ? new CoinGeckoProvider({ apiKey: keys.coingecko, http: http('coingecko'), now: clock, bucket: bucket(30, 0.5), extraCoinIds: config.coinGeckoCoinIds, logger }) : undefined;
-  const alphavantageQuota = quota('alphavantage', config.dailyLimits.alphavantage);
-  const alphavantage = keys.alphavantage ? new AlphaVantageProvider({ apiKey: keys.alphavantage, http: http('alphavantage'), now: clock, bucket: bucket(5, 5 / 60), quota: alphavantageQuota }) : undefined;
+  // Profiles and EPS estimates stop one call short of the daily limit; the calendar's call may use the last one.
+  const alphavantage = keys.alphavantage
+    ? new AlphaVantageProvider({ apiKey: keys.alphavantage, http: http('alphavantage'), now: clock, bucket: bucket(5, 5 / 60), quota: quota('alphavantage', alphaVantageGeneralLimit(config)) })
+    : undefined;
 
   return {
     provider: new RoutingProvider({ twelvedata, eodhd, coingecko, alphavantage }, logger),
     fx: new FrankfurterFx({ http: http('frankfurter'), now: clock }),
     earnings: keys.alphavantage
-      ? new AlphaVantageEarnings({ apiKey: keys.alphavantage, http: http('alphavantage'), bucket: bucket(1, 5 / 60), quota: alphavantageQuota, horizon: config.calendar.earningsHorizon })
+      ? new AlphaVantageEarnings({ apiKey: keys.alphavantage, http: http('alphavantage'), bucket: bucket(1, 5 / 60), quota: quota('alphavantage', config.dailyLimits.alphavantage), horizon: config.calendar.earningsHorizon })
       : undefined,
     actions: keys.eodhd && eodhd ? new EodhdCorporateActions({ apiKey: keys.eodhd, http: http('eodhd'), bucket: bucket(5, 1), quota: quota('eodhd', config.dailyLimits.eodhd), dividends: eodhd }) : undefined,
   };

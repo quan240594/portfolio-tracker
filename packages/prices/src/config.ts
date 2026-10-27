@@ -90,6 +90,12 @@ export function parseCalendarSettings(env: Env): CalendarSettings {
   };
 }
 
+/**
+ * Alpha Vantage calls the profile lookups and the EPS estimates may use of the shared daily limit: the calendar keeps its own call(s), so
+ * a day of enrichment (about one profile call per US holding) can never leave it without its one cheap call.
+ */
+export const alphaVantageGeneralLimit = (config: Pick<PricesConfig, 'dailyLimits' | 'calendar'>): number => Math.max(0, config.dailyLimits.alphavantage - config.calendar.alphavantageDailyCalls);
+
 /** The environment variables are those of the Python service (`services/prices/README.md`), minus the AWS-only ones. */
 export function parsePricesConfig(env: Env): PricesConfig {
   return {

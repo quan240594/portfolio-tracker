@@ -7,7 +7,7 @@ export { PriceRepository, type CalendarState, type LastAttempt } from './reposit
 export { providerOf, routeOf } from './symbols.js';
 export type { FxLatest, FxSource, PriceBatch, PriceSource, QuoteFailure } from './providers/base.js';
 export { AlphaVantageProvider } from './providers/alphavantage.js';
-export { AlphaVantageEarnings, EodhdCorporateActions, alphaVantageSymbol, parseEarningsCsv, parseSplitRatio, parseSplits } from './providers/calendar.js';
+export { AlphaVantageEarnings, EodhdCorporateActions, alphaVantageSymbol, earningsTargets, parseEarningsCsv, parseEarningsRows, parseSplitRatio, parseSplits } from './providers/calendar.js';
 export { CoinGeckoProvider, coinIds } from './providers/coingecko.js';
 export { EodhdProvider, toEodhdSymbol } from './providers/eodhd.js';
 export { FrankfurterFx, hasWeekday, yearChunks } from './providers/frankfurter.js';
