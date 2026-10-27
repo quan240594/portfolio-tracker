@@ -161,55 +161,87 @@ function ByHolding({ data, period }: Readonly<{ data: GetDividendsResponse; peri
   );
 }
 
-/** "Dividends received" over time and by holding: one period selector drives both cards. Renders grid cells: the first spans the full width of the page's two-column card grid, the second sits in the next row. */
-export function ReceivedCards() {
-  const { scope, ready } = usePortfolioScope();
-  const query = useDividends(scope, { enabled: ready });
+export interface ReceivedControls {
+  period: ReceivedPeriod;
+  setPeriod: (period: ReceivedPeriod) => void;
+  granularity: Granularity;
+  setGranularity: (granularity: Granularity) => void;
+  includeFuture: boolean;
+  setIncludeFuture: (includeFuture: boolean) => void;
+}
+
+/** The state both received cards share (one period selector drives both); owned by the page so it survives hiding a card. */
+export function useReceivedControls(): ReceivedControls {
   const [period, setPeriod] = useState<ReceivedPeriod>('all');
   const [granularity, setGranularity] = useState<Granularity>('month');
   const [includeFuture, setIncludeFuture] = useState(true);
+  return { period, setPeriod, granularity, setGranularity, includeFuture, setIncludeFuture };
+}
+
+/** "Dividends received" over time, with the period, granularity and future-payments controls. */
+export function ReceivedOverTimeCard({ controls }: Readonly<{ controls: ReceivedControls }>) {
+  const { period, setPeriod, granularity, setGranularity, includeFuture, setIncludeFuture } = controls;
+  const { scope, ready } = usePortfolioScope();
+  const query = useDividends(scope, { enabled: ready });
   const overviewQuery = useScopedDividendsOverview();
 
   return (
+    <QueryCard
+      id="div-received-time"
+      title="Dividends received"
+      query={query}
+      loadingLabel="Loading received dividends"
+      errorTitle="Could not load dividends"
+      controls={
+        <>
+          <SegmentedControl label="Period" options={PERIODS} value={period} onChange={setPeriod} />
+          <SegmentedControl label="Granularity" options={GRANULARITIES} value={granularity} onChange={setGranularity} />
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" className="h-4 w-4 rounded border-slate-300 accent-brand-600" checked={includeFuture} onChange={(e) => setIncludeFuture(e.target.checked)} />
+            <span>Include future payments</span>
+          </label>
+        </>
+      }
+      info={
+        <>
+          <p>Net dividends you received (after withholding tax, converted to EUR at the rate of the payment date), per month, quarter or year, for the selected period. The headline counts only what was received.</p>
+          <p>With &quot;Include future payments&quot; the next 12 months follow on the same axis: declared (announced) and estimated (implied by your payment history, not announced) income, net, at the latest exchange rate, the same figures as the Future payments card. The period that contains today stacks what you received so far with what is still expected, so its bar shows the full expected total. Amounts above the bars are rounded; the table has the exact figures.</p>
+          <p>The dashed &quot;avg&quot; line is the average received per completed month, quarter or year in the view (the period in progress and the upcoming ones are not counted).</p>
+          <p>Source: the DIVIDEND transactions in this portfolio scope and the dividend events behind Future payments.</p>
+        </>
+      }
+    >
+      {(data) => <OverTime data={data} period={period} granularity={granularity} includeFuture={includeFuture} overviewQuery={overviewQuery} />}
+    </QueryCard>
+  );
+}
+
+/** "Dividends received by holding" for the period chosen in the over-time card (or the default when that card is hidden). */
+export function ReceivedByHoldingCard({ controls }: Readonly<{ controls: ReceivedControls }>) {
+  const { scope, ready } = usePortfolioScope();
+  const query = useDividends(scope, { enabled: ready });
+
+  return (
+    <QueryCard
+      id="div-received-holding"
+      title="Dividends received by holding"
+      query={query}
+      loadingLabel="Loading received dividends"
+      errorTitle="Could not load dividends"
+      info={<p>Net dividends received per holding in the period selected in the Dividends received card, largest first. Holdings that were sold since still show the dividends they paid.</p>}
+    >
+      {(data) => <ByHolding data={data} period={controls.period} />}
+    </QueryCard>
+  );
+}
+
+/** Both received cards with their shared controls. */
+export function ReceivedCards() {
+  const controls = useReceivedControls();
+  return (
     <>
-      <QueryCard
-        id="div-received-time"
-        className="md:col-span-2"
-        title="Dividends received"
-        query={query}
-        loadingLabel="Loading received dividends"
-        errorTitle="Could not load dividends"
-        controls={
-          <>
-            <SegmentedControl label="Period" options={PERIODS} value={period} onChange={setPeriod} />
-            <SegmentedControl label="Granularity" options={GRANULARITIES} value={granularity} onChange={setGranularity} />
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" className="h-4 w-4 rounded border-slate-300 accent-brand-600" checked={includeFuture} onChange={(e) => setIncludeFuture(e.target.checked)} />
-              <span>Include future payments</span>
-            </label>
-          </>
-        }
-        info={
-          <>
-            <p>Net dividends you received (after withholding tax, converted to EUR at the rate of the payment date), per month, quarter or year, for the selected period. The headline counts only what was received.</p>
-            <p>With &quot;Include future payments&quot; the next 12 months follow on the same axis: declared (announced) and estimated (implied by your payment history, not announced) income, net, at the latest exchange rate, the same figures as the Future payments card. The period that contains today stacks what you received so far with what is still expected, so its bar shows the full expected total. Amounts above the bars are rounded; the table has the exact figures.</p>
-            <p>The dashed &quot;avg&quot; line is the average received per completed month, quarter or year in the view (the period in progress and the upcoming ones are not counted).</p>
-            <p>Source: the DIVIDEND transactions in this portfolio scope and the dividend events behind Future payments.</p>
-          </>
-        }
-      >
-        {(data) => <OverTime data={data} period={period} granularity={granularity} includeFuture={includeFuture} overviewQuery={overviewQuery} />}
-      </QueryCard>
-      <QueryCard
-        id="div-received-holding"
-        title="Dividends received by holding"
-        query={query}
-        loadingLabel="Loading received dividends"
-        errorTitle="Could not load dividends"
-        info={<p>Net dividends received per holding in the period selected in the Dividends received card above, largest first. Holdings that were sold since still show the dividends they paid.</p>}
-      >
-        {(data) => <ByHolding data={data} period={period} />}
-      </QueryCard>
+      <ReceivedOverTimeCard controls={controls} />
+      <ReceivedByHoldingCard controls={controls} />
     </>
   );
 }

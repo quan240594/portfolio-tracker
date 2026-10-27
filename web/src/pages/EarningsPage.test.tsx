@@ -193,3 +193,33 @@ describe('the page', () => {
     expect(sampleDemoSummaries()).toHaveLength(2);
   });
 });
+
+describe('the card layout', () => {
+  const cardOrder = () => [...document.querySelectorAll<HTMLElement>('[data-card-id]')].map((el) => el.dataset.cardId);
+
+  it('keeps the summaries above what was checked and puts the customize toggle in the page header, next to the refresh button', async () => {
+    demo();
+    renderApp('/earnings/CLDV');
+    await screen.findAllByRole('article');
+    expect(cardOrder()).toEqual(['earnings-summaries', 'earnings-checked']);
+    const actions = document.querySelector<HTMLElement>('[data-page-header-actions]')!;
+    expect(within(actions).getByRole('button', { name: 'Customize layout' })).toBeInTheDocument();
+    expect(within(actions).getByRole('button', { name: 'Check CLDV now' })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Filter by company' })).toBeInTheDocument();
+  });
+
+  it('moves the checked section above the summaries and can hide it', async () => {
+    demo();
+    const user = userEvent.setup();
+    renderApp('/earnings');
+    await screen.findAllByRole('article');
+    await user.click(screen.getByRole('button', { name: 'Customize layout' }));
+    await user.click(screen.getByRole('button', { name: 'Move What was checked up' }));
+    expect(cardOrder()).toEqual(['earnings-checked', 'earnings-summaries']);
+
+    await user.click(screen.getByRole('button', { name: 'Hide What was checked' }));
+    expect(cardOrder()).toEqual(['earnings-summaries']);
+    expect(screen.getByRole('button', { name: 'Show What was checked' })).toBeInTheDocument();
+    expect(screen.getAllByRole('article')).toHaveLength(2);
+  });
+});

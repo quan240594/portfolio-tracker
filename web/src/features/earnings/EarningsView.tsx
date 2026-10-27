@@ -1,5 +1,5 @@
 import { useParams, Link } from 'react-router-dom';
-import type { EarningsStatusResponse } from '@portfolio/shared';
+import type { EarningsListResponse, EarningsStatusResponse } from '@portfolio/shared';
 import { errorMessage } from '../../api/client';
 import { useEarnings, useEarningsStatus, useRefreshEarnings } from '../../api/earningsHooks';
 import { EmptyState } from '../../components/EmptyState';
@@ -7,6 +7,7 @@ import { ErrorState } from '../../components/ErrorState';
 import { PageHeader } from '../../components/Layout';
 import { LoadingRegion, Skeleton } from '../../components/Skeleton';
 import { formatDateTime } from '../../lib/format';
+import { CardGrid, type CardDefinition } from '../layout/CardGrid';
 import { CheckedSection } from './CheckedSection';
 import { EarningsCard } from './EarningsCard';
 
@@ -107,6 +108,37 @@ const retryOf = (query: { refetch: () => Promise<unknown> }) => () => {
   query.refetch().catch(() => undefined);
 };
 
+interface LoadedProps {
+  status: EarningsStatusResponse;
+  list: EarningsListResponse;
+  symbol: string | undefined;
+}
+
+function Summaries({ summaries }: Readonly<{ summaries: EarningsListResponse['summaries'] }>) {
+  if (summaries.length === 0) return <Empty />;
+  return (
+    <div className="grid gap-4">
+      {summaries.map((summary) => (
+        <EarningsCard key={`${summary.symbol}-${summary.reportDate}`} summary={summary} />
+      ))}
+    </div>
+  );
+}
+
+function LoadedEarnings({ status, list, symbol }: Readonly<LoadedProps>) {
+  const cards: CardDefinition[] = [
+    { id: 'earnings-summaries', title: 'Earnings summaries', defaultWidth: 'full', render: () => <Summaries summaries={list.summaries} /> },
+    { id: 'earnings-checked', title: 'What was checked', defaultWidth: 'full', render: () => <CheckedSection status={status} selected={symbol} hasSummaries={list.summaries.length > 0} /> },
+  ];
+  return (
+    <div className="space-y-4">
+      <Notices status={status} />
+      <Chips symbols={list.symbols} selected={symbol} />
+      <CardGrid pageId="earnings" cards={cards} gap="gap-4" />
+    </div>
+  );
+}
+
 export function EarningsView() {
   const { symbol: raw } = useParams();
   const symbol = raw === undefined ? undefined : decodeURIComponent(raw).toUpperCase();
@@ -133,23 +165,7 @@ export function EarningsView() {
       </LoadingRegion>
     );
   } else {
-    const list = listQuery.data;
-    body = (
-      <div className="space-y-4">
-        <Notices status={status} />
-        <Chips symbols={list.symbols} selected={symbol} />
-        {list.summaries.length === 0 ? (
-          <Empty />
-        ) : (
-          <div className="grid gap-4">
-            {list.summaries.map((summary) => (
-              <EarningsCard key={`${summary.symbol}-${summary.reportDate}`} summary={summary} />
-            ))}
-          </div>
-        )}
-        <CheckedSection status={status} selected={symbol} hasSummaries={list.summaries.length > 0} />
-      </div>
-    );
+    body = <LoadedEarnings status={status} list={listQuery.data} symbol={symbol} />;
   }
   return (
     <>

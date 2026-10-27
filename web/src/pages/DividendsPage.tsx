@@ -10,7 +10,8 @@ import { ConsistencyCard } from '../features/dividends/ConsistencyCard';
 import { DiversificationCard } from '../features/dividends/DiversificationCard';
 import { DividendGrowthCard } from '../features/dividends/DividendGrowthCard';
 import { AverageGrowthCard, FuturePaymentsCard } from '../features/dividends/GrowthAndFuture';
-import { ReceivedCards } from '../features/dividends/ReceivedCards';
+import { ReceivedByHoldingCard, ReceivedOverTimeCard, useReceivedControls } from '../features/dividends/ReceivedCards';
+import { CardGrid, type CardDefinition } from '../features/layout/CardGrid';
 import { DividendsKpi, YieldKpi } from '../features/dividends/YieldKpis';
 import { YieldPayoutCard } from '../features/dividends/YieldPayoutCard';
 
@@ -117,6 +118,30 @@ export function DividendsPage() {
   const ccy = data?.baseCurrency ?? BASE_CURRENCY;
   const amountsIn = scopeName ? `${scopeName} · amounts in ${ccy}` : `Amounts in ${ccy}`;
   const empty = data?.received.length === 0 && data.upcoming.length === 0;
+  const received = useReceivedControls();
+
+  const cards: CardDefinition[] = [
+    {
+      id: 'kpis',
+      title: 'Yield and dividend KPIs',
+      defaultWidth: 'third',
+      render: () => (
+        <div className="flex flex-col gap-4">
+          <YieldKpi />
+          <DividendsKpi />
+        </div>
+      ),
+    },
+    { id: 'yield-payout', title: 'Yield / payout', defaultWidth: 'twothirds', render: () => <YieldPayoutCard /> },
+    { id: 'diversification', title: 'Passive income diversification', defaultWidth: 'full', render: () => <DiversificationCard /> },
+    { id: 'consistency', title: 'Dividend safety', defaultWidth: 'full', render: () => <ConsistencyCard /> },
+    { id: 'received-over-time', title: 'Dividends received', defaultWidth: 'full', render: () => <ReceivedOverTimeCard controls={received} /> },
+    { id: 'received-by-holding', title: 'Dividends received by holding', defaultWidth: 'half', render: () => <ReceivedByHoldingCard controls={received} /> },
+    { id: 'future-payments', title: 'Future payments', defaultWidth: 'half', render: () => <FuturePaymentsCard /> },
+    { id: 'average-growth', title: 'Average annual growth', defaultWidth: 'full', render: () => <AverageGrowthCard /> },
+    { id: 'dividend-growth', title: 'Dividend growth', defaultWidth: 'full', render: () => <DividendGrowthCard /> },
+    { id: 'payment-history', title: 'Payment history', defaultWidth: 'full', render: () => <PaymentHistory query={query} /> },
+  ];
 
   return (
     <>
@@ -124,26 +149,7 @@ export function DividendsPage() {
       {empty ? (
         <EmptyState title={current ? `No dividends in ${current.name} yet` : 'No dividends yet'} description="Dividend transactions and announced payouts for your holdings will show up here." />
       ) : (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-            <div className="flex flex-col gap-4 lg:col-span-1">
-              <YieldKpi />
-              <DividendsKpi />
-            </div>
-            <div className="lg:col-span-2">
-              <YieldPayoutCard />
-            </div>
-          </div>
-          <DiversificationCard />
-          <ConsistencyCard />
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-            <ReceivedCards />
-            <FuturePaymentsCard />
-            <AverageGrowthCard className="md:col-span-2" />
-          </div>
-          <DividendGrowthCard />
-          <PaymentHistory query={query} />
-        </div>
+        <CardGrid pageId="dividends" cards={cards} />
       )}
     </>
   );
