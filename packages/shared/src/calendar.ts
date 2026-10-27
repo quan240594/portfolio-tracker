@@ -32,6 +32,10 @@ export type CalendarEarningsTime = (typeof CALENDAR_EARNINGS_TIMES)[number];
 
 export type CalendarOrigin = 'HOLDING' | 'WATCHLIST';
 
+/** Where an earnings date stands: `reported` (results released, from a stored summary), `scheduled` (a date from a data provider) or `projected` (the previous report plus about a quarter). */
+export const CALENDAR_EARNINGS_PHASES = ['reported', 'scheduled', 'projected'] as const;
+export type CalendarEarningsPhase = (typeof CALENDAR_EARNINGS_PHASES)[number];
+
 export const CALENDAR_TYPE_LABELS: Readonly<Record<CalendarEventType, string>> = {
   EX_DIVIDEND: 'Ex-dividend',
   DIVIDEND_PAY: 'Dividend payment',
@@ -48,8 +52,9 @@ export const CALENDAR_CHART_LOOKBACK_MONTHS = 3;
 
 export const CALENDAR_COVERAGE = {
   earnings:
-    'Earnings dates come from the free Alpha Vantage earnings calendar and cover mostly US-listed companies. ' +
-    'European and other non-US listings usually have no date. Dates are the provider’s expected dates and stay estimates until the day has passed.',
+    'Upcoming earnings dates come from the free Alpha Vantage earnings calendar (one call a day for the next 12 months); European listings are matched to their US ticker where one exists. ' +
+    'Reported results come from the earnings summaries and link to them. Where no date is announced, the next date is projected from the previous report (about 91 days later) and marked Estimated. ' +
+    'Provider dates stay estimates until the day has passed.',
   corporateActions:
     'Stock splits and reverse splits (EODHD, refreshed on a rotating daily budget) and the splits you record yourself. ' +
     'Share adjustments that EODHD reports with an irregular ratio (stock dividends, spin-off adjustments) show as corporate actions. ' +
@@ -169,6 +174,10 @@ export interface CalendarEvent {
   fiscalPeriodEnd?: string;
   epsEstimate?: number;
   timeOfDay?: CalendarEarningsTime;
+  /** EARNINGS only. */
+  earningsPhase?: CalendarEarningsPhase;
+  /** Fiscal period of a reported release, as the company calls it ("Q3 2026"). */
+  period?: string;
   splitFrom?: number;
   splitTo?: number;
 }
@@ -212,6 +221,13 @@ export interface CalendarQuery {
   scope: CalendarScope;
 }
 
+/** A released quarterly result (one stored earnings summary): the report date and the fiscal period the company gave it. */
+export interface ReportedEarnings {
+  symbol: string;
+  reportDate: string;
+  period?: string;
+}
+
 export interface CalendarData {
   /** YYYY-MM-DD: the "current" day. */
   today: string;
@@ -222,6 +238,8 @@ export interface CalendarData {
   fxHistory?: readonly FxDay[];
   dividendEvents: readonly DividendEvent[];
   earnings: readonly StoredEarningsEvent[];
+  /** Released results of the held companies; they show as reported earnings and anchor the projected next date. */
+  reportedEarnings?: readonly ReportedEarnings[];
   splits: readonly StoredSplitEvent[];
   /** Symbols on the user's watchlist. */
   watchlist: readonly string[];
@@ -533,26 +551,113 @@ function describeEarnings(e: StoredEarningsEvent): string {
   return parts.join(' ');
 }
 
-function earningsEntries(ctx: Ctx, stored: readonly StoredEarningsEvent[]): CalendarEvent[] {
+/** Quarters are about 91 days apart; a stored report date plus this is where the next one is projected. */
+export const EARNINGS_PROJECTION_DAYS = 91;
+/** A provider date this close to a released report is that report (companies report a few days off the expected date). */
+const REPORT_MATCH_DAYS = 4;
+/** A projected date that has just passed is an overdue release, not a reason to project a whole quarter further. */
+const OVERDUE_GRACE_DAYS = 14;
+const MAX_PROJECTED_QUARTERS = 4;
+
+function providerEarnings(ctx: Ctx, e: StoredEarningsEvent, origin: CalendarOrigin): CalendarEvent {
+  return {
+    id: `earn:${e.symbol}:${e.date}`,
+    date: e.date,
+    type: 'EARNINGS',
+    status: e.confirmed || e.date <= ctx.today ? 'CONFIRMED' : 'ESTIMATED',
+    symbol: e.symbol,
+    name: ctx.nameOf(e.symbol, e.name),
+    origin,
+    source: e.source,
+    description: describeEarnings(e),
+    fiscalPeriodEnd: e.fiscalPeriodEnd,
+    epsEstimate: e.epsEstimate,
+    currency: e.currency,
+    timeOfDay: e.timeOfDay ?? 'unknown',
+    earningsPhase: 'scheduled',
+  };
+}
+
+/** Released results: CONFIRMED (the date has passed; there is no separate "reported" status), labelled "Reported" in the text. */
+function reportedEarnings(ctx: Ctx, report: ReportedEarnings, origin: CalendarOrigin, provider: StoredEarningsEvent | undefined): CalendarEvent {
+  const period = report.period?.trim() || undefined;
+  return {
+    id: `earn:${report.symbol}:${report.reportDate}`,
+    date: report.reportDate,
+    type: 'EARNINGS',
+    status: 'CONFIRMED',
+    symbol: report.symbol,
+    name: ctx.nameOf(report.symbol, provider?.name),
+    origin,
+    source: 'earnings-summary',
+    description: period === undefined ? 'Reported results' : `Reported results for ${period}`,
+    period,
+    fiscalPeriodEnd: provider?.fiscalPeriodEnd,
+    epsEstimate: provider?.epsEstimate,
+    currency: provider?.currency,
+    timeOfDay: provider?.timeOfDay ?? 'unknown',
+    earningsPhase: 'reported',
+  };
+}
+
+/** The date the next report is projected to fall on: the previous report plus whole quarters, never before today. */
+export function projectedEarningsDate(lastReport: string, today: string): string | null {
+  let date = lastReport;
+  for (let quarter = 1; quarter <= MAX_PROJECTED_QUARTERS; quarter++) {
+    date = addIsoDays(date, EARNINGS_PROJECTION_DAYS);
+    if (date >= today) return date;
+    if (daysBetween(date, today) <= OVERDUE_GRACE_DAYS) return null;
+  }
+  return null;
+}
+
+function projectedEarnings(ctx: Ctx, symbol: string, lastReport: ReportedEarnings, origin: CalendarOrigin): CalendarEvent | null {
+  const date = projectedEarningsDate(lastReport.reportDate, ctx.today);
+  if (date === null) return null;
+  return {
+    id: `earn-est:${symbol}:${date}`,
+    date,
+    type: 'EARNINGS',
+    status: 'ESTIMATED',
+    symbol,
+    name: ctx.nameOf(symbol),
+    origin,
+    source: 'estimate',
+    description: `Estimated next report, about ${EARNINGS_PROJECTION_DAYS} days after the previous one (${lastReport.reportDate}). A projection, not an announced date.`,
+    timeOfDay: 'unknown',
+    earningsPhase: 'projected',
+  };
+}
+
+/**
+ * Earnings of every symbol the user holds or watches: the provider's dates, the released reports (which replace the provider date
+ * they match), and, for a company with a released report but no provider date still ahead, one projected next date.
+ */
+function earningsEntries(ctx: Ctx, stored: readonly StoredEarningsEvent[], reports: readonly ReportedEarnings[]): CalendarEvent[] {
   const out: CalendarEvent[] = [];
+  const latest = new Map<string, ReportedEarnings>();
+  for (const report of reports) {
+    if (report.reportDate > (latest.get(report.symbol)?.reportDate ?? '')) latest.set(report.symbol, report);
+  }
+  const matched = new Set<StoredEarningsEvent>();
+  for (const report of reports) {
+    const origin = ctx.originOf(report.symbol);
+    if (!origin) continue;
+    const provider = stored.find((e) => e.symbol === report.symbol && Math.abs(daysBetween(e.date, report.reportDate)) <= REPORT_MATCH_DAYS);
+    if (provider) matched.add(provider);
+    out.push(reportedEarnings(ctx, report, origin, provider));
+  }
+  const ahead = new Set<string>();
   for (const e of stored) {
     const origin = ctx.originOf(e.symbol);
-    if (!origin) continue;
-    out.push({
-      id: `earn:${e.symbol}:${e.date}`,
-      date: e.date,
-      type: 'EARNINGS',
-      status: e.confirmed || e.date <= ctx.today ? 'CONFIRMED' : 'ESTIMATED',
-      symbol: e.symbol,
-      name: ctx.nameOf(e.symbol, e.name),
-      origin,
-      source: e.source,
-      description: describeEarnings(e),
-      fiscalPeriodEnd: e.fiscalPeriodEnd,
-      epsEstimate: e.epsEstimate,
-      currency: e.currency,
-      timeOfDay: e.timeOfDay ?? 'unknown',
-    });
+    if (!origin || matched.has(e)) continue;
+    if (e.date >= ctx.today) ahead.add(e.symbol);
+    out.push(providerEarnings(ctx, e, origin));
+  }
+  for (const [symbol, report] of latest) {
+    const origin = ctx.originOf(symbol);
+    const projection = origin && !ahead.has(symbol) ? projectedEarnings(ctx, symbol, report, origin) : null;
+    if (projection) out.push(projection);
   }
   return out;
 }
@@ -678,7 +783,7 @@ export function buildCalendar(data: CalendarData, query: CalendarQuery): Calenda
   const all = [
     ...dividendEntries(ctx, data.dividendEvents),
     ...estimatedDividends(ctx, data.dividendEvents),
-    ...earningsEntries(ctx, data.earnings),
+    ...earningsEntries(ctx, data.earnings, data.reportedEarnings ?? []),
     ...splitEntries(ctx, data.splits),
   ];
   return {

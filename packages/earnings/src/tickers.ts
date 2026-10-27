@@ -4,6 +4,8 @@
  * the ticker itself; the ticker without its exchange suffix; a curated alias table (German listings use their own spellings: `FOO.DE` is
  * Salesforce, `M4I.DE` Mastercard); and the company name against the SEC's titles (a foreign issuer that files 6-Ks through its ADR).
  */
+import { TICKER_ALIASES, significantWords } from '@portfolio/shared';
+
 export interface TickerEntry {
   cik: string;
   title: string;
@@ -23,35 +25,7 @@ export interface TickerQuery {
   isin?: string;
 }
 
-/** Listing ticker (without suffix) to the ticker the SEC knows the company by. A match is still checked against the holding's name. */
-export const TICKER_ALIASES: ReadonlyMap<string, string> = new Map([
-  ['FOO', 'CRM'],
-  ['M4I', 'MA'],
-  ['NFC', 'NFLX'],
-  ['ADB', 'ADBE'],
-  ['APC', 'AAPL'],
-  ['MSF', 'MSFT'],
-  ['AMZ', 'AMZN'],
-  ['ABEA', 'GOOGL'],
-  ['FB2A', 'META'],
-  ['NVD', 'NVDA'],
-  ['TL0', 'TSLA'],
-  ['NOVC', 'NVO'],
-  ['TSFA', 'TSM'],
-  ['CMC', 'JPM'],
-]);
-
-const NAME_NOISE = new Set([
-  'inc', 'incorporated', 'corp', 'corporation', 'co', 'company', 'ltd', 'limited', 'plc', 'nv', 'sa', 'ag', 'se', 'holding', 'holdings',
-  'group', 'the', 'adr', 'class', 'ordinary', 'shares', 'common', 'stock', 'de', 'ads', 'sponsored',
-]);
-
-export function significantWords(name: string): string[] {
-  return name
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((word) => word.length > 1 && !NAME_NOISE.has(word));
-}
+export { TICKER_ALIASES, significantWords };
 
 const sharesWord = (title: string, wanted: ReadonlySet<string>): boolean => significantWords(title).some((word) => wanted.has(word));
 const hasRealName = (name: string | undefined, symbol: string): name is string => name !== undefined && name.trim() !== '' && name.trim().toUpperCase() !== symbol;

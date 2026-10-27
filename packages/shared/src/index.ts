@@ -42,6 +42,7 @@ export * from './classification-csv.js';
 export * from './logo-domains.js';
 export * from './logo-domain-table.js';
 export * from './t212-ticker.js';
+export * from './ticker-aliases.js';
 export * from './instrument-baseline.js';
 export * from './dividend-comparison.js';
 export * from './notifications.js';
