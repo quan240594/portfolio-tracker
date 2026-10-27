@@ -12,6 +12,7 @@ import { LegendSwatch, NothingSelected, SelectableLegend, SelectableTable, useSe
 import { DividendYearChart, dividendYearLabel, selectYears, yearId, yearKind, yearSeriesKeys, type YearKind } from './DividendYearChart';
 import { uniqueKeys } from './assetFormat';
 import { Figure } from './StatsSidebar';
+import { CardGrid } from '../layout/CardGrid';
 
 function Kpi({ label, children }: Readonly<{ label: string; children: ReactNode | null }>) {
   return (
@@ -165,13 +166,15 @@ function Received({ query }: Readonly<{ query: UseQueryResult<AssetPositionsResp
 /** Dividends tab: yield and payout, per-year chart, the stored dividend events and what the user received. */
 export function DividendsTab({ detail, positions }: Readonly<{ detail: AssetDetailResponse; positions: UseQueryResult<AssetPositionsResponse> }>) {
   return (
-    <div className="space-y-5">
-      <Kpis detail={detail} received={positions.data} />
-      <PerYear detail={detail} />
-      <div className="grid gap-5 lg:grid-cols-2">
-        <History detail={detail} />
-        <Received query={positions} />
-      </div>
-    </div>
+    <CardGrid
+      pageId="asset-detail-dividends"
+      gap="gap-5"
+      cards={[
+        { id: 'div-kpis', title: 'Dividend figures', defaultWidth: 'full', render: () => <Kpis detail={detail} received={positions.data} /> },
+        { id: 'div-per-year', title: 'Dividend per share per year', defaultWidth: 'full', render: () => <PerYear detail={detail} /> },
+        { id: 'div-history', title: 'Dividend history', defaultWidth: 'half', render: () => <History detail={detail} /> },
+        { id: 'div-received', title: 'Dividends you received', defaultWidth: 'half', render: () => <Received query={positions} /> },
+      ]}
+    />
   );
 }

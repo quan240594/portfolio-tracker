@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { DEFAULT_GROWTH_RANGE } from '@portfolio/shared';
 import { useGrowth } from '../../api/growthHooks';
+import { CardGrid } from '../layout/CardGrid';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
 import { BenchmarksBar } from './BenchmarksBar';
 import { DynamicsCard } from './DynamicsCard';
@@ -21,10 +22,16 @@ export function GrowthTab() {
   return (
     <div className="space-y-5">
       <BenchmarksBar selected={benchmarks} options={shared.data?.options} benchmarks={shared.data?.benchmarks} onChange={setBenchmarks} />
-      <ValueCard benchmarks={benchmarks} />
-      <PerformanceCard benchmarks={benchmarks} compare={compare} onCompareChange={setCompare} />
-      <DynamicsCard query={shared} compare={compare} onCompareChange={setCompare} />
-      <HoldingsCard />
+      <CardGrid
+        pageId="analytics-growth"
+        gap="gap-5"
+        cards={[
+          { id: 'value', title: 'Portfolio value', defaultWidth: 'full', render: () => <ValueCard benchmarks={benchmarks} /> },
+          { id: 'performance', title: 'Portfolio performance', defaultWidth: 'full', render: () => <PerformanceCard benchmarks={benchmarks} compare={compare} onCompareChange={setCompare} /> },
+          { id: 'dynamics', title: 'Dynamics of returns', defaultWidth: 'full', render: () => <DynamicsCard query={shared} compare={compare} onCompareChange={setCompare} /> },
+          { id: 'holdings', title: 'Holdings performance', defaultWidth: 'full', render: () => <HoldingsCard /> },
+        ]}
+      />
     </div>
   );
 }

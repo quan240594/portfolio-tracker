@@ -44,7 +44,7 @@ export function StatsSidebar({ detail }: Readonly<{ detail: AssetDetailResponse 
   const dividendCurrency = dividends.currency ?? profile.currency;
   const growth = stats.dividendGrowth;
   return (
-    <aside aria-label="Key figures" className="card min-w-0 space-y-5 p-4">
+    <aside aria-label="Key figures" className="card min-w-0 space-y-5 self-start p-4">
       <Group title="Estimate">
         <Row label="P/E ratio" hint="Price divided by trailing twelve-month earnings per share">
           {stats.peRatio === null ? null : formatRatio(stats.peRatio, 1)}

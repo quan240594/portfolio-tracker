@@ -128,7 +128,11 @@ export function AssetHeader({ detail }: Readonly<{ detail: AssetDetailResponse }
               <p className="muted text-sm">{meta.join(' · ') || DASH}</p>
             </div>
           </div>
-          <WatchlistStar symbol={profile.symbol} />
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Where the Customize switch of the open tab lives (see CardGrid). */}
+            <div data-page-header-actions className="empty:hidden" />
+            <WatchlistStar symbol={profile.symbol} />
+          </div>
         </div>
         <div className="mt-5 grid gap-5 border-t border-slate-100 pt-5 lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)] dark:border-slate-800">
           <PriceBlock detail={detail} />

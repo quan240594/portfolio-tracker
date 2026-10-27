@@ -5,6 +5,7 @@ import { QueryBoundary } from '../../components/QueryBoundary';
 import { SegmentedControl } from '../../components/SegmentedControl';
 import { formatDate, formatPercent } from '../../lib/format';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
+import { CardGrid } from '../layout/CardGrid';
 import { ratioOrDash } from './labels';
 import { PanelHeader, TableShell, rowClass } from './TableShell';
 
@@ -40,17 +41,30 @@ function RiskContent({ data }: Readonly<{ data: AnalyticsRiskResponse }>) {
           {data.benchmark.message}
         </output>
       )}
-      <TableShell caption="Risk metrics" columns={[{ label: 'Metric' }, { label: 'Value', align: 'right' }, { label: 'What it means' }]}>
-        {rows.map((r) => (
-          <tr key={r.metric} className={rowClass}>
-            <th scope="row" className="py-2.5 pr-3 text-left font-medium whitespace-nowrap">
-              {r.metric}
-            </th>
-            <td className="py-2.5 pr-3 text-right font-semibold tabular-nums">{r.value}</td>
-            <td className="muted py-2.5 text-xs">{r.note}</td>
-          </tr>
-        ))}
-      </TableShell>
+      <CardGrid
+        pageId="analytics-risk"
+        gap="gap-4"
+        cards={[
+          {
+            id: 'risk-metrics',
+            title: 'Risk metrics',
+            defaultWidth: 'full',
+            render: () => (
+              <TableShell caption="Risk metrics" columns={[{ label: 'Metric' }, { label: 'Value', align: 'right' }, { label: 'What it means' }]}>
+                {rows.map((r) => (
+                  <tr key={r.metric} className={rowClass}>
+                    <th scope="row" className="py-2.5 pr-3 text-left font-medium whitespace-nowrap">
+                      {r.metric}
+                    </th>
+                    <td className="py-2.5 pr-3 text-right font-semibold tabular-nums">{r.value}</td>
+                    <td className="muted py-2.5 text-xs">{r.note}</td>
+                  </tr>
+                ))}
+              </TableShell>
+            ),
+          },
+        ]}
+      />
       <p className="muted text-xs">
         {data.from && data.to
           ? `Based on ${data.observations} weekday returns from ${formatDate(data.from)} to ${formatDate(data.to)}, corrected for deposits and withdrawals. `
