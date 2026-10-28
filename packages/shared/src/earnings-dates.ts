@@ -147,8 +147,12 @@ export interface EarningsDatesResponse {
   lastSuccess: EarningsRunReport | null;
   budget: ProviderBudgetReport | null;
   refresh: RefreshReport;
+  /** Held companies (the ones that report quarterly results); funds, ETFs and crypto are not counted. */
   held: number;
+  /** Of those, how many have a next date. */
   withDate: number;
+  /** Held funds, ETFs and crypto positions: they have no earnings and are listed with `reasonCode: 'not-applicable'`. */
+  funds: number;
   symbols: HeldEarningsDate[];
 }
 
@@ -167,11 +171,14 @@ const reportOf = (run: EarningsRunRecord | null, held: ReadonlySet<string>): Ear
       };
 
 const CRYPTO = /^[A-Z0-9]+-[A-Z]{3}$/;
+const NOT_APPLICABLE_TEXT = 'Fund or crypto: no earnings';
 const day = (iso: string): string => iso.slice(0, 10);
 
 interface WhyInput {
   symbol: string;
   name: string;
+  /** False for a fund, ETF or crypto position (no quarterly results); absent means a company. */
+  hasEarnings?: boolean;
   /** `undefined`: not tracked; null: tracked, since an unknown time. */
   trackedAt: string | null | undefined;
   run: EarningsRunRecord | null;
@@ -211,7 +218,7 @@ function answerWhy({ symbol, name }: WhyInput, run: EarningsRunRecord): Why {
 /** Why a held symbol has no upcoming earnings date. */
 export function whyNoEarningsDate(input: WhyInput): Why {
   const { symbol, trackedAt, run, lastOk } = input;
-  if (CRYPTO.test(symbol)) return { code: 'not-applicable', text: 'Crypto has no earnings reports.' };
+  if (input.hasEarnings === false || CRYPTO.test(symbol)) return { code: 'not-applicable', text: NOT_APPLICABLE_TEXT };
   if (trackedAt === undefined) return { code: 'not-tracked', text: 'Not tracked yet: the calendar job only looks up tracked symbols, and this one has not been registered (it is registered when the transaction is saved or the price history is fetched).' };
   if (run === null) return { code: 'never-run', text: 'The calendar job has not run yet (it runs daily at 05:30 Amsterdam time).' };
   if (trackedAt !== null && trackedAt > run.at) return { code: 'since-bought', text: `The calendar job has not run since you bought it (added ${day(trackedAt)}, last run ${day(run.at)}).` };
@@ -226,7 +233,7 @@ export function whyNoEarningsDate(input: WhyInput): Why {
 export interface EarningsDatesInput {
   now: Date;
   /** The open positions of the market (no cash or custom assets), with their display names. */
-  held: readonly { symbol: string; name: string }[];
+  held: readonly { symbol: string; name: string; hasEarnings?: boolean }[];
   /** `createdAt` of the tracked-ticker item of each tracked symbol (null: tracked, time unknown). */
   tracked: ReadonlyMap<string, string | null>;
   /** The next event per symbol as the calendar shows it (see `nextEarningsEvents`). */
@@ -237,21 +244,27 @@ export interface EarningsDatesInput {
   refresh: RefreshReport;
 }
 
-/** The report: symbols without a date first (by symbol), then the ones with the earliest date first. */
+const isCompany = (entry: { symbol: string; hasEarnings?: boolean }): boolean => entry.hasEarnings !== false && !CRYPTO.test(entry.symbol);
+
+/** The report: companies without a date first (by symbol), then the ones with the earliest date first, then funds and crypto (no earnings). */
 export function buildEarningsDatesReport(input: EarningsDatesInput): EarningsDatesResponse {
   const { now, run, lastOk } = input;
-  const symbols = input.held.map(({ symbol, name }): HeldEarningsDate => {
-    const event = input.next.get(symbol);
+  const symbols = input.held.map((entry): HeldEarningsDate => {
+    const { symbol, name } = entry;
+    const event = isCompany(entry) ? input.next.get(symbol) : undefined;
     if (event) return { symbol, name, next: { date: event.date, source: event.earningsPhase ?? 'scheduled', timeOfDay: event.timeOfDay ?? 'unknown' }, reasonCode: null, reason: null };
-    const why = whyNoEarningsDate({ symbol, name, trackedAt: input.tracked.get(symbol), run, lastOk });
+    const why = whyNoEarningsDate({ symbol, name, hasEarnings: entry.hasEarnings, trackedAt: input.tracked.get(symbol), run, lastOk });
     return { symbol, name, next: null, reasonCode: why.code, reason: why.text };
   });
   symbols.sort((a, b) => {
+    const aFund = a.reasonCode === 'not-applicable';
+    if (aFund !== (b.reasonCode === 'not-applicable')) return aFund ? 1 : -1;
     if (a.next === null && b.next !== null) return -1;
     if (a.next !== null && b.next === null) return 1;
     return (a.next?.date ?? '').localeCompare(b.next?.date ?? '') || a.symbol.localeCompare(b.symbol);
   });
-  const heldSymbols = new Set(input.held.map((entry) => entry.symbol));
+  const companies = input.held.filter(isCompany);
+  const heldSymbols = new Set(companies.map((entry) => entry.symbol));
   return {
     asOf: now.toISOString(),
     today: now.toISOString().slice(0, 10),
@@ -259,8 +272,9 @@ export function buildEarningsDatesReport(input: EarningsDatesInput): EarningsDat
     lastSuccess: reportOf(lastOk, heldSymbols),
     budget: input.budget,
     refresh: input.refresh,
-    held: symbols.length,
+    held: companies.length,
     withDate: symbols.filter((entry) => entry.next !== null).length,
+    funds: input.held.length - companies.length,
     symbols,
   };
 }
@@ -287,6 +301,7 @@ export const earningsDatesSchema = z.object({
   refresh: z.object({ available: z.boolean(), reason: z.string().nullable(), nextAllowedAt: z.string().nullable() }),
   held: count,
   withDate: count,
+  funds: count.default(0),
   symbols: z.array(
     z.object({
       symbol: z.string(),

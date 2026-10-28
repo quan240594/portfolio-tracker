@@ -19,7 +19,23 @@ const why = (over: Partial<Parameters<typeof whyNoEarningsDate>[0]> = {}) => why
 
 describe('whyNoEarningsDate', () => {
   it('has no earnings for crypto', () => {
-    expect(why({ symbol: 'BTC-EUR' })).toEqual({ code: 'not-applicable', text: 'Crypto has no earnings reports.' });
+    expect(why({ symbol: 'BTC-EUR' })).toEqual({ code: 'not-applicable', text: 'Fund or crypto: no earnings' });
+  });
+
+  it('says a fund or ETF has no earnings, whatever the job did or did not do', () => {
+    const fund = { symbol: 'VWRL.AS', name: 'Vanguard FTSE All-World UCITS ETF', hasEarnings: false };
+    for (const over of [{}, { trackedAt: undefined }, { run: null, lastOk: null }, { run: run({ status: 'failed', reason: 'x' }), lastOk: null }]) {
+      expect(why({ ...fund, ...over })).toEqual({ code: 'not-applicable', text: 'Fund or crypto: no earnings' });
+    }
+  });
+
+  it('never says the job has not run yet once a run is recorded', () => {
+    const statuses = ['ok', 'no-provider', 'no-symbols', 'budget-exhausted', 'rate-limited', 'failed', 'skipped'] as const;
+    for (const status of statuses) {
+      for (const trackedAt of [undefined, null, '2026-10-01T10:00:00.000Z']) {
+        expect(why({ run: run({ status }), lastOk: null, trackedAt }).text).not.toMatch(/not run yet/);
+      }
+    }
   });
 
   it('says a symbol the job does not track yet is not looked up', () => {
@@ -106,7 +122,7 @@ function input(over: Partial<EarningsDatesInput> = {}): EarningsDatesInput {
   });
   return {
     now: NOW,
-    held: ['AAPL', 'BTC-EUR', 'GOOGL', 'NVDA', 'TSLA'].map((symbol) => ({ symbol, name: symbol })),
+    held: ['AAPL', 'BTC-EUR', 'GOOGL', 'NVDA', 'TSLA', 'VWRL.AS'].map((symbol) => ({ symbol, name: symbol, ...(symbol === 'VWRL.AS' ? { hasEarnings: false } : {}) })),
     tracked: new Map([
       ['AAPL', '2026-01-02T10:00:00.000Z'],
       ['GOOGL', '2026-01-02T10:00:00.000Z'],
@@ -124,21 +140,34 @@ function input(over: Partial<EarningsDatesInput> = {}): EarningsDatesInput {
 describe('buildEarningsDatesReport', () => {
   const report = buildEarningsDatesReport(input());
 
-  it('lists the symbols without a date first, then the dates in order', () => {
-    expect(report.symbols.map((entry) => `${entry.symbol}:${entry.next?.date ?? '-'}`)).toEqual(['BTC-EUR:-', 'TSLA:-', 'GOOGL:2026-10-28', 'AAPL:2026-10-29', 'NVDA:2026-12-01']);
+  it('lists the companies without a date first, then the dates in order, then funds and crypto', () => {
+    expect(report.symbols.map((entry) => `${entry.symbol}:${entry.next?.date ?? '-'}`)).toEqual(['TSLA:-', 'GOOGL:2026-10-28', 'AAPL:2026-10-29', 'NVDA:2026-12-01', 'BTC-EUR:-', 'VWRL.AS:-']);
   });
 
   it('describes the date with its source and time of day, and the missing ones with a reason', () => {
     const bySymbol = Object.fromEntries(report.symbols.map((entry) => [entry.symbol, entry]));
     expect(bySymbol.GOOGL).toMatchObject({ next: { date: '2026-10-28', source: 'scheduled', timeOfDay: 'AMC' }, reasonCode: null, reason: null });
     expect(bySymbol.NVDA?.next?.source).toBe('projected');
-    expect(bySymbol['BTC-EUR']).toMatchObject({ next: null, reasonCode: 'not-applicable' });
+    expect(bySymbol['BTC-EUR']).toMatchObject({ next: null, reasonCode: 'not-applicable', reason: 'Fund or crypto: no earnings' });
+    expect(bySymbol['VWRL.AS']).toMatchObject({ next: null, reasonCode: 'not-applicable', reason: 'Fund or crypto: no earnings' });
     expect(bySymbol.TSLA).toMatchObject({ next: null, reasonCode: 'not-tracked' });
   });
 
-  it('counts the held symbols with a date and the held ones the run matched', () => {
-    expect(report).toMatchObject({ today: '2026-10-28', asOf: NOW.toISOString(), held: 5, withDate: 3 });
+  it('counts only the held companies, and the funds and crypto apart', () => {
+    expect(report).toMatchObject({ today: '2026-10-28', asOf: NOW.toISOString(), held: 4, withDate: 3, funds: 2 });
+    expect(report.symbols).toHaveLength(6);
+  });
+
+  it('counts the held companies the run matched', () => {
     expect(report.lastRun).toMatchObject({ status: 'ok', rows: 5000, events: 2, matchedHeld: 2 });
+    const fundMatched = buildEarningsDatesReport(input({ run: run({ matchedSymbols: ['AAPL', 'VWRL.AS'] }) }));
+    expect(fundMatched.lastRun?.matchedHeld).toBe(1);
+  });
+
+  it('shows a fund as having no earnings even when the calendar has an event for the symbol', () => {
+    const withEvent = buildEarningsDatesReport(input({ next: new Map(input().next).set('VWRL.AS', input().next.get('AAPL')!) }));
+    expect(withEvent.symbols.find((entry) => entry.symbol === 'VWRL.AS')).toMatchObject({ next: null, reasonCode: 'not-applicable' });
+    expect(withEvent).toMatchObject({ held: 4, withDate: 3, funds: 2 });
   });
 
   it('keeps the counts of a run that did not say them as null and passes the budget and refresh state through', () => {
@@ -154,6 +183,8 @@ describe('buildEarningsDatesReport', () => {
   it('is valid against the schema the web client parses it with', () => {
     expect(earningsDatesSchema.safeParse(report).success).toBe(true);
     expect(earningsDatesSchema.safeParse(buildEarningsDatesReport(input({ run: null, lastOk: null }))).success).toBe(true);
+    const { funds: _funds, ...older } = report;
+    expect(earningsDatesSchema.parse(older).funds).toBe(0);
   });
 
   it('sorts equal dates by symbol', () => {
@@ -185,5 +216,13 @@ describe('nextEarningsEvents', () => {
     expect(reported.get('GOOGL')).toMatchObject({ earningsPhase: 'reported', date: '2026-10-28' });
     const projected = nextEarningsEvents({ ...base, earnings: [], reportedEarnings: [{ symbol: 'GOOGL', reportDate: '2026-08-10' }] });
     expect(projected.get('GOOGL')).toMatchObject({ earningsPhase: 'projected', date: '2026-11-09' });
+  });
+
+  it('reports a due-now projection (the projected date has just passed, no release stored yet) as projected for today', () => {
+    const due = nextEarningsEvents({ ...base, earnings: [], reportedEarnings: [{ symbol: 'GOOGL', reportDate: '2026-07-23', period: 'Q2 2026' }] });
+    expect(due.get('GOOGL')).toMatchObject({ earningsPhase: 'projected', date: '2026-10-28', status: 'ESTIMATED' });
+    const report = buildEarningsDatesReport({ now: NOW, held: [{ symbol: 'GOOGL', name: 'Alphabet Inc' }], tracked: new Map(), next: due, run: run(), lastOk: run(), budget: null, refresh: AVAILABLE });
+    expect(report.symbols[0]).toMatchObject({ next: { date: '2026-10-28', source: 'projected' }, reasonCode: null });
+    expect(report.withDate).toBe(1);
   });
 });

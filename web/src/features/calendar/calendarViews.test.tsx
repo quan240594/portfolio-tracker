@@ -118,6 +118,14 @@ describe('reported and projected earnings', () => {
     expect(dialog).toHaveTextContent('No date is announced yet. This is a projection from the previous report (about 91 days later)');
   });
 
+  it('explains a projection that is due now with its own description', () => {
+    const description = 'Report due: the projected date (22-10-2026, previous report + about 91 days) has passed and no release is stored yet. A projection, not an announced date.';
+    renderWithProviders(<EventDialog event={{ ...projected, date: TODAY, description }} baseCurrency="EUR" onClose={vi.fn()} withScope={(to) => to} />);
+    const dialog = screen.getByRole('dialog', { name: 'AAPL · Earnings' });
+    expect(dialog).toHaveTextContent(description);
+    expect(dialog).not.toHaveTextContent('No date is announced yet');
+  });
+
   it('shows a reported release with its summary link on the report date', async () => {
     server.use(
       http.get(api('/earnings/status'), () => HttpResponse.json(DEMO_EARNINGS_STATUS)),
