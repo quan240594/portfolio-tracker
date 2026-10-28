@@ -2,6 +2,7 @@
  * INVENTED sample summaries: fictional companies and made-up numbers, for the public demo (mock mode) and for tests. Nothing here is a real
  * company's result.
  */
+import { attachConsensus, type ConsensusFigure, type ConsensusState } from './earnings-consensus.js';
 import { EARNINGS_SCHEMA_VERSION, KPI_TEMPLATES, KPI_TEMPLATE_IDS, type EarningsKpi, type EarningsMetric, type EarningsSummary, type KpiTemplateId } from './earnings.js';
 
 const metric = (value: number, unit: EarningsMetric['unit'], extra: Partial<EarningsMetric> = {}): EarningsMetric => ({ value, unit, ...extra });
@@ -54,9 +55,15 @@ export function sampleSummary(overrides: Partial<EarningsSummary> = {}): Earning
 const kpisOf = (template: KpiTemplateId, values: Readonly<Record<string, EarningsMetric>>): EarningsKpi[] =>
   KPI_TEMPLATES[template].slots.map((slot) => ({ key: slot.key, label: slot.label, unit: slot.unit, ...(values[slot.key] === undefined ? {} : { metric: values[slot.key] }) }));
 
-/** The two summaries the demo shows: a software company and a bank, both fictional. */
+/** An invented consensus joined to a sample summary, as the API does it (the quarter that ended on `quarterEnd`). */
+function withSampleConsensus(summary: EarningsSummary, quarterEnd: string, figures: { eps?: ConsensusFigure; revenue?: ConsensusFigure }, state?: ConsensusState): EarningsSummary {
+  const quarter = { symbol: summary.symbol, quarterEnd, ticker: summary.symbol, fetchedAt: '2026-10-12T06:20:00.000Z', ...figures };
+  return attachConsensus(summary, { quarters: [quarter], state });
+}
+
+/** The two summaries the demo shows: a software company and a bank, both fictional, with invented analyst estimates. */
 export function sampleDemoSummaries(): EarningsSummary[] {
-  const saas = sampleSummary({
+  const saasBase = sampleSummary({
     symbol: 'CLDV',
     name: 'Cloudvale Software Inc.',
     period: 'Q2 FY2027',
@@ -84,7 +91,7 @@ export function sampleDemoSummaries(): EarningsSummary[] {
     verification: { dropped: 1, droppedFields: ['quote'], model: '@cf/meta/llama-3.1-8b-instruct-fp8', neuronsEstimate: 310, calls: 1 },
     generatedAt: '2026-10-14T20:30:00.000Z',
   });
-  const bank = sampleSummary({
+  const bankBase = sampleSummary({
     symbol: 'HBRB',
     name: 'Harbor Bancorp',
     period: 'Q3 2026',
@@ -110,6 +117,16 @@ export function sampleDemoSummaries(): EarningsSummary[] {
     verification: { dropped: 0, droppedFields: [], model: '@cf/meta/llama-3.1-8b-instruct-fp8', neuronsEstimate: 280, calls: 1 },
     generatedAt: '2026-10-16T11:05:00.000Z',
   });
+  const saas = withSampleConsensus(saasBase, '2026-09-30', {
+    eps: { average: 1.95, high: 2.02, low: 1.88, analysts: 31 },
+    revenue: { average: 3_180_000_000, high: 3_240_000_000, low: 3_100_000_000, analysts: 27 },
+  });
+  const bank = withSampleConsensus(
+    bankBase,
+    '2026-09-30',
+    { eps: { average: 4.9, high: 5.02, low: 4.78, analysts: 14 } },
+    { symbol: 'HBRB', outcome: 'ok', at: '2026-10-12T06:20:00.000Z', fetchedAt: '2026-10-12T06:20:00.000Z', ticker: 'HBRB', quarters: 1, updatedAt: '2026-10-12T06:20:00.000Z' },
+  );
   return [bank, saas];
 }
 

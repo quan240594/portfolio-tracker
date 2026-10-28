@@ -8,6 +8,7 @@ import { createConsoleLogger, logger, setLogger, silentLogger, type Logger } fro
 import { MemoryItemStore } from './memory/item-store.js';
 import { MemoryJobQueue } from './memory/job-queue.js';
 import { SCHEDULED_JOBS, toAwsCron, toUnixCron } from './schedule.js';
+import { JOB_CEILINGS } from './budget/jobs.js';
 import { listByPrefix, listTransactions, putTransactions, registerUser, trackTickers } from './data/index.js';
 
 describe('encoding', () => {
@@ -130,13 +131,20 @@ describe('schedule', () => {
 
   it('declares one schedule per job with unique names', () => {
     expect(new Set(SCHEDULED_JOBS.map((s) => s.name)).size).toBe(SCHEDULED_JOBS.length);
-    expect(SCHEDULED_JOBS.map((s) => s.job)).toEqual(['refreshPrices', 'refreshCalendar', 'syncBroker', 'syncBroker', 'notifyDividends', 'refreshT212Quotes', 'refreshT212Quotes', 'watchEarnings', 'watchEarnings', 'backfillEarnings']);
+    expect(SCHEDULED_JOBS.map((s) => s.job)).toEqual(['refreshPrices', 'refreshCalendar', 'syncBroker', 'syncBroker', 'notifyDividends', 'refreshT212Quotes', 'refreshT212Quotes', 'watchEarnings', 'watchEarnings', 'backfillEarnings', 'earningsEstimates']);
   });
 
   it('the earnings backfill runs every 15 minutes on every day, on Cloudflare only', () => {
     const backfill = SCHEDULED_JOBS.find((s) => s.name === 'earnings-backfill')!;
     expect(toUnixCron(backfill)).toBe('0,15,30,45 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23 * * *');
     expect(backfill).toMatchObject({ weekdaysOnly: false, cloudflareOnly: true, payload: { trigger: 'scheduled' } });
+  });
+
+  it('the consensus estimates run four times a day, every day, on Cloudflare only', () => {
+    const estimates = SCHEDULED_JOBS.find((s) => s.name === 'earnings-estimates')!;
+    expect(toUnixCron(estimates)).toBe('20 8,13,18,22 * * *');
+    expect(estimates).toMatchObject({ job: 'earningsEstimates', timezone: 'Europe/Amsterdam', weekdaysOnly: false, cloudflareOnly: true, payload: { trigger: 'scheduled' } });
+    expect(JOB_CEILINGS.earningsEstimates).toBe('ok');
   });
 
   it('adds the intraday sync and the notification run on Cloudflare only, leaving the AWS schedules as they were', () => {

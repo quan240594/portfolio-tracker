@@ -130,6 +130,18 @@ export const SCHEDULED_JOBS = [
     weekdaysOnly: false,
     cloudflareOnly: true,
   }),
+  // Analyst consensus of the held companies (Alpha Vantage): four slots a day, every day. A run makes at most three calls, one per step, and the job
+  // keeps to 8 calls a day and to what is left of the shared allowance, so most runs do nothing: one row read.
+  scheduled({
+    name: 'earnings-estimates',
+    job: JOBS.earningsEstimates,
+    payload: { trigger: 'scheduled' },
+    timezone: 'Europe/Amsterdam',
+    minute: 20,
+    hours: [8, 13, 18, 22],
+    weekdaysOnly: false,
+    cloudflareOnly: true,
+  }),
 ] as const satisfies readonly ScheduledJob[];
 
 const minutesOf = ({ minute }: ScheduledJob): string => (typeof minute === 'number' ? String(minute) : minute.join(','));

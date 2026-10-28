@@ -23,6 +23,7 @@
  * - POST /earnings/backfill            owner-triggered "fetch all now" (rescan all): re-derives the current holdings, drops the check state of sold ones, starts the backfill of every holding over, at most once per hour
  */
 import { z } from 'zod';
+import type { ConsensusOutcome, SummaryConsensus } from './earnings-consensus.js';
 
 export const EARNINGS_ROUTES = {
   earningsList: 'GET /earnings',
@@ -277,6 +278,8 @@ export interface EarningsSummary {
   verification: EarningsVerification;
   generatedAt: string;
   status: 'ok';
+  /** The analyst consensus joined to the summary by the API (EPS and revenue, beat or miss, or why there is none); never stored. */
+  consensus?: SummaryConsensus;
 }
 
 /** Where the last run for a symbol ended: the first stage that did not go on, or `ok`. */
@@ -448,6 +451,8 @@ export interface EarningsSymbolStatus {
   lastRun?: EarningsLastRun;
   /** Quarterly releases of the backfill plan: how many exist and how many are stored. */
   releases?: { planned: number; stored: number; failed: number };
+  /** What the consensus job last did for this company (additive: absent before its first attempt). */
+  consensus?: { outcome: ConsensusOutcome; at: string; detail?: string; fetchedAt?: string };
 }
 
 export type EarningsNotReady = 'sec-contact' | 'ai-binding';
@@ -468,6 +473,8 @@ export interface EarningsStatusResponse {
   lastFullPassAt?: string;
   /** How many symbols you traded but no longer hold: they are neither listed nor counted nor checked. */
   notHeld?: number;
+  /** Analyst consensus: how many of the eligible companies have figures stored, and why the job waits (the plan has no estimates, or the day's allowance is used). */
+  consensus?: { covered: number; companies: number; blockedUntil?: string; blockedReason?: 'premium' | 'rate-limited' };
   /** The currently held symbols only (the same ones as the Dashboard's holdings). */
   symbols: EarningsSymbolStatus[];
 }

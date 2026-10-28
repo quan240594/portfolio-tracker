@@ -34,6 +34,8 @@ export const JOB_CEILINGS: Readonly<Record<JobName, JobCeiling>> = {
   fetchEarningsSummary: 'ok',
   /** The backfill is a convenience that must never crowd out the owner's requests: only below 60 %; a skipped run is simply tried again 15 minutes later. */
   backfillEarnings: 'ok',
+  /** Consensus estimates are a convenience that spends the shared Alpha Vantage allowance: only below 60 %; a skipped run is simply tried again at the next slot. */
+  earningsEstimates: 'ok',
 };
 
 /** A job this table does not know is treated as non-essential. */
