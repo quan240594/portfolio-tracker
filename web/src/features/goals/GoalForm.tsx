@@ -2,6 +2,8 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { DEFAULT_GOAL_TARGETS, GOAL_TYPES, GOAL_TYPE_LABELS, type GoalSettings, type GoalType } from '@portfolio/shared';
 import { ADVANCED_FIELDS, targetHint, yearOptions, type GoalField, type GoalFieldErrors, type GoalFormValues } from './goalFormModel';
 import { formatPercent } from '../../lib/format';
+import { GrowthChoices, InflationChoices, YieldChoices } from '../assumptions/AssumptionChoices';
+import type { AssumptionsController } from '../assumptions/useGoalAssumptions';
 
 interface FieldProps {
   field: GoalField;
@@ -119,6 +121,8 @@ export interface GoalFormProps {
   currency: string;
   /** The portfolio's current forward yield, shown as the placeholder of the starting yield. */
   portfolioYieldPct: number;
+  /** The helpers that suggest the dividend growth, the yield on new money and the inflation from the portfolio and the ECB. */
+  assumptions: AssumptionsController;
   saved: boolean;
   /** Text next to the buttons: what happens to the entered values (can be empty). */
   status: string;
@@ -158,10 +162,13 @@ function AdvancedSection({ hasError, children }: Readonly<{ hasError: boolean; c
 }
 
 export function GoalForm(props: Readonly<GoalFormProps>) {
-  const { values, errors, settings, today, currency, portfolioYieldPct, saved, status, saving, resetting, submitError, onChange, onBlurField, onSubmit, onReset } = props;
+  const { values, errors, settings, today, currency, portfolioYieldPct, assumptions, saved, status, saving, resetting, submitError, onChange, onBlurField, onSubmit, onReset } = props;
   const isValue = values.goalType === 'value';
 
-  const setField = (field: GoalField, value: string) => onChange({ ...values, [field]: value });
+  const setField = (field: GoalField, value: string) => {
+    assumptions.noteEdit(field);
+    onChange({ ...values, [field]: value });
+  };
   const changeType = (goalType: GoalType) => {
     const other: GoalType = goalType === 'value' ? 'income' : 'value';
     // An untouched default target follows the goal type; anything the user typed is kept.
@@ -189,8 +196,11 @@ export function GoalForm(props: Readonly<GoalFormProps>) {
           hint: `Leave empty to use your portfolio’s current yield (${formatPercent(portfolioYieldPct)}).`,
         })}
         {field('dividendGrowthPct', 'Dividend growth per year (%)')}
+        <GrowthChoices helper={assumptions.growth} />
         {field('yieldOnNewMoneyPct', 'Yield on new money (%)')}
+        <YieldChoices helper={assumptions.yield} />
         {field('inflationPct', 'Inflation per year (%)')}
+        {assumptions.inflation && <InflationChoices helper={assumptions.inflation} />}
         <Toggle id="goal-adjustForInflation" label="Adjust goal for inflation" checked={values.adjustForInflation} onChange={(adjustForInflation) => onChange({ ...values, adjustForInflation })} />
         <Toggle id="goal-reinvestDividends" label="Reinvest dividends" checked={values.reinvestDividends} onChange={(reinvestDividends) => onChange({ ...values, reinvestDividends })} />
       </AdvancedSection>

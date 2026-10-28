@@ -1,13 +1,17 @@
-import { useMemo, useState } from 'react';
-import type { GoalResponse, GoalSettings } from '@portfolio/shared';
+import { useCallback, useMemo, useState } from 'react';
+import { MAX_GOAL_RATE_PCT, type GoalResponse, type GoalSettings } from '@portfolio/shared';
 import { errorMessage } from '../../api/client';
 import { useGoalPreview, useSaveGoal } from '../../api/goalsHooks';
+import { useGoalAssumptions, type AssumptionField } from '../assumptions/useGoalAssumptions';
 import { GoalForm } from './GoalForm';
 import { GoalResults } from './GoalResults';
 import { apiFieldErrors, parseGoalForm, sameSettings, settingsToForm, type GoalField, type GoalFieldErrors, type GoalFormValues } from './goalFormModel';
 import { useDebouncedValue } from './useDebouncedValue';
 
 export const PREVIEW_DELAY_MS = 400;
+
+const RATE_RANGE = { min: 0, max: MAX_GOAL_RATE_PCT };
+const ASSUMPTION_RANGES = { growth: RATE_RANGE, yield: RATE_RANGE, inflation: RATE_RANGE };
 
 function statusOf(saved: boolean, dirty: boolean): string {
   if (dirty) return saved ? 'Unsaved changes' : 'Not saved yet';
@@ -30,6 +34,9 @@ export function GoalPlanner({ saved, scope, resetting, resetError, onReset }: Re
   const [submitted, setSubmitted] = useState(false);
   const [serverErrors, setServerErrors] = useState<GoalFieldErrors>({});
   const save = useSaveGoal(scope);
+  const fill = useCallback((patch: Partial<Record<AssumptionField, string>>) => setValues((v) => ({ ...v, ...patch })), []);
+  // A goal that was never saved starts from the portfolio's own figures; a saved goal keeps what the owner entered.
+  const assumptions = useGoalAssumptions({ scope, values, fill, ranges: ASSUMPTION_RANGES, autoStart: !saved.saved, withInflation: true });
 
   const parsed = useMemo(() => parseGoalForm(values, today), [values, today]);
   const settings = 'settings' in parsed ? parsed.settings : null;
@@ -65,6 +72,7 @@ export function GoalPlanner({ saved, scope, resetting, resetError, onReset }: Re
         today={today}
         currency={projection.baseCurrency}
         portfolioYieldPct={saved.projection.start.yieldPct}
+        assumptions={assumptions}
         saved={saved.saved}
         status={statusOf(saved.saved, dirty)}
         saving={save.isPending}

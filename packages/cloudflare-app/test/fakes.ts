@@ -1,4 +1,6 @@
 import { generateVapidKeys } from '@portfolio/platform';
+import { fakeInflationPoints } from '@portfolio/api/testing';
+import { buildInflationReply, ecbInflationSeriesKey } from '@portfolio/shared';
 import { FakeSec, type FilingSpec } from '@portfolio/earnings/testing';
 
 /**
@@ -328,4 +330,24 @@ export class FakeSecService {
     const reply = this.sec.handle(request.url, request.header('user-agent') ?? undefined, request.header('accept-encoding') ?? undefined);
     return { status: reply.status, bytes: new TextEncoder().encode(reply.body), headers: reply.headers };
   };
+}
+
+/** The ECB Data Portal (no real network): the HICP annual-rate series of both areas, invented; every request is recorded and `failWith` makes the next ones fail with that HTTP status. */
+export class FakeEcb {
+  readonly requests: string[] = [];
+  failWith: number | null = null;
+
+  readonly service: FakeService = (request) => {
+    const url = new URL(request.url);
+    if (url.host !== 'data-api.ecb.europa.eu') return undefined;
+    this.requests.push(request.url);
+    if (this.failWith !== null) return { status: this.failWith, json: null };
+    const area = (['U2', 'NL'] as const).find((a) => url.pathname === `/service/data/ICP/${ecbInflationSeriesKey(a)}`);
+    return area === undefined ? { status: 404, json: null } : { status: 200, json: JSON.parse(buildInflationReply(fakeInflationPoints(area))) };
+  };
+
+  /** Requests for one area's series. */
+  to(area: 'U2' | 'NL'): string[] {
+    return this.requests.filter((url) => url.includes(`/ICP/${ecbInflationSeriesKey(area)}?`));
+  }
 }

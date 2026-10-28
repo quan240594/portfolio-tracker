@@ -18,6 +18,7 @@ import { securitiesHandlers } from './securitiesHandlers';
 import { dividendsOverviewHandlers } from './dividendsOverviewHandlers';
 import { growthHandlers } from './growthHandlers';
 import { goalsHandlers } from './goals-handlers';
+import { inflationHandlers } from './inflationHandlers';
 import { classificationHandlers } from './classification-handlers';
 import { calendarHandlers } from './calendarHandlers';
 import { logoHandlers } from './logo-handlers';
@@ -164,6 +165,7 @@ export const handlers: HttpHandler[] = [
 
   ...managementHandlers,
   ...goalsHandlers,
+  ...inflationHandlers,
   ...classificationHandlers,
   ...logoHandlers,
   ...securitiesHandlers,

@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useMemo, useState, type FormEvent } from 'react';
 import type { AnalyticsGoalParams, AnalyticsGoalResponse, GoalScenario } from '@portfolio/shared';
 import { useAnalyticsGoal } from '../../api/analyticsHooks';
 import { QueryBoundary } from '../../components/QueryBoundary';
@@ -9,7 +9,9 @@ import { useTheme } from '../../theme/ThemeProvider';
 import { LOCALE, formatMoney, formatPercent } from '../../lib/format';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
 import { CardGrid } from '../layout/CardGrid';
-import { DEFAULT_GOAL_FORM, parseGoalForm, type GoalField, type GoalFormValues } from './goalForm';
+import { GrowthChoices, YieldChoices } from '../assumptions/AssumptionChoices';
+import { useGoalAssumptions, type AssumptionField, type AssumptionsController } from '../assumptions/useGoalAssumptions';
+import { DEFAULT_GOAL_FORM, GOAL_FIELD_RULES, parseGoalForm, type GoalField, type GoalFormValues } from './goalForm';
 import { PanelHeader } from './TableShell';
 
 const FIELDS: { name: GoalField; label: string; hint?: string }[] = [
@@ -66,18 +68,30 @@ function GoalFieldInput({ name, label, hint, value, error, onChange }: Readonly<
   );
 }
 
+const ASSUMPTION_RANGES = {
+  growth: GOAL_FIELD_RULES.dividendGrowthPct,
+  yield: GOAL_FIELD_RULES.yieldOnNewMoneyPct,
+  inflation: { min: 0, max: 0 },
+};
+
 interface FormProps {
   values: GoalFormValues;
   errors: Partial<Record<GoalField, string>>;
+  assumptions: AssumptionsController;
+  onFieldChange: (name: GoalField, value: string) => void;
   onValuesChange: (values: GoalFormValues) => void;
   onSubmit: (e: FormEvent) => void;
 }
 
-function GoalForm({ values, errors, onValuesChange, onSubmit }: Readonly<FormProps>) {
+function GoalForm({ values, errors, assumptions, onFieldChange, onValuesChange, onSubmit }: Readonly<FormProps>) {
   return (
     <form onSubmit={onSubmit} noValidate className="space-y-3" aria-label="Income goal assumptions">
       {FIELDS.map((f) => (
-        <GoalFieldInput key={f.name} {...f} value={values[f.name]} error={errors[f.name]} onChange={(v) => onValuesChange({ ...values, [f.name]: v })} />
+        <div key={f.name} className="space-y-2">
+          <GoalFieldInput {...f} value={values[f.name]} error={errors[f.name]} onChange={(v) => onFieldChange(f.name, v)} />
+          {f.name === 'dividendGrowthPct' && <GrowthChoices helper={assumptions.growth} />}
+          {f.name === 'yieldOnNewMoneyPct' && <YieldChoices helper={assumptions.yield} />}
+        </div>
       ))}
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={values.reinvestDividends} onChange={(e) => onValuesChange({ ...values, reinvestDividends: e.target.checked })} />
@@ -167,6 +181,12 @@ export function GoalTab() {
   const [errors, setErrors] = useState<Partial<Record<GoalField, string>>>({});
   const { scope, ready } = usePortfolioScope();
   const query = useAnalyticsGoal(scope, params, { enabled: ready });
+  const fill = useCallback((patch: Partial<Record<AssumptionField, string>>) => setValues((v) => ({ ...v, ...patch })), []);
+  const assumptions = useGoalAssumptions({ scope, enabled: ready, values: { ...values, inflationPct: '' }, fill, ranges: ASSUMPTION_RANGES, autoStart: false, withInflation: false });
+  const changeField = (name: GoalField, value: string) => {
+    assumptions.noteEdit(name);
+    setValues({ ...values, [name]: value });
+  };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -185,7 +205,7 @@ export function GoalTab() {
       <CardGrid
         pageId="analytics-goal"
         cards={[
-          { id: 'goal-form', title: 'Assumptions', defaultWidth: 'third', render: () => <GoalForm values={values} errors={errors} onValuesChange={setValues} onSubmit={submit} /> },
+          { id: 'goal-form', title: 'Assumptions', defaultWidth: 'third', render: () => <GoalForm values={values} errors={errors} assumptions={assumptions} onFieldChange={changeField} onValuesChange={setValues} onSubmit={submit} /> },
           {
             id: 'goal-results',
             title: 'Projection',

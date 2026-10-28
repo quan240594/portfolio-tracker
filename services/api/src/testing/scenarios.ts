@@ -1,6 +1,9 @@
 import { createTestSubscriber } from '@portfolio/platform/testing';
 import { MAX_PUSH_DEVICES, drain, sequentially } from '@portfolio/shared';
 import { describe, expect, it } from 'vitest';
+import { FAKE_ECB_LATEST_MONTH } from './inflation-fakes.js';
+
+export { FAKE_ECB_LATEST_MONTH, fakeEcb, fakeInflationPoints, type FakeEcb } from './inflation-fakes.js';
 
 export interface ScenarioResponse {
   status: number;
@@ -201,6 +204,19 @@ export function defineApiScenarios(label: string, target: ApiScenarioTarget): vo
       expect((await call('GET', '/earnings', { query: { limit: '0' } })).status).toBe(400);
       expect((await call('GET', '/earnings/NOT-HELD/2026-10-21')).status).toBe(404);
       expect((await call('POST', '/earnings/NOT-HELD/refresh')).status).toBe(404);
+    });
+
+    it('serves the cached ECB inflation series per area and refuses an unknown area', async () => {
+      const first = await call('GET', '/inflation', { query: { area: 'NL' } });
+      expect(first.status).toBe(200);
+      expect(first.body).toMatchObject({ area: 'NL', series: 'ICP.M.NL.N.000000.4.ANR', latestMonth: FAKE_ECB_LATEST_MONTH, stale: false });
+      expect(first.body.points.length).toBeGreaterThan(300);
+      expect(first.body.points[0]).toEqual({ month: '1999-01', ratePct: expect.any(Number) });
+      // The second answer comes from the cache: the same copy, not a new fetch.
+      expect((await call('GET', '/inflation', { query: { area: 'NL' } })).body.fetchedAt).toBe(first.body.fetchedAt);
+      const euro = await call('GET', '/inflation');
+      expect(euro.body).toMatchObject({ area: 'U2', series: 'ICP.M.U2.N.000000.4.ANR' });
+      expect((await call('GET', '/inflation', { query: { area: 'DE' } })).status).toBe(400);
     });
 
     it('manages dividend notifications: settings, devices and a test push, or reports the feature unavailable', async () => {

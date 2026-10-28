@@ -369,6 +369,8 @@ export class HubCore {
       notify: { repo: new ItemNotificationRepository(items), push: pushConfig(this.config, this.fetchImpl) },
       historySymbols: createHistorySymbolApi({ items, ...(hasPriceService(this.factories) ? { queue: jobs } : {}), guard: this.guard, now: this.now }),
       earnings: createEarningsApi({ items, config: this.config, ai: this.ai, queue: jobs, now: this.now, guard: this.guard }),
+      // One request and one row written per area and month (see docs/architecture.md "Goal assumption helpers").
+      inflation: { items, fetch: (url, init) => this.fetchImpl(url, init) },
       broker: {
         store: new ItemBrokerStore(items),
         credentials: new SecretCredentialStore(secrets, this.config.brokerSecretPrefix),

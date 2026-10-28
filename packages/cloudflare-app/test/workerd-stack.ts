@@ -3,7 +3,7 @@ import { Log, LogLevel, Miniflare, Response as MiniflareResponse } from 'minifla
 import { fileURLToPath } from 'node:url';
 import type { DrainOptions, Stack } from './browser.js';
 import { aiAnswers, secFor } from './earnings-fakes.js';
-import { FakeGithub, FakeLogos, FakePrices, FakePush, FakeTrading212, ORIGIN, OWNER_ID, TEST_CLIENT_ID, TEST_CLIENT_SECRET, TEST_SECRETS_KEY, TEST_SESSION_SECRET, TEST_VAPID, route } from './fakes.js';
+import { FakeEcb, FakeGithub, FakeLogos, FakePrices, FakePush, FakeTrading212, ORIGIN, OWNER_ID, TEST_CLIENT_ID, TEST_CLIENT_SECRET, TEST_SECRETS_KEY, TEST_SESSION_SECRET, TEST_VAPID, route } from './fakes.js';
 import { PINNED_NOW, type SuiteStartOptions } from './suite.js';
 
 const ENTRY = fileURLToPath(new URL('./entry.ts', import.meta.url));
@@ -48,7 +48,8 @@ export async function createWorkerdStack(options: SuiteStartOptions = {}): Promi
   const logos = new FakeLogos();
   const push = new FakePush();
   const sec = secFor(options.earnings);
-  const services = [github.service, trading212.service, sec.service, prices.service, logos.service, push.service];
+  const ecb = new FakeEcb();
+  const services = [github.service, trading212.service, sec.service, prices.service, logos.service, push.service, ecb.service];
   const mf = new Miniflare({
     modules: [{ type: 'ESModule', path: 'worker.mjs', contents: await bundleWorker() }],
     // The Hub logs one JSON line per request; the tests do not need them.
@@ -116,6 +117,7 @@ export async function createWorkerdStack(options: SuiteStartOptions = {}): Promi
     logos,
     push,
     sec,
+    ecb,
     hubState,
     send: async (path, init) => (await mf.dispatchFetch(`${ORIGIN}${path}`, init as never)) as unknown as Response,
     drain: (options) => drain(options),

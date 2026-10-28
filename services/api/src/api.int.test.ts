@@ -8,6 +8,7 @@ import { createHandler } from './lambda/handler.js';
 import { createAwsDeps } from './clients.js';
 import { loadConfig } from './config.js';
 import { apiEvent } from './testing/fakes.js';
+import { fakeEcb } from './testing/inflation-fakes.js';
 import { defineApiScenarios } from './testing/scenarios.js';
 import { LOCALSTACK_ENDPOINT, localAwsConfig, localStackAvailable } from './testing/localstack.js';
 import { seed } from '../scripts/seed.js';
@@ -31,7 +32,7 @@ describe.skipIf(!available)('api against LocalStack', () => {
     AWS_REGION: 'eu-west-1',
     AUTH_MODE: 'demo',
   });
-  const handler = createHandler(() => createAwsDeps(config));
+  const handler = createHandler(() => createAwsDeps(config, fakeEcb().fetch));
   const call = async (...args: Parameters<typeof apiEvent>) => {
     const res = await handler(apiEvent(...args));
     return { status: res.statusCode ?? 500, body: res.body ? JSON.parse(res.body) : undefined };
