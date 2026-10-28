@@ -75,6 +75,11 @@ You need a Cloudflare account on the Free plan and a GitHub account. Every comma
    against the broker quote. A symbol the provider does not know (for example `FWRA.MI`) takes its history from another listing of the same fund (same ISIN and currency; XETRA, Frankfurt, Amsterdam, Paris, Milan, London in
    that order; two EODHD calls, once per ISIN), marked "History from another listing of the same fund". See `docs/architecture.md`, "Chart reconciliation and proxy listings".
 
+   **Earnings dates.** Settings > Diagnostics > Earnings dates (`GET /api/diagnostics/earnings-dates`) shows when the daily calendar job last ran and how it ended (read the provider's calendar, skipped by the budget
+   guard, provider error with its reason, rate-limited), how many rows the provider returned and how many matched, the Alpha Vantage calls used today, and for each held symbol the next date or why there is none.
+   "Refresh earnings dates now" (`POST /api/diagnostics/earnings-dates/refresh`) queues the calendar job once; it is refused within an hour of the last ask and when fewer than 3 Alpha Vantage calls are left
+   today. See `docs/architecture.md`, "Earnings dates diagnostics".
+
    **What to expect from free keys.** The free plans are small (Twelve Data: 8 credits a minute, `/profile` is not included; EODHD: 20 calls a
    day). The price jobs know that: they keep the minute and day usage in the database, remember a "limit reached" answer until the limit resets
    (next minute, or the next UTC midnight) instead of retrying, try a symbol at most 3 times a day, and fetch dividends last. With about 25 holdings

@@ -1,5 +1,5 @@
 import { TICKER_ALIASES, significantWords, type DividendEvent, type StoredEarningsEvent, type StoredSplitEvent } from '@portfolio/shared';
-import type { CorporateActionsSource, EarningsSource } from '@portfolio/platform';
+import type { CorporateActionsSource, EarningsFetchReport, EarningsSource } from '@portfolio/platform';
 import { csvRecords, parseCsv } from '../csv.js';
 import { ProviderError, RateLimitError, SymbolNotFoundError } from '../errors.js';
 import type { HttpClient } from '../http.js';
@@ -18,7 +18,13 @@ import { ALPHAVANTAGE_URL } from './alphavantage.js';
  * | Splits             | EODHD `/splits/{symbol}`                 | 1 call per symbol of the 20 calls/day   |
  * | Dividends (refresh)| EODHD `/div/{symbol}`                    | 1 call per symbol, same budget          |
  */
-const TIME_OF_DAY: Readonly<Record<string, 'BMO' | 'AMC'>> = { 'pre-market': 'BMO', 'post-market': 'AMC' };
+const TIME_OF_DAY: Readonly<Record<string, 'BMO' | 'AMC'>> = { premarket: 'BMO', postmarket: 'AMC' };
+
+/** `Post-Market`, `post market` and `postmarket` are one spelling. */
+const timeOfDayKey = (raw: string | undefined): string => (raw ?? '').toLowerCase().replaceAll(/[^a-z]/g, '');
+
+/** A calendar ticker as the targets spell it: upper case, a dot for the dash or slash of a class share (`BRK-B`, `BRK/B`). */
+const tickerKey = (raw: string | undefined): string => (raw ?? '').trim().toUpperCase().replaceAll(/[-/]/g, '.');
 
 /** Alpha Vantage symbol of a canonical one; null when it has no (US) listing (exchange suffixes and crypto). */
 export function alphaVantageSymbol(symbol: string): string | null {
@@ -103,15 +109,43 @@ export function earningsTargets(symbols: readonly string[], names: ReadonlyMap<s
  * an empty/"None"/malformed estimate is absent and the time of day is `pre-market`, `post-market` or empty.
  */
 export function parseEarningsRows(input: string, targets: EarningsTargets): StoredEarningsEvent[] {
+  return scanEarningsRows(input, targets).events;
+}
+
+/** The dates found in one calendar and how its rows related to the targets: what the status report shows when a date is missing. */
+export interface EarningsScan {
+  events: StoredEarningsEvent[];
+  /** Data rows of the calendar. */
+  rows: number;
+  /** App symbols whose ticker the calendar lists (on any date), sorted. */
+  listed: string[];
+  /** App symbols whose ticker is listed but never for a company of that name, sorted. */
+  unvouched: string[];
+}
+
+/** `parseEarningsRows` with the counts of the answer. */
+export function scanEarningsRows(input: string, targets: EarningsTargets): EarningsScan {
   const body = input.replace(/^\uFEFF/, '');
   if (body.trimStart().startsWith('{')) raiseForJsonBody(body);
   const { header, records } = csvRecords(parseCsv(body));
   if (!header.includes('symbol') || !header.includes('reportDate')) throw new ProviderError('alphavantage: unexpected response for EARNINGS_CALENDAR', { provider: 'alphavantage' });
   const events = new Map<string, StoredEarningsEvent>();
+  const listed = new Set<string>();
+  const vouched = new Set<string>();
   for (const row of records) {
-    for (const event of earningsEvents(row, targets)) events.set(`${event.symbol}\u0000${event.date}`, event);
+    const rowName = (row.name ?? '').trim();
+    const candidates = targets.get(tickerKey(row.symbol)) ?? [];
+    const matched = candidates.filter((target) => vouches(target, rowName));
+    for (const target of candidates) listed.add(target.symbol);
+    for (const target of matched) vouched.add(target.symbol);
+    for (const event of earningsEvents(row, matched, rowName)) events.set(`${event.symbol}\u0000${event.date}`, event);
   }
-  return [...events.keys()].toSorted(byText).map((key) => events.get(key)!);
+  return {
+    events: [...events.keys()].toSorted(byText).map((key) => events.get(key)!),
+    rows: records.length,
+    listed: [...listed].toSorted(byText),
+    unvouched: [...listed].filter((symbol) => !vouched.has(symbol)).toSorted(byText),
+  };
 }
 
 /** `parseEarningsRows` for tickers that are their own app symbols (Alpha Vantage ticker -> symbol), as the Python service reads the calendar. */
@@ -119,11 +153,9 @@ export function parseEarningsCsv(input: string, mapping: ReadonlyMap<string, str
   return parseEarningsRows(input, new Map([...mapping].map(([ticker, symbol]) => [ticker, [{ symbol, via: 'direct' as const }]])));
 }
 
-/** One CSV row as an event per matching app symbol; none for rows of untracked companies and rows without a valid report date. */
-function earningsEvents(row: Record<string, string | undefined>, targets: EarningsTargets): StoredEarningsEvent[] {
+/** One CSV row as an event per vouched app symbol; none for a row without a valid report date. */
+function earningsEvents(row: Record<string, string | undefined>, matched: readonly EarningsTarget[], rowName: string): StoredEarningsEvent[] {
   const date = isoDateOrNull(row.reportDate);
-  const rowName = (row.name ?? '').trim();
-  const matched = (targets.get((row.symbol ?? '').trim().toUpperCase()) ?? []).filter((target) => vouches(target, rowName));
   if (date === null || matched.length === 0) return [];
   const currency = (row.currency ?? '').trim().toUpperCase();
   return matched.map((target) =>
@@ -134,7 +166,7 @@ function earningsEvents(row: Record<string, string | undefined>, targets: Earnin
       fiscalPeriodEnd: isoDateOrNull(row.fiscalDateEnding) ?? undefined,
       epsEstimate: estimate(row.estimate),
       currency: /^[A-Z]{3}$/.test(currency) ? currency : undefined,
-      timeOfDay: ownValue(TIME_OF_DAY, (row.timeOfTheDay ?? '').trim().toLowerCase()) ?? 'unknown',
+      timeOfDay: ownValue(TIME_OF_DAY, timeOfDayKey(row.timeOfTheDay)) ?? 'unknown',
       source: 'alphavantage',
     }),
   );
@@ -157,12 +189,17 @@ export class AlphaVantageEarnings implements EarningsSource {
   constructor(private readonly options: AlphaVantageEarningsOptions) {}
 
   async fetch(symbols: readonly string[], today: string, names?: ReadonlyMap<string, string>): Promise<StoredEarningsEvent[]> {
+    return (await this.fetchReport(symbols, today, names)).events;
+  }
+
+  async fetchReport(symbols: readonly string[], today: string, names?: ReadonlyMap<string, string>): Promise<EarningsFetchReport> {
     const targets = earningsTargets(symbols, names);
-    if (targets.size === 0) return [];
+    if (targets.size === 0) return { events: [], rows: 0, listed: [], unvouched: [] };
     await this.options.quota.consume(1);
     await this.options.bucket.acquire(1);
     const body = await this.options.http.getText(ALPHAVANTAGE_URL, { function: 'EARNINGS_CALENDAR', horizon: this.options.horizon ?? '12month', apikey: this.options.apiKey }, { Accept: 'text/csv, */*' });
-    return parseEarningsRows(body, targets).filter((event) => event.date >= today);
+    const scan = scanEarningsRows(body, targets);
+    return { ...scan, events: scan.events.filter((event) => event.date >= today) };
   }
 }
 

@@ -1,5 +1,5 @@
-import { BudgetGuard, MemoryUsageStore, METRIC_LIMITS, silentLogger, type JobHandler, type JobPayloads, type UsageStore } from '@portfolio/platform';
-import type { TransactionsChangedDetail } from '@portfolio/shared';
+import { BudgetGuard, MemoryItemStore, MemoryUsageStore, METRIC_LIMITS, silentLogger, type JobHandler, type JobPayloads, type UsageStore } from '@portfolio/platform';
+import { parseEarningsRun, type TransactionsChangedDetail } from '@portfolio/shared';
 import { describe, expect, it, vi } from 'vitest';
 import {
   CORE_JOB_FACTORIES,
@@ -265,5 +265,57 @@ describe('the notification job', () => {
     const context = { items: {}, now: () => NOON, config: { push: { allowedHosts: [] }, baseCurrency: 'EUR', origin: 'https://x.test' }, fetch } as unknown as JobContext;
     const job = CORE_JOB_FACTORIES.notifyDividends!(context);
     expect(await job({ payload: { trigger: 'scheduled' } })).toMatchObject({ done: true, result: { skipped: 'not-configured' } });
+  });
+});
+
+describe('the calendar job behind the budget guard', () => {
+  const manual = { trigger: 'manual' } as const;
+
+  it('runs an owner-requested refresh in the warning band, where the daily one gives way', async () => {
+    const { guard, options } = setup();
+    const handler = ran();
+    const job = guardedJob('refreshCalendar', handler as never, options);
+    await use(guard, 70);
+    expect(await job({ payload: prices })).toEqual({ done: true, result: { skipped: 'deferred-by-priority' } });
+    expect(await job({ payload: manual })).toEqual({ done: true, result: 'ran' });
+    await use(guard, 15);
+    expect(await job({ payload: manual })).toEqual({ done: true, result: { skipped: 'blocked' } });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a dropped job to onDropped, and a failure of the report changes nothing', async () => {
+    const { guard, options } = setup();
+    const onDropped = vi.fn(() => Promise.reject(new Error('store down')));
+    const job = guardedJob('refreshCalendar', ran() as never, { ...options, onDropped });
+    expect(await job({ payload: prices })).toEqual({ done: true, result: 'ran' });
+    expect(onDropped).not.toHaveBeenCalled();
+    await use(guard, 70);
+    expect(await job({ payload: prices })).toEqual({ done: true, result: { skipped: 'deferred-by-priority' } });
+    expect(onDropped).toHaveBeenCalledWith('refreshCalendar', prices, expect.objectContaining({ reason: 'deferred-by-priority' }));
+  });
+
+  it('records a dropped calendar run so the Diagnostics page can say why a date is missing, and ignores other dropped jobs', async () => {
+    const { guard } = setup();
+    const items = new MemoryItemStore();
+    const registry = createJobRegistry({ budget: new SubrequestBudget(), now: () => NOON, items } as unknown as JobContext, { guard }, { refreshCalendar: () => ran() as never, refreshPrices: () => ran() as never });
+    await use(guard, 70);
+    await registry.refreshPrices!({ payload: prices });
+    expect(items.snapshot()).toEqual([]);
+    await registry.refreshCalendar!({ payload: prices });
+    const record = parseEarningsRun(items.snapshot().find((item) => item.SK === 'EARNINGS#LASTRUN'));
+    expect(record).toEqual({ at: NOON.toISOString(), trigger: 'scheduled', status: 'skipped', reason: expect.stringContaining('above 60%'), tracked: 0 });
+    expect(items.snapshot().find((item) => item.SK === 'EARNINGS#LASTOK')).toBeUndefined();
+    await use(guard, 15);
+    await registry.refreshCalendar!({ payload: manual });
+    expect(parseEarningsRun(items.snapshot().find((item) => item.SK === 'EARNINGS#LASTRUN'))).toMatchObject({ trigger: 'manual', status: 'skipped', reason: expect.stringContaining('used up') });
+  });
+
+  it('says when the budget ledger could not be read', async () => {
+    const items = new MemoryItemStore();
+    const failing: UsageStore = { ...new MemoryUsageStore(), read: () => Promise.reject(new Error('down')) } as unknown as UsageStore;
+    const { guard } = setup(failing);
+    const registry = createJobRegistry({ budget: new SubrequestBudget(), now: () => NOON, items } as unknown as JobContext, { guard }, { refreshCalendar: () => ran() as never });
+    await registry.refreshCalendar!({ payload: prices });
+    expect(parseEarningsRun(items.snapshot().find((item) => item.SK === 'EARNINGS#LASTRUN'))?.reason).toContain('ledger');
   });
 });

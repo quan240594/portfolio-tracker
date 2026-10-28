@@ -1,5 +1,5 @@
 import { cond, queryAll, type BatchOp, type Item, type ItemStore } from '@portfolio/platform';
-import { CALENDAR_ENTITY, ENTITY, HISTORY_OVERRIDE_STATUSES, calendarKeys, isProfileSource, keys, majorDividend, majorEod, majorQuote, mergeProfile, minorUnit, sourceOf, type DividendEvent, type EodPrice, type FxDay, type FxRates, type HistoryOverrideStatus, type InstrumentProfile, type ProfileSource, type Quote, type StoredEarningsEvent, type StoredSplitEvent } from '@portfolio/shared';
+import { CALENDAR_ENTITY, EARNINGS_RUN_ENTITY, ENTITY, earningsRunKeys, HISTORY_OVERRIDE_STATUSES, calendarKeys, isProfileSource, keys, majorDividend, majorEod, majorQuote, mergeProfile, minorUnit, sourceOf, type DividendEvent, type EarningsRunRecord, type EodPrice, type FxDay, type FxRates, type HistoryOverrideStatus, type InstrumentProfile, type ProfileSource, type Quote, type StoredEarningsEvent, type StoredSplitEvent } from '@portfolio/shared';
 import { BlockBook, StoreQuotaLedger, type ProviderBlock } from './limits.js';
 import { profileDetails } from './models.js';
 import { byText, definedOnly } from './parse.js';
@@ -409,6 +409,13 @@ export class PriceRepository {
     return ops.length;
   }
 
+  /** What a calendar run did to the earnings dates: `EARNINGS#LASTRUN` always, `EARNINGS#LASTOK` too when it read the provider's calendar. */
+  async putEarningsRun(run: EarningsRunRecord): Promise<void> {
+    const base = { entityType: EARNINGS_RUN_ENTITY, ...definedOnly(run) };
+    const keysOf = run.status === 'ok' ? [earningsRunKeys.last, earningsRunKeys.lastOk] : [earningsRunKeys.last];
+    await this.store.batchWrite(keysOf.map((key): BatchOp => ({ type: 'put', item: { ...key, ...base } })));
+  }
+
   async putSplits(events: readonly StoredSplitEvent[], updatedAt: string): Promise<number> {
     const ops = putOps(events.map((event) => splitItem(event, updatedAt)));
     await this.store.batchWrite(ops);
@@ -450,6 +457,16 @@ export class PriceRepository {
    */
   consumeBudget(provider: string, day: string, calls: number, limit: number, token?: string): Promise<boolean> {
     return new StoreQuotaLedger(this.store).consume(budgetKey(provider), CALENDAR_BUDGET_ENTITY, day, calls, limit, token);
+  }
+
+  /** Calls of `provider` used on the UTC `day`: all of the app's (`USAGE`), and the ones the calendar's own budget counted. */
+  async callsUsedOn(provider: string, day: string): Promise<{ used: number; calendarUsed: number }> {
+    const found = await this.store.getMany([{ PK: 'USAGE', SK: provider }, budgetKey(provider)]);
+    const usedOn = (key: { PK: string; SK: string }): number => {
+      const item = found.find((candidate) => candidate.PK === key.PK && candidate.SK === key.SK);
+      return item?.day === day && typeof item.used === 'number' ? item.used : 0;
+    };
+    return { used: usedOn({ PK: 'USAGE', SK: provider }), calendarUsed: usedOn(budgetKey(provider)) };
   }
 
   /** Sets marker attributes without touching the others. */

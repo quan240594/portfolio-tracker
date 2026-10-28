@@ -178,6 +178,34 @@ describe('ItemRepository market data', () => {
     });
     expect(await repo.getCalendarEvents([], '2026-06-01', '2026-12-31')).toEqual({ earnings: [], splits: [] });
   });
+
+  it('getEarningsDatesData reads the upcoming dates, the tracked-ticker items and the two run records of the calendar job', async () => {
+    const { items, repo } = setup();
+    const record = { at: '2026-10-28T04:30:00.000Z', trigger: 'scheduled', status: 'ok', reason: '', tracked: 2, rows: 10, events: 1, matchedSymbols: ['AAPL'] };
+    await items.batchWrite([
+      { type: 'put', item: { PK: 'TICKER#AAPL', SK: 'EARN#2026-10-20', entityType: 'EARNINGS_EVENT', symbol: 'AAPL', date: '2026-10-20', source: 'alphavantage' } },
+      { type: 'put', item: { PK: 'TICKER#AAPL', SK: 'EARN#2026-10-29', entityType: 'EARNINGS_EVENT', symbol: 'AAPL', date: '2026-10-29', source: 'alphavantage' } },
+      { type: 'put', item: { PK: 'TRACKED', SK: 'TICKER#AAPL', entityType: 'TRACKED_TICKER', symbol: 'AAPL', createdAt: '2026-01-02T10:00:00.000Z' } },
+      { type: 'put', item: { PK: 'TRACKED', SK: 'TICKER#MSFT', entityType: 'TRACKED_TICKER', symbol: 'MSFT' } },
+      { type: 'put', item: { PK: 'CALENDAR', SK: 'EARNINGS#LASTRUN', entityType: 'EARNINGS_RUN', ...record, status: 'failed', reason: 'boom' } },
+      { type: 'put', item: { PK: 'CALENDAR', SK: 'EARNINGS#LASTOK', entityType: 'EARNINGS_RUN', ...record } },
+    ]);
+    const data = await repo.getEarningsDatesData(['AAPL', 'MSFT', 'GOOGL'], '2026-10-28');
+    expect(data.upcoming).toEqual([{ symbol: 'AAPL', date: '2026-10-29', source: 'alphavantage' }]);
+    expect(data.tracked).toEqual(
+      new Map([
+        ['AAPL', '2026-01-02T10:00:00.000Z'],
+        ['MSFT', null],
+      ]),
+    );
+    expect(data.run).toMatchObject({ status: 'failed', reason: 'boom' });
+    expect(data.lastOk).toMatchObject({ status: 'ok', rows: 10, matchedSymbols: ['AAPL'] });
+  });
+
+  it('getEarningsDatesData without symbols or records is empty', async () => {
+    const { repo } = setup();
+    expect(await repo.getEarningsDatesData([], '2026-10-28')).toEqual({ tracked: new Map(), upcoming: [], run: null, lastOk: null });
+  });
 });
 
 describe('ItemRepository registry and imports', () => {

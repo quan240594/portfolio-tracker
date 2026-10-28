@@ -36,7 +36,17 @@ from .secrets import get_api_key
 from .symbols import currency_for, has_exchange_suffix, is_crypto
 
 ALPHAVANTAGE_URL = "https://www.alphavantage.co/query"
-TIME_OF_DAY = {"pre-market": "BMO", "post-market": "AMC"}
+TIME_OF_DAY = {"premarket": "BMO", "postmarket": "AMC"}
+
+
+def _time_of_day_key(raw: str | None) -> str:
+    """`Post-Market`, `post market` and `postmarket` are one spelling."""
+    return "".join(ch for ch in (raw or "").lower() if ch.isalpha())
+
+
+def _ticker_key(raw: str | None) -> str:
+    """A calendar ticker as the mapping spells it: upper case, a dot for a class share's dash or slash."""
+    return (raw or "").strip().upper().replace("-", ".").replace("/", ".")
 
 
 class EarningsSource(Protocol):
@@ -133,7 +143,7 @@ def parse_earnings_csv(text: str, mapping: dict[str, str]) -> list[EarningsEvent
         )
     out: dict[tuple[str, str], EarningsEvent] = {}
     for row in reader:
-        canonical = mapping.get((row.get("symbol") or "").strip().upper())
+        canonical = mapping.get(_ticker_key(row.get("symbol")))
         report = _iso_date(row.get("reportDate"))
         if canonical is None or report is None:
             continue
@@ -145,7 +155,7 @@ def parse_earnings_csv(text: str, mapping: dict[str, str]) -> list[EarningsEvent
             fiscal_period_end=_iso_date(row.get("fiscalDateEnding")),
             eps_estimate=_eps(row.get("estimate")),
             currency=currency if len(currency) == 3 and currency.isalpha() else None,
-            time_of_day=TIME_OF_DAY.get((row.get("timeOfTheDay") or "").strip().lower(), "unknown"),
+            time_of_day=TIME_OF_DAY.get(_time_of_day_key(row.get("timeOfTheDay")), "unknown"),
             source="alphavantage",
         )
     return [out[k] for k in sorted(out)]

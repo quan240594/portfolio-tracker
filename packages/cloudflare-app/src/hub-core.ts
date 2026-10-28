@@ -25,6 +25,7 @@ import { parseImportObjectKey, type PriceHistoryCoverage } from '@portfolio/shar
 import { readBodyBounded } from './body.js';
 import type { HubConfig } from './config.js';
 import { createHistorySymbolApi } from './history-symbol.js';
+import { createCalendarDatesApi } from './calendar-dates.js';
 import { createEarningsApi, earningsConfigured, neuronMeter } from './earnings.js';
 import { createHubLogoRoute, logoLookupGate } from './logos.js';
 import { alarmReport, finishOf, limitOf, triggerOf, type AlarmInfo } from './diagnostics.js';
@@ -368,6 +369,8 @@ export class HubCore {
       files,
       notify: { repo: new ItemNotificationRepository(items), push: pushConfig(this.config, this.fetchImpl) },
       historySymbols: createHistorySymbolApi({ items, ...(hasPriceService(this.factories) ? { queue: jobs } : {}), guard: this.guard, now: this.now }),
+      // The earnings dates section of Settings > Diagnostics: the Alpha Vantage allowance and the "Refresh earnings dates now" button.
+      ...(hasPriceService(this.factories) ? { calendarDates: createCalendarDatesApi({ items, config: this.config.prices, queue: jobs, now: this.now }) } : {}),
       earnings: createEarningsApi({ items, config: this.config, ai: this.ai, queue: jobs, now: this.now, guard: this.guard }),
       // One request and one row written per area and month (see docs/architecture.md "Goal assumption helpers").
       inflation: { items, fetch: (url, init) => this.fetchImpl(url, init) },

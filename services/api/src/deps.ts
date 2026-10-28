@@ -1,5 +1,5 @@
 import type { EventPublisher, FileStore, ItemStore } from '@portfolio/platform';
-import type { EarningsBackfillResponse, EarningsRefreshResponse, EarningsStatusResponse } from '@portfolio/shared';
+import type { EarningsBackfillResponse, EarningsRefreshResponse, EarningsStatusResponse, ProviderBudgetReport, RefreshEarningsDatesResponse, RefreshRefusal, RefreshReport } from '@portfolio/shared';
 import type { BrokerDeps } from './broker-deps.js';
 import type { Config } from './config.js';
 import type { InflationFetch } from './inflation/source.js';
@@ -15,6 +15,14 @@ export interface EarningsDeps {
   refresh(symbol: string, eligible: boolean): Promise<EarningsRefreshResponse>;
   /** "Fetch all now": re-arms the backfill of the last quarters of every holding; refuses (without queuing) when it was asked for less than an hour ago. */
   backfill(): Promise<EarningsBackfillResponse>;
+}
+
+/** What the Diagnostics "Earnings dates" section needs of the deployment: the provider's allowance and the manual refresh (the Cloudflare app); the AWS stack has neither and its report says so. */
+export interface CalendarDatesDeps {
+  /** The Alpha Vantage allowance of the day (null when it cannot be read) and whether a manual refresh would be queued now. */
+  status(): Promise<{ budget: ProviderBudgetReport | null; refresh: RefreshReport }>;
+  /** Queues the calendar job once; refuses (without queuing) when it was asked for less than an hour ago or the allowance of the day is nearly used. */
+  refresh(): Promise<RefreshEarningsDatesResponse | { accepted: false; reason: RefreshRefusal; message: string; retryAfterSeconds?: number }>;
 }
 
 /**
@@ -45,6 +53,8 @@ export interface Deps {
   notify?: NotifyDeps;
   /** Earnings summaries (status and refresh); routes answer `available: false` when absent. */
   earnings?: EarningsDeps;
+  /** Earnings dates diagnostics (provider allowance and manual refresh); the report answers without them, the refresh route answers 404. */
+  calendarDates?: CalendarDatesDeps;
   /** The price history symbol override reaching the price jobs; absent = the field is only stored. */
   historySymbols?: HistorySymbolDeps;
   /** ECB inflation series (`GET /inflation`); the route answers 503 when absent. */

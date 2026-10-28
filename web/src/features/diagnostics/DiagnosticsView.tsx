@@ -4,8 +4,10 @@ import { ErrorState } from '../../components/ErrorState';
 import { PageHeader } from '../../components/Layout';
 import { LoadingRegion, Skeleton } from '../../components/Skeleton';
 import { CardGrid } from '../layout/CardGrid';
+import { EarningsDatesCard } from './EarningsDatesCard';
 import { PriceCoverageCard } from './PriceCoverageCard';
 import { ValuationReportCard } from './ValuationReportCard';
+import { useEarningsDates, type EarningsDatesResult } from './useEarningsDates';
 import { usePriceCoverage, type PriceCoverageResult } from './usePriceCoverage';
 import { jobLine, formatDuration, formatInstant, retryLabel, RUN_STATUS_LABELS, statusOf, type RunStatus } from './runFormat';
 import { useAlarmDiagnostics } from './useAlarmDiagnostics';
@@ -170,13 +172,31 @@ function CoverageSlot({ prices }: Readonly<{ prices: PriceCoverageResult }>) {
   );
 }
 
-function Loaded({ report, prices }: Readonly<{ report: AlarmDiagnosticsReport; prices: PriceCoverageResult }>) {
+/** The earnings dates card; nothing where the backend has no such report, a short message when it could not be read. */
+function EarningsDatesSlot({ earnings }: Readonly<{ earnings: EarningsDatesResult }>) {
+  if (earnings.report) return <EarningsDatesCard report={earnings.report} earnings={earnings} />;
+  if (earnings.availability !== 'error') return null;
+  return (
+    <section id="earnings-dates" aria-labelledby="earnings-dates-error" className="card space-y-2 p-4">
+      <h2 id="earnings-dates-error" className="text-base font-semibold">
+        Earnings dates
+      </h2>
+      <p className="text-sm">The earnings dates could not be read.</p>
+      <button type="button" className="btn-secondary" onClick={earnings.refetch}>
+        Try again
+      </button>
+    </section>
+  );
+}
+
+function Loaded({ report, prices, earnings }: Readonly<{ report: AlarmDiagnosticsReport; prices: PriceCoverageResult; earnings: EarningsDatesResult }>) {
   return (
     <div className="space-y-6">
       <CardGrid
         pageId="diagnostics"
         cards={[
           { id: 'price-coverage', title: 'Price data coverage', defaultWidth: 'full', render: () => <CoverageSlot prices={prices} /> },
+          { id: 'earnings-dates', title: 'Earnings dates', defaultWidth: 'full', render: () => <EarningsDatesSlot earnings={earnings} /> },
           { id: 'valuation-report', title: 'Valuation report', defaultWidth: 'full', render: () => <ValuationReportCard /> },
           { id: 'alarm-summary', title: 'Last 24 hours', defaultWidth: 'full', render: () => <Summary report={report} /> },
           { id: 'alarm-runs', title: 'Alarm runs', defaultWidth: 'full', render: () => <Runs runs={report.runs} /> },
@@ -198,10 +218,11 @@ function Loaded({ report, prices }: Readonly<{ report: AlarmDiagnosticsReport; p
 export function DiagnosticsView() {
   const diagnostics = useAlarmDiagnostics();
   const prices = usePriceCoverage();
+  const earnings = useEarningsDates();
   let body: React.ReactNode;
   if (diagnostics.availability === 'not-exposed') body = <EmptyState title="Diagnostics are not available" description="This deployment does not keep an alarm log or price coverage details." />;
   else if (diagnostics.availability === 'error') body = <ErrorState error={diagnostics.error} onRetry={diagnostics.refetch} />;
-  else if (diagnostics.report) body = <Loaded report={diagnostics.report} prices={prices} />;
+  else if (diagnostics.report) body = <Loaded report={diagnostics.report} prices={prices} earnings={earnings} />;
   else {
     body = (
       <LoadingRegion label="Loading diagnostics">
@@ -216,15 +237,16 @@ export function DiagnosticsView() {
       onClick={() => {
         diagnostics.refetch();
         prices.refetch();
+        earnings.refetch();
       }}
-      disabled={diagnostics.isFetching || prices.isFetching}
+      disabled={diagnostics.isFetching || prices.isFetching || earnings.isFetching}
     >
-      {diagnostics.isFetching || prices.isFetching ? 'Refreshing…' : 'Refresh'}
+      {diagnostics.isFetching || prices.isFetching || earnings.isFetching ? 'Refreshing…' : 'Refresh'}
     </button>
   );
   return (
     <>
-      <PageHeader title="Diagnostics" description="What the background alarm of this deployment did lately, and how much price history is stored." actions={diagnostics.availability === 'ready' ? refresh : undefined} />
+      <PageHeader title="Diagnostics" description="What the background alarm of this deployment did lately, how much price history is stored, and where the earnings dates come from." actions={diagnostics.availability === 'ready' ? refresh : undefined} />
       {body}
     </>
   );

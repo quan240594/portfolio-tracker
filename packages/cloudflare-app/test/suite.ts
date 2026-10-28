@@ -578,6 +578,16 @@ export function defineAppSuite(label: string, start: StartStack): void {
         const history = (await call('GET', '/prices/status')).body.history;
         expect(history.symbols).toHaveLength(1);
         expect(history.symbols[0]).toMatchObject({ symbol: 'AAPL', name: 'AAPL', provider: 'twelvedata', eodRows: 0, historyState: 'missing', reason: 'No provider key for this exchange', firstTransaction: '2026-01-05' });
+        // The earnings dates section says why there is no date: the calendar job ran and found no Alpha Vantage key; a refresh would be pointless.
+        await stack.seed([{ PK: 'TRACKED', SK: 'TICKER#AAPL', entityType: 'TRACKED_TICKER', symbol: 'AAPL', createdAt: '2020-01-01T00:00:00.000Z' }]);
+        const dates = await call('GET', '/diagnostics/earnings-dates');
+        expect(dates.status).toBe(200);
+        expect(dates.body).toMatchObject({ held: 1, withDate: 0, lastRun: { status: 'no-provider', trigger: 'scheduled' }, lastSuccess: null, budget: { provider: 'Alpha Vantage', used: 0, limit: 25 }, refresh: { available: false } });
+        expect(dates.body.symbols[0]).toMatchObject({ symbol: 'AAPL', next: null, reasonCode: 'no-provider' });
+        const refresh = await call('POST', '/diagnostics/earnings-dates/refresh');
+        expect(refresh.status).toBe(503);
+        expect(refresh.body.error.code).toBe('NOT_CONFIGURED');
+        expect((await new Browser(stack).request('/api/diagnostics/earnings-dates')).status).toBe(401);
         expect((await owner.request('/api/usage')).status).toBe(200);
       } finally {
         await stack.dispose();

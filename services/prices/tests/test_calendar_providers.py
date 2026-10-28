@@ -120,6 +120,23 @@ def test_parse_earnings_csv_header_only_is_empty() -> None:
     assert cp.parse_earnings_csv("symbol,name,reportDate\n", MAPPING) == []
 
 
+def test_parse_earnings_csv_finds_the_alphabet_report_dated_today() -> None:
+    text = "\r\n".join(
+        [
+            "symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay",
+            "GOOG,Alphabet Inc - Class C,2026-10-28,2026-09-30,2.31,USD,post-market",
+            "GOOGL,Alphabet Inc - Class A,2026-10-28,2026-09-30,2.31,USD,postmarket",
+            "brk-b,Berkshire Hathaway Inc,2026-11-01,2026-09-30,None,USD,",
+            "",
+        ]
+    )
+    events = cp.parse_earnings_csv(text, {"GOOGL": "GOOGL", "BRK.B": "BRK-B"})
+    assert [(e.symbol, e.date, e.time_of_day) for e in events] == [
+        ("BRK-B", "2026-11-01", "unknown"),
+        ("GOOGL", "2026-10-28", "AMC"),
+    ]
+
+
 @pytest.mark.parametrize(
     ("body", "error"),
     [

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 import uuid
 from dataclasses import dataclass
@@ -81,8 +82,41 @@ def calendar_refresh(event: dict[str, Any] | None, context: Any) -> dict[str, An
 # --------------------------------------------------------------------------- earnings
 
 
+MAX_RUN_SYMBOLS = 300
+_URL = re.compile(r"https?://\S+")
+_SECRET = re.compile(r"\b(?:api_?key|apikey|token|secret|key)=\S+", re.IGNORECASE)
+_LONG_TOKEN = re.compile(r"[A-Za-z0-9_-]{24,}")
+
+
+def _safe_reason(text: str, fallback: str) -> str:
+    """One line without URLs or tokens, at most 120 characters (same rule as `sanitizeAttemptError`)."""
+    clean = _LONG_TOKEN.sub("[redacted]", _SECRET.sub("[redacted]", _URL.sub("[url]", text)))
+    clean = " ".join(clean.split())
+    if not clean:
+        return fallback
+    return clean if len(clean) <= 120 else clean[:119] + "\u2026"
+
+
+def _record_earnings_run(deps: CalendarDeps, run: dict[str, Any]) -> None:
+    try:
+        deps.crepo.put_earnings_run(run)
+    except (ClientError, BotoCoreError) as exc:
+        log.warning("could not record the earnings run", extra={"error": str(exc)})
+
+
 def _refresh_earnings(deps: CalendarDeps, symbols: list[str], today: date, stamp: str) -> dict[str, Any]:
-    """One provider call lists the upcoming earnings of every company; only tracked tickers are stored."""
+    """One provider call lists the upcoming earnings of every company; only tracked tickers are stored.
+    The outcome is recorded for Settings > Diagnostics (see `put_earnings_run`)."""
+    run: dict[str, Any] = {"at": stamp, "trigger": "scheduled", "reason": "", "tracked": len(symbols)}
+    summary = _attempt_earnings(deps, symbols, today, stamp, run)
+    run["status"] = summary["status"]
+    _record_earnings_run(deps, run)
+    return summary
+
+
+def _attempt_earnings(
+    deps: CalendarDeps, symbols: list[str], today: date, stamp: str, run: dict[str, Any]
+) -> dict[str, Any]:
     source = deps.earnings
     if source is None:
         return {"status": "no-provider"}
@@ -101,10 +135,14 @@ def _refresh_earnings(deps: CalendarDeps, symbols: list[str], today: date, stamp
         stale = _drop_moved_reports(deps, events, day)
     except (ProviderError, ClientError, BotoCoreError) as exc:
         log.warning("earnings refresh failed", extra={"provider": source.name, "error": str(exc)})
-        return {"status": "failed", "error": type(exc).__name__}
+        status = "rate-limited" if isinstance(exc, RateLimitError) else "failed"
+        run["reason"] = _safe_reason(str(exc), type(exc).__name__)
+        return {"status": status, "error": type(exc).__name__}
+    matched = sorted({e.symbol for e in events})
+    run.update({"events": written, "matchedSymbols": matched[:MAX_RUN_SYMBOLS]})
     return {
         "status": "ok",
-        "symbols": len({e.symbol for e in events}),
+        "symbols": len(matched),
         "events": written,
         "staleDeleted": stale,
     }

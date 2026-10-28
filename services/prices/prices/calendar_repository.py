@@ -12,9 +12,13 @@ from botocore.exceptions import ClientError
 
 from . import aws
 from .calendar_models import (
+    BUDGET_PK,
     EARNINGS_PREFIX,
+    EARNINGS_RUN_LAST_SK,
+    EARNINGS_RUN_OK_SK,
     ENTITY_CALENDAR_BUDGET,
     ENTITY_CALENDAR_STATE,
+    ENTITY_EARNINGS_RUN,
     EarningsEvent,
     SplitEvent,
     budget_key,
@@ -52,6 +56,13 @@ class CalendarRepository:
     def put_earnings(self, events: Iterable[EarningsEvent], updated_at: str) -> int:
         """Idempotent: an event is keyed by symbol and report date, so re-runs overwrite the same items."""
         return self._batch_put(earnings_item(e, updated_at) for e in events)
+
+    def put_earnings_run(self, run: dict[str, Any]) -> None:
+        """What a calendar run did to the earnings dates, for Settings > Diagnostics: `EARNINGS#LASTRUN`
+        always, `EARNINGS#LASTOK` too when it read the provider's calendar (the Cloudflare job's record)."""
+        sort_keys = [EARNINGS_RUN_LAST_SK] + ([EARNINGS_RUN_OK_SK] if run.get("status") == "ok" else [])
+        items = ({"PK": BUDGET_PK, "SK": sk, "entityType": ENTITY_EARNINGS_RUN, **run} for sk in sort_keys)
+        self._batch_put(items)
 
     def put_splits(self, events: Iterable[SplitEvent], updated_at: str) -> int:
         return self._batch_put(split_item(e, updated_at) for e in events)
