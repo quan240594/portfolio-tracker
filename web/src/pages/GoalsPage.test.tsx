@@ -374,6 +374,31 @@ describe('GoalsPage', () => {
     expect(lines.length).toBeGreaterThan(30);
   });
 
+  it('lays the page out as the form (a third) and the results (two thirds) cards', async () => {
+    await openGoals();
+    const cards = [...document.querySelectorAll<HTMLElement>('[data-card-id]')];
+    expect(cards.map((card) => [card.dataset.cardId, card.dataset.width])).toEqual([
+      ['goal-form', 'third'],
+      ['goal-results', 'twothirds'],
+    ]);
+    expect(within(cards[0]!).getByRole('form', { name: 'Goal settings' })).toBeInTheDocument();
+    expect(within(cards[1]!).getByRole('list', { name: 'Insights' })).toBeInTheDocument();
+  });
+
+  it('keeps typed values when the form card is hidden and shown again', async () => {
+    const user = await openGoals();
+    await user.clear(targetInput());
+    await user.type(targetInput(), '36000');
+    await user.click(screen.getByRole('button', { name: 'Customize layout' }));
+    await user.click(screen.getByRole('button', { name: 'Hide Goal settings' }));
+    expect(screen.queryByRole('form', { name: 'Goal settings' })).not.toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'Insights' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Show Goal settings' }));
+    expect(targetInput()).toHaveValue('36000');
+    await user.click(screen.getByRole('button', { name: 'Reset to default' }));
+  });
+
   it('is reachable from the main navigation', async () => {
     const user = userEvent.setup();
     renderApp('/');

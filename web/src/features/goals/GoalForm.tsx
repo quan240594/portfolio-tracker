@@ -184,7 +184,7 @@ export function GoalForm(props: Readonly<GoalFormProps>) {
   );
 
   return (
-    <form onSubmit={submit} noValidate className="card space-y-4 p-4" aria-label="Goal settings">
+    <form onSubmit={submit} noValidate className="card space-y-4 self-start p-4" aria-label="Goal settings">
       <GoalTypeControl value={values.goalType} onChange={changeType} />
       {field('targetAmount', isValue ? 'Target portfolio value (€)' : 'Target annual passive income (€)', { hint: settings ? targetHint(settings, today, currency) : undefined })}
       <YearSelect value={values.targetYear} today={today} error={errors.targetYear} onChange={(v) => setField('targetYear', v)} />

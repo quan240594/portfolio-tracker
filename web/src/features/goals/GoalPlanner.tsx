@@ -1,9 +1,10 @@
 import { useCallback, useMemo, useState } from 'react';
-import { MAX_GOAL_RATE_PCT, type GoalResponse, type GoalSettings } from '@portfolio/shared';
+import { MAX_GOAL_RATE_PCT, type GoalProjection, type GoalResponse, type GoalSettings } from '@portfolio/shared';
 import { errorMessage } from '../../api/client';
 import { useGoalPreview, useSaveGoal } from '../../api/goalsHooks';
 import { useGoalAssumptions, type AssumptionField } from '../assumptions/useGoalAssumptions';
 import { GoalForm } from './GoalForm';
+import { CardGrid, type CardDefinition } from '../layout/CardGrid';
 import { GoalResults } from './GoalResults';
 import { apiFieldErrors, parseGoalForm, sameSettings, settingsToForm, type GoalField, type GoalFieldErrors, type GoalFormValues } from './goalFormModel';
 import { useDebouncedValue } from './useDebouncedValue';
@@ -16,6 +17,23 @@ const ASSUMPTION_RANGES = { growth: RATE_RANGE, yield: RATE_RANGE, inflation: RA
 function statusOf(saved: boolean, dirty: boolean): string {
   if (dirty) return saved ? 'Unsaved changes' : 'Not saved yet';
   return saved ? 'Saved' : '';
+}
+
+interface ResultsPanelProps {
+  projection: GoalProjection;
+  showPreview: boolean;
+  previewError?: string;
+  recalculating: boolean;
+}
+
+function ResultsPanel({ projection, showPreview, previewError, recalculating }: Readonly<ResultsPanelProps>) {
+  return (
+    <div className={`space-y-4 transition-opacity ${recalculating ? 'opacity-60' : ''}`}>
+      {showPreview && <output className="block text-sm text-amber-800 dark:text-amber-200">Preview of unsaved changes. Choose “Save and calculate” to keep them.</output>}
+      {previewError !== undefined && <p role="alert" className="text-sm text-red-600 dark:text-red-400">Could not calculate the preview: {previewError}</p>}
+      <GoalResults projection={projection} />
+    </div>
+  );
 }
 
 interface Props {
@@ -63,31 +81,47 @@ export function GoalPlanner({ saved, scope, resetting, resetError, onReset }: Re
     if (settings) save.mutate(settings, { onError: (err) => setServerErrors(apiFieldErrors(err)) });
   };
 
-  return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[22rem_minmax(0,1fr)] lg:items-start">
-      <GoalForm
-        values={values}
-        errors={shownErrors}
-        settings={settings}
-        today={today}
-        currency={projection.baseCurrency}
-        portfolioYieldPct={saved.projection.start.yieldPct}
-        assumptions={assumptions}
-        saved={saved.saved}
-        status={statusOf(saved.saved, dirty)}
-        saving={save.isPending}
-        resetting={resetting}
-        submitError={save.isError ? errorMessage(save.error) : resetError}
-        onChange={change}
-        onBlurField={blur}
-        onSubmit={submit}
-        onReset={onReset}
-      />
-      <div className={`space-y-4 transition-opacity ${recalculating ? 'opacity-60' : ''}`}>
-        {showPreview && <output className="block text-sm text-amber-800 dark:text-amber-200">Preview of unsaved changes. Choose “Save and calculate” to keep them.</output>}
-        {preview.isError && dirtyKey !== null && <p role="alert" className="text-sm text-red-600 dark:text-red-400">Could not calculate the preview: {errorMessage(preview.error)}</p>}
-        <GoalResults projection={projection} />
-      </div>
-    </div>
-  );
+  const cards: CardDefinition[] = [
+    {
+      id: 'goal-form',
+      title: 'Goal settings',
+      defaultWidth: 'third',
+      render: () => (
+        <GoalForm
+          values={values}
+          errors={shownErrors}
+          settings={settings}
+          today={today}
+          currency={projection.baseCurrency}
+          portfolioYieldPct={saved.projection.start.yieldPct}
+          assumptions={assumptions}
+          saved={saved.saved}
+          status={statusOf(saved.saved, dirty)}
+          saving={save.isPending}
+          resetting={resetting}
+          submitError={save.isError ? errorMessage(save.error) : resetError}
+          onChange={change}
+          onBlurField={blur}
+          onSubmit={submit}
+          onReset={onReset}
+        />
+      ),
+    },
+    {
+      id: 'goal-results',
+      title: 'Projection',
+      defaultWidth: 'twothirds',
+      render: () => (
+        <ResultsPanel
+          projection={projection}
+          showPreview={showPreview}
+          previewError={dirtyKey !== null && preview.isError ? errorMessage(preview.error) : undefined}
+          recalculating={recalculating}
+        />
+      ),
+    },
+  ];
+
+  // The form values, the touched fields and the assumption helpers live here, above the cards: hiding or moving a card never loses them.
+  return <CardGrid pageId="goals" cards={cards} />;
 }

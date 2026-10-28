@@ -3828,7 +3828,7 @@ A card that depends on state shared with another card must keep that state in th
 
 ### Phase 2a: the pages on the grid
 
-Converted: holdings, dividends, calendar, earnings, transactions, rebalance, assets, watchlist, brokers, notifications, diagnostics, every tab of analytics and of asset detail. **Not yet** goals (phase 2b, after the branches that edit it have merged); the dashboard follows in "Phase 2b: the dashboard" below.
+Converted: holdings, dividends, calendar, earnings, transactions, rebalance, assets, watchlist, brokers, notifications, diagnostics, every tab of analytics and of asset detail. The dashboard and goals followed in phase 2b, so every page is on the grid.
 With the default layout a page renders the same elements in the same DOM order as before (each page's test asserts the order of `[data-card-id]`), so existing tests and e2e specs run unchanged.
 
 - **Switch.** `PageHeader` always renders an actions area (`data-page-header-actions`); `CardGrid` portals its "Customize layout" button into it (asset detail has its own header and provides the same attribute). Without a header the button sits above the grid. Outside editing the grid adds nothing else to the page; while editing it shows the bar (reset, hidden cards, save state).
@@ -3857,6 +3857,7 @@ With the default layout a page renders the same elements in the same DOM order a
 | analytics-benchmark | `benchmark-chart`, `benchmark-stats`: full |
 | analytics-dividends | `year-chart`, `month-chart`, `year-table`, `per-share-table`: half |
 | analytics-goal | `goal-form`: third, `goal-results`: twothirds |
+| goals | `goal-form`: third, `goal-results`: twothirds |
 | asset-detail-overview | `price-history`: twothirds, `stats`: third, `latest-earnings`, `positions`, `about`: full |
 | asset-detail-dividends | `div-kpis`, `div-per-year`: full, `div-history`, `div-received`: half |
 
@@ -3889,6 +3890,13 @@ The default layout has the same DOM order and relative widths as before; `CardGr
 | `total-return-note` | Total return note | full |
 
 Tests: `web/src/pages/DashboardLayout.test.tsx` (order, widths, move/hide with the toggle, failed summary, empty state) and `web/e2e/dashboard-layout.spec.ts` (customize, move a KPI card, reload, hide, reset); `web/e2e/layout-widths.spec.ts` also covers `/` (KPI amounts on one line at 1024-1280 px, also in a wide fallback font, and no sideways scrolling).
+
+### Goals page on the grid
+
+`/goals` (layout id `goals`) has two cards: `goal-form` (third, the settings form with the dividend growth, yield and inflation helpers) and `goal-results` (twothirds: verdict and summary, insights, chart, year table, parameters). The old fixed 22 rem form column is now a third of the grid; everything else (DOM order, spacing `gap-6`, the form not stretching to the height of the results via `self-start`) is as before.
+The results stay one card on purpose: with the form column taller than its neighbour, separate verdict/chart/table cards would be placed in new grid rows and leave a hole under the form in the default layout.
+All state sits in `GoalPlanner`, above the cards: the typed form values, the touched fields, the server errors and the assumption helpers (`useGoalAssumptions`), plus the preview. Hiding, moving or resizing the form card therefore never loses what was typed, and showing it again restores the fields and the helper choices (only the open/closed state of "Returns and inflation" and of a helper popover is per mount). Customize on `/goals` appears once the saved goal has loaded; the loading and error states are outside the grid.
+`web/e2e/goals-layout.spec.ts` covers customize, move, reload (persisted) and the form values surviving hide and show: `pnpm --filter @portfolio/web exec playwright test e2e/goals-layout.spec.ts` (set `E2E_PORT` to a free port).
 
 ### Tests
 
