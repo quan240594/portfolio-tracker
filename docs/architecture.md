@@ -556,7 +556,7 @@ the stored *past* events (an event within 20 days of a received payment is the s
 
 ### Dashboard stat grid and trailing (TTM) dividend figures
 
-The Dashboard shows one grid of twelve stat cards (`data-testid="kpi-grid"`: 3 columns from `lg`, 2 from `sm`, 1 on phones), in this
+The Dashboard shows twelve stat cards, each its own card on the page's card grid (`dashboard` layout, see "Modular page layouts"; 3 per row from `lg`, 1 on narrower screens), in this
 order: Total value, Day change, Unrealized P&L, Currency effect, Total return, Dividends received, Realized P&L, Money-weighted return
 (IRR), Time-weighted return (TWR), **Dividend yield (TTM)**, **Dividend growth (TTM)**, Passive income (next 12 months). Cash and
 Custom assets cards, only for portfolios that hold them, follow after the twelve so those keep their rows. `KpiCard` takes an optional
@@ -3828,7 +3828,7 @@ A card that depends on state shared with another card must keep that state in th
 
 ### Phase 2a: the pages on the grid
 
-Converted: holdings, dividends, calendar, earnings, transactions, rebalance, assets, watchlist, brokers, notifications, diagnostics, every tab of analytics and of asset detail. **Not yet** the dashboard and goals (phase 2b, after the branches that edit them have merged).
+Converted: holdings, dividends, calendar, earnings, transactions, rebalance, assets, watchlist, brokers, notifications, diagnostics, every tab of analytics and of asset detail. **Not yet** goals (phase 2b, after the branches that edit it have merged); the dashboard follows in "Phase 2b: the dashboard" below.
 With the default layout a page renders the same elements in the same DOM order as before (each page's test asserts the order of `[data-card-id]`), so existing tests and e2e specs run unchanged.
 
 - **Switch.** `PageHeader` always renders an actions area (`data-page-header-actions`); `CardGrid` portals its "Customize layout" button into it (asset detail has its own header and provides the same attribute). Without a header the button sits above the grid. Outside editing the grid adds nothing else to the page; while editing it shows the bar (reset, hidden cards, save state).
@@ -3861,6 +3861,34 @@ With the default layout a page renders the same elements in the same DOM order a
 | asset-detail-dividends | `div-kpis`, `div-per-year`: full, `div-history`, `div-received`: half |
 
 The Playwright spec `web/e2e/layout.spec.ts` (mock mode) covers customize, move, reload (persisted in `localStorage`), hide, resize, reset and the separate narrow-screen layout on `/watchlist`: `pnpm --filter @portfolio/web exec playwright test e2e/layout.spec.ts` (set `E2E_PORT` to a free port).
+
+### Phase 2b: the dashboard
+
+The dashboard (`web/src/pages/DashboardPage.tsx`, layout id `dashboard`) is a card grid too. The header keeps the title, the scope description and the **period toggle** (TTM, YTD, 5y, 10y, All time) in its actions area, next to "Customize layout"; the toggle state (`useDashboardPeriod`) lives in the page and is passed to the cards that follow the period, so it works with any card hidden. The empty state (no holdings and no returns) still replaces the whole grid, toggle and switch included.
+The default layout has the same DOM order and relative widths as before; `CardGrid` uses `gap-6` throughout (the stat tiles used to sit 1 rem apart, they now sit 1.5 rem apart like the other blocks, and the 2-column tablet arrangement is gone: below 1024 px the cards stack in one column, like every converted page).
+
+- **One card per KPI.** `PortfolioKpis`, `ReturnKpis` and `TrailingDividendKpis` were split into one component per tile. A failed request is reported once, on the first tile of its group (`kpi-total-value` for the portfolio summary, `kpi-irr` for the return analytics, `kpi-yield-ttm` for the trailing dividends); the other tiles of the group render nothing and so take no room (a frame whose body is empty is hidden), exactly as the single error block replaced the group before. A failed period request still shows "Could not load this period" on the three period tiles.
+- **Empty cards.** `kpi-cash` and `kpi-custom-assets` (only for portfolios that hold them), `insights`, `watchlist-widget` and `total-return-note` can render nothing: they take no room, but can still be moved or hidden while customizing.
+- **Same page, same state.** The cards read their data through the shared query hooks (one request each, cached), so splitting them added no requests; the dashboard still makes the same calls for a scope.
+
+| Card id | Title | Default width |
+| --- | --- | --- |
+| `kpi-total-value`, `kpi-day-change`, `kpi-unrealized`, `kpi-currency-effect` | Total value, Day change, Unrealized P&L, Currency effect | third |
+| `kpi-total-return`, `kpi-dividends-received`, `kpi-realized` | Total return, Dividends received (with Projected rest of year), Realized P&L (these three follow the period) | third |
+| `kpi-irr`, `kpi-twr` | Money-weighted return (IRR), Time-weighted return (TWR) (follow the period) | third |
+| `kpi-yield-ttm`, `kpi-growth-ttm` | Dividend yield (TTM), Dividend growth (TTM) | third |
+| `kpi-passive-income` | Passive income (next 12 months) | third |
+| `kpi-cash`, `kpi-custom-assets` | Cash, Custom assets (only when held) | third |
+| `insights` | Portfolio insights | full |
+| `performance` | Value vs invested | twothirds |
+| `allocation` | Allocation | third |
+| `top-holdings` | Top holdings | half |
+| `calendar` | Calendar (compact month) | half |
+| `watchlist-widget` | Watchlist | full |
+| `movers` | Top movers | full |
+| `total-return-note` | Total return note | full |
+
+Tests: `web/src/pages/DashboardLayout.test.tsx` (order, widths, move/hide with the toggle, failed summary, empty state) and `web/e2e/dashboard-layout.spec.ts` (customize, move a KPI card, reload, hide, reset); `web/e2e/layout-widths.spec.ts` also covers `/` (KPI amounts on one line at 1024-1280 px, also in a wide fallback font, and no sideways scrolling).
 
 ### Tests
 

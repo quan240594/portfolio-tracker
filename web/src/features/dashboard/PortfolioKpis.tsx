@@ -26,15 +26,6 @@ const joinHint = (...parts: (string | undefined)[]): string => parts.filter(Bool
 
 const PERIOD_FAILED = 'Could not load this period';
 
-interface PeriodCardsProps {
-  period: DashboardPeriod;
-  currency: string;
-  loading: boolean;
-  failed: boolean;
-  figures: Figures | undefined;
-  pp: PeriodPerformance | undefined;
-}
-
 const REALIZED_HINT = 'Gains and losses on positions you sold, after fees. Not included in Unrealized P&L.';
 
 interface Hints {
@@ -54,87 +45,127 @@ function hintsOf({ failed, figures, coverage, currency }: Readonly<{ failed: boo
   };
 }
 
-/** Total return, dividends received and realized P&L: they follow the selected period. */
-function PeriodCards({ period, currency, loading, failed, figures, pp }: Readonly<PeriodCardsProps>) {
-  const hints = hintsOf({ failed, figures, coverage: pp && coverageLabel(period, pp), currency });
-  const shown = failed ? undefined : figures;
-  const dash = failed ? '—' : undefined;
+function usePortfolioSummary() {
+  const { scope, ready } = usePortfolioScope();
+  const query = usePortfolio(scope, { enabled: ready });
+  return { query, data: query.data, ccy: query.data?.baseCurrency ?? BASE_CURRENCY };
+}
+
+type SummaryQuery = ReturnType<typeof usePortfolioSummary>['query'];
+
+/** The summary failed: Total value reports it once (the other cards that need it step aside and take no room). */
+const SummaryFailure = ({ query }: Readonly<{ query: SummaryQuery }>) => (
+  <ErrorState error={query.error} onRetry={() => void query.refetch()} title="Could not load portfolio summary" />
+);
+
+/** Total value card; it also reports a failed portfolio summary for the cards of this group. */
+export function TotalValueKpi() {
+  const { query, data, ccy } = usePortfolioSummary();
+  if (query.isError) return <SummaryFailure query={query} />;
   return (
-    <>
-      <KpiCard
-        loading={loading}
-        label="Total return"
-        value={dash ?? (shown && formatMoney(shown.totalReturn, currency, { signed: true }))}
-        change={shown && <Change pct={shown.totalReturnPct} value={shown.totalReturn} />}
-        hint={hints.totalReturn}
-      />
-      <KpiCard
-        loading={loading}
-        label="Dividends received"
-        value={dash ?? (shown && formatMoney(shown.dividends, currency))}
-        change={<ProjectedRestOfYear />}
-        hint={hints.dividends}
-      />
-      <KpiCard loading={loading} label="Realized P&L" value={dash ?? (shown && formatMoney(shown.realizedPnl, currency, { signed: true }))} hint={hints.realized} />
-    </>
+    <KpiCard
+      loading={query.isPending}
+      label="Total value"
+      note={SNAPSHOT_NOTE}
+      value={data && formatMoney(data.totalValue, ccy)}
+      hint={data && `${data.holdingsCount} holdings · cost ${formatMoney(data.totalCost, ccy)}`}
+    />
   );
 }
 
-/** The first seven stat cards (grid cells, rendered inside the dashboard's single stat grid). */
-export function PortfolioKpis({ period }: Readonly<{ period: DashboardPeriod }>) {
+export function DayChangeKpi() {
+  const { query, data, ccy } = usePortfolioSummary();
+  if (query.isError) return null;
+  return (
+    <KpiCard
+      loading={query.isPending}
+      label="Day change"
+      note={SNAPSHOT_NOTE}
+      value={data && formatMoney(data.dayChange, ccy, { signed: true })}
+      change={data && <Change pct={data.dayChangePct} value={data.dayChange} />}
+    />
+  );
+}
+
+export function UnrealizedKpi() {
+  const { query, data, ccy } = usePortfolioSummary();
+  if (query.isError) return null;
+  return (
+    <KpiCard
+      loading={query.isPending}
+      label="Unrealized P&L"
+      note={SNAPSHOT_NOTE}
+      value={data && formatMoney(data.unrealizedPnl, ccy, { signed: true })}
+      change={data && <Change pct={data.unrealizedPnlPct} value={data.unrealizedPnl} />}
+      hint={data && `Incl. ${formatMoney(data.currencyEffect, ccy, { signed: true })} currency effect`}
+    />
+  );
+}
+
+export function CurrencyEffectKpi() {
+  const { query, data, ccy } = usePortfolioSummary();
+  if (query.isError) return null;
+  return (
+    <KpiCard
+      loading={query.isPending}
+      label="Currency effect"
+      note={SNAPSHOT_NOTE}
+      value={data && <Change amount={data.currencyEffect} currency={ccy} />}
+      hint={`Part of the unrealized P&L caused by exchange-rate moves since purchase — e.g. a weaker US dollar lowers the ${ccy} value of US shares. Already included in Unrealized P&L.`}
+    />
+  );
+}
+
+/** The figures that follow the selected period, with the loading and failure state of the two requests behind them. */
+function usePeriodFigures(period: DashboardPeriod) {
   const { scope, ready } = usePortfolioScope();
-  const { data, isPending, isError, error, refetch } = usePortfolio(scope, { enabled: ready });
+  const { query, data, ccy } = usePortfolioSummary();
   const windowed = period !== 'all';
   const summary = useAnalyticsSummary(scope, { enabled: ready && windowed, period: queryPeriod(period) });
-  if (isError) {
-    return (
-      <div className="sm:col-span-2 lg:col-span-3">
-        <ErrorState error={error} onRetry={() => void refetch()} title="Could not load portfolio summary" />
-      </div>
-    );
-  }
-  const ccy = data?.baseCurrency ?? BASE_CURRENCY;
   const pp = windowed ? summary.data?.periodPerformance : undefined;
-  const hasFigures = data !== undefined && (!windowed || pp !== undefined);
+  const failed = windowed && summary.isError;
+  const figures = data && (!windowed || pp !== undefined) ? figuresOf(data, pp) : undefined;
+  return {
+    query,
+    ccy,
+    loading: query.isPending || (windowed && summary.isPending),
+    failed,
+    shown: failed ? undefined : figures,
+    dash: failed ? '—' : undefined,
+    hints: hintsOf({ failed, figures, coverage: pp && coverageLabel(period, pp), currency: ccy }),
+  };
+}
+
+export function TotalReturnKpi({ period }: Readonly<{ period: DashboardPeriod }>) {
+  const { query, ccy, loading, shown, dash, hints } = usePeriodFigures(period);
+  if (query.isError) return null;
   return (
-    <>
-      <KpiCard
-        loading={isPending}
-        label="Total value"
-        note={SNAPSHOT_NOTE}
-        value={data && formatMoney(data.totalValue, ccy)}
-        hint={data && `${data.holdingsCount} holdings · cost ${formatMoney(data.totalCost, ccy)}`}
-      />
-      <KpiCard
-        loading={isPending}
-        label="Day change"
-        note={SNAPSHOT_NOTE}
-        value={data && formatMoney(data.dayChange, ccy, { signed: true })}
-        change={data && <Change pct={data.dayChangePct} value={data.dayChange} />}
-      />
-      <KpiCard
-        loading={isPending}
-        label="Unrealized P&L"
-        note={SNAPSHOT_NOTE}
-        value={data && formatMoney(data.unrealizedPnl, ccy, { signed: true })}
-        change={data && <Change pct={data.unrealizedPnlPct} value={data.unrealizedPnl} />}
-        hint={data && `Incl. ${formatMoney(data.currencyEffect, ccy, { signed: true })} currency effect`}
-      />
-      <KpiCard
-        loading={isPending}
-        label="Currency effect"
-        note={SNAPSHOT_NOTE}
-        value={data && <Change amount={data.currencyEffect} currency={ccy} />}
-        hint={`Part of the unrealized P&L caused by exchange-rate moves since purchase — e.g. a weaker US dollar lowers the ${ccy} value of US shares. Already included in Unrealized P&L.`}
-      />
-      <PeriodCards
-        period={period}
-        currency={ccy}
-        loading={isPending || (windowed && summary.isPending)}
-        failed={windowed && summary.isError}
-        figures={data && hasFigures ? figuresOf(data, pp) : undefined}
-        pp={pp}
-      />
-    </>
+    <KpiCard
+      loading={loading}
+      label="Total return"
+      value={dash ?? (shown && formatMoney(shown.totalReturn, ccy, { signed: true }))}
+      change={shown && <Change pct={shown.totalReturnPct} value={shown.totalReturn} />}
+      hint={hints.totalReturn}
+    />
   );
+}
+
+export function DividendsReceivedKpi({ period }: Readonly<{ period: DashboardPeriod }>) {
+  const { query, ccy, loading, shown, dash, hints } = usePeriodFigures(period);
+  if (query.isError) return null;
+  return (
+    <KpiCard
+      loading={loading}
+      label="Dividends received"
+      value={dash ?? (shown && formatMoney(shown.dividends, ccy))}
+      change={<ProjectedRestOfYear />}
+      hint={hints.dividends}
+    />
+  );
+}
+
+export function RealizedPnlKpi({ period }: Readonly<{ period: DashboardPeriod }>) {
+  const { query, ccy, loading, shown, dash, hints } = usePeriodFigures(period);
+  if (query.isError) return null;
+  return <KpiCard loading={loading} label="Realized P&L" value={dash ?? (shown && formatMoney(shown.realizedPnl, ccy, { signed: true }))} hint={hints.realized} />;
 }

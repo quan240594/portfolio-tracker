@@ -32,37 +32,41 @@ function performanceFor(data: AnalyticsSummaryResponse): { perf: Performance; tr
 
 const withNote = (hint: string, note: string | undefined): string => (note ? `${hint} · ${note}` : hint);
 
-/** Money-weighted and time-weighted return cards (grid cells), from GET /analytics/summary (of the selected period when one is given). */
-export function ReturnKpis({ period = 'all' }: Readonly<{ period?: DashboardPeriod }>) {
+function useReturnFigures(period: DashboardPeriod) {
   const { scope, ready } = usePortfolioScope();
-  const { data, isPending, isError, error, refetch } = useAnalyticsSummary(scope, { enabled: ready, period: queryPeriod(period) });
-  if (isError) {
-    return (
-      <div className="sm:col-span-2 lg:col-span-2">
-        <ErrorState error={error} onRetry={() => void refetch()} title="Could not load return analytics" className="h-full" />
-      </div>
-    );
-  }
-  const shown = data && performanceFor(data);
+  const query = useAnalyticsSummary(scope, { enabled: ready, period: queryPeriod(period) });
+  return { query, shown: query.data && performanceFor(query.data) };
+}
+
+/** Money-weighted return card, from GET /analytics/summary (of the selected period when one is given); it also reports a failed request for the TWR card. */
+export function IrrKpi({ period = 'all' }: Readonly<{ period?: DashboardPeriod }>) {
+  const { query, shown } = useReturnFigures(period);
+  if (query.isError) return <ErrorState error={query.error} onRetry={() => void query.refetch()} title="Could not load return analytics" className="h-full" />;
   return (
-    <>
-      <KpiCard
-        loading={isPending}
-        label="Money-weighted return (IRR)"
-        value={shown && <ReturnValue pct={shown.perf.irrPct} />}
-        hint={shown && withNote(irrHint(shown.perf), shown.truncatedNote)}
-      />
-      <KpiCard
-        loading={isPending}
-        label="Time-weighted return (TWR)"
-        value={shown && <ReturnValue pct={shown.perf.twrPct} />}
-        hint={shown && withNote(twrHint(shown.perf), shown.truncatedNote)}
-      />
-    </>
+    <KpiCard
+      loading={query.isPending}
+      label="Money-weighted return (IRR)"
+      value={shown && <ReturnValue pct={shown.perf.irrPct} />}
+      hint={shown && withNote(irrHint(shown.perf), shown.truncatedNote)}
+    />
   );
 }
 
-/** Forward passive income card (a grid cell), from GET /analytics/summary. */
+/** Time-weighted return card, from GET /analytics/summary (of the selected period when one is given). */
+export function TwrKpi({ period = 'all' }: Readonly<{ period?: DashboardPeriod }>) {
+  const { query, shown } = useReturnFigures(period);
+  if (query.isError) return null;
+  return (
+    <KpiCard
+      loading={query.isPending}
+      label="Time-weighted return (TWR)"
+      value={shown && <ReturnValue pct={shown.perf.twrPct} />}
+      hint={shown && withNote(twrHint(shown.perf), shown.truncatedNote)}
+    />
+  );
+}
+
+/** Forward passive income card, from GET /analytics/summary. */
 export function PassiveIncomeKpi() {
   const { scope, ready } = usePortfolioScope();
   const { data, isPending, isError, error, refetch } = useAnalyticsSummary(scope, { enabled: ready });

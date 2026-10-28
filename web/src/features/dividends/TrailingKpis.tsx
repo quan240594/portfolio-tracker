@@ -81,28 +81,18 @@ function GrowthCard({ currency, summary }: Readonly<Props>) {
   );
 }
 
-/** Trailing-twelve-month dividend yield and growth, from GET /dividends/overview (the same request the Dividends page uses). */
-export function TrailingDividendKpis() {
+/** Trailing-twelve-month dividend yield, from GET /dividends/overview (the same request the Dividends page uses); it also reports a failed request for the growth card. */
+export function DividendYieldKpi() {
   const { data, isPending, isError, error, refetch } = useScopedDividendsOverview();
-  if (isError) {
-    return (
-      <div className="sm:col-span-2 lg:col-span-2">
-        <ErrorState error={error} onRetry={() => void refetch()} title="Could not load trailing dividends" className="h-full" />
-      </div>
-    );
-  }
-  if (isPending || !data) {
-    return (
-      <>
-        <KpiCard loading label="Dividend yield (TTM)" note={TTM_NOTE} info={YIELD_INFO} value={null} />
-        <KpiCard loading label="Dividend growth (TTM)" note={TTM_NOTE} info={GROWTH_INFO} value={null} />
-      </>
-    );
-  }
-  return (
-    <>
-      <YieldCard currency={data.baseCurrency} summary={data.summary} />
-      <GrowthCard currency={data.baseCurrency} summary={data.summary} />
-    </>
-  );
+  if (isError) return <ErrorState error={error} onRetry={() => void refetch()} title="Could not load trailing dividends" className="h-full" />;
+  if (isPending || !data) return <KpiCard loading label="Dividend yield (TTM)" note={TTM_NOTE} info={YIELD_INFO} value={null} />;
+  return <YieldCard currency={data.baseCurrency} summary={data.summary} />;
+}
+
+/** Trailing-twelve-month dividend growth, from the same request as the yield card. */
+export function DividendGrowthKpi() {
+  const { data, isPending, isError } = useScopedDividendsOverview();
+  if (isError) return null;
+  if (isPending || !data) return <KpiCard loading label="Dividend growth (TTM)" note={TTM_NOTE} info={GROWTH_INFO} value={null} />;
+  return <GrowthCard currency={data.baseCurrency} summary={data.summary} />;
 }

@@ -16,13 +16,14 @@ import { AllocationDonut } from '../components/charts/AllocationDonut';
 import { StaleBadge } from '../features/holdings/HoldingsTable';
 import { WatchlistWidget } from '../features/watchlist/WatchlistWidget';
 import { usePortfolioScope } from '../features/portfolios/usePortfolioScope';
-import { PassiveIncomeKpi, ReturnKpis } from '../features/analytics/AnalyticsKpis';
-import { TrailingDividendKpis } from '../features/dividends/TrailingKpis';
+import { IrrKpi, PassiveIncomeKpi, TwrKpi } from '../features/analytics/AnalyticsKpis';
+import { DividendGrowthKpi, DividendYieldKpi } from '../features/dividends/TrailingKpis';
 import { InsightsSection } from '../features/analytics/InsightsSection';
 import { MoversSection } from '../features/analytics/MoversSection';
 import { DashboardCalendarCard } from '../features/dashboard/DashboardCalendarCard';
 import { PERIOD_OPTIONS, useDashboardPeriod } from '../features/dashboard/dashboardPeriod';
-import { PortfolioKpis } from '../features/dashboard/PortfolioKpis';
+import { CurrencyEffectKpi, DayChangeKpi, DividendsReceivedKpi, RealizedPnlKpi, TotalReturnKpi, TotalValueKpi, UnrealizedKpi } from '../features/dashboard/PortfolioKpis';
+import { CardGrid, type CardDefinition } from '../features/layout/CardGrid';
 import { BASE_CURRENCY, formatDateTime, formatMoney, formatPercent, formatWeight } from '../lib/format';
 
 type AllocationTab = Exclude<AllocationDimension, 'symbol'> | 'category';
@@ -38,36 +39,25 @@ const ALLOCATION_TABS: { value: AllocationTab; label: string }[] = [
 const RANGE_OPTIONS = HISTORY_RANGES.map((r) => ({ value: r, label: r }));
 
 
-/** Cash and custom assets, only for portfolios that hold them: after the twelve standard cards, so those keep their rows. */
-function HoldingsBreakdownKpis() {
+function useBreakdown() {
   const { scope, ready } = usePortfolioScope();
   const { data } = usePortfolio(scope, { enabled: ready });
-  const ccy = data?.baseCurrency ?? BASE_CURRENCY;
-  return (
-    <>
-      {data?.cashValue !== undefined && (
-        <KpiCard label="Cash" value={formatMoney(data.cashValue, ccy)} hint={`Included in total value. Interest and fees: ${formatMoney(data.cashIncome ?? 0, ccy, { signed: true })}`} />
-      )}
-      {data?.customAssetsValue !== undefined && (
-        <KpiCard label="Custom assets" value={formatMoney(data.customAssetsValue, ccy)} hint="Real estate, savings and other manually valued assets. Included in total value." />
-      )}
-    </>
-  );
+  return { data, ccy: data?.baseCurrency ?? BASE_CURRENCY };
 }
 
-/** One grid of twelve stat cards: three per row on desktop, two on tablets, one on phones. */
-function KpiGrid({ period }: Readonly<{ period: DashboardPeriod }>) {
-  return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="kpi-grid">
-      <PortfolioKpis period={period} />
-      <ReturnKpis period={period} />
-      <TrailingDividendKpis />
-      <PassiveIncomeKpi />
-      <HoldingsBreakdownKpis />
-    </div>
-  );
+/** Cash, only for portfolios that hold it (the card takes no room otherwise). */
+function CashKpi() {
+  const { data, ccy } = useBreakdown();
+  if (data?.cashValue === undefined) return null;
+  return <KpiCard label="Cash" value={formatMoney(data.cashValue, ccy)} hint={`Included in total value. Interest and fees: ${formatMoney(data.cashIncome ?? 0, ccy, { signed: true })}`} />;
 }
 
+/** Custom assets, only for portfolios that hold them. */
+function CustomAssetsKpi() {
+  const { data, ccy } = useBreakdown();
+  if (data?.customAssetsValue === undefined) return null;
+  return <KpiCard label="Custom assets" value={formatMoney(data.customAssetsValue, ccy)} hint="Real estate, savings and other manually valued assets. Included in total value." />;
+}
 function PerformanceCard() {
   const [range, setRange] = useState<HistoryRange>('1Y');
   const { scope, ready } = usePortfolioScope();
@@ -96,7 +86,7 @@ function PerformanceCard() {
   }
 
   return (
-    <section className="card p-4 lg:col-span-2" aria-labelledby="perf-title">
+    <section className="card p-4" aria-labelledby="perf-title">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 id="perf-title" className="font-semibold">
@@ -213,6 +203,49 @@ function dashboardDescription(data: GetPortfolioResponse | undefined, scopeName:
   return `${prefix} in ${data.baseCurrency} · as of ${asOf}`;
 }
 
+/** The twelve stat cards come first (three per row on desktop), then cash and custom assets when held, so those keep their rows. */
+function statCards(period: DashboardPeriod): CardDefinition[] {
+  return [
+    { id: 'kpi-total-value', title: 'Total value', defaultWidth: 'third', render: () => <TotalValueKpi /> },
+    { id: 'kpi-day-change', title: 'Day change', defaultWidth: 'third', render: () => <DayChangeKpi /> },
+    { id: 'kpi-unrealized', title: 'Unrealized P&L', defaultWidth: 'third', render: () => <UnrealizedKpi /> },
+    { id: 'kpi-currency-effect', title: 'Currency effect', defaultWidth: 'third', render: () => <CurrencyEffectKpi /> },
+    { id: 'kpi-total-return', title: 'Total return', defaultWidth: 'third', render: () => <TotalReturnKpi period={period} /> },
+    { id: 'kpi-dividends-received', title: 'Dividends received', defaultWidth: 'third', render: () => <DividendsReceivedKpi period={period} /> },
+    { id: 'kpi-realized', title: 'Realized P&L', defaultWidth: 'third', render: () => <RealizedPnlKpi period={period} /> },
+    { id: 'kpi-irr', title: 'Money-weighted return (IRR)', defaultWidth: 'third', render: () => <IrrKpi period={period} /> },
+    { id: 'kpi-twr', title: 'Time-weighted return (TWR)', defaultWidth: 'third', render: () => <TwrKpi period={period} /> },
+    { id: 'kpi-yield-ttm', title: 'Dividend yield (TTM)', defaultWidth: 'third', render: () => <DividendYieldKpi /> },
+    { id: 'kpi-growth-ttm', title: 'Dividend growth (TTM)', defaultWidth: 'third', render: () => <DividendGrowthKpi /> },
+    { id: 'kpi-passive-income', title: 'Passive income (next 12 months)', defaultWidth: 'third', render: () => <PassiveIncomeKpi /> },
+    { id: 'kpi-cash', title: 'Cash', defaultWidth: 'third', render: () => <CashKpi /> },
+    { id: 'kpi-custom-assets', title: 'Custom assets', defaultWidth: 'third', render: () => <CustomAssetsKpi /> },
+  ];
+}
+
+function dashboardCards(period: DashboardPeriod, portfolio: GetPortfolioResponse | undefined): CardDefinition[] {
+  return [
+    ...statCards(period),
+    { id: 'insights', title: 'Portfolio insights', defaultWidth: 'full', render: () => <InsightsSection /> },
+    { id: 'performance', title: 'Value vs invested', defaultWidth: 'twothirds', render: () => <PerformanceCard /> },
+    { id: 'allocation', title: 'Allocation', defaultWidth: 'third', render: () => <AllocationCard /> },
+    { id: 'top-holdings', title: 'Top holdings', defaultWidth: 'half', render: () => <TopHoldingsCard /> },
+    { id: 'calendar', title: 'Calendar', defaultWidth: 'half', render: () => <DashboardCalendarCard /> },
+    { id: 'watchlist-widget', title: 'Watchlist', defaultWidth: 'full', render: () => <WatchlistWidget /> },
+    { id: 'movers', title: 'Top movers', defaultWidth: 'full', render: () => <MoversSection /> },
+    { id: 'total-return-note', title: 'Total return note', defaultWidth: 'full', render: () => <TotalReturnNote portfolio={portfolio} /> },
+  ];
+}
+
+function TotalReturnNote({ portfolio }: Readonly<{ portfolio: GetPortfolioResponse | undefined }>) {
+  if (!portfolio) return null;
+  return (
+    <p className="muted text-xs">
+      Total return {formatPercent(portfolio.totalReturnPct, { signed: true })} on amount invested, including realized gains and dividends.
+    </p>
+  );
+}
+
 export function DashboardPage() {
   const { scope, ready, scopeName, withScope, current } = usePortfolioScope();
   const portfolio = usePortfolio(scope, { enabled: ready });
@@ -242,27 +275,7 @@ export function DashboardPage() {
           }
         />
       ) : (
-        <div className="space-y-6">
-          <KpiGrid period={period} />
-          <InsightsSection />
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-            <PerformanceCard />
-            <AllocationCard />
-          </div>
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <TopHoldingsCard />
-            <DashboardCalendarCard />
-            <div className="empty:hidden lg:col-span-2">
-              <WatchlistWidget />
-            </div>
-          </div>
-          <MoversSection />
-          {portfolio.data && (
-            <p className="muted text-xs">
-              Total return {formatPercent(portfolio.data.totalReturnPct, { signed: true })} on amount invested, including realized gains and dividends.
-            </p>
-          )}
-        </div>
+        <CardGrid pageId="dashboard" cards={dashboardCards(period, portfolio.data)} />
       )}
     </>
   );

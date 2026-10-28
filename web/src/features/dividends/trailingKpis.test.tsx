@@ -23,13 +23,13 @@ const loaded = async (name: string) => {
 const yieldCard = () => loaded('Dividend yield (TTM)');
 const growthCard = () => loaded('Dividend growth (TTM)');
 
-describe('dashboard stat grid', () => {
-  it('has twelve standard cards in one grid (3 columns on desktop, 2 on tablets, 1 on phones), then cash and custom assets when held', async () => {
+describe('dashboard stat cards', () => {
+  it('has twelve standard cards, one card each (3 per row on desktop, 1 on phones), then cash and custom assets when held', async () => {
     renderWithProviders(<DashboardPage />);
     await yieldCard();
-    const grid = screen.getByTestId('kpi-grid');
-    expect(grid).toHaveClass('grid-cols-1', 'sm:grid-cols-2', 'lg:grid-cols-3');
-    expect(within(grid).getAllByRole('region').map((card) => card.getAttribute('aria-label'))).toEqual([
+    const cards = [...document.querySelectorAll<HTMLElement>('[data-card-id^="kpi-"]')];
+    expect(cards.every((card) => card.dataset.width === 'third')).toBe(true);
+    expect(cards.flatMap((card) => within(card).queryAllByRole('region')).map((card) => card.getAttribute('aria-label'))).toEqual([
       'Total value',
       'Day change',
       'Unrealized P&L',
