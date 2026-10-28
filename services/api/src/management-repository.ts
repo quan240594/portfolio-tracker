@@ -2,17 +2,23 @@ import { cond, listByPrefix, type Item, type ItemKey, type ItemStore } from '@po
 import {
   CLASSIFICATION_ENTITY,
   GOAL_ENTITY,
+  LAYOUT_BREAKPOINTS,
+  LAYOUT_ENTITY,
   MANAGEMENT_ENTITY,
   classificationKeys,
   fromItem,
   goalKeys,
   keys,
+  layoutKeys,
   managementKeys,
   type Category,
   type ClassificationOverrideItem,
   type CategoryAssignment,
   type CustomAsset,
   type GoalItem,
+  type LayoutBreakpoint,
+  type LayoutPageId,
+  type PageLayoutItem,
   type PortfolioSettings,
   type WatchlistEntry,
 } from '@portfolio/shared';
@@ -48,6 +54,13 @@ export interface ManagementRepository {
   listClassificationOverrides(userId: string): Promise<ClassificationOverrideItem[]>;
   putClassificationOverrides(items: readonly ClassificationOverrideItem[]): Promise<void>;
   deleteClassificationOverride(userId: string, symbol: string): Promise<void>;
+  /** The stored layouts (desktop and/or mobile) of one page. */
+  getLayouts(userId: string, page: LayoutPageId): Promise<PageLayoutItem[]>;
+  /** Every stored layout of the user, for the backup. */
+  listLayouts(userId: string): Promise<PageLayoutItem[]>;
+  putLayout(item: PageLayoutItem): Promise<void>;
+  /** Clears one breakpoint of a page (no error when nothing is stored). */
+  deleteLayout(userId: string, page: LayoutPageId, breakpoint: LayoutBreakpoint): Promise<void>;
   /** Removes settings, categories, assignments, custom assets and the goal of a deleted portfolio. */
   deletePortfolioData(userId: string, portfolioId: string): Promise<void>;
 }
@@ -170,6 +183,23 @@ export class ItemManagementRepository implements ManagementRepository {
 
   deleteClassificationOverride(userId: string, symbol: string): Promise<void> {
     return this.remove(classificationKeys.override(userId, symbol));
+  }
+
+  async getLayouts(userId: string, page: LayoutPageId): Promise<PageLayoutItem[]> {
+    const items = await this.store.getMany(LAYOUT_BREAKPOINTS.map((breakpoint) => layoutKeys.layout(userId, page, breakpoint)));
+    return items.map((item) => fromItem<PageLayoutItem>(item));
+  }
+
+  listLayouts(userId: string): Promise<PageLayoutItem[]> {
+    return this.listUser(userId, layoutKeys.prefix);
+  }
+
+  async putLayout(item: PageLayoutItem): Promise<void> {
+    await this.put(layoutKeys.layout(item.userId, item.page, item.breakpoint), LAYOUT_ENTITY, item);
+  }
+
+  deleteLayout(userId: string, page: LayoutPageId, breakpoint: LayoutBreakpoint): Promise<void> {
+    return this.remove(layoutKeys.layout(userId, page, breakpoint));
   }
 
   async deletePortfolioData(userId: string, portfolioId: string): Promise<void> {

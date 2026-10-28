@@ -4,6 +4,7 @@ import { useWatchlist, useWatchlistMutations } from '../api/management-hooks';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
 import { PageHeader } from '../components/Layout';
+import { CardGrid, type CardDefinition } from '../features/layout/CardGrid';
 import { LoadingRegion, Skeleton } from '../components/Skeleton';
 import { WatchlistTable } from '../features/watchlist/WatchlistTable';
 
@@ -42,18 +43,31 @@ export function WatchlistPage() {
   const failure = [add, remove].find((m) => m.isError)?.error;
   const shownError = formError ?? (failure ? errorMessage(failure) : null);
 
+  const cards: CardDefinition[] = [
+    {
+      id: 'watchlist-add',
+      title: 'Add to watchlist',
+      defaultWidth: 'full',
+      render: () => (
+        <div>
+          <form onSubmit={submit} noValidate aria-label="Add to watchlist" className="flex flex-wrap items-end gap-3">
+            <div className="min-w-[12rem]">
+              <label className="label" htmlFor="watch-symbol">Symbol</label>
+              <input id="watch-symbol" className="input uppercase" placeholder="e.g. NVDA" autoComplete="off" spellCheck={false} value={symbol} onChange={(e) => setSymbol(e.target.value)} />
+            </div>
+            <button type="submit" className="btn-primary" disabled={add.isPending}>{add.isPending ? 'Adding…' : 'Add to watchlist'}</button>
+          </form>
+          {shownError && <p role="alert" className="mt-4 text-sm text-red-700 dark:text-red-300">{shownError}</p>}
+        </div>
+      ),
+    },
+    { id: 'watchlist-table', title: 'Watchlist', defaultWidth: 'full', render: () => body },
+  ];
+
   return (
     <>
       <PageHeader title="Watchlist" description="Symbols you follow. Prices appear shortly after you add a new one." />
-      <form onSubmit={submit} noValidate aria-label="Add to watchlist" className="mb-4 flex flex-wrap items-end gap-3">
-        <div className="min-w-[12rem]">
-          <label className="label" htmlFor="watch-symbol">Symbol</label>
-          <input id="watch-symbol" className="input uppercase" placeholder="e.g. NVDA" autoComplete="off" spellCheck={false} value={symbol} onChange={(e) => setSymbol(e.target.value)} />
-        </div>
-        <button type="submit" className="btn-primary" disabled={add.isPending}>{add.isPending ? 'Adding…' : 'Add to watchlist'}</button>
-      </form>
-      {shownError && <p role="alert" className="mb-4 text-sm text-red-700 dark:text-red-300">{shownError}</p>}
-      {body}
+      <CardGrid pageId="watchlist" cards={cards} gap="gap-4" />
     </>
   );
 }

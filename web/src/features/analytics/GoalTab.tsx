@@ -8,6 +8,7 @@ import { LegendSwatch, NothingSelected, SelectableLegend, SelectableTable, useSl
 import { useTheme } from '../../theme/ThemeProvider';
 import { LOCALE, formatMoney, formatPercent } from '../../lib/format';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
+import { CardGrid } from '../layout/CardGrid';
 import { DEFAULT_GOAL_FORM, parseGoalForm, type GoalField, type GoalFormValues } from './goalForm';
 import { PanelHeader } from './TableShell';
 
@@ -65,28 +66,21 @@ function GoalFieldInput({ name, label, hint, value, error, onChange }: Readonly<
   );
 }
 
-function GoalForm({ onSubmit }: Readonly<{ onSubmit: (params: AnalyticsGoalParams) => void }>) {
-  const [values, setValues] = useState<GoalFormValues>(DEFAULT_GOAL_FORM);
-  const [errors, setErrors] = useState<Partial<Record<GoalField, string>>>({});
+interface FormProps {
+  values: GoalFormValues;
+  errors: Partial<Record<GoalField, string>>;
+  onValuesChange: (values: GoalFormValues) => void;
+  onSubmit: (e: FormEvent) => void;
+}
 
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    const result = parseGoalForm(values);
-    if ('errors' in result) {
-      setErrors(result.errors);
-      return;
-    }
-    setErrors({});
-    onSubmit(result.params);
-  };
-
+function GoalForm({ values, errors, onValuesChange, onSubmit }: Readonly<FormProps>) {
   return (
-    <form onSubmit={submit} noValidate className="space-y-3" aria-label="Income goal assumptions">
+    <form onSubmit={onSubmit} noValidate className="space-y-3" aria-label="Income goal assumptions">
       {FIELDS.map((f) => (
-        <GoalFieldInput key={f.name} {...f} value={values[f.name]} error={errors[f.name]} onChange={(v) => setValues({ ...values, [f.name]: v })} />
+        <GoalFieldInput key={f.name} {...f} value={values[f.name]} error={errors[f.name]} onChange={(v) => onValuesChange({ ...values, [f.name]: v })} />
       ))}
       <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={values.reinvestDividends} onChange={(e) => setValues({ ...values, reinvestDividends: e.target.checked })} />
+        <input type="checkbox" checked={values.reinvestDividends} onChange={(e) => onValuesChange({ ...values, reinvestDividends: e.target.checked })} />
         <span>Reinvest dividends</span>
       </label>
       <button type="submit" className="btn-primary">
@@ -169,17 +163,41 @@ function GoalResults({ data }: Readonly<{ data: AnalyticsGoalResponse }>) {
 
 export function GoalTab() {
   const [params, setParams] = useState<AnalyticsGoalParams>({});
+  const [values, setValues] = useState<GoalFormValues>(DEFAULT_GOAL_FORM);
+  const [errors, setErrors] = useState<Partial<Record<GoalField, string>>>({});
   const { scope, ready } = usePortfolioScope();
   const query = useAnalyticsGoal(scope, params, { enabled: ready });
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    const result = parseGoalForm(values);
+    if ('errors' in result) {
+      setErrors(result.errors);
+      return;
+    }
+    setErrors({});
+    setParams(result.params);
+  };
+
   return (
     <section aria-labelledby="goal-title">
       <PanelHeader id="goal-title" title="Passive income goal" description="How long until your dividends reach the income you are aiming for?" />
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[18rem_minmax(0,1fr)]">
-        <GoalForm onSubmit={setParams} />
-        <QueryBoundary query={query} loadingLabel="Loading projection" errorTitle="Could not load the projection">
-          {(data) => <GoalResults data={data} />}
-        </QueryBoundary>
-      </div>
+      <CardGrid
+        pageId="analytics-goal"
+        cards={[
+          { id: 'goal-form', title: 'Assumptions', defaultWidth: 'third', render: () => <GoalForm values={values} errors={errors} onValuesChange={setValues} onSubmit={submit} /> },
+          {
+            id: 'goal-results',
+            title: 'Projection',
+            defaultWidth: 'twothirds',
+            render: () => (
+              <QueryBoundary query={query} loadingLabel="Loading projection" errorTitle="Could not load the projection">
+                {(data) => <GoalResults data={data} />}
+              </QueryBoundary>
+            ),
+          },
+        ]}
+      />
     </section>
   );
 }

@@ -11,6 +11,7 @@ import { PageHeader } from '../components/Layout';
 import { LoadingRegion, Skeleton } from '../components/Skeleton';
 import { CalendarKpis, CoverageNotes, IncomeChartCard } from '../features/calendar/CalendarOverview';
 import { FilterBar, ViewToolbar } from '../features/calendar/CalendarControls';
+import { CardGrid, type CardDefinition } from '../features/layout/CardGrid';
 import { DayDialog, EventDialog } from '../features/calendar/EventDialog';
 import { EventList } from '../features/calendar/EventList';
 import { MonthGrid } from '../features/calendar/MonthGrid';
@@ -56,6 +57,61 @@ function CalendarMain({ state, today, events, currency, loading, onSelectEvent, 
     return <p className="muted py-8 text-center text-sm">No events in this period for the selected filters.</p>;
   }
   return <EventList events={events} baseCurrency={currency} onSelect={onSelectEvent} today={today} />;
+}
+
+interface FiltersCardProps {
+  state: CalendarUiState;
+  onChange: (patch: Partial<CalendarUiState>) => void;
+  onDownload: () => void;
+  download: ReturnType<typeof useDownloadCalendarIcs>;
+  saved: string | null;
+}
+
+function FiltersCard({ state, onChange, onDownload, download, saved }: Readonly<FiltersCardProps>) {
+  return (
+    <section className="card space-y-4 p-4" aria-label="Calendar filters">
+      <FilterBar state={state} onChange={onChange} onDownload={onDownload} downloading={download.isPending} downloadDisabled={state.types.length === 0 || state.statuses.length === 0} />
+      <output className="block text-xs empty:hidden" aria-live="polite">
+        {saved && <span className="muted">Saved {saved}. Import it into your calendar app; it is a one-time download, not a subscription.</span>}
+      </output>
+      {download.isError && (
+        <p role="alert" className="text-sm text-red-700 dark:text-red-300">
+          Could not download the calendar: {errorMessage(download.error)}
+        </p>
+      )}
+    </section>
+  );
+}
+
+interface EventsCardProps {
+  state: CalendarUiState;
+  today: string;
+  onChange: (patch: Partial<CalendarUiState>) => void;
+  /** Expected income of the shown month; null when the total is not shown. */
+  monthTotal: number | null;
+  calendar: ReturnType<typeof useCalendar>;
+  events: readonly CalendarEvent[];
+  currency: string;
+  onSelectEvent: (event: CalendarEvent) => void;
+  onSelectDay: (date: string) => void;
+}
+
+function EventsCard({ state, today, onChange, monthTotal, calendar, events, currency, onSelectEvent, onSelectDay }: Readonly<EventsCardProps>) {
+  return (
+    <section className="card space-y-4 p-4" aria-label="Events">
+      <ViewToolbar state={state} today={today} onChange={onChange} />
+      {monthTotal !== null && (
+        <p className="text-sm">
+          <span className="muted">Expected dividends in {formatMonthYear(state.month)}: </span>
+          <strong className="tabular-nums">{formatMoney(monthTotal, currency)}</strong>
+        </p>
+      )}
+      {calendar.isError && <ErrorState error={calendar.error} onRetry={() => void calendar.refetch()} title="Could not load the calendar" />}
+      {!calendar.isError && (
+        <CalendarMain state={state} today={today} events={events} currency={currency} loading={calendar.isPending} onSelectEvent={onSelectEvent} onSelectDay={onSelectDay} />
+      )}
+    </section>
+  );
 }
 
 export function CalendarPage() {
@@ -115,51 +171,35 @@ export function CalendarPage() {
   const monthTotal = monthIncome(everything, state.month);
   const showMonthTotal = state.range === 'month' && !!data;
 
+  const cards: CardDefinition[] = [
+    { id: 'calendar-kpis', title: 'Income summary', defaultWidth: 'third', render: () => <CalendarKpis summary={data?.summary} currency={currency} loading={calendar.isPending} /> },
+    { id: 'income-chart', title: 'Income per month', defaultWidth: 'twothirds', render: () => <IncomeChartCard monthly={data?.monthly} summary={data?.summary} currency={currency} loading={calendar.isPending} /> },
+    { id: 'calendar-filters', title: 'Calendar filters', defaultWidth: 'full', render: () => <FiltersCard state={state} onChange={update} onDownload={onDownload} download={download} saved={saved} /> },
+    {
+      id: 'calendar-events',
+      title: 'Events',
+      defaultWidth: 'full',
+      render: () => (
+        <EventsCard
+          state={state}
+          today={today}
+          onChange={update}
+          monthTotal={showMonthTotal ? monthTotal : null}
+          calendar={calendar}
+          events={events}
+          currency={currency}
+          onSelectEvent={(e) => setSelection({ kind: 'event', id: e.id })}
+          onSelectDay={(date) => setSelection({ kind: 'day', date })}
+        />
+      ),
+    },
+    { id: 'coverage-notes', title: 'Coverage notes', defaultWidth: 'full', render: () => <CoverageNotes earnings={data?.coverage.earnings} corporateActions={data?.coverage.corporateActions} /> },
+  ];
+
   return (
     <>
       <PageHeader title="Calendar" description={description} />
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-          <CalendarKpis summary={data?.summary} currency={currency} loading={calendar.isPending} />
-          <IncomeChartCard monthly={data?.monthly} summary={data?.summary} currency={currency} loading={calendar.isPending} />
-        </div>
-
-        <section className="card space-y-4 p-4" aria-label="Calendar filters">
-          <FilterBar state={state} onChange={update} onDownload={onDownload} downloading={download.isPending} downloadDisabled={state.types.length === 0 || state.statuses.length === 0} />
-          <output className="block text-xs empty:hidden" aria-live="polite">
-            {saved && <span className="muted">Saved {saved}. Import it into your calendar app; it is a one-time download, not a subscription.</span>}
-          </output>
-          {download.isError && (
-            <p role="alert" className="text-sm text-red-700 dark:text-red-300">
-              Could not download the calendar: {errorMessage(download.error)}
-            </p>
-          )}
-        </section>
-
-        <section className="card space-y-4 p-4" aria-label="Events">
-          <ViewToolbar state={state} today={today} onChange={update} />
-          {showMonthTotal && (
-            <p className="text-sm">
-              <span className="muted">Expected dividends in {formatMonthYear(state.month)}: </span>
-              <strong className="tabular-nums">{formatMoney(monthTotal, currency)}</strong>
-            </p>
-          )}
-          {calendar.isError && <ErrorState error={calendar.error} onRetry={() => void calendar.refetch()} title="Could not load the calendar" />}
-          {!calendar.isError && (
-            <CalendarMain
-              state={state}
-              today={today}
-              events={events}
-              currency={currency}
-              loading={calendar.isPending}
-              onSelectEvent={(e) => setSelection({ kind: 'event', id: e.id })}
-              onSelectDay={(date) => setSelection({ kind: 'day', date })}
-            />
-          )}
-        </section>
-
-        <CoverageNotes earnings={data?.coverage.earnings} corporateActions={data?.coverage.corporateActions} />
-      </div>
+      <CardGrid pageId="calendar" cards={cards} />
 
       <EventDialog event={selectedEvent} baseCurrency={currency} onClose={() => setSelection(null)} withScope={withScope} />
       <DayDialog date={dayDate} events={dayEvents} baseCurrency={currency} onClose={() => setSelection(null)} onSelect={(e) => setSelection({ kind: 'event', id: e.id })} />

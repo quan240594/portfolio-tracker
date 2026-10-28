@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { invalidatePortfolioData, usePortfolios } from '../../api/hooks';
 import { ErrorState } from '../../components/ErrorState';
 import { PageHeader } from '../../components/Layout';
+import { CardGrid } from '../layout/CardGrid';
 import { LoadingRegion, Skeleton } from '../../components/Skeleton';
 import { USE_MOCKS } from '../../config';
 import { ConnectForm } from './ConnectForm';
@@ -21,7 +22,7 @@ function Instructions() {
           Enable only these scopes: <strong>account</strong>, <strong>metadata</strong>, <strong>portfolio</strong>, <strong>history:orders</strong>,{' '}
           <strong>history:dividends</strong> and <strong>history:transactions</strong>. Do <em>not</em> enable order execution or pies.
         </li>
-        <li>Copy the key and the secret (shown once) into the form above.</li>
+        <li>Copy the key and the secret (shown once) into the connection form.</li>
       </ol>
       <ul className="muted list-disc space-y-1 pl-5 text-xs">
         <li>Trading 212 only allows the API for your own account: connect your own Invest or Stocks ISA account, not someone else&apos;s.</li>
@@ -72,10 +73,13 @@ export function BrokerPage() {
           Demo mode: the connection is simulated. Trading 212 is never contacted from this page, and nothing you type leaves your browser.
         </p>
       )}
-      <div className="space-y-6">
-        {body}
-        <Instructions />
-      </div>
+      <CardGrid
+        pageId="brokers"
+        cards={[
+          { id: 'broker-connection', title: 'Connection', defaultWidth: 'full', render: () => body },
+          { id: 'broker-instructions', title: 'How to connect', defaultWidth: 'full', render: () => <Instructions /> },
+        ]}
+      />
     </>
   );
 }

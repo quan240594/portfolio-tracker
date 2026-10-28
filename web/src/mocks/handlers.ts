@@ -22,6 +22,7 @@ import { classificationHandlers } from './classification-handlers';
 import { calendarHandlers } from './calendarHandlers';
 import { logoHandlers } from './logo-handlers';
 import { earningsHandlers } from './earningsHandlers';
+import { layoutHandlers } from './layoutHandlers';
 import { categoryAllocation, managementHandlers } from './management-handlers';
 import { api, errorResponse, guard, latency } from './utils';
 
@@ -42,6 +43,7 @@ export const handlers: HttpHandler[] = [
   ...growthHandlers,
   ...calendarHandlers,
   ...earningsHandlers,
+  ...layoutHandlers,
   http.get(api('/health'), () => HttpResponse.json({ status: 'ok' })),
 
   http.get(api('/portfolios'), async () => {

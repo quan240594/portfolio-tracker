@@ -10,6 +10,7 @@ import { analyticsTheme } from '../../components/charts/analyticsTheme';
 import { useTheme } from '../../theme/ThemeProvider';
 import { formatMoney } from '../../lib/format';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
+import { CardGrid } from '../layout/CardGrid';
 import { periodLabel, signedPercentOrDash } from './labels';
 import { PanelHeader } from './TableShell';
 
@@ -60,16 +61,36 @@ function ReturnsBody({ data, rows }: Readonly<{ data: AnalyticsReturnsResponse; 
   const shown = selectRows(rows, (r) => r.period, selection);
   return (
     <div className="space-y-5">
-      <div>
-        <SelectableLegend
-          label="Chart series"
-          testId="returns-legend"
-          selection={selection}
-          entries={[{ key: 'twrPct', label: 'Return (TWR)', swatch: <SignSwatch gain={c.gain} loss={c.loss} /> }]}
-        />
-        {selection.nothingSelected ? <NothingSelected onShowAll={selection.reset} /> : <ReturnsBarChart rows={shown} period={data.period} filtered={selection.hasHidden} focusKey={selection.focusKey} />}
-      </div>
-      <SelectableTable caption={`Returns per ${data.period}, newest first`} rowHeader="Period" columns={columns} rows={tableRows} selection={selection} tableClassName="w-full text-sm" scrollClassName="overflow-x-auto" />
+      <CardGrid
+        pageId="analytics-returns"
+        gap="gap-5"
+        cards={[
+          {
+            id: 'returns-chart',
+            title: 'Returns chart',
+            defaultWidth: 'full',
+            render: () => (
+              <div>
+                <SelectableLegend
+                  label="Chart series"
+                  testId="returns-legend"
+                  selection={selection}
+                  entries={[{ key: 'twrPct', label: 'Return (TWR)', swatch: <SignSwatch gain={c.gain} loss={c.loss} /> }]}
+                />
+                {selection.nothingSelected ? <NothingSelected onShowAll={selection.reset} /> : <ReturnsBarChart rows={shown} period={data.period} filtered={selection.hasHidden} focusKey={selection.focusKey} />}
+              </div>
+            ),
+          },
+          {
+            id: 'returns-table',
+            title: 'Returns table',
+            defaultWidth: 'full',
+            render: () => (
+              <SelectableTable caption={`Returns per ${data.period}, newest first`} rowHeader="Period" columns={columns} rows={tableRows} selection={selection} tableClassName="w-full text-sm" scrollClassName="overflow-x-auto" />
+            ),
+          },
+        ]}
+      />
       <p className="muted text-xs">
         Time-weighted return (TWR) removes the effect of deposits and withdrawals, so it measures how your investments performed. The IRR
         is money-weighted and also reflects when you invested; for a year that is not complete yet it is the return over the period, not annualised.

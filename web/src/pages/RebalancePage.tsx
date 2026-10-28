@@ -4,6 +4,7 @@ import { useRebalance } from '../api/management-hooks';
 import { PageHeader } from '../components/Layout';
 import { ErrorState } from '../components/ErrorState';
 import { LoadingRegion, Skeleton } from '../components/Skeleton';
+import { CardGrid, type CardDefinition } from '../features/layout/CardGrid';
 import { RequirePortfolio } from '../features/management/RequirePortfolio';
 import { CategoryEditor } from '../features/rebalance/CategoryEditor';
 import { DriftTable } from '../features/rebalance/DriftTable';
@@ -11,8 +12,7 @@ import { RebalanceForm } from '../features/rebalance/RebalanceForm';
 import { TradesPanel } from '../features/rebalance/TradesPanel';
 import { formatMoney } from '../lib/format';
 
-function Plan({ portfolioId }: Readonly<{ portfolioId: string }>) {
-  const [query, setQuery] = useState<RebalanceQuery | null>(null);
+function PlanResult({ portfolioId, query }: Readonly<{ portfolioId: string; query: RebalanceQuery | null }>) {
   const { data, isFetching, isError, error, refetch } = useRebalance(portfolioId, query);
 
   let result = null;
@@ -36,16 +36,18 @@ function Plan({ portfolioId }: Readonly<{ portfolioId: string }>) {
     );
   }
 
-  return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-      <div className="space-y-6 lg:col-span-1">
-        <RebalanceForm onSubmit={setQuery} />
-      </div>
-      <div className="lg:col-span-2">
-        {result ?? <p className="muted card p-6 text-sm">Set an amount and calculate to see the drift and suggested trades.</p>}
-      </div>
-    </div>
-  );
+  return result ?? <p className="muted card p-6 text-sm">Set an amount and calculate to see the drift and suggested trades.</p>;
+}
+
+/** The calculation request is shared: the form sets it, the result card shows the plan it produces. */
+function RebalanceCards({ portfolioId }: Readonly<{ portfolioId: string }>) {
+  const [query, setQuery] = useState<RebalanceQuery | null>(null);
+  const cards: CardDefinition[] = [
+    { id: 'category-editor', title: 'Categories & targets', defaultWidth: 'full', render: () => <CategoryEditor portfolioId={portfolioId} /> },
+    { id: 'rebalance-form', title: 'Plan trades', defaultWidth: 'third', render: () => <RebalanceForm onSubmit={setQuery} /> },
+    { id: 'rebalance-result', title: 'Drift and trades', defaultWidth: 'twothirds', render: () => <PlanResult portfolioId={portfolioId} query={query} /> },
+  ];
+  return <CardGrid pageId="rebalance" cards={cards} />;
 }
 
 export function RebalancePage() {
@@ -53,12 +55,7 @@ export function RebalancePage() {
     <>
       <PageHeader title="Rebalance" description="Compare your allocation with category targets and plan the trades that close the gap." />
       <RequirePortfolio what="Categories and targets">
-        {({ portfolioId }) => (
-          <div className="space-y-6">
-            <CategoryEditor portfolioId={portfolioId} />
-            <Plan portfolioId={portfolioId} />
-          </div>
-        )}
+        {({ portfolioId }) => <RebalanceCards portfolioId={portfolioId} />}
       </RequirePortfolio>
     </>
   );

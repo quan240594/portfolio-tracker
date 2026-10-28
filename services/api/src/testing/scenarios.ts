@@ -163,6 +163,26 @@ export function defineApiScenarios(label: string, target: ApiScenarioTarget): vo
       expect((await call('DELETE', `/portfolios/${id}`, { query: { force: 'true' } })).status).toBe(204);
     });
 
+    it("stores the owner's page layouts per breakpoint and clears them again", async () => {
+      const layout = (breakpoint: 'desktop' | 'mobile') => ({ version: 1, breakpoint, order: ['b', 'a'], widths: { a: 'third' }, hidden: ['c'] });
+      // Whatever an earlier run left behind, a page starts clean.
+      expect((await call('DELETE', '/layouts/rebalance')).status).toBe(204);
+      expect((await call('GET', '/layouts/rebalance')).body).toEqual({ desktop: null, mobile: null });
+      expect((await call('PUT', '/layouts/rebalance/desktop', { body: layout('desktop') })).status).toBe(204);
+      expect((await call('PUT', '/layouts/rebalance/mobile', { body: { ...layout('mobile'), widths: {} } })).status).toBe(204);
+      expect((await call('GET', '/layouts/rebalance')).body).toEqual({ desktop: layout('desktop'), mobile: { ...layout('mobile'), widths: {} } });
+      expect((await call('GET', '/layouts/watchlist')).body).toEqual({ desktop: null, mobile: null });
+      expect((await call('PUT', '/layouts/rebalance/desktop', { body: { ...layout('desktop'), order: ['c'], hidden: [] } })).status).toBe(204);
+      expect((await call('GET', '/layouts/rebalance')).body.desktop).toMatchObject({ order: ['c'], hidden: [] });
+      expect((await call('PUT', '/layouts/rebalance/desktop', { body: layout('mobile') })).status).toBe(400);
+      expect((await call('PUT', '/layouts/rebalance/desktop', { body: { ...layout('desktop'), order: ['Bad Id'] } })).status).toBe(400);
+      expect((await call('PUT', '/layouts/not-a-page/desktop', { body: layout('desktop') })).status).toBe(400);
+      expect((await call('PUT', '/layouts/rebalance/desktop', { body: null })).status).toBe(204);
+      expect((await call('GET', '/layouts/rebalance')).body).toEqual({ desktop: null, mobile: { ...layout('mobile'), widths: {} } });
+      expect((await call('DELETE', '/layouts/rebalance')).status).toBe(204);
+      expect((await call('GET', '/layouts/rebalance')).body).toEqual({ desktop: null, mobile: null });
+    });
+
     it('serves earnings summaries, or reports the feature unavailable', async () => {
       const list = await call('GET', '/earnings');
       const status = await call('GET', '/earnings/status');

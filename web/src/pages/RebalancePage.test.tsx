@@ -194,3 +194,37 @@ describe('RebalancePage', () => {
     });
   });
 });
+
+const cardOrder = () => [...document.querySelectorAll<HTMLElement>('[data-card-id]')].map((el) => el.dataset.cardId);
+
+describe('RebalancePage layout', () => {
+  it('keeps the default card order and puts the customize toggle in the page header', async () => {
+    await openMain();
+    expect(cardOrder()).toEqual(['category-editor', 'rebalance-form', 'rebalance-result']);
+    const actions = document.querySelector<HTMLElement>('[data-page-header-actions]')!;
+    expect(within(actions).getByRole('button', { name: 'Customize layout' })).toBeInTheDocument();
+  });
+
+  it('moves the result above the form, and the form still drives the result', async () => {
+    const user = await openMain();
+    await screen.findByText('Core ETFs');
+    await user.click(screen.getByRole('button', { name: 'Customize layout' }));
+    await user.click(screen.getByRole('button', { name: 'Move Plan trades down' }));
+    expect(cardOrder()).toEqual(['category-editor', 'rebalance-result', 'rebalance-form']);
+
+    await user.click(screen.getByRole('button', { name: 'Calculate trades' }));
+    expect(await screen.findByRole('table', { name: 'Suggested trades' })).toBeInTheDocument();
+  });
+
+  it('still calculates when the result card is hidden and shows the plan once it is shown again', async () => {
+    const user = await openMain();
+    await screen.findByText('Core ETFs');
+    await user.click(screen.getByRole('button', { name: 'Customize layout' }));
+    await user.click(screen.getByRole('button', { name: 'Hide Drift and trades' }));
+    await user.click(screen.getByRole('button', { name: 'Calculate trades' }));
+    expect(screen.queryByRole('table', { name: 'Suggested trades' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Show Drift and trades' }));
+    expect(await screen.findByRole('table', { name: 'Suggested trades' })).toBeInTheDocument();
+  });
+});

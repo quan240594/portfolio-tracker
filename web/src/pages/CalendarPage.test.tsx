@@ -268,6 +268,33 @@ describe('CalendarPage', () => {
     await gotoViaNav(userEvent.setup(), 'Calendar');
     expect(await screen.findByRole('heading', { level: 1, name: 'Calendar' })).toBeInTheDocument();
   });
+
+  describe('card layout', () => {
+    const cardOrder = () => [...document.querySelectorAll<HTMLElement>('[data-card-id]')].map((el) => el.dataset.cardId);
+
+    it('keeps the default card order and puts the customize toggle in the page header', async () => {
+      open();
+      await screen.findByRole('region', { name: 'Calendar filters' });
+      expect(cardOrder()).toEqual(['calendar-kpis', 'income-chart', 'calendar-filters', 'calendar-events', 'coverage-notes']);
+      const actions = document.querySelector<HTMLElement>('[data-page-header-actions]')!;
+      expect(within(actions).getByRole('button', { name: 'Customize layout' })).toBeInTheDocument();
+    });
+
+    it('moves and hides cards while the calendar keeps working', async () => {
+      const user = userEvent.setup();
+      open();
+      await screen.findByRole('region', { name: 'Calendar filters' });
+      await user.click(screen.getByRole('button', { name: 'Customize layout' }));
+      await user.click(screen.getByRole('button', { name: 'Move Events up' }));
+      expect(cardOrder()).toEqual(['calendar-kpis', 'income-chart', 'calendar-events', 'calendar-filters', 'coverage-notes']);
+
+      await user.click(screen.getByRole('button', { name: 'Hide Calendar filters' }));
+      expect(screen.queryByRole('region', { name: 'Calendar filters' })).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Done' }));
+      expect(await within(events()).findByRole('radio', { name: 'List' })).toBeInTheDocument();
+      expect(cardOrder()).toEqual(['calendar-kpis', 'income-chart', 'calendar-events', 'coverage-notes']);
+    });
+  });
 });
 
 describe('GET /calendar (demo backend)', () => {

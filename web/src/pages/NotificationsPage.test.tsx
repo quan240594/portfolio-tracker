@@ -282,3 +282,34 @@ describe('Notifications page', () => {
     expect(screen.getByRole('button', { name: 'Send a test notification' })).toBeDisabled();
   });
 });
+
+const cardOrder = () => [...document.querySelectorAll<HTMLElement>('[data-card-id]')].map((el) => el.dataset.cardId);
+
+describe('Notifications page layout', () => {
+  it('keeps the default card order, the note after the cards and the customize toggle in the page header', async () => {
+    environment = installPushEnvironment();
+    backend(state());
+    await openPage();
+    await screen.findByRole('heading', { name: 'This device' });
+    expect(cardOrder()).toEqual(['this-device', 'settings', 'devices']);
+    const actions = document.querySelector<HTMLElement>('[data-page-header-actions]')!;
+    expect(within(actions).getByRole('button', { name: 'Customize layout' })).toBeInTheDocument();
+    const list = document.querySelector('[data-card-list]')!.parentElement!;
+    expect(list.nextElementSibling).toBe(screen.getByRole('region', { name: 'About notifications' }));
+  });
+
+  it('moves the devices above the settings and hides this device', async () => {
+    const user = userEvent.setup();
+    environment = installPushEnvironment();
+    backend(state({ devices: [device()] }));
+    await openPage();
+    await screen.findByRole('heading', { name: 'Devices' });
+    await user.click(screen.getByRole('button', { name: 'Customize layout' }));
+    await user.click(screen.getByRole('button', { name: 'Move Devices up' }));
+    expect(cardOrder()).toEqual(['this-device', 'devices', 'settings']);
+
+    await user.click(screen.getByRole('button', { name: 'Hide This device' }));
+    expect(screen.queryByRole('heading', { name: 'This device' })).not.toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Notify me about' })).toBeInTheDocument();
+  });
+});

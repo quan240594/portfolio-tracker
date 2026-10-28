@@ -4,6 +4,7 @@ import { useAnalyticsMetrics } from '../../api/analyticsHooks';
 import { QueryBoundary } from '../../components/QueryBoundary';
 import { SegmentedControl } from '../../components/SegmentedControl';
 import { PanelHeader } from '../analytics/TableShell';
+import { CardGrid } from '../layout/CardGrid';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
 import { Notice } from './MetricCard';
 import { PeCard } from './PeCard';
@@ -19,15 +20,17 @@ function MetricsContent({ data }: Readonly<{ data: AnalyticsMetricsResponse }>) 
   return (
     <div className="space-y-4">
       {!data.benchmark.available && data.benchmark.message && <Notice>{data.benchmark.message}</Notice>}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <TwrCard data={data} />
-        <PeCard data={data} />
-        <VolatilityCard data={data} />
-        <SharpeCard data={data} />
-        <div className="lg:col-span-2">
-          <SortinoCard data={data} />
-        </div>
-      </div>
+      <CardGrid
+        pageId="analytics-metrics"
+        gap="gap-4"
+        cards={[
+          { id: 'twr', title: 'Time-weighted return', defaultWidth: 'half', render: () => <TwrCard data={data} /> },
+          { id: 'pe', title: 'Price/earnings', defaultWidth: 'half', render: () => <PeCard data={data} /> },
+          { id: 'volatility', title: 'Volatility', defaultWidth: 'half', render: () => <VolatilityCard data={data} /> },
+          { id: 'sharpe', title: 'Sharpe ratio', defaultWidth: 'half', render: () => <SharpeCard data={data} /> },
+          { id: 'sortino', title: 'Sortino ratio', defaultWidth: 'full', render: () => <SortinoCard data={data} /> },
+        ]}
+      />
       <p className="muted text-xs">Past performance and risk do not predict future results. Not investment advice.</p>
     </div>
   );

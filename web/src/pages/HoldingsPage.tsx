@@ -6,6 +6,7 @@ import { PageHeader } from '../components/Layout';
 import { ErrorState } from '../components/ErrorState';
 import { EmptyState } from '../components/EmptyState';
 import { LoadingRegion, Skeleton } from '../components/Skeleton';
+import { CardGrid } from '../features/layout/CardGrid';
 import { HoldingsTable } from '../features/holdings/HoldingsTable';
 import { formatMoney } from '../lib/format';
 import { usePortfolioScope } from '../features/portfolios/usePortfolioScope';
@@ -48,7 +49,7 @@ export function HoldingsPage() {
   return (
     <>
       <PageHeader title="Holdings" description={holdingsDescription(data, scopeName)} />
-      {body}
+      <CardGrid pageId="holdings" cards={[{ id: 'holdings-table', title: 'Holdings', defaultWidth: 'full', render: () => body }]} />
     </>
   );
 }

@@ -111,7 +111,10 @@ export function PageHeader({ title, description, actions }: Readonly<{ title: st
         <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
         {description && <p className="muted mt-1 text-sm">{description}</p>}
       </div>
-      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+      {/* Where the page's Customize switch lives (see CardGrid). */}
+      <div data-page-header-actions className="flex flex-wrap gap-2 empty:hidden">
+        {actions}
+      </div>
     </div>
   );
 }

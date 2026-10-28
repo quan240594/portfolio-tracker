@@ -264,3 +264,30 @@ describe('suggestedPortfolio', () => {
     expect(suggestedPortfolio([])).toBe('');
   });
 });
+
+const cardOrder = () => [...document.querySelectorAll<HTMLElement>('[data-card-id]')].map((el) => el.dataset.cardId);
+
+describe('Trading 212 page layout', () => {
+  it('keeps the default card order and puts the customize toggle in the page header', async () => {
+    renderApp('/brokers');
+    await screen.findByLabelText('API key');
+    expect(cardOrder()).toEqual(['broker-connection', 'broker-instructions']);
+    const actions = document.querySelector<HTMLElement>('[data-page-header-actions]')!;
+    expect(within(actions).getByRole('button', { name: 'Customize layout' })).toBeInTheDocument();
+    // The cards can be reordered, so the instructions must not point "above" or "below".
+    expect(screen.getByRole('region', { name: 'How to connect' })).not.toHaveTextContent(/\b(above|below)\b/);
+  });
+
+  it('moves the instructions above the connection and hides them', async () => {
+    const user = userEvent.setup();
+    renderApp('/brokers');
+    await screen.findByLabelText('API key');
+    await user.click(screen.getByRole('button', { name: 'Customize layout' }));
+    await user.click(screen.getByRole('button', { name: 'Move How to connect up' }));
+    expect(cardOrder()).toEqual(['broker-instructions', 'broker-connection']);
+
+    await user.click(screen.getByRole('button', { name: 'Hide How to connect' }));
+    expect(screen.queryByRole('region', { name: 'How to connect' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('API key')).toBeInTheDocument();
+  });
+});

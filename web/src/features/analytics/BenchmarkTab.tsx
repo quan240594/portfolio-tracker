@@ -7,6 +7,7 @@ import { SegmentedControl } from '../../components/SegmentedControl';
 import { BenchmarkChart } from '../../components/charts/BenchmarkChart';
 import { formatDate, formatPercent } from '../../lib/format';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
+import { CardGrid } from '../layout/CardGrid';
 import { PanelHeader } from './TableShell';
 
 const BENCHMARK_OPTIONS = BENCHMARK_SYMBOLS.map((s) => ({ value: s, label: s }));
@@ -56,8 +57,14 @@ function BenchmarkContent({ data }: Readonly<{ data: AnalyticsBenchmarkResponse 
           {data.benchmark.message}
         </output>
       )}
-      <BenchmarkChart points={data.points} currency={data.baseCurrency} benchmark={data.benchmark.symbol} />
-      <ComparisonStats data={data} />
+      <CardGrid
+        pageId="analytics-benchmark"
+        gap="gap-4"
+        cards={[
+          { id: 'benchmark-chart', title: 'Benchmark chart', defaultWidth: 'full', render: () => <BenchmarkChart points={data.points} currency={data.baseCurrency} benchmark={data.benchmark.symbol} /> },
+          { id: 'benchmark-stats', title: 'Comparison figures', defaultWidth: 'full', render: () => <ComparisonStats data={data} /> },
+        ]}
+      />
     </div>
   );
 }

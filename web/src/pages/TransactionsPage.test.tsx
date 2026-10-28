@@ -227,3 +227,28 @@ describe('TransactionsPage', () => {
     });
   });
 });
+
+const cardOrder = () => [...document.querySelectorAll<HTMLElement>('[data-card-id]')].map((el) => el.dataset.cardId);
+
+describe('TransactionsPage layout', () => {
+  it('keeps the table as one card and puts the customize toggle in the page header', async () => {
+    renderApp('/transactions');
+    await screen.findByRole('table', { name: 'Transactions, newest first' });
+    expect(cardOrder()).toEqual(['transactions-table']);
+    const actions = document.querySelector<HTMLElement>('[data-page-header-actions]')!;
+    expect(within(actions).getByRole('button', { name: 'Customize layout' })).toBeInTheDocument();
+    expect(within(actions).getByRole('button', { name: 'Add transaction' })).toBeInTheDocument();
+  });
+
+  it('hides and shows the table card', async () => {
+    const user = userEvent.setup();
+    renderApp('/transactions');
+    await screen.findByRole('table', { name: 'Transactions, newest first' });
+    await user.click(screen.getByRole('button', { name: 'Customize layout' }));
+    await user.click(screen.getByRole('button', { name: 'Hide Transactions' }));
+    expect(cardOrder()).toEqual([]);
+    expect(screen.queryByRole('table', { name: 'Transactions, newest first' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Show Transactions' }));
+    expect(await screen.findByRole('table', { name: 'Transactions, newest first' })).toBeInTheDocument();
+  });
+});

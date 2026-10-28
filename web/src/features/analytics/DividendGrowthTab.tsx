@@ -5,6 +5,7 @@ import type { GrowthBar } from '../../components/charts/DividendGrowthChart';
 import { SelectableDataTable, SelectableTable, useSeriesSelection, type SeriesSelection } from '../../components/charts/selection';
 import { formatMoney, formatMonth } from '../../lib/format';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
+import { CardGrid } from '../layout/CardGrid';
 import { signedPercentOrDash } from './labels';
 import { GrowthChartBlock, growthSeriesKeys } from './GrowthChartBlock';
 import { PanelHeader, TableShell, numCell, rowClass } from './TableShell';
@@ -83,22 +84,37 @@ function GrowthBody({ data }: Readonly<{ data: AnalyticsDividendGrowthResponse }
   const monthSelection = useSeriesSelection(growthSeriesKeys(monthBars), monthBars.map((b) => b.label));
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="min-w-0">
-          <h3 className="mb-2 text-sm font-medium">Per year</h3>
-          <GrowthChartBlock bars={yearBars} selection={yearSelection} currency={data.baseCurrency} title="Dividends received per year" testId="dividend-year-chart" currentName="Received" />
-        </div>
-        <div className="min-w-0">
-          <h3 className="mb-2 text-sm font-medium">Last {MONTHS_SHOWN} months vs a year earlier</h3>
-          <GrowthChartBlock bars={monthBars} selection={monthSelection} currency={data.baseCurrency} title="Monthly dividends compared with a year earlier" testId="dividend-month-chart" currentName="This period">
-            <MonthTable bars={monthBars} currency={data.baseCurrency} currentName="This period" selection={monthSelection} />
-          </GrowthChartBlock>
-        </div>
-      </div>
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <YearTable data={data} selection={yearSelection} />
-        <PerShareTable series={data.perShare} />
-      </div>
+      <CardGrid
+        pageId="analytics-dividends"
+        cards={[
+          {
+            id: 'year-chart',
+            title: 'Dividends per year',
+            defaultWidth: 'half',
+            render: () => (
+              <div>
+                <h3 className="mb-2 text-sm font-medium">Per year</h3>
+                <GrowthChartBlock bars={yearBars} selection={yearSelection} currency={data.baseCurrency} title="Dividends received per year" testId="dividend-year-chart" currentName="Received" />
+              </div>
+            ),
+          },
+          {
+            id: 'month-chart',
+            title: 'Last months vs a year earlier',
+            defaultWidth: 'half',
+            render: () => (
+              <div>
+                <h3 className="mb-2 text-sm font-medium">Last {MONTHS_SHOWN} months vs a year earlier</h3>
+                <GrowthChartBlock bars={monthBars} selection={monthSelection} currency={data.baseCurrency} title="Monthly dividends compared with a year earlier" testId="dividend-month-chart" currentName="This period">
+                  <MonthTable bars={monthBars} currency={data.baseCurrency} currentName="This period" selection={monthSelection} />
+                </GrowthChartBlock>
+              </div>
+            ),
+          },
+          { id: 'year-table', title: 'Dividends per year table', defaultWidth: 'half', render: () => <YearTable data={data} selection={yearSelection} /> },
+          { id: 'per-share-table', title: 'Dividend per share table', defaultWidth: 'half', render: () => <PerShareTable series={data.perShare} /> },
+        ]}
+      />
       <p className="muted text-xs">
         Net dividends received, converted at the rate of the payment date. Growth compares with the previous calendar year; the current year is incomplete.
         The charts follow the years, months and series you include in the legends or the tables.

@@ -154,3 +154,69 @@ describe('DividendsPage', () => {
     ).toBeInTheDocument();
   });
 });
+
+const cardOrder = () => [...document.querySelectorAll<HTMLElement>('[data-card-id]')].map((el) => el.dataset.cardId);
+
+describe('DividendsPage layout', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('keeps the default card order and puts the customize toggle in the page header', async () => {
+    renderApp('/dividends');
+    expect(await screen.findByRole('heading', { name: 'Payment history' })).toBeInTheDocument();
+    expect(cardOrder()).toEqual([
+      'kpis',
+      'yield-payout',
+      'diversification',
+      'consistency',
+      'received-over-time',
+      'received-by-holding',
+      'future-payments',
+      'average-growth',
+      'dividend-growth',
+      'payment-history',
+    ]);
+    const actions = document.querySelector('[data-page-header-actions]')!;
+    expect(within(actions as HTMLElement).getByRole('button', { name: 'Customize layout' })).toBeInTheDocument();
+  });
+
+  it('reorders and hides cards', async () => {
+    const user = userEvent.setup();
+    renderApp('/dividends');
+    await screen.findByRole('heading', { name: 'Payment history' });
+    await user.click(screen.getByRole('button', { name: 'Customize layout' }));
+    await user.click(screen.getByRole('button', { name: 'Move Dividends received by holding down' }));
+    expect(cardOrder().slice(4, 7)).toEqual(['received-over-time', 'future-payments', 'received-by-holding']);
+
+    await user.click(screen.getByRole('button', { name: 'Hide Dividend growth' }));
+    expect(cardOrder()).not.toContain('dividend-growth');
+    await user.click(screen.getByRole('button', { name: 'Show Dividend growth' }));
+    expect(cardOrder()).toContain('dividend-growth');
+  });
+
+  it('keeps the period selector driving the by-holding card wherever the cards are, and when the selector card is hidden', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.parse('2026-10-27T10:00:00Z') });
+    const template = getDividends().received[0]!;
+    const received = [
+      { ...template, symbol: 'OLDCO', date: '2020-03-10', amount: 10 },
+      { ...template, symbol: 'NEWCO', date: '2026-09-15', amount: 20 },
+    ];
+    server.use(http.get('/api/dividends', () => HttpResponse.json(overview({ received }))));
+    const user = userEvent.setup();
+    renderWithProviders(<DividendsPage />);
+    const holdingCard = await screen.findByRole('region', { name: 'Dividends received by holding' });
+    const holdings = async () => {
+      const table = await within(holdingCard).findByRole('table', { name: 'Dividends received per holding' });
+      return within(table).getAllByRole('rowheader').map((c) => c.textContent);
+    };
+    await user.click(await within(holdingCard).findByText('Show data table'));
+    expect(await holdings()).toEqual(['NEWCO', 'OLDCO']);
+
+    await user.click(screen.getByRole('radio', { name: '12 months' }));
+    expect(await holdings()).toEqual(['NEWCO']);
+
+    await user.click(screen.getByRole('button', { name: 'Customize layout' }));
+    await user.click(screen.getByRole('button', { name: 'Hide Dividends received' }));
+    expect(screen.queryByRole('radio', { name: '12 months' })).not.toBeInTheDocument();
+    expect(await holdings()).toEqual(['NEWCO']);
+  });
+});
