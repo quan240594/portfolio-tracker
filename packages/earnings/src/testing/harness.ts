@@ -68,7 +68,7 @@ export interface HarnessOptions {
   allowance?: number;
   estimates?: EstimateSource;
   /** The consensus client of the `earningsEstimates` job (`FakeEstimates`); absent = no Alpha Vantage key. */
-  consensus?: EstimatesJobDeps['client'];
+  consensus?: NonNullable<EstimatesJobDeps['client']>;
   /** Environment of the feature (`EARNINGS_BACKFILL_QUARTERS`, ...), merged over the configured defaults. */
   env?: Record<string, string>;
 }

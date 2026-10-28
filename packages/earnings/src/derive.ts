@@ -5,7 +5,6 @@
  */
 import {
   EARNINGS_SCHEMA_VERSION,
-  IN_LINE_TOLERANCE,
   KPI_TEMPLATES,
   classifyBeat,
   roundTo,
@@ -49,7 +48,8 @@ export interface DeriveInput {
 }
 
 /** An actual within 0.5 % of the estimate is "in line" (the rule lives in `@portfolio/shared`, where the API's join uses it too). */
-export { IN_LINE_TOLERANCE, classifyBeat };
+export { IN_LINE_TOLERANCE } from '@portfolio/shared';
+export { classifyBeat };
 
 /** Percent change from `from` to `to`; absent when `from` is not positive (a growth rate against a loss or zero says nothing). */
 export function changePct(to: number, from: number | undefined): number | undefined {
