@@ -84,7 +84,7 @@ def calendar_refresh(event: dict[str, Any] | None, context: Any) -> dict[str, An
 
 MAX_RUN_SYMBOLS = 300
 _URL = re.compile(r"https?://\S+")
-_SECRET = re.compile(r"\b(?:api_?key|apikey|token|secret|key)=\S+", re.IGNORECASE)
+_SECRET = re.compile(r"\b(?:api_?key|token|secret|key)=\S+", re.IGNORECASE)
 _LONG_TOKEN = re.compile(r"[A-Za-z0-9_-]{24,}")
 
 

@@ -59,7 +59,7 @@ export interface EarningsRunRecord {
   unvouched?: string[];
 }
 
-const symbolList = z.array(z.string()).max(MAX_RUN_SYMBOLS);
+const symbolList = z.array(z.string()).max(MAX_RUN_SYMBOLS).optional().catch(undefined);
 const count = z.number().int().nonnegative();
 
 export const earningsRunSchema = z.object({
@@ -70,9 +70,9 @@ export const earningsRunSchema = z.object({
   tracked: count.catch(0),
   rows: count.optional().catch(undefined),
   events: count.optional().catch(undefined),
-  matchedSymbols: symbolList.optional().catch(undefined),
-  listed: symbolList.optional().catch(undefined),
-  unvouched: symbolList.optional().catch(undefined),
+  matchedSymbols: symbolList,
+  listed: symbolList,
+  unvouched: symbolList,
 });
 
 /** The run a stored item describes; null when there is none or it is not a record of this version. */

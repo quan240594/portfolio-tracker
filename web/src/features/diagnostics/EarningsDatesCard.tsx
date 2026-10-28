@@ -18,6 +18,27 @@ const TIME_LABELS: Readonly<Record<NonNullable<HeldEarningsDate['next']>['timeOf
 
 const TRIGGER_LABELS = { scheduled: 'daily run', manual: 'refreshed on request' } as const;
 
+const plural = (count: number, one: string, many: string): string => (count === 1 ? one : many);
+
+function rowsText(rows: number | null): string {
+  return rows === null ? 'Rows returned: not recorded' : `The provider returned ${rows} rows`;
+}
+
+function matchedText(matched: number | null, held: number): string {
+  if (matched === null) return '';
+  return `, ${matched} of your ${held} held ${plural(held, 'symbol', 'symbols')} matched`;
+}
+
+function storedText(events: number | null): string {
+  if (events === null) return '';
+  return `; ${events} ${plural(events, 'date', 'dates')} stored`;
+}
+
+function upcomingText(withDate: number, held: number): string {
+  if (held === 0) return 'No open positions to check.';
+  return `${withDate} of ${held} held ${plural(held, 'symbol has', 'symbols have')} an upcoming date.`;
+}
+
 function RunSummary({ run, held, label }: Readonly<{ run: EarningsRunReport; held: number; label: string }>) {
   const counted = run.status === 'ok';
   return (
@@ -28,9 +49,9 @@ function RunSummary({ run, held, label }: Readonly<{ run: EarningsRunReport; hel
       {run.reason !== '' && <p className="break-words">Reason: {run.reason}</p>}
       {counted && (
         <p className="muted">
-          {run.rows === null ? 'Rows returned: not recorded' : `The provider returned ${run.rows} rows`}
-          {run.matchedHeld === null ? '' : `, ${run.matchedHeld} of your ${held} held ${held === 1 ? 'symbol' : 'symbols'} matched`}
-          {run.events === null ? '' : `; ${run.events} ${run.events === 1 ? 'date' : 'dates'} stored`}.
+          {rowsText(run.rows)}
+          {matchedText(run.matchedHeld, held)}
+          {storedText(run.events)}.
         </p>
       )}
     </div>
@@ -129,7 +150,7 @@ export function EarningsDatesCard({ report, earnings }: Readonly<{ report: GetEa
       <BudgetLine report={report} />
       <RefreshControl report={report} earnings={earnings} />
       <p className="text-sm">
-        {report.held === 0 ? 'No open positions to check.' : `${report.withDate} of ${report.held} held ${report.held === 1 ? 'symbol has' : 'symbols have'} an upcoming date.`}
+        {upcomingText(report.withDate, report.held)}
       </p>
       {report.symbols.length > 0 && (
         <table className="w-full table-fixed text-left text-sm md:table-auto">
