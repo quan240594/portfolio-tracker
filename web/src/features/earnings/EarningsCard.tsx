@@ -10,6 +10,7 @@ import {
   NOT_DISCLOSED,
   NO_ESTIMATE,
   changeParts,
+  estimateOf,
   formatMetric,
   growthLines,
   guidanceText,
@@ -71,6 +72,9 @@ function Scorecard({ summary, labelledBy }: Readonly<{ summary: EarningsSummary;
             <td className="px-3 py-2 max-sm:block max-sm:px-0 max-sm:py-0.5" data-label="Expected">
               <span className="muted mr-2 sm:hidden">Expected</span>
               <span className={row.hasEstimate ? 'tabular-nums' : 'muted text-xs'}>{row.expected}</span>
+              {row.analysts && <span className="muted ml-1 text-xs">({row.analysts})</span>}
+              {row.range && <span className="muted block text-xs tabular-nums">{row.range}</span>}
+              {row.source && <span className="muted block text-[11px]">{row.source}</span>}
             </td>
             <td className="px-3 py-2 font-semibold tabular-nums max-sm:block max-sm:px-0 max-sm:py-0.5" data-label="Actual">
               <span className="muted mr-2 font-normal sm:hidden">Actual</span>
@@ -78,7 +82,7 @@ function Scorecard({ summary, labelledBy }: Readonly<{ summary: EarningsSummary;
             </td>
             <td className="py-2 pl-3 max-sm:block max-sm:px-0 max-sm:py-0.5" data-label="Beat/Miss">
               <span className="muted mr-2 sm:hidden">Beat/Miss</span>
-              {row.verdict ? <VerdictChip verdict={row.verdict} surprise={row.surprise} /> : <span className="muted text-xs">{row.hasEstimate ? NOT_DISCLOSED : NO_ESTIMATE}</span>}
+              {row.verdict ? <VerdictChip verdict={row.verdict} surprise={row.surprise} text={row.beat} /> : <span className="muted text-xs">{row.hasEstimate ? NOT_DISCLOSED : row.expected}</span>}
             </td>
           </tr>
         ))}
@@ -108,6 +112,7 @@ function GrowthList({ summary }: Readonly<{ summary: EarningsSummary }>) {
 function MetricLine({ summary, metricKey, hideChange = false }: Readonly<{ summary: EarningsSummary; metricKey: string; hideChange?: boolean }>) {
   const metric = metricOf(summary, metricKey);
   const label = labelOf(summary, metricKey);
+  const estimate = metric === undefined ? undefined : estimateOf(summary, metricKey, metric);
   if (metric === undefined) {
     return (
       <li className="flex flex-wrap items-baseline justify-between gap-x-3">
@@ -124,8 +129,8 @@ function MetricLine({ summary, metricKey, hideChange = false }: Readonly<{ summa
       </span>
       <span className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-right">
         <strong className="tabular-nums">{formatMetric(metric.value, metric.unit, summary.reportingCurrency)}</strong>
-        {metric.estimate !== undefined && <span className="muted text-xs tabular-nums">Est. {formatMetric(metric.estimate, metric.unit, summary.reportingCurrency)}</span>}
-        {metric.verdict && <VerdictChip verdict={metric.verdict} surprise={surpriseText(metric.surprisePct)} />}
+        {estimate !== undefined && <span className="muted text-xs tabular-nums">Est. {formatMetric(estimate.average, metric.unit, summary.reportingCurrency)}</span>}
+        {estimate?.surprise && <VerdictChip verdict={estimate.surprise.verdict} surprise={surpriseText(estimate.surprise.pct)} />}
         {!hideChange && <Changes metric={metric} />}
       </span>
     </li>

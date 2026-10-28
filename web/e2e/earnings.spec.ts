@@ -41,7 +41,8 @@ for (const viewport of [
       const bank = cards.nth(0);
       await expect(bank.getByRole('table')).toBeVisible();
       await expect(bank.getByText('In line').first()).toBeVisible();
-      await expect(bank.getByText('no estimate available').first()).toBeVisible();
+      await expect(bank.getByText('The data provider has no estimate for this figure').first()).toBeVisible();
+      await expect(bank.getByText('Consensus: Alpha Vantage').first()).toBeVisible();
       await expect(bank.getByRole('list', { name: 'Growth' })).toContainText('EPS up 12%');
       await expect(bank.getByText('Source: SEC filing')).toBeVisible();
       await expect(bank.getByRole('link', { name: /Source: SEC filing/ })).toHaveAttribute('rel', 'noopener noreferrer');
@@ -57,6 +58,9 @@ for (const viewport of [
       await expect(saas.getByText('reported', { exact: true }).first()).toBeVisible();
       await expect(saas.getByText(/first stored quarter/)).toBeVisible();
       await expect(saas.getByText('Beat/Miss').first()).toBeAttached();
+      await expect(saas.getByText('(31 analysts)')).toBeVisible();
+      await expect(saas.getByText(/^Beat by/).first()).toBeVisible();
+      await expect(saas.getByText(/^Missed by/).first()).toBeVisible();
 
       // Native details: a closed section opens on click.
       const updates = bank.locator('details', { hasText: 'Key updates' });
@@ -116,6 +120,8 @@ test.describe('Earnings summaries: what was checked', () => {
       await expect(section.getByText(/^Last full pass: every company was looked at since 25-10-2026/)).toBeVisible();
       await expect(section.getByText(/3 of 12 releases read/)).toBeVisible();
       await expect(section.getByText(/Resumes at 00:00 UTC/)).toBeVisible();
+      await expect(section.getByText(/^Consensus estimates: 0 of 3 companies\. The free plan does not include estimates; not asked again before/)).toBeVisible();
+      await expect(section.getByText(/^NRDV\.AS: .* · estimates: not covered by the data provider/)).toBeVisible();
       await expect(section.getByRole('button', { name: 'Fetch all now' })).toBeVisible();
       await section.getByRole('button', { name: 'Fetch all now' }).click();
       await expect(section.getByText(/Started\. The page fills as releases are read/)).toBeVisible();
@@ -130,6 +136,7 @@ test.describe('Earnings summaries: what was checked', () => {
       await expect(section).not.toHaveAttribute('open', '');
       await section.locator('summary').click();
       await expect(section.getByText(/8 of 8 releases read/)).toBeVisible();
+      await expect(section.getByText('Consensus estimates: 2 of 2 companies.')).toBeVisible();
       expect(await overflowing(page)).toEqual([]);
     });
   }

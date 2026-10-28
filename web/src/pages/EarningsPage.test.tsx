@@ -62,6 +62,21 @@ describe('the page', () => {
     expect(document.title).toContain('Earnings');
   });
 
+  it('shows the invented consensus of the demo with its source, range and analysts, and how many companies have it', async () => {
+    demo();
+    const user = userEvent.setup();
+    renderApp('/earnings');
+    const [bank, saas] = await screen.findAllByRole('article');
+    expect(within(saas!).getAllByText('Consensus: Alpha Vantage')).toHaveLength(2);
+    expect(within(saas!).getByText('(31 analysts)')).toBeInTheDocument();
+    expect(within(saas!).getByText('(27 analysts)')).toBeInTheDocument();
+    expect(within(saas!).getByText(/^Beat by/)).toBeInTheDocument();
+    expect(within(saas!).getByText(/^Missed by/)).toBeInTheDocument();
+    expect(within(bank!).getAllByText('The data provider has no estimate for this figure')).toHaveLength(2);
+    await user.click(screen.getByText('What was checked'));
+    expect(screen.getByText('Consensus estimates: 2 of 2 companies.')).toBeInTheDocument();
+  });
+
   it('asks for an immediate check of the filtered symbol, at most once an hour', async () => {
     demo();
     const user = userEvent.setup();

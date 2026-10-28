@@ -4,6 +4,7 @@
  */
 import type { EarningsBackfillStatus, EarningsLastRun, EarningsStatusResponse, EarningsSymbolStatus } from '@portfolio/shared';
 import { formatDate, formatDateTime } from '../../lib/format';
+import { reasonText } from './earningsModel';
 
 export interface CheckedLine {
   symbol: string;
@@ -39,11 +40,20 @@ function releasesNote(entry: EarningsSymbolStatus): string {
   return ` · ${entry.releases.stored} of ${entry.releases.planned} quarters stored${failed}`;
 }
 
+const lowerFirst = (text: string): string => text.charAt(0).toLowerCase() + text.slice(1);
+
+/** ` · estimates: not covered by the data provider`: why the consensus of a company is missing; nothing when it was fetched. */
+function consensusNote(entry: EarningsSymbolStatus): string {
+  const outcome = entry.consensus?.outcome;
+  if (outcome === undefined || outcome === 'ok') return '';
+  return ` · estimates: ${lowerFirst(reasonText(outcome, entry.consensus?.detail))}`;
+}
+
 /** The line of one company. Without a run (an older deployment, or never checked) the older fields say what they can. */
 export function checkedLine(entry: EarningsSymbolStatus, status: EarningsStatusResponse): CheckedLine {
   if (entry.lastRun !== undefined) {
     const phrase = PHRASES[entry.lastRun.stage](entry.lastRun, status);
-    return { symbol: entry.symbol, text: `${entry.symbol}: ${phrase.text}${releasesNote(entry)}`, tone: phrase.tone };
+    return { symbol: entry.symbol, text: `${entry.symbol}: ${phrase.text}${releasesNote(entry)}${consensusNote(entry)}`, tone: phrase.tone };
   }
   if (!entry.lastCheckedAt) return { symbol: entry.symbol, text: `${entry.symbol}: not checked yet`, tone: 'wait' };
   const reason = entry.lastReason ? `, ${entry.lastReason}` : '';
@@ -72,6 +82,20 @@ export function notCountedText(status: EarningsStatusResponse): string | undefin
   if (count <= 0) return undefined;
   const noun = count === 1 ? 'symbol' : 'symbols';
   return `Not counted: ${count} ${noun} you no longer hold.`;
+}
+
+/**
+ * `Consensus estimates: 18 of 26 companies.` and, when the job waits, why: the free plan has no estimates, or the daily limit of the provider was
+ * reached. Absent on a deployment without the field.
+ */
+export function consensusText(status: EarningsStatusResponse): string | undefined {
+  const { consensus } = status;
+  if (consensus === undefined) return undefined;
+  const base = `Consensus estimates: ${consensus.covered} of ${consensus.companies} companies.`;
+  if (!status.estimatesConfigured) return `${base} They need an Alpha Vantage key (the ALPHAVANTAGE_API_KEY secret).`;
+  if (consensus.blockedReason === undefined || consensus.blockedUntil === undefined) return base;
+  const why = consensus.blockedReason === 'premium' ? 'The free plan does not include estimates' : 'The data provider’s daily limit was reached';
+  return `${base} ${why}; not asked again before ${formatDateTime(consensus.blockedUntil)}.`;
 }
 
 export function lastPassText(status: EarningsStatusResponse): string {

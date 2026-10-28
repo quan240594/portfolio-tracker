@@ -20,9 +20,9 @@ const AT = '2026-10-25T06:30:00.000Z';
 
 /** One line of each kind for the page that has nothing to show: the AI could not read a release, no release, no SEC registration, a fund. */
 const EMPTY_SYMBOLS: EarningsStatusResponse['symbols'] = [
-  { symbol: 'CLDV', eligible: true, lastCheckedAt: AT, lastRun: { at: AT, stage: 'ai', detail: 'invalid JSON', filing: { form: '8-K', date: '2026-10-21', accession: '0001000404-26-000003' } }, releases: { planned: 4, stored: 0, failed: 1 } },
+  { symbol: 'CLDV', eligible: true, lastCheckedAt: AT, lastRun: { at: AT, stage: 'ai', detail: 'invalid JSON', filing: { form: '8-K', date: '2026-10-21', accession: '0001000404-26-000003' } }, releases: { planned: 4, stored: 0, failed: 1 }, consensus: { outcome: 'premium', at: AT } },
   { symbol: 'HBRB', eligible: true, lastCheckedAt: AT, lastRun: { at: AT, stage: 'no-release-found', detail: 'no results release in the last 135 days' } },
-  { symbol: 'NRDV.AS', eligible: true, lastCheckedAt: AT, lastRun: { at: AT, stage: 'ticker-map', detail: 'not found in the SEC company list (no US registration, or the name matches none)' } },
+  { symbol: 'NRDV.AS', eligible: true, lastCheckedAt: AT, lastRun: { at: AT, stage: 'ticker-map', detail: 'not found in the SEC company list (no US registration, or the name matches none)' }, consensus: { outcome: 'no-coverage', at: AT, detail: 'no US ticker is known for this listing' } },
   { symbol: 'VWRL', eligible: false },
 ];
 
@@ -37,6 +37,7 @@ function demoStatus(): EarningsStatusResponse {
       neurons: { used: 5980, dailyCap: 6000, allowance: 10_000, state: 'warn', resetsAt: '2026-10-26T00:00:00.000Z' },
       backfill: { status: 'running', quarters: 4, total: 12, done: 3, stored: 2, failed: 1, planned: 3, companies: 3, waitReason: 'allowance', waitUntil: '2026-10-26T00:05:00.000Z' },
       lastFullPassAt: AT,
+      consensus: { covered: 0, companies: 3, blockedUntil: '2026-11-01T06:30:00.000Z', blockedReason: 'premium' },
       symbols: EMPTY_SYMBOLS,
     };
   }
@@ -48,6 +49,7 @@ function demoStatus(): EarningsStatusResponse {
     neurons: { used: 420, dailyCap: 6000, allowance: 10_000, state: 'ok', resetsAt: '2026-10-24T00:00:00.000Z' },
     backfill: { status: 'complete', quarters: 4, total: 8, done: 8, stored: 8, failed: 0, planned: 2, companies: 2, completedAt: '2026-10-24T08:00:00.000Z' },
     lastFullPassAt: '2026-10-24T08:00:00.000Z',
+    consensus: { covered: shown.filter((summary) => summary.consensus?.quarterEnd !== undefined).length, companies: shown.length },
     symbols: shown.map((summary) => ({
       symbol: summary.symbol,
       eligible: true,
@@ -56,6 +58,7 @@ function demoStatus(): EarningsStatusResponse {
       latestReportDate: summary.reportDate,
       lastRun: { at: summary.generatedAt, stage: 'ok', detail: 'summary stored', filing: { form: summary.form, date: summary.reportDate, accession: summary.accession } },
       releases: { planned: 4, stored: 4, failed: 0 },
+      ...(summary.consensus?.asOf === undefined ? {} : { consensus: { outcome: 'ok' as const, at: summary.consensus.asOf, fetchedAt: summary.consensus.asOf } }),
     })),
   };
 }

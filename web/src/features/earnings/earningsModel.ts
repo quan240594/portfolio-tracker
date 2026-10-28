@@ -4,9 +4,13 @@
  * never filled in.
  */
 import {
+  CONSENSUS_SOURCE_LABEL,
   CORE_METRIC_META,
   KPI_TEMPLATES,
   formatCompactMoney,
+  type ConsensusMetric,
+  type ConsensusReason,
+  type EstimateSurprise,
   type CoreMetricKey,
   type EarningsBasis,
   type EarningsGuidance,
@@ -69,19 +73,100 @@ export function metricOf(summary: EarningsSummary, key: string): EarningsMetric 
   return summary.headline[key as CoreMetricKey] ?? summary.kpis.find((kpi) => kpi.key === key)?.metric;
 }
 
+/** Why a figure has no estimate, in the words the card shows instead of a bare "no estimate available". */
+export const REASON_TEXT: Readonly<Record<ConsensusReason, string>> = {
+  'no-key': 'Needs an Alpha Vantage key, which is not set on this deployment',
+  pending: 'Fetched on the next free run',
+  'no-coverage': 'Not covered by the data provider',
+  premium: 'The free plan does not include estimates',
+  'rate-limited': 'The data provider’s daily limit was reached; tried again later',
+  error: 'The last attempt to fetch it failed',
+  'no-quarter': 'The data provider has no estimate for this quarter',
+  'no-figure': 'The data provider has no estimate for this figure',
+  mismatch: 'The estimates did not match the size of the reported figures, so they are not shown',
+};
+
+const SOURCE_TEXT: Readonly<Record<ConsensusMetric['source'], string>> = {
+  consensus: `Consensus: ${CONSENSUS_SOURCE_LABEL}`,
+  release: `Estimate: ${CONSENSUS_SOURCE_LABEL}`,
+  calendar: `Calendar estimate: ${CONSENSUS_SOURCE_LABEL}`,
+};
+
+/** The reason line of a figure without an estimate; the detail of a failed attempt is added in brackets. */
+export function reasonText(reason: ConsensusReason, detail?: string): string {
+  return reason === 'error' && detail !== undefined && detail !== '' ? `${REASON_TEXT.error} (${detail})` : REASON_TEXT[reason];
+}
+
 export interface ScorecardRow {
   key: string;
   label: string;
   basis?: EarningsBasis;
-  /** Text of the expected cell: the estimate, or "no estimate available". */
+  /** Text of the expected cell: the estimate, or why there is none (`no estimate available` for a summary without the consensus fields). */
   expected: string;
   hasEstimate: boolean;
+  /** `Range US$ 6,30 to US$ 6,60`, with the estimates of the highest and the lowest analyst. */
+  range?: string;
+  /** `12 analysts`. */
+  analysts?: string;
+  /** `Consensus: Alpha Vantage`. */
+  source?: string;
   /** Text of the actual cell, or "not disclosed". */
   actual: string;
   disclosed: boolean;
   verdict?: EarningsVerdict;
   /** `+7,3%`: the surprise next to the verdict. */
   surprise?: string;
+  /** `Beat by US$ 0,47 (7,3%)`, `Missed by $0.06B (1,9%)` or `In line`: the verdict in words, with the amount. */
+  beat?: string;
+}
+
+/** `Beat by US$ 0,47 (7,3%)`: the size of the surprise in the unit of the figure and in percent of the estimate. */
+export function beatText(verdict: EarningsVerdict, amount: number, pct: number | undefined, show: (value: number) => string): string {
+  if (verdict === 'inline') return VERDICT_LABELS.inline;
+  const verb = verdict === 'beat' ? 'Beat by' : 'Missed by';
+  const percent = pct === undefined ? '' : ` (${formatPercent(Math.abs(pct), { digits: 1 })})`;
+  return `${verb} ${show(Math.abs(amount))}${percent}`;
+}
+
+/** The estimate of a figure: the joined consensus for EPS and revenue, else what the release was stored with. */
+export function estimateOf(summary: EarningsSummary, key: string, metric: EarningsMetric | undefined): ConsensusMetric | undefined {
+  if (key === 'eps' && summary.consensus?.eps !== undefined) return summary.consensus.eps;
+  if (key === 'revenue' && summary.consensus?.revenue !== undefined) return summary.consensus.revenue;
+  if (metric?.estimate === undefined) return undefined;
+  const surprise = metric.verdict === undefined ? undefined : { amount: metric.value - metric.estimate, verdict: metric.verdict, ...(metric.surprisePct === undefined ? {} : { pct: metric.surprisePct }) };
+  return { average: metric.estimate, source: 'release', ...(surprise === undefined ? {} : { surprise }) };
+}
+
+/** What the expected cell says when there is no estimate. */
+function missingText(summary: EarningsSummary, key: string): string {
+  const { consensus } = summary;
+  if (consensus === undefined) return NO_ESTIMATE;
+  if (key !== 'eps' && key !== 'revenue') return 'Consensus covers EPS and revenue only';
+  return consensus.reason === undefined ? NO_ESTIMATE : reasonText(consensus.reason, consensus.detail);
+}
+
+function rangeText(estimate: ConsensusMetric, unit: MetricUnit, currency: string): string | undefined {
+  if (estimate.low === undefined || estimate.high === undefined) return undefined;
+  return `Range ${formatMetric(estimate.low, unit, currency)} to ${formatMetric(estimate.high, unit, currency)}`;
+}
+
+function surpriseParts(surprise: EstimateSurprise | undefined, unit: MetricUnit, currency: string): Pick<ScorecardRow, 'beat' | 'surprise' | 'verdict'> {
+  if (surprise === undefined) return {};
+  const text = beatText(surprise.verdict, surprise.amount, surprise.pct, (value) => formatMetric(value, unit, currency));
+  const pct = surprise.pct === undefined ? {} : { surprise: formatGrowth(surprise.pct) };
+  return { verdict: surprise.verdict, beat: text, ...pct };
+}
+
+function estimateParts(estimate: ConsensusMetric, unit: MetricUnit, currency: string): Pick<ScorecardRow, 'range' | 'analysts' | 'source' | 'beat' | 'surprise' | 'verdict'> {
+  const range = rangeText(estimate, unit, currency);
+  const noun = estimate.analysts === 1 ? 'analyst' : 'analysts';
+  const analysts = estimate.analysts === undefined ? undefined : `${estimate.analysts} ${noun}`;
+  return {
+    ...(range === undefined ? {} : { range }),
+    ...(analysts === undefined ? {} : { analysts }),
+    source: SOURCE_TEXT[estimate.source],
+    ...surpriseParts(estimate.surprise, unit, currency),
+  };
 }
 
 /** The two rows of the card (per-share result and revenue; AFFO for a REIT) with expected, actual and the verdict. */
@@ -89,16 +174,16 @@ export function scorecardRows(summary: EarningsSummary): ScorecardRow[] {
   return KPI_TEMPLATES[summary.template].scorecard.map((key) => {
     const metric = metricOf(summary, key);
     const unit = metric?.unit ?? 'money';
+    const estimate = estimateOf(summary, key, metric);
     return {
       key,
       label: labelOf(summary, key),
       ...(metric?.basis === undefined ? {} : { basis: metric.basis }),
-      expected: metric?.estimate === undefined ? NO_ESTIMATE : formatMetric(metric.estimate, unit, summary.reportingCurrency),
-      hasEstimate: metric?.estimate !== undefined,
+      expected: estimate === undefined ? missingText(summary, key) : formatMetric(estimate.average, unit, summary.reportingCurrency),
+      hasEstimate: estimate !== undefined,
       actual: metric === undefined ? NOT_DISCLOSED : formatMetric(metric.value, unit, summary.reportingCurrency),
       disclosed: metric !== undefined,
-      ...(metric?.verdict === undefined ? {} : { verdict: metric.verdict }),
-      ...(metric?.surprisePct === undefined ? {} : { surprise: formatGrowth(metric.surprisePct) }),
+      ...(estimate === undefined ? {} : estimateParts(estimate, unit, summary.reportingCurrency)),
     };
   });
 }
