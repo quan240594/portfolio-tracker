@@ -17,8 +17,8 @@ describe('portfolio-scoped pages', () => {
     const params: string[] = [];
     server.events.on('request:start', ({ request }) => {
       const url = new URL(request.url);
-      // The watchlist and the free-plan usage are per user/deployment, not per portfolio.
-      if (!['/api/portfolios', '/api/watchlist', '/api/usage', '/api/earnings/status'].includes(url.pathname)) params.push(`${url.pathname}?${url.searchParams.get('portfolioId')}`);
+      // The watchlist, the page layouts and the free-plan usage are per user/deployment, not per portfolio.
+      if (!['/api/portfolios', '/api/watchlist', '/api/usage', '/api/earnings/status'].includes(url.pathname) && !url.pathname.startsWith('/api/layouts/')) params.push(`${url.pathname}?${url.searchParams.get('portfolioId')}`);
     });
     renderApp('/?portfolio=trading-212');
     const top = await screen.findByRole('region', { name: 'Top holdings' });

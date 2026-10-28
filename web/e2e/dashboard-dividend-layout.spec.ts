@@ -48,7 +48,7 @@ test.describe('Dashboard stat grid (mock mode)', () => {
     test(`lays out the twelve cards without overflow at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height });
       await page.goto('/');
-      const grid = page.getByTestId('kpi-grid');
+      const grid = page.locator('[data-card-list]');
       await expect(region(page, 'Dividend yield (TTM)').getByTestId('kpi-value')).toHaveText(/^\d+,\d{2}%$/);
       await expect(region(page, 'Passive income (next 12 months)').getByTestId('kpi-value')).toHaveText(/^€\s[\d.]+,\d{2}$/);
       expect(await overflow(page)).toBeLessThanOrEqual(0);
@@ -76,13 +76,13 @@ test.describe('Dashboard stat grid (mock mode)', () => {
     });
   }
 
-  test('uses two columns on a tablet', async ({ page }) => {
+  test('stacks the cards in one column on a tablet (the card grid starts at 1024px)', async ({ page }) => {
     await page.setViewportSize({ width: 768, height: 900 });
     await page.goto('/');
     await expect(region(page, 'Dividend growth (TTM)').getByTestId('kpi-value')).toBeVisible();
     const boxes: Box[] = [];
-    for (const name of STANDARD_CARDS) boxes.push(await box(region(page.getByTestId('kpi-grid'), name)));
-    expect(new Set(boxes.map((b) => Math.round(b.x))).size).toBe(2);
+    for (const name of STANDARD_CARDS) boxes.push(await box(region(page.locator('[data-card-list]'), name)));
+    expect(new Set(boxes.map((b) => Math.round(b.x))).size).toBe(1);
     expect(await overflow(page)).toBeLessThanOrEqual(0);
   });
 

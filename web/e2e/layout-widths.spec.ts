@@ -12,7 +12,7 @@ const FONTS = [
 
 for (const font of FONTS) {
   for (const width of WIDTHS) {
-    for (const url of ['/calendar', '/dividends']) {
+    for (const url of ['/', '/calendar', '/dividends']) {
       test(`KPI amounts stay on one line, inside their card (${font.name}): ${url} at ${width}`, async ({ page }) => {
         await page.setViewportSize({ width, height: 900 });
         await page.goto(url);
@@ -46,7 +46,7 @@ for (const font of FONTS) {
   }
 }
 
-const GRID_PAGES = ['/dividends', '/calendar', '/rebalance?portfolio=trading-212', '/assets/AAPL?portfolio=all', '/analytics?tab=metrics', '/analytics?tab=dividends', '/analytics?tab=goal'];
+const GRID_PAGES = ['/', '/dividends', '/calendar', '/rebalance?portfolio=trading-212', '/assets/AAPL?portfolio=all', '/analytics?tab=metrics', '/analytics?tab=dividends', '/analytics?tab=goal'];
 
 for (const width of [1024, 1100]) {
   for (const url of GRID_PAGES) {
