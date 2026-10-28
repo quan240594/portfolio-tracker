@@ -31,6 +31,7 @@ export const earningsDates = (over: Partial<GetEarningsDatesResponse> = {}): Get
   refresh: { available: true, reason: null, nextAllowedAt: null },
   held: 3,
   withDate: 2,
+  funds: 0,
   symbols: [
     heldDate({ symbol: 'NOVO-B.CO', name: 'Novo Nordisk', next: null, reasonCode: 'not-listed', reason: "Not in the provider's calendar: its calendar of 5120 rows (2026-10-28) has no row for NOVO-B.CO." }),
     heldDate(),

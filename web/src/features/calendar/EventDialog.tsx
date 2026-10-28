@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import type { CalendarEvent } from '@portfolio/shared';
+import { EARNINGS_DUE_TEXT, type CalendarEvent } from '@portfolio/shared';
 import { CompanyLogo } from '../../components/CompanyLogo';
 import { Dialog } from '../../components/Dialog';
 import { formatDate, formatMoney, formatQuantity, formatWeekdayDate } from '../../lib/format';
@@ -65,6 +65,7 @@ function TypeRows({ event, baseCurrency }: Readonly<{ event: CalendarEvent; base
 }
 
 function estimateNote(event: CalendarEvent): string {
+  if (event.earningsPhase === 'projected' && event.description.startsWith(EARNINGS_DUE_TEXT)) return event.description;
   if (event.earningsPhase === 'projected') return 'No date is announced yet. This is a projection from the previous report (about 91 days later) and may be days off.';
   if (event.type === 'EARNINGS') return 'The date comes from a data provider and may change once the company confirms it.';
   return 'This date is a projection and may change once the company announces it.';

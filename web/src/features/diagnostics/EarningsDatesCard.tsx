@@ -26,7 +26,7 @@ function rowsText(rows: number | null): string {
 
 function matchedText(matched: number | null, held: number): string {
   if (matched === null) return '';
-  return `, ${matched} of your ${held} held ${plural(held, 'symbol', 'symbols')} matched`;
+  return `, ${matched} of your ${held} held ${plural(held, 'company', 'companies')} matched`;
 }
 
 function storedText(events: number | null): string {
@@ -34,9 +34,15 @@ function storedText(events: number | null): string {
   return `; ${events} ${plural(events, 'date', 'dates')} stored`;
 }
 
-function upcomingText(withDate: number, held: number): string {
-  if (held === 0) return 'No open positions to check.';
-  return `${withDate} of ${held} held ${plural(held, 'symbol has', 'symbols have')} an upcoming date.`;
+function upcomingText(withDate: number, held: number, funds: number): string {
+  if (held === 0 && funds === 0) return 'No open positions to check.';
+  if (held === 0) return 'No held company to check.';
+  return `${withDate} of ${held} held ${plural(held, 'company has', 'companies have')} an upcoming date.`;
+}
+
+function fundsText(funds: number): string {
+  if (funds === 0) return '';
+  return `${funds} ${plural(funds, 'fund or crypto position has', 'fund or crypto positions have')} no earnings and ${plural(funds, 'is', 'are')} not counted.`;
 }
 
 function RunSummary({ run, held, label }: Readonly<{ run: EarningsRunReport; held: number; label: string }>) {
@@ -97,7 +103,7 @@ function RefreshControl({ report, earnings }: Readonly<{ report: GetEarningsDate
 }
 
 function NextDate({ row }: Readonly<{ row: HeldEarningsDate }>) {
-  if (row.next === null) return <span className="muted">No date</span>;
+  if (row.next === null) return <span className="muted">{row.reasonCode === 'not-applicable' ? 'No earnings' : 'No date'}</span>;
   const time = TIME_LABELS[row.next.timeOfDay];
   return (
     <>
@@ -138,7 +144,7 @@ function SymbolRow({ row }: Readonly<{ row: HeldEarningsDate }>) {
 
 /**
  * "Earnings dates": when the calendar job last ran and how it ended, how many rows the provider returned and how many matched, and for each
- * held symbol the next date or why there is none. The button queues the job once (once an hour, not while the provider allowance is nearly used).
+ * held company the next date or why there is none (funds, ETFs and crypto have no earnings and are not counted). The button queues the job once (once an hour, not while the provider allowance is nearly used).
  */
 export function EarningsDatesCard({ report, earnings }: Readonly<{ report: GetEarningsDatesResponse; earnings: EarningsDatesResult }>) {
   return (
@@ -150,7 +156,7 @@ export function EarningsDatesCard({ report, earnings }: Readonly<{ report: GetEa
       <BudgetLine report={report} />
       <RefreshControl report={report} earnings={earnings} />
       <p className="text-sm">
-        {upcomingText(report.withDate, report.held)}
+        {upcomingText(report.withDate, report.held, report.funds)} {fundsText(report.funds)}
       </p>
       {report.symbols.length > 0 && (
         <table className="w-full table-fixed text-left text-sm md:table-auto">

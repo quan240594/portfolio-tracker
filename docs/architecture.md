@@ -846,9 +846,15 @@ at all. Traced end to end with fakes (provider call, CSV parsing, mapping to the
 * *Scheduled* (`scheduled`): the provider's date, `ESTIMATED` until the day has passed, `source: alphavantage`, with "Before market
   open" / "After market close" when the provider says so.
 * *Projected* (`projected`): when a company has a reported summary but no provider date ahead, the next date is the latest report
-  plus 91 days (`projectedEarningsDate`; a quarter further while the date is long past, nothing when it is only up to 14 days
-  overdue or the report is older than a year), `ESTIMATED`, `source: estimate`, drawn dashed, labelled "Projected date" and described
-  as "A projection, not an announced date". A date is never shown without its `source`.
+  plus 91 days (`projectEarnings` / `projectedEarningsDate`; a quarter further while the date is long past, nothing when the report
+  is older than a year), `ESTIMATED`, `source: estimate`, drawn dashed, labelled "Projected date" and described as "A projection, not an
+  announced date". A projected date that has **just passed** (up to 14 days, `OVERDUE_GRACE_DAYS`) with no newer report and no provider
+  date ahead is a release that is *due*: the event is dated **today** (so it shows in today's cell, the lists and the Dashboard card) and
+  reads "Report due: the projected date (22-10-2026, previous report + about 91 days) has passed and no release is stored yet. A
+  projection, not an announced date." (`EARNINGS_DUE_TEXT`). It disappears by itself when the summary is stored (the reported event
+  replaces it and the next quarter is projected), when the provider lists a date ahead, and after the grace window (the next quarter is
+  projected). Before this, a company a few days late (GOOGL, last report 23-07-2026, today 28-10-2026) had no event at all, which hid
+  exactly the companies that were about to report. A date is never shown without its `source`.
 
 The refresh makes **one** `EARNINGS_CALENDAR` call per UTC day with `horizon=12month` (the default of `CALENDAR_EARNINGS_HORIZON`), filters it to
 the tracked symbols (holdings and watchlist) and replaces the upcoming dates a company moved. Tests: `pnpm --filter @portfolio/prices test`,
@@ -3951,7 +3957,8 @@ Question that started it: "why is the Alphabet report not in the calendar?" Noth
 3. **Not looked up yet.** The job only reads `TRACKED` symbols, registered when a transaction is saved or synced; a holding added after 05:30 has no date until the next run ("The calendar job has not run since you bought it").
 4. **Not in the provider's calendar.** The provider lists the company under another ticker (GOOG vs GOOGL are separate rows; the app looks up the exact ticker, `BRK-B` as `BRK.B`) or not at all yet, or lists it under another company's name (`vouches` / `sameCompany` for suffixed listings).
 5. **Date handling is not a cause.** Verified by test (`packages/prices/src/jobs/earnings-googl.test.ts`): a row dated today is kept (`date >= today`, UTC; the job runs at 03:30-04:30 UTC), is `CONFIRMED` in the calendar for every status filter that includes it, `post-market` is `AMC`; the stored window (`EARN#from`..`EARN#to`), horizon (12 months), scope (holdings and watchlist) and the web filter defaults (all types, all statuses, all scopes) do not hide it. Hardened: a row ticker is matched case- and dash-insensitively (`brk-b`, `BRK/B`) and `postmarket` / `Post-Market` read as after the close (TypeScript and the Python service).
-6. A report released and summarised yesterday does not replace a provider date more than 4 days away (`REPORT_MATCH_DAYS`); a projection from a report is dropped when it is more than 14 days overdue (`OVERDUE_GRACE_DAYS`).
+6. A report released and summarised yesterday does not replace a provider date more than 4 days away (`REPORT_MATCH_DAYS`); a projection from a report that is up to 14 days overdue (`OVERDUE_GRACE_DAYS`) is dated today as "Report due" (it used to be dropped, which hid GOOGL on its results day); after that it moves a quarter on.
+7. **Funds, ETFs and crypto have no quarterly results.** They are classified like the earnings pipeline does (`hasEarnings`), are not counted in "N of M held companies have an upcoming date" (`held` counts companies only; `funds` is the additive count of the others), and their rows say "Fund or crypto: no earnings" (`reasonCode: not-applicable`), listed last. "The calendar job has not run yet" is only ever said when no run record exists at all.
 
 ### What the job records (`CALENDAR` partition)
 

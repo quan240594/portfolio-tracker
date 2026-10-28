@@ -30,12 +30,32 @@ describe('GET /diagnostics/earnings-dates', () => {
   it('lists the open positions only, the ones without a date first, with the reason and the last run', async () => {
     const { read } = scenario();
     const body = await read();
-    expect(body.symbols.map((entry) => entry.symbol)).toEqual(['BTC-EUR', 'GOOGL', 'AAPL']);
-    expect(body.symbols[0]).toMatchObject({ next: null, reasonCode: 'not-applicable' });
-    expect(body.symbols[1]).toMatchObject({ symbol: 'GOOGL', name: 'Alphabet Inc', next: null, reasonCode: 'not-listed' });
-    expect(body.symbols[1]!.reason).toBe("Not in the provider's calendar: its calendar of 4800 rows (2026-06-15) has no row for GOOGL.");
-    expect(body.symbols[2]).toMatchObject({ symbol: 'AAPL', name: 'AAPL', next: { date: '2026-06-18', source: 'scheduled', timeOfDay: 'AMC' } });
-    expect(body).toMatchObject({ today: '2026-06-15', held: 3, withDate: 1, lastRun: { status: 'ok', rows: 4800, matchedHeld: 1 }, budget: null });
+    expect(body.symbols.map((entry) => entry.symbol)).toEqual(['GOOGL', 'AAPL', 'BTC-EUR']);
+    expect(body.symbols[0]).toMatchObject({ symbol: 'GOOGL', name: 'Alphabet Inc', next: null, reasonCode: 'not-listed' });
+    expect(body.symbols[0]!.reason).toBe("Not in the provider's calendar: its calendar of 4800 rows (2026-06-15) has no row for GOOGL.");
+    expect(body.symbols[1]).toMatchObject({ symbol: 'AAPL', name: 'AAPL', next: { date: '2026-06-18', source: 'scheduled', timeOfDay: 'AMC' } });
+    expect(body.symbols[2]).toMatchObject({ next: null, reasonCode: 'not-applicable', reason: 'Fund or crypto: no earnings' });
+    expect(body).toMatchObject({ today: '2026-06-15', held: 2, withDate: 1, funds: 1, lastRun: { status: 'ok', rows: 4800, matchedHeld: 1 }, budget: null });
+  });
+
+  it('does not count a fund as a company and says it has no earnings, with or without a run record', async () => {
+    const { read, repo } = scenario();
+    repo.transactions = [...repo.transactions, txn({ id: 'f', date: '2025-01-02', type: 'BUY', symbol: 'VWRL.AS', quantity: 2, price: 100 })];
+    repo.profiles = { ...repo.profiles, 'VWRL.AS': { symbol: 'VWRL.AS', name: 'Vanguard FTSE All-World UCITS ETF', assetClass: 'ETF', currency: 'EUR' } };
+    for (const recorded of [run(), null]) {
+      repo.earningsRun = recorded;
+      repo.earningsLastOk = recorded;
+      const body = await read();
+      expect(body.symbols.find((entry) => entry.symbol === 'VWRL.AS')).toMatchObject({ next: null, reasonCode: 'not-applicable', reason: 'Fund or crypto: no earnings' });
+      expect(body).toMatchObject({ held: 2, withDate: 1, funds: 2 });
+    }
+  });
+
+  it('reports a due-now projection (previous report + 91 days has passed, nothing stored yet) as projected for today', async () => {
+    const { read, repo } = scenario();
+    repo.earningsSummaries = [{ symbol: 'GOOGL', reportDate: '2026-03-10', period: 'Q4 2025' } as never];
+    const googl = (await read()).symbols.find((entry) => entry.symbol === 'GOOGL');
+    expect(googl).toMatchObject({ next: { date: '2026-06-15', source: 'projected' }, reasonCode: null, reason: null });
   });
 
   it('answers without the Cloudflare parts where the deployment has none: no allowance, no refresh', async () => {

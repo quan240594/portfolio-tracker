@@ -1,6 +1,7 @@
 import {
   buildEarningsDatesReport,
   currentHoldings,
+  hasEarnings,
   nextEarningsEvents,
   type EARNINGS_DATES_ROUTES,
   type GetEarningsDatesResponse,
@@ -23,7 +24,7 @@ const NO_REFRESH: RefreshReport = {
 
 /**
  * `GET /diagnostics/earnings-dates`: the open positions of the read scope and, for each, the next earnings date as the calendar shows it,
- * or why there is none (see `whyNoEarningsDate`), next to what the daily calendar job did last. Reads only: the transactions, one batched
+ * or why there is none (see `whyNoEarningsDate`; funds, ETFs and crypto have no earnings and are not counted as companies), next to what the daily calendar job did last. Reads only: the transactions, one batched
  * read of the tracked-ticker items, one query per held symbol, the two run records and the stored summaries (they anchor a projected date).
  */
 export async function getEarningsDates(ctx: RouteContext): Promise<RouteResult> {
@@ -42,7 +43,7 @@ export async function getEarningsDates(ctx: RouteContext): Promise<RouteResult> 
   const next = nextEarningsEvents({ today, transactions, watchlist: [], profiles, earnings: data.upcoming, reportedEarnings });
   const report = buildEarningsDatesReport({
     now: at,
-    held: held.map((symbol) => ({ symbol, name: profiles[symbol]?.name ?? symbol })),
+    held: held.map((symbol) => ({ symbol, name: profiles[symbol]?.name ?? symbol, hasEarnings: hasEarnings(profiles[symbol]?.assetClass, profiles[symbol]?.name) })),
     tracked: data.tracked,
     next,
     run: data.run,

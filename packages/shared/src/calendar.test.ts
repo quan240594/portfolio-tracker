@@ -15,7 +15,9 @@ import {
   calendarSplitKind,
   calendarSplitLabel,
   defaultCalendarRange,
+  nextEarningsEvents,
   projectedEarningsDate,
+  projectEarnings,
   type CalendarData,
   type CalendarEvent,
   type CalendarQuery,
@@ -434,12 +436,67 @@ describe('reported and projected earnings', () => {
     expect(projection).toMatchObject({ date: '2026-07-21', origin: 'WATCHLIST', status: 'ESTIMATED' });
   });
 
-  it('skips whole quarters that are long gone, but not a report that is only a few days overdue, nor one older than a year', () => {
+  it('skips whole quarters that are long gone, dates a report that is only a few days overdue today, and gives up on one older than a year', () => {
     expect(projectedEarningsDate('2026-05-14', TODAY)).toBe('2026-08-13');
     expect(projectedEarningsDate('2026-03-17', TODAY)).toBe('2026-06-16');
     expect(projectedEarningsDate('2026-01-10', TODAY)).toBe('2026-07-11');
-    expect(projectedEarningsDate('2026-03-10', TODAY)).toBeNull();
+    expect(projectedEarningsDate('2026-03-10', TODAY)).toBe(TODAY);
     expect(projectedEarningsDate('2024-01-01', TODAY)).toBeNull();
+  });
+
+  it('says when a projection is due now and since when', () => {
+    expect(projectEarnings('2026-03-10', TODAY)).toEqual({ date: TODAY, dueSince: '2026-06-09' });
+    expect(projectEarnings('2026-03-17', TODAY)).toEqual({ date: '2026-06-16' });
+    // 14 days overdue is still due; 15 days moves on to the next quarter.
+    expect(projectEarnings('2026-03-02', TODAY)).toEqual({ date: TODAY, dueSince: '2026-06-01' });
+    expect(projectEarnings('2026-03-01', TODAY)).toEqual({ date: '2026-08-30' });
+  });
+
+  describe('a report that is a few days overdue (GOOGL-like: last report 2026-07-23, today 2026-10-28, no provider date)', () => {
+    const googl = tx({ id: 'buy-googl', symbol: 'GOOGL', date: '2025-01-02', quantity: 2 });
+    const dueData: Partial<CalendarData> = { transactions: [googl], earnings: [], reportedEarnings: [{ symbol: 'GOOGL', reportDate: '2026-07-23', period: 'Q2 2026' }] };
+    const dueEvents = (today: string, override: Partial<CalendarData> = {}) =>
+      buildCalendar({ ...data, today, ...dueData, ...override }, { ...wide, from: '2026-10-01', to: '2027-03-31', types: ['EARNINGS'] }).events.filter((e) => e.symbol === 'GOOGL');
+
+    it('shows an ESTIMATED projected event dated today with a clear description', () => {
+      expect(dueEvents('2026-10-28')).toEqual([
+        {
+          id: 'earn-est:GOOGL:2026-10-28',
+          date: '2026-10-28',
+          type: 'EARNINGS',
+          status: 'ESTIMATED',
+          symbol: 'GOOGL',
+          name: 'GOOGL',
+          origin: 'HOLDING',
+          source: 'estimate',
+          description: 'Report due: the projected date (22-10-2026, previous report + about 91 days) has passed and no release is stored yet. A projection, not an announced date.',
+          timeOfDay: 'unknown',
+          earningsPhase: 'projected',
+        },
+      ]);
+    });
+
+    it('is the next event of the symbol', () => {
+      const next = nextEarningsEvents({ today: '2026-10-28', transactions: [googl], watchlist: [], profiles: {}, earnings: [], reportedEarnings: dueData.reportedEarnings });
+      expect(next.get('GOOGL')).toMatchObject({ date: '2026-10-28', status: 'ESTIMATED', earningsPhase: 'projected' });
+    });
+
+    it('goes away once the summary is stored (the reported event replaces it) and projects the next quarter', () => {
+      const reports = [...(dueData.reportedEarnings ?? []), { symbol: 'GOOGL', reportDate: '2026-10-28', period: 'Q3 2026' }];
+      const events = dueEvents('2026-10-28', { reportedEarnings: reports });
+      expect(events.map((e) => `${e.earningsPhase} ${e.date}`)).toEqual(['reported 2026-10-28', 'projected 2027-01-27']);
+    });
+
+    it('is replaced by a provider date that is still ahead', () => {
+      const events = dueEvents('2026-10-28', { earnings: [{ symbol: 'GOOGL', date: '2026-10-30', source: 'alphavantage' }] });
+      expect(events.map((e) => `${e.earningsPhase} ${e.date}`)).toEqual(['scheduled 2026-10-30']);
+    });
+
+    it('stays for the whole grace window, then follows the quarter-skipping rule', () => {
+      expect(dueEvents('2026-11-05').map((e) => `${e.earningsPhase} ${e.date}`)).toEqual(['projected 2026-11-05']);
+      expect(dueEvents('2026-11-05')[0]?.description).toContain('(22-10-2026,');
+      expect(dueEvents('2026-11-06').map((e) => e.date)).toEqual(['2027-01-21']);
+    });
   });
 
   it('projects nothing while the provider has a date ahead, and nothing for symbols that are neither held nor watched', () => {

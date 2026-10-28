@@ -53,7 +53,7 @@ export const CALENDAR_CHART_LOOKBACK_MONTHS = 3;
 export const CALENDAR_COVERAGE = {
   earnings:
     'Upcoming earnings dates come from the free Alpha Vantage earnings calendar (one call a day for the next 12 months); European listings are matched to their US ticker where one exists. ' +
-    'Reported results come from the earnings summaries and link to them. Where no date is announced, the next date is projected from the previous report (about 91 days later) and marked Estimated. ' +
+    'Reported results come from the earnings summaries and link to them. Where no date is announced, the next date is projected from the previous report (about 91 days later) and marked Estimated; a projected date that has just passed (up to 14 days) without a stored release shows as due today. ' +
     'Provider dates stay estimates until the day has passed.',
   corporateActions:
     'Stock splits and reverse splits (EODHD, refreshed on a rotating daily budget) and the splits you record yourself. ' +
@@ -578,7 +578,7 @@ function describeEarnings(e: StoredEarningsEvent): string {
 export const EARNINGS_PROJECTION_DAYS = 91;
 /** A provider date this close to a released report is that report (companies report a few days off the expected date). */
 const REPORT_MATCH_DAYS = 4;
-/** A projected date that has just passed is an overdue release, not a reason to project a whole quarter further. */
+/** A projected date that has just passed is an overdue release (shown as due today), not a reason to project a whole quarter further. */
 const OVERDUE_GRACE_DAYS = 14;
 const MAX_PROJECTED_QUARTERS = 4;
 
@@ -623,30 +623,54 @@ function reportedEarnings(ctx: EarningsCtx, report: ReportedEarnings, origin: Ca
   };
 }
 
-/** The date the next report is projected to fall on: the previous report plus whole quarters, never before today. */
-export function projectedEarningsDate(lastReport: string, today: string): string | null {
+/** Starts the description of a projected report that is due now: its projected date has just passed and no release is stored yet. */
+export const EARNINGS_DUE_TEXT = 'Report due:';
+
+/** Where the next report is projected: `date` (never before today) and, when the projected date has just passed, that date as `dueSince`. */
+export interface EarningsProjection {
+  date: string;
+  dueSince?: string;
+}
+
+/**
+ * The previous report plus whole quarters. A date that has just passed (up to {@link OVERDUE_GRACE_DAYS} days) is a release that is due,
+ * not a quarter further: it is projected on `today`, so the company shows up on the day it is most likely to report.
+ */
+export function projectEarnings(lastReport: string, today: string): EarningsProjection | null {
   let date = lastReport;
   for (let quarter = 1; quarter <= MAX_PROJECTED_QUARTERS; quarter++) {
     date = addIsoDays(date, EARNINGS_PROJECTION_DAYS);
-    if (date >= today) return date;
-    if (daysBetween(date, today) <= OVERDUE_GRACE_DAYS) return null;
+    if (date >= today) return { date };
+    if (daysBetween(date, today) <= OVERDUE_GRACE_DAYS) return { date: today, dueSince: date };
   }
   return null;
 }
 
+/** The date the next report is projected to fall on: the previous report plus whole quarters, never before today. */
+export function projectedEarningsDate(lastReport: string, today: string): string | null {
+  return projectEarnings(lastReport, today)?.date ?? null;
+}
+
+const dayMonthYear = (iso: string): string => `${iso.slice(8)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}`;
+
+function projectionText(lastReport: string, dueSince: string | undefined): string {
+  if (dueSince === undefined) return `Estimated next report, about ${EARNINGS_PROJECTION_DAYS} days after the previous one (${lastReport}). A projection, not an announced date.`;
+  return `${EARNINGS_DUE_TEXT} the projected date (${dayMonthYear(dueSince)}, previous report + about ${EARNINGS_PROJECTION_DAYS} days) has passed and no release is stored yet. A projection, not an announced date.`;
+}
+
 function projectedEarnings(ctx: EarningsCtx, symbol: string, lastReport: ReportedEarnings, origin: CalendarOrigin): CalendarEvent | null {
-  const date = projectedEarningsDate(lastReport.reportDate, ctx.today);
-  if (date === null) return null;
+  const projection = projectEarnings(lastReport.reportDate, ctx.today);
+  if (projection === null) return null;
   return {
-    id: `earn-est:${symbol}:${date}`,
-    date,
+    id: `earn-est:${symbol}:${projection.date}`,
+    date: projection.date,
     type: 'EARNINGS',
     status: 'ESTIMATED',
     symbol,
     name: ctx.nameOf(symbol),
     origin,
     source: 'estimate',
-    description: `Estimated next report, about ${EARNINGS_PROJECTION_DAYS} days after the previous one (${lastReport.reportDate}). A projection, not an announced date.`,
+    description: projectionText(lastReport.reportDate, projection.dueSince),
     timeOfDay: 'unknown',
     earningsPhase: 'projected',
   };

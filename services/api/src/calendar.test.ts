@@ -227,6 +227,16 @@ describe('earnings of the holdings', () => {
     expect(body.events.at(-1).description).toContain('Estimated next report');
   });
 
+  it('shows a report that is a few days overdue as estimated and due today, instead of nothing', async () => {
+    const { handler, repo } = holdingsWithEarnings();
+    repo.earningsEvents = repo.earningsEvents.filter((e) => e.symbol !== 'AMZN');
+    repo.earningsSummaries.push(sampleSummary({ symbol: 'AMZN', reportDate: '2026-03-10', period: 'Q4 2025' }));
+    const body = json(await handler(apiEvent('GET', '/calendar', { query: { types: 'EARNINGS', scope: 'holdings', from: '2026-06-15', to: '2026-06-15' } })));
+    expect(body.events).toEqual([
+      expect.objectContaining({ id: 'earn-est:AMZN:2026-06-15', date: '2026-06-15', status: 'ESTIMATED', earningsPhase: 'projected', source: 'estimate', description: expect.stringContaining('Report due: the projected date (09-06-2026, previous report + about 91 days) has passed') }),
+    ]);
+  });
+
   it('gives another user’s companies no earnings and no projection', async () => {
     const { handler, repo } = holdingsWithEarnings();
     repo.earningsSummaries.push(sampleSummary({ symbol: 'KO', reportDate: '2026-04-21' }));
