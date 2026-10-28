@@ -280,7 +280,7 @@ export function attachConsensus(summary: EarningsSummary, input: ConsensusInput)
     ...(usable === undefined ? {} : { quarterEnd: usable.quarterEnd, asOf: usable.fetchedAt }),
     ...(eps === undefined ? {} : { eps }),
     ...(revenue === undefined ? {} : { revenue }),
-    ...(why ?? {}),
+    ...why,
   };
   return { ...summary, consensus };
 }
