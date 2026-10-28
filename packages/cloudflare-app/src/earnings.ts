@@ -15,10 +15,11 @@ import {
   type AiLike,
   type EarningsInputs,
   type EarningsJobDeps,
+  type EstimatesJobDeps,
   type NeuronMeter,
   type NeuronsToday,
 } from '@portfolio/earnings';
-import { DailyQuota, StoreQuotaLedger, alphaVantageGeneralLimit } from '@portfolio/prices';
+import { AlphaVantageEstimatesClient, DailyQuota, EstimateBudget, StoreQuotaLedger, alphaVantageGeneralLimit } from '@portfolio/prices';
 import { classificationFieldsOf, currentHoldings, kpiTemplateFor, type EarningsHolding } from '@portfolio/shared';
 import type { HubConfig } from './config.js';
 
@@ -120,6 +121,23 @@ export function earningsJobDeps(context: EarningsContext): EarningsJobDeps {
     ...(context.ai === undefined ? {} : { extractor: new WorkersAiExtractor({ ai: context.ai, meter: context.neurons, model: earnings.model }) }),
     estimates: new AlphaVantageEstimates({ apiKey: config.prices.keys.alphavantage, fetch: fetchFn, quota: new DailyQuota(new StoreQuotaLedger(items), 'alphavantage', alphaVantageGeneralLimit(config.prices), today) }),
     queue: context.queue,
+    now,
+  };
+}
+
+/**
+ * What `earningsEstimates` needs for one alarm run: the held companies, the Alpha Vantage client (absent without the optional key) and the job's
+ * allowance of the provider's calls. The one outbound call of a step goes through the alarm's counted `fetch`.
+ */
+export function estimatesJobDeps(context: EarningsContext): EstimatesJobDeps {
+  const { items, config, now } = context;
+  const { prices } = config;
+  const apiKey = prices.keys.alphavantage;
+  return {
+    repo: new EarningsRepository(items),
+    inputs: createEarningsInputs(items),
+    budget: new EstimateBudget({ store: items, dailyLimit: prices.dailyLimits.alphavantage, generalLimit: alphaVantageGeneralLimit(prices), today: () => now().toISOString().slice(0, 10) }),
+    ...(apiKey === undefined ? {} : { client: new AlphaVantageEstimatesClient({ apiKey, fetch: (url, init) => context.fetch(url, init) }) }),
     now,
   };
 }

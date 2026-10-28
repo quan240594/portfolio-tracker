@@ -5,7 +5,9 @@
  */
 import {
   EARNINGS_SCHEMA_VERSION,
+  IN_LINE_TOLERANCE,
   KPI_TEMPLATES,
+  classifyBeat,
   roundTo,
   type CoreMetricKey,
   type EarningsBasis,
@@ -15,7 +17,6 @@ import {
   type EarningsOrigin,
   type EarningsSegment,
   type EarningsSummary,
-  type EarningsVerdict,
   type GuidanceDirection,
   type KpiTemplateId,
   type MetricUnit,
@@ -47,18 +48,8 @@ export interface DeriveInput {
   previous?: EarningsSummary;
 }
 
-/** An actual within 0.5 % of the estimate is "in line". */
-export const IN_LINE_TOLERANCE = 0.005;
-
-export function classifyBeat(actual: number, estimate: number): { verdict: EarningsVerdict; surprisePct?: number } {
-  const diff = actual - estimate;
-  // The epsilon keeps 1.005 against 1 a beat: 1.005 - 1 is 0.004999... in floating point.
-  const tolerance = Math.abs(estimate) * IN_LINE_TOLERANCE - 1e-9;
-  let verdict: EarningsVerdict = 'inline';
-  if (diff > 0 && diff >= tolerance) verdict = 'beat';
-  else if (diff < 0 && -diff >= tolerance) verdict = 'miss';
-  return estimate === 0 ? { verdict } : { verdict, surprisePct: roundTo((diff / Math.abs(estimate)) * 100, 1) };
-}
+/** An actual within 0.5 % of the estimate is "in line" (the rule lives in `@portfolio/shared`, where the API's join uses it too). */
+export { IN_LINE_TOLERANCE, classifyBeat };
 
 /** Percent change from `from` to `to`; absent when `from` is not positive (a growth rate against a loss or zero says nothing). */
 export function changePct(to: number, from: number | undefined): number | undefined {

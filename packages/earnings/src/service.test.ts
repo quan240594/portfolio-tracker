@@ -17,6 +17,10 @@ function service(options: { contact?: string; ai?: boolean; neurons?: number } =
 }
 
 describe('EarningsService.status', () => {
+  it('knows whether the Alpha Vantage key is set', () => {
+    expect(service({ contact: CONTACT }).svc.estimatesConfigured).toBe(false);
+  });
+
   it('says what is missing, never a value', async () => {
     const { svc } = service({ ai: false });
     const status = await svc.status([{ symbol: 'LMFG', eligible: true }]);
@@ -35,6 +39,21 @@ describe('EarningsService.status', () => {
       { symbol: 'LMFG', eligible: true, lastCheckedAt: '2026-10-21T09:30:00.000Z', lastResult: 'failed', lastReason: 'The submissions list: the SEC answered 500', retryAfter: '2026-10-21T10:30:00.000Z', latestReportDate: '2026-07-22' },
       { symbol: 'VWRL', eligible: false, lastRun: { at: NOW.toISOString(), stage: 'not-eligible', detail: 'no quarterly results (a fund, crypto or similar)' } },
     ]);
+  });
+
+  it('counts the companies with consensus figures and says why the job waits', async () => {
+    const { svc, repo } = service({ contact: CONTACT });
+    const at = NOW.toISOString();
+    await repo.putConsensus([{ symbol: 'AAA', quarterEnd: '2026-09-30', ticker: 'AAA', fetchedAt: at, eps: { average: 1 } }], { symbol: 'AAA', outcome: 'ok', at, fetchedAt: at, ticker: 'AAA', quarters: 1, updatedAt: at });
+    await repo.putConsensusState({ symbol: 'BBB', outcome: 'error', at, detail: 'the request failed', updatedAt: at });
+    const refs = [{ symbol: 'AAA', eligible: true }, { symbol: 'BBB', eligible: true }, { symbol: 'CCC', eligible: true }, { symbol: 'VWRL', eligible: false }];
+    const status = await svc.status(refs);
+    expect(status.consensus).toEqual({ covered: 1, companies: 3 });
+    expect(status.symbols.map((row) => row.consensus)).toEqual([{ outcome: 'ok', at, fetchedAt: at }, { outcome: 'error', at, detail: 'the request failed' }, undefined, undefined]);
+    await repo.putConsensusBlock({ until: '2026-10-28T10:00:00.000Z', reason: 'premium', at });
+    expect((await svc.status(refs)).consensus).toEqual({ covered: 1, companies: 3, blockedUntil: '2026-10-28T10:00:00.000Z', blockedReason: 'premium' });
+    await repo.putConsensusBlock({ until: '2026-10-21T09:00:00.000Z', reason: 'rate-limited', at });
+    expect((await svc.status(refs)).consensus).toEqual({ covered: 1, companies: 3 });
   });
 
   it('an expired block is not reported', async () => {

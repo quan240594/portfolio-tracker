@@ -4,7 +4,7 @@ import { parseEarningsConfig } from '@portfolio/earnings';
 import { parsePricesConfig } from '@portfolio/prices';
 import { classificationKeys, keys, transactionItem, type Transaction } from '@portfolio/shared';
 import { describe, expect, it } from 'vitest';
-import { createEarningsApi, createEarningsInputs, earningsConfigured, earningsJobDeps, neuronMeter } from './earnings.js';
+import { createEarningsApi, createEarningsInputs, earningsConfigured, earningsJobDeps, estimatesJobDeps, neuronMeter } from './earnings.js';
 import type { HubConfig } from './config.js';
 
 const NOW = new Date('2026-10-21T19:30:00.000Z');
@@ -126,6 +126,15 @@ describe('earningsJobDeps and createEarningsApi', () => {
     expect([bare.sec, bare.extractor]).toEqual([undefined, undefined]);
     const full = earningsJobDeps(context(hubConfig({ SEC_CONTACT: 'PortfolioTracker/1.0 (me@example.invalid)' }), new FakeAi({})));
     expect([full.sec !== undefined, full.extractor !== undefined, full.estimates !== undefined]).toEqual([true, true, true]);
+  });
+
+  it('builds the consensus job with a client only when there is an Alpha Vantage key, through the counted fetch and the shared allowance', async () => {
+    const withKey = estimatesJobDeps(context(hubConfig()));
+    expect(withKey.client).toBeDefined();
+    expect(await withKey.budget.room()).toEqual({ allowed: true, remaining: 25 });
+    await expect(withKey.client!.fetchEstimates('AAPL')).resolves.toEqual({ status: 'error', reason: 'the request failed' });
+    const noKey = estimatesJobDeps({ ...context(hubConfig()), config: { prices: parsePricesConfig({}), earnings: parseEarningsConfig({}) } as HubConfig });
+    expect(noKey.client).toBeUndefined();
   });
 
   it('is configured only with both', () => {

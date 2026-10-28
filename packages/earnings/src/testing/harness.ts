@@ -1,8 +1,10 @@
 import { MemoryItemStore, MemoryJobQueue, type JobRegistry } from '@portfolio/platform';
+import { EstimateBudget } from '@portfolio/prices';
 import { WorkersAiExtractor, type NeuronMeter } from '../ai.js';
 import { parseEarningsConfig, type EarningsConfig } from '../config.js';
 import { createBackfillEarningsJob } from '../backfill.js';
 import type { EarningsInputs, EarningsJobDeps } from '../common.js';
+import { createEarningsEstimatesJob, type EstimatesJobDeps } from '../estimates-job.js';
 import { createFetchEarningsSummaryJob, createWatchEarningsJob } from '../jobs.js';
 import { EarningsRepository } from '../repository.js';
 import { SecClient } from '../sec.js';
@@ -44,6 +46,8 @@ export interface EarningsHarness {
   clock: TestClock;
   queue: MemoryJobQueue;
   deps: EarningsJobDeps;
+  /** What the `earningsEstimates` job runs on: the fake client (when given), the allowance of the provider's day and the clock. */
+  estimatesDeps: EstimatesJobDeps;
   config: EarningsConfig;
   holdings: EarningsHolding[];
   calendar: Record<string, string[]>;
@@ -63,6 +67,8 @@ export interface HarnessOptions {
   start?: Date;
   allowance?: number;
   estimates?: EstimateSource;
+  /** The consensus client of the `earningsEstimates` job (`FakeEstimates`); absent = no Alpha Vantage key. */
+  consensus?: EstimatesJobDeps['client'];
   /** Environment of the feature (`EARNINGS_BACKFILL_QUARTERS`, ...), merged over the configured defaults. */
   env?: Record<string, string>;
 }
@@ -97,9 +103,17 @@ export function earningsHarness(options: HarnessOptions = {}): EarningsHarness {
     now: clock.now,
     ...(options.estimates === undefined ? {} : { estimates: options.estimates }),
   };
+  const estimatesDeps: EstimatesJobDeps = {
+    repo,
+    inputs,
+    budget: new EstimateBudget({ store, dailyLimit: 25, generalLimit: 24, today: () => clock.now().toISOString().slice(0, 10) }),
+    now: clock.now,
+    ...(options.consensus === undefined ? {} : { client: options.consensus }),
+  };
+  registry.earningsEstimates = createEarningsEstimatesJob(() => estimatesDeps);
   registry.watchEarnings = createWatchEarningsJob(() => deps);
   registry.fetchEarningsSummary = createFetchEarningsSummaryJob(() => deps);
   registry.backfillEarnings = createBackfillEarningsJob(() => deps);
   registry.notifyDividends = () => Promise.resolve({ done: true, result: {} });
-  return { store, repo, sec, ai, meter, clock, queue, deps, config, holdings, calendar, former, registry };
+  return { store, repo, sec, ai, meter, clock, queue, deps, estimatesDeps, config, holdings, calendar, former, registry };
 }

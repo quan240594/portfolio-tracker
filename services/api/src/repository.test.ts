@@ -252,4 +252,18 @@ describe('ItemRepository registry and imports', () => {
     expect(await repo.getImport('u', 'nope')).toBeNull();
     expect(get).toHaveBeenCalledWith({ PK: 'USER#u', SK: 'IMPORT#imp' }, { consistent: true });
   });
+
+  it('getConsensus reads the quarters and the state of a symbol from the ticker partition, newest first, ignoring other rows', async () => {
+    const { items, repo } = setup();
+    const at = '2026-10-12T06:20:00.000Z';
+    await items.put({ PK: 'TICKER#A', SK: 'EARNEST#2026-06-30', entityType: 'EARNINGS_CONSENSUS', symbol: 'A', quarterEnd: '2026-06-30', ticker: 'A', fetchedAt: at, eps: { average: 1 } });
+    await items.put({ PK: 'TICKER#A', SK: 'EARNEST#2026-09-30', entityType: 'EARNINGS_CONSENSUS', symbol: 'A', quarterEnd: '2026-09-30', ticker: 'A', fetchedAt: at, eps: { average: 2 } });
+    await items.put({ PK: 'TICKER#A', SK: 'EARNEST#STATE', entityType: 'EARNINGS_CONSENSUS_STATE', symbol: 'A', outcome: 'ok', at, updatedAt: at });
+    await items.put({ PK: 'TICKER#A', SK: 'EARNSUM#2026-10-21', entityType: 'EARNINGS_SUMMARY' });
+    await items.put({ PK: 'TICKER#B', SK: 'EARNEST#2026-09-30', entityType: 'EARNINGS_CONSENSUS', symbol: 'B', quarterEnd: '2026-09-30', ticker: 'B', fetchedAt: at });
+    const found = await repo.getConsensus('A');
+    expect(found.quarters.map((quarter) => quarter.quarterEnd)).toEqual(['2026-09-30', '2026-06-30']);
+    expect(found.state).toEqual({ symbol: 'A', outcome: 'ok', at, updatedAt: at });
+    expect(await repo.getConsensus('NOPE')).toEqual({ quarters: [], state: null });
+  });
 });

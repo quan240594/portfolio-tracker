@@ -1,10 +1,17 @@
 import { listByPrefix, type ItemStore } from '@portfolio/platform';
 import { dropUndefined } from './util.js';
 import {
+  CONSENSUS_ENTITY,
+  CONSENSUS_READ_LIMIT,
   EARNINGS_ENTITY,
   EARNINGS_KEEP_QUARTERS,
+  consensusKeys,
   earningsKeys,
   fromItem,
+  readConsensusItems,
+  type ConsensusBlock,
+  type ConsensusQuarter,
+  type ConsensusState,
   type EarningsBackfillMarker,
   type EarningsHeldCache,
   type EarningsSecBlock,
@@ -93,5 +100,37 @@ export class EarningsRepository {
 
   async putBackfill(marker: EarningsBackfillMarker): Promise<void> {
     await this.store.put({ ...earningsKeys.backfill, entityType: EARNINGS_ENTITY.backfill, ...dropUndefined(marker) });
+  }
+
+  /** The stored consensus of a symbol: its newest quarters and the outcome of the last fetch. */
+  async getConsensus(symbol: string): Promise<{ quarters: ConsensusQuarter[]; state: ConsensusState | null }> {
+    const page = await this.store.query({ pk: consensusKeys.tickerPk(symbol), sk: { beginsWith: consensusKeys.prefix }, reverse: true, limit: CONSENSUS_READ_LIMIT, consistent: true });
+    return readConsensusItems(page.items);
+  }
+
+  async getConsensusStates(symbols: readonly string[]): Promise<Map<string, ConsensusState>> {
+    const items = symbols.length === 0 ? [] : await this.store.getMany(symbols.map((symbol) => consensusKeys.state(symbol)));
+    return new Map(items.map((item) => [item.PK.slice(consensusKeys.tickerPk('').length), fromItem<ConsensusState>(item)]));
+  }
+
+  /** The quarters of a fetch and the state that says when they were fetched: one batch (the state last, so a state always has its quarters). */
+  async putConsensus(quarters: readonly ConsensusQuarter[], state: ConsensusState): Promise<void> {
+    await this.store.batchWrite([
+      ...quarters.map((quarter) => ({ type: 'put' as const, item: { ...consensusKeys.quarter(quarter.symbol, quarter.quarterEnd), entityType: CONSENSUS_ENTITY.quarter, ...dropUndefined(quarter) } })),
+      { type: 'put' as const, item: { ...consensusKeys.state(state.symbol), entityType: CONSENSUS_ENTITY.state, ...dropUndefined(state) } },
+    ]);
+  }
+
+  async putConsensusState(state: ConsensusState): Promise<void> {
+    await this.store.put({ ...consensusKeys.state(state.symbol), entityType: CONSENSUS_ENTITY.state, ...dropUndefined(state) });
+  }
+
+  async getConsensusBlock(): Promise<ConsensusBlock | null> {
+    const item = await this.store.get(consensusKeys.block, { consistent: true });
+    return item ? fromItem<ConsensusBlock>(item) : null;
+  }
+
+  async putConsensusBlock(block: ConsensusBlock): Promise<void> {
+    await this.store.put({ ...consensusKeys.block, entityType: CONSENSUS_ENTITY.block, ...block });
   }
 }

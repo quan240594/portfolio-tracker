@@ -9,6 +9,8 @@ import type { Repository } from './repository.js';
 
 /** The earnings summaries feature of a deployment that has it (the Cloudflare app); the AWS stack has none and its routes answer `available: false`. */
 export interface EarningsDeps {
+  /** Whether the Alpha Vantage key of the analyst consensus is set (absent = unknown: the summaries then say "fetched on the next run"). */
+  readonly estimatesConfigured?: boolean;
   /** Whether the feature is configured, the last checks of the symbols and the Workers AI neurons used today. */
   status(symbols: readonly { symbol: string; eligible: boolean }[]): Promise<EarningsStatusResponse>;
   /** Queues a re-check of one symbol; refuses (without queuing) when it was asked for less than an hour ago. */

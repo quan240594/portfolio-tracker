@@ -102,7 +102,7 @@ You need a Cloudflare account on the Free plan and a GitHub account. Every comma
    pnpm exec wrangler secret put TWELVEDATA_API_KEY     # quotes, history, profiles of US-listed symbols
    pnpm exec wrangler secret put EODHD_API_KEY          # exchange-suffixed symbols (.AS, .DE, ...), dividends, splits
    pnpm exec wrangler secret put COINGECKO_API_KEY      # crypto (demo key)
-   pnpm exec wrangler secret put ALPHAVANTAGE_API_KEY   # US company profiles, earnings calendar
+   pnpm exec wrangler secret put ALPHAVANTAGE_API_KEY   # US company profiles, earnings calendar, analyst consensus
    ```
    Free-tier limits and tuning variables (`EODHD_DAILY_LIMIT`, `EU_REFRESH_HOURS`, `FX_HISTORY_START`, `CALENDAR_*`, ...) are those of
    `@portfolio/prices` (`parsePricesConfig`); put one in `vars` of `wrangler.jsonc` only to change its default. The refreshes run
@@ -147,7 +147,7 @@ You need a Cloudflare account on the Free plan and a GitHub account. Every comma
    ```
    Without `SEC_CONTACT` nothing is sent to the SEC and `/earnings` says "not configured". The `ai` binding (`AI`) is already in `wrangler.jsonc` and needs no key or paid plan
    (Free plan: 10,000 neurons a day; the app stops at 80 % and never goes past it; a request over the allowance would fail, not bill). Optional: the secret
-   `ALPHAVANTAGE_API_KEY` of step 7 also gives the **expected EPS** and the EPS beat/miss (one call per release, from the 25 a day; without it the cell says "no estimate available");
+   `ALPHAVANTAGE_API_KEY` of step 7 also gives the **analyst consensus** (expected EPS and revenue with range and number of analysts, and the beat/miss): the job `earningsEstimates` makes at most 8 calls a day, one per held company in order of need, and none when fewer than 5 of the 25 a day are left; without the key, or when the plan does not include the function, each cell says why;
    variables `EARNINGS_AI_MODEL` (default `@cf/meta/llama-3.1-8b-instruct-fp8`), `EARNINGS_AI_DAILY_NEURONS` (default 6000, at most 8000) and `EARNINGS_BACKFILL_QUARTERS` (default 4, at most 8).
    The first scheduled step after the deploy starts a **backfill**: the latest `EARNINGS_BACKFILL_QUARTERS` quarterly releases of **every** held company, newest first across all companies (silently, no push,
    except a release from the last 48 hours), one release per step every 15 minutes, within the daily AI allowance: with about 20 companies that is about 80 releases, one to four days. The Earnings page shows the progress

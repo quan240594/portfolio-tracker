@@ -303,7 +303,7 @@ export class FakeLogos {
 }
 
 /**
- * The SEC (company tickers, submissions, filing index and documents) and Alpha Vantage's `EARNINGS` function over the invented releases of
+ * The SEC (company tickers, submissions, filing index and documents) and Alpha Vantage's `EARNINGS` and `EARNINGS_ESTIMATES` functions over the invented releases of
  * `@portfolio/earnings/testing`; every request is recorded with its User-Agent. Alpha Vantage's other functions are left to `FakePrices`.
  */
 export class FakeSecService {
@@ -311,6 +311,9 @@ export class FakeSecService {
   /** Alpha Vantage `EARNINGS` answers per symbol; none by default (no estimate available). */
   readonly estimates = new Map<string, unknown>();
   readonly estimateRequests: string[] = [];
+  /** Alpha Vantage `EARNINGS_ESTIMATES` answers per ticker; no estimates (no coverage) by default. */
+  readonly consensus = new Map<string, unknown>();
+  readonly consensusRequests: string[] = [];
 
   constructor(filings: readonly FilingSpec[], tickers: Record<string, { cik: number; title: string }>) {
     this.sec = new FakeSec(filings, tickers);
@@ -325,6 +328,11 @@ export class FakeSecService {
     if (url.host === 'www.alphavantage.co' && url.searchParams.get('function') === 'EARNINGS') {
       this.estimateRequests.push(url.searchParams.get('symbol') ?? '');
       return { status: 200, json: this.estimates.get(url.searchParams.get('symbol') ?? '') ?? { quarterlyEarnings: [] } };
+    }
+    if (url.host === 'www.alphavantage.co' && url.searchParams.get('function') === 'EARNINGS_ESTIMATES') {
+      const ticker = url.searchParams.get('symbol') ?? '';
+      this.consensusRequests.push(ticker);
+      return { status: 200, json: this.consensus.get(ticker) ?? { symbol: ticker, estimates: [] } };
     }
     if (url.host !== 'www.sec.gov' && url.host !== 'data.sec.gov') return undefined;
     const reply = this.sec.handle(request.url, request.header('user-agent') ?? undefined, request.header('accept-encoding') ?? undefined);
