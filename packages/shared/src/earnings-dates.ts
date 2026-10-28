@@ -59,17 +59,25 @@ export interface EarningsRunRecord {
   unvouched?: string[];
 }
 
-const symbolList = z.array(z.string()).max(MAX_RUN_SYMBOLS).optional().catch(undefined);
+/** A field that falls back to `fallback` instead of failing the whole record when it is missing or malformed. */
+function lenient<T extends z.ZodTypeAny, F extends z.infer<T> | undefined>(schema: T, fallback: F) {
+  return z.unknown().transform((value): z.infer<T> | F => {
+    const result = schema.safeParse(value);
+    return result.success ? result.data : fallback;
+  });
+}
+
+const symbolList = lenient(z.array(z.string()).max(MAX_RUN_SYMBOLS), undefined);
 const count = z.number().int().nonnegative();
 
 export const earningsRunSchema = z.object({
   at: z.string(),
-  trigger: z.enum(EARNINGS_RUN_TRIGGERS).catch('scheduled'),
+  trigger: lenient(z.enum(EARNINGS_RUN_TRIGGERS), 'scheduled' as const),
   status: z.enum(EARNINGS_RUN_STATUSES),
-  reason: z.string().catch(''),
-  tracked: count.catch(0),
-  rows: count.optional().catch(undefined),
-  events: count.optional().catch(undefined),
+  reason: lenient(z.string(), ''),
+  tracked: lenient(count, 0),
+  rows: lenient(count, undefined),
+  events: lenient(count, undefined),
   matchedSymbols: symbolList,
   listed: symbolList,
   unvouched: symbolList,
