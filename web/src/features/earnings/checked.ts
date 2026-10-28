@@ -69,7 +69,9 @@ export function totalsText(status: EarningsStatusResponse): string {
 /** `Not counted: 94 symbols you no longer hold.`; absent when there are none. */
 export function notCountedText(status: EarningsStatusResponse): string | undefined {
   const count = status.notHeld ?? 0;
-  return count > 0 ? `Not counted: ${count} symbol${count === 1 ? '' : 's'} you no longer hold.` : undefined;
+  if (count <= 0) return undefined;
+  const noun = count === 1 ? 'symbol' : 'symbols';
+  return `Not counted: ${count} ${noun} you no longer hold.`;
 }
 
 export function lastPassText(status: EarningsStatusResponse): string {
