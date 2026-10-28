@@ -13,7 +13,7 @@
 import { addIsoDays, daysBetween, DAYS_PER_YEAR, roundTo, transactionAmount } from './analytics.js';
 import { calculatePassiveIncome, paymentsPerYear, type PassiveIncome } from './analytics-income.js';
 import { FxTimeline } from './fx.js';
-import { buildPositions, calculatePortfolio, type Position } from './portfolio.js';
+import { buildPositions, calculatePortfolio, HELD_DUST_QUANTITY, type Position } from './portfolio.js';
 import type { DividendEvent, FxDay, FxRates, InstrumentProfile, Quote, Transaction } from './types.js';
 
 export const CALENDAR_EVENT_TYPES = ['EX_DIVIDEND', 'DIVIDEND_PAY', 'EARNINGS', 'SPLIT', 'CORPORATE_ACTION'] as const;
@@ -292,12 +292,14 @@ interface Ctx {
   currentPositions: ReadonlyMap<string, Position>;
   quantityOn: (symbol: string, date: string) => number;
   originOf: (symbol: string) => CalendarOrigin | null;
+  /** Earnings follow what is held now: a symbol that was sold out is a holding no more (it shows only while on the watchlist). */
+  earningsOriginOf: (symbol: string) => CalendarOrigin | null;
   nameOf: (symbol: string, fallback?: string) => string;
   netFactor: (symbol: string) => number;
 }
 
 /** What the earnings entries need of the context: the day, who the symbol belongs to and its name. */
-type EarningsCtx = Pick<Ctx, 'today' | 'originOf' | 'nameOf'>;
+type EarningsCtx = Pick<Ctx, 'today' | 'earningsOriginOf' | 'nameOf'>;
 
 /** HOLDING for a symbol in the transactions, WATCHLIST for one that is only watched, null otherwise. */
 function originResolver(transactions: readonly Transaction[], watchlist: readonly string[]): (symbol: string) => CalendarOrigin | null {
@@ -305,6 +307,15 @@ function originResolver(transactions: readonly Transaction[], watchlist: readonl
   const watched = new Set(watchlist);
   return (symbol) => {
     if (traded.has(symbol)) return 'HOLDING';
+    return watched.has(symbol) ? 'WATCHLIST' : null;
+  };
+}
+
+/** Earnings follow what is held now: HOLDING above the dust threshold, WATCHLIST for a watched symbol that is not held, null otherwise. */
+function heldOriginResolver(positions: ReadonlyMap<string, Position>, watchlist: readonly string[]): (symbol: string) => CalendarOrigin | null {
+  const watched = new Set(watchlist);
+  return (symbol) => {
+    if ((positions.get(symbol)?.quantity ?? 0) > HELD_DUST_QUANTITY) return 'HOLDING';
     return watched.has(symbol) ? 'WATCHLIST' : null;
   };
 }
@@ -322,6 +333,7 @@ function createContext(data: CalendarData): Ctx {
     }
     return positions;
   };
+  const currentPositions = positionsAsOf(data.today);
   const trailingStart = addIsoDays(data.today, -DAYS_PER_YEAR);
   const trailing = data.transactions.filter((t) => t.type === 'DIVIDEND' && t.date > trailingStart && t.date <= data.today);
 
@@ -329,10 +341,11 @@ function createContext(data: CalendarData): Ctx {
     today: data.today,
     timeline,
     transactions: data.transactions,
-    currentPositions: positionsAsOf(data.today),
+    currentPositions,
     // Shares bought on the ex-date are not entitled; a future ex-date assumes the current position.
     quantityOn: (symbol, date) => positionsAsOf(date > data.today ? data.today : addIsoDays(date, -1)).get(symbol)?.quantity ?? 0,
     originOf: originResolver(data.transactions, data.watchlist),
+    earningsOriginOf: heldOriginResolver(currentPositions, data.watchlist),
     nameOf: profileName(data.profiles),
     // Same observed-withholding rule as calculatePassiveIncome, so event amounts add up to the analytics figures.
     netFactor: (symbol) => {
@@ -653,7 +666,7 @@ function reportedEntries(ctx: EarningsCtx, stored: readonly StoredEarningsEvent[
   const events: CalendarEvent[] = [];
   const matched = new Set<StoredEarningsEvent>();
   for (const report of reports) {
-    const origin = ctx.originOf(report.symbol);
+    const origin = ctx.earningsOriginOf(report.symbol);
     if (!origin) continue;
     const provider = stored.find((e) => e.symbol === report.symbol && Math.abs(daysBetween(e.date, report.reportDate)) <= REPORT_MATCH_DAYS);
     if (provider) matched.add(provider);
@@ -667,7 +680,7 @@ function scheduledEntries(ctx: EarningsCtx, stored: readonly StoredEarningsEvent
   const events: CalendarEvent[] = [];
   const ahead = new Set<string>();
   for (const e of stored) {
-    const origin = ctx.originOf(e.symbol);
+    const origin = ctx.earningsOriginOf(e.symbol);
     if (!origin || matched.has(e)) continue;
     if (e.date >= ctx.today) ahead.add(e.symbol);
     events.push(providerEarnings(ctx, e, origin));
@@ -684,7 +697,7 @@ function earningsEntries(ctx: EarningsCtx, stored: readonly StoredEarningsEvent[
   const scheduled = scheduledEntries(ctx, stored, reported.matched);
   const projections: CalendarEvent[] = [];
   for (const [symbol, report] of latestReports(reports)) {
-    const origin = ctx.originOf(symbol);
+    const origin = ctx.earningsOriginOf(symbol);
     const projection = origin && !scheduled.ahead.has(symbol) ? projectedEarnings(ctx, symbol, report, origin) : null;
     if (projection) projections.push(projection);
   }
@@ -705,7 +718,7 @@ export interface EarningsOutlookInput {
  * date (`scheduled`), a released report of today (`reported`) or a projection from the last report (`projected`). A symbol without one is absent.
  */
 export function nextEarningsEvents(input: EarningsOutlookInput): Map<string, CalendarEvent> {
-  const ctx: EarningsCtx = { today: input.today, originOf: originResolver(input.transactions, input.watchlist), nameOf: profileName(input.profiles) };
+  const ctx: EarningsCtx = { today: input.today, earningsOriginOf: heldOriginResolver(buildPositions(input.transactions, input.today), input.watchlist), nameOf: profileName(input.profiles) };
   const next = new Map<string, CalendarEvent>();
   for (const event of [...earningsEntries(ctx, input.earnings, input.reportedEarnings ?? [])].sort(compareEvents)) {
     if (event.date >= input.today && !next.has(event.symbol)) next.set(event.symbol, event);

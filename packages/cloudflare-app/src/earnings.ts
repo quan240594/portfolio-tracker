@@ -19,7 +19,7 @@ import {
   type NeuronsToday,
 } from '@portfolio/earnings';
 import { DailyQuota, StoreQuotaLedger, alphaVantageGeneralLimit } from '@portfolio/prices';
-import { classificationFieldsOf, heldQuantities, isMarketSymbol, kpiTemplateFor, type EarningsHolding } from '@portfolio/shared';
+import { classificationFieldsOf, currentHoldings, kpiTemplateFor, type EarningsHolding } from '@portfolio/shared';
 import type { HubConfig } from './config.js';
 
 /** Whether the feature has everything it needs: the SEC contact and the Workers AI binding. */
@@ -30,7 +30,7 @@ const CALENDAR_DAYS_BACK = 7;
 const CALENDAR_DAYS_AHEAD = 130;
 
 /**
- * The distinct companies held by any user today, with the KPI template (the owner's override, else the table or sector) and the expected
+ * The distinct companies held by any user today (above the dust threshold; sold-out symbols are reported as `former`, never watched), with the KPI template (the owner's override, else the table or sector) and the expected
  * report dates of the calendar. Instruments without earnings (ETFs, crypto, ...) are left out. What an instrument is comes from the stored
  * profile with the owner's classification overrides on top, as everywhere else (the Snowball import classifies the holdings through overrides;
  * reading the stored profile alone silently left every such holding out); an instrument whose class nobody knows counts unless its name reads like a fund. A user whose transactions cannot be replayed
@@ -46,15 +46,18 @@ export function createEarningsInputs(items: ItemStore): EarningsInputs {
       const held = await Promise.all(
         userIds.map(async (userId) => {
           try {
-            return { userId, symbols: [...heldQuantities(await repo.listTransactions(userId), today).keys()].filter(isMarketSymbol) };
+            return { userId, ...currentHoldings(await repo.listTransactions(userId), today) };
           } catch {
-            return { userId, symbols: [] as string[] };
+            return { userId, held: [] as string[], former: [] as string[] };
           }
         }),
       );
-      const symbols = [...new Set(held.flatMap((entry) => entry.symbols))].sort((a, b) => a.localeCompare(b));
-      if (symbols.length === 0) return { holdings: [], calendar: {} };
-      const [profiles, overrides] = await Promise.all([repo.getProfiles(symbols), Promise.all(held.map((entry) => mgmt.getClassificationOverrides(entry.userId, entry.symbols)))]);
+      const byName = (a: string, b: string): number => a.localeCompare(b);
+      const symbols = [...new Set(held.flatMap((entry) => entry.held))].toSorted(byName);
+      const heldNow = new Set(symbols);
+      const former = [...new Set(held.flatMap((entry) => entry.former))].filter((symbol) => !heldNow.has(symbol)).toSorted(byName);
+      if (symbols.length === 0) return { holdings: [], calendar: {}, former };
+      const [profiles, overrides] = await Promise.all([repo.getProfiles(symbols), Promise.all(held.map((entry) => mgmt.getClassificationOverrides(entry.userId, entry.held)))]);
       const fieldsOf = (symbol: string) => overrides.flatMap((byUser) => (byUser[symbol] === undefined ? [] : [classificationFieldsOf(byUser[symbol])]));
       const holdings: EarningsHolding[] = [];
       for (const symbol of symbols) {
@@ -74,7 +77,7 @@ export function createEarningsInputs(items: ItemStore): EarningsInputs {
         dates.push(event.date);
         calendar[event.symbol] = dates;
       }
-      return { holdings, calendar };
+      return { holdings, calendar, former };
     },
   };
 }

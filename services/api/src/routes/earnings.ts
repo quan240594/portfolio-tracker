@@ -3,8 +3,8 @@ import {
   assetSymbolSchema,
   earningsListQuerySchema,
   earningsPeriodSchema,
+  currentHoldings,
   hasEarnings,
-  marketSymbols,
   type EARNINGS_ROUTES,
   type EarningsBackfillResponse,
   type EarningsListResponse,
@@ -16,11 +16,16 @@ import { HttpError, ok, validate, type RouteResult } from '../lib/http.js';
 import { loadProfiles } from '../lib/profiles.js';
 import type { RouteHandler } from '../router.js';
 
-/** Symbols the caller holds or ever held: a summary is public, but only what you own is listed. */
-async function ownSymbols(ctx: RouteContext): Promise<string[]> {
+/**
+ * The symbols the caller holds today (above the dust threshold) and the ones traded but sold out: a summary is public, but only what you
+ * hold now is listed, counted and checked (the sold-out ones are only counted, for the status page).
+ */
+async function ownHoldings(ctx: RouteContext): Promise<{ held: string[]; former: string[] }> {
   const transactions = await ctx.deps.repo.listTransactions(ctx.userId);
-  return [...new Set(marketSymbols(transactions.map((t) => t.symbol)))].sort((a, b) => a.localeCompare(b));
+  return currentHoldings(transactions, ctx.deps.now().toISOString().slice(0, 10));
 }
+
+const ownSymbols = async (ctx: RouteContext): Promise<string[]> => (await ownHoldings(ctx)).held;
 
 function requireEarnings(ctx: RouteContext): EarningsDeps {
   if (!ctx.deps.earnings) throw new HttpError(404, 'NOT_AVAILABLE', 'Earnings summaries are not available on this deployment');
@@ -29,7 +34,7 @@ function requireEarnings(ctx: RouteContext): EarningsDeps {
 
 const symbolParam = (ctx: RouteContext): string => validate(assetSymbolSchema.safeParse(ctx.pathParams.symbol), 'Invalid symbol');
 
-/** `GET /earnings?symbol=&limit=`: the newest summaries of the symbols you hold or held, newest first. */
+/** `GET /earnings?symbol=&limit=`: the newest summaries of the symbols you hold now, newest first. */
 async function listEarnings(ctx: RouteContext): Promise<RouteResult> {
   if (!ctx.deps.earnings) return ok({ available: false, summaries: [], symbols: [] } satisfies EarningsListResponse);
   const query = validate(earningsListQuerySchema.safeParse(ctx.query), 'Invalid query parameters');
@@ -46,10 +51,10 @@ async function listEarnings(ctx: RouteContext): Promise<RouteResult> {
 /** `GET /earnings/status`: is the feature configured, what was checked last, how many neurons are used today. */
 async function earningsStatus(ctx: RouteContext): Promise<RouteResult> {
   if (!ctx.deps.earnings) return ok({ available: false, configured: false, missing: [], estimatesConfigured: false, symbols: [] } satisfies EarningsStatusResponse);
-  const own = await ownSymbols(ctx);
-  const profiles = await loadProfiles(ctx, own);
-  const symbols = own.map((symbol) => ({ symbol, eligible: hasEarnings(profiles[symbol]?.assetClass, profiles[symbol]?.name) }));
-  return ok(await ctx.deps.earnings.status(symbols));
+  const { held, former } = await ownHoldings(ctx);
+  const profiles = await loadProfiles(ctx, held);
+  const symbols = held.map((symbol) => ({ symbol, eligible: hasEarnings(profiles[symbol]?.assetClass, profiles[symbol]?.name) }));
+  return ok({ ...(await ctx.deps.earnings.status(symbols)), ...(former.length === 0 ? {} : { notHeld: former.length }) });
 }
 
 /** `GET /earnings/{symbol}/{period}`: one summary (`period` is its report date). */
@@ -82,7 +87,7 @@ async function refreshEarnings(ctx: RouteContext): Promise<RouteResult> {
   }
 }
 
-/** `POST /earnings/backfill`: "Fetch all now" re-arms the backfill of every holding (failed releases get another chance); once per hour. */
+/** `POST /earnings/backfill`: "Fetch all now" (rescan all) starts the backfill of every current holding over (the sold-out ones are dropped); once per hour. */
 async function backfillEarnings(ctx: RouteContext): Promise<RouteResult> {
   const result: EarningsBackfillResponse = await requireEarnings(ctx).backfill();
   if (result.accepted) return ok(result, 202);

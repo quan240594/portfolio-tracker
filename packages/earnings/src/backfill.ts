@@ -129,9 +129,17 @@ const needsPlan = (state: EarningsSymbolState | undefined, run: Run): boolean =>
   if (state.plan === undefined || state.planQuarters !== run.marker.quarters) return true;
   const stale = run.now.getTime() - Date.parse(state.plannedAt ?? '') > PLAN_MAX_AGE_MS;
   const asked = run.marker.armedBy === 'manual' && (state.plannedAt ?? '') < run.marker.armedAt;
-  // A plan without releases (a failed SEC request, or a company that had none) is made again after a day, or when the owner asks.
-  return state.plan.length === 0 ? stale || asked : stale && asked;
+  // "Fetch all now" makes every plan again; a plan without releases (a failed SEC request, or a company that had none) is also made again after a day.
+  return state.plan.length === 0 ? stale || asked : asked;
 };
+
+/** A release planned again keeps what was tried of it today: a rescan does not hand out new attempts. */
+function carryTries(items: readonly EarningsPlanItem[], previous: readonly EarningsPlanItem[]): EarningsPlanItem[] {
+  return items.map((item) => {
+    const before = previous.find((entry) => entry.accession === item.accession);
+    return before?.triesDay === undefined ? item : { ...item, triesDay: before.triesDay, triesToday: before.triesToday };
+  });
+}
 
 async function planSymbol(run: Run, symbol: string): Promise<void> {
   const { deps, sec, now } = run;
@@ -146,7 +154,7 @@ async function planSymbol(run: Run, symbol: string): Promise<void> {
     }
     throw error;
   }
-  const items = planItems(filings, run.marker.quarters, run.today, await deps.repo.latest(symbol, 12));
+  const items = carryTries(planItems(filings, run.marker.quarters, run.today, await deps.repo.latest(symbol, 12)), state!.plan ?? []);
   const open = items.filter((item) => item.status === 'todo').length;
   let note = runOf(now, 'select-filing', `${open} release(s) to read, the latest first`);
   if (items.length === 0) note = runOf(now, 'no-release-found', 'no results release (8-K item 2.02 or 6-K) in the SEC list for this period');
@@ -327,11 +335,21 @@ async function ensureMarker(deps: EarningsJobDeps, now: Date): Promise<EarningsB
 
 const isWaiting = (marker: EarningsBackfillMarker, now: Date): boolean => marker.waitUntil !== undefined && Date.parse(marker.waitUntil) > now.getTime();
 
+/** The run of one step. A manual run rebuilds the held list (the current holdings), drops the check state of symbols nobody holds any more and retries the unmapped ones. */
 async function startRun(deps: EarningsJobDeps, marker: EarningsBackfillMarker, now: Date, held: 'cached' | 'rebuilt'): Promise<Run> {
   const cache = await loadHeld(deps, held === 'rebuilt');
   const holdings = new Map(cache.holdings.map((holding) => [holding.symbol, holding]));
+  if (held === 'rebuilt' && cache.former !== undefined) await deps.repo.deleteStates(cache.former);
   const states = await deps.repo.getStates([...holdings.keys()]);
-  return { deps, sec: deps.sec!, extractor: deps.extractor!, marker, holdings, states, now, today: utcDayOf(now) };
+  const run: Run = { deps, sec: deps.sec!, extractor: deps.extractor!, marker, holdings, states, now, today: utcDayOf(now) };
+  if (held === 'rebuilt') await retryUnmapped(run);
+  return run;
+}
+
+/** A rescan looks the companies the SEC did not know up again, instead of waiting out the month. */
+async function retryUnmapped(run: Run): Promise<void> {
+  const missed = [...run.states.values()].filter((state) => state.cik === undefined && state.cikMissingAt !== undefined);
+  await Promise.all(missed.map((state) => patch(run, state.symbol, { cikMissingAt: undefined })));
 }
 
 /** Writes the marker with fresh counters after a step, and what the step ended in. */

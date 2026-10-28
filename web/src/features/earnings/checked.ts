@@ -66,6 +66,14 @@ export function totalsText(status: EarningsStatusResponse): string {
   return parts.join(' · ');
 }
 
+/** `Not counted: 94 symbols you no longer hold.`; absent when there are none. */
+export function notCountedText(status: EarningsStatusResponse): string | undefined {
+  const count = status.notHeld ?? 0;
+  if (count <= 0) return undefined;
+  const noun = count === 1 ? 'symbol' : 'symbols';
+  return `Not counted: ${count} ${noun} you no longer hold.`;
+}
+
 export function lastPassText(status: EarningsStatusResponse): string {
   return status.lastFullPassAt === undefined ? 'Last full pass: not every company has been looked at yet.' : `Last full pass: every company was looked at since ${formatDateTime(status.lastFullPassAt)}.`;
 }
@@ -89,6 +97,7 @@ export interface BackfillText {
 export function backfillText(backfill: EarningsBackfillStatus | undefined): BackfillText | undefined {
   if (backfill === undefined) return undefined;
   if (backfill.status === 'not-started') return { headline: 'The latest quarters of every holding are read in the background: the first step starts within 15 minutes.' };
+  if (backfill.status === 'running' && backfill.total === 0 && backfill.planned === 0) return { headline: 'Rescanning every holding: the current holdings are listed again, the first step starts within 15 minutes.', detail: 'Working on it: a step runs every 15 minutes.' };
   const failed = backfill.failed > 0 ? ` (${backfill.failed} could not be read)` : '';
   const listed = backfill.planned < backfill.companies ? ` The SEC list of ${backfill.companies - backfill.planned} of ${backfill.companies} companies is not read yet.` : '';
   if (backfill.status === 'complete') {

@@ -152,7 +152,7 @@ You need a Cloudflare account on the Free plan and a GitHub account. Every comma
    The first scheduled step after the deploy starts a **backfill**: the latest `EARNINGS_BACKFILL_QUARTERS` quarterly releases of **every** held company, newest first across all companies (silently, no push,
    except a release from the last 48 hours), one release per step every 15 minutes, within the daily AI allowance: with about 20 companies that is about 80 releases, one to four days. The Earnings page shows the progress
    ("34 of 80 releases read, resumes at 00:00 UTC when the daily AI allowance is used up"), one line per company about what stopped it ("What was checked", open while there is nothing to show) and a **Fetch all now**
-   button (once an hour; it also retries releases that failed). Only the public release text goes to Workers AI, never your
+   button (once an hour: a rescan of your current holdings that also retries releases that failed; sold positions are neither listed nor checked). Only the public release text goes to Workers AI, never your
    portfolio. Revenue and guidance consensus have no free source and are never shown. Details, cost and limits: `docs/architecture.md`, "Earnings summaries".
 
 Until the variables and secrets are valid, every API and sign-in route answers 503 `NOT_CONFIGURED` naming the missing

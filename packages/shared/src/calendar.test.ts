@@ -448,6 +448,16 @@ describe('reported and projected earnings', () => {
     expect(events.some((e) => e.symbol === 'NOPE')).toBe(false);
   });
 
+  it('shows no earnings of a symbol that was sold out (a leftover below the dust threshold included), unless it is on the watchlist', () => {
+    const sold = [tx({ id: 'buy-old', symbol: 'OLD', date: '2025-01-02', quantity: 4 }), tx({ id: 'sell-old', symbol: 'OLD', type: 'SELL', date: '2026-01-02', quantity: 4 })];
+    const dust = [tx({ id: 'buy-dust', symbol: 'DUST', date: '2025-01-02', quantity: 4 }), tx({ id: 'sell-dust', symbol: 'DUST', type: 'SELL', date: '2026-01-02', quantity: 4 - 1e-7 })];
+    const reports = ['OLD', 'DUST'].map((symbol) => ({ symbol, reportDate: '2026-05-14' }));
+    const stored: StoredEarningsEvent[] = ['OLD', 'DUST'].map((symbol) => ({ symbol, date: '2026-07-30', source: 'alphavantage' }));
+    const shown = (override: Partial<CalendarData>) => eventsOf({ types: ['EARNINGS'] }, { transactions: [...transactions, ...sold, ...dust], earnings: stored, reportedEarnings: reports, ...override }).filter((e) => e.symbol === 'OLD' || e.symbol === 'DUST');
+    expect(shown({})).toEqual([]);
+    expect(new Set(shown({ watchlist: ['OLD'] }).map((e) => `${e.symbol} ${e.origin}`))).toEqual(new Set(['OLD WATCHLIST']));
+  });
+
   it('honours the status and type filters and counts for no income', () => {
     const result = buildCalendar({ ...data, earnings: noProviderAhead, reportedEarnings: [{ symbol: 'AAPL', reportDate: '2026-05-14' }] }, { ...wide, types: ['EARNINGS'], statuses: ['ESTIMATED'], scope: 'holdings' });
     expect(result.events.filter((e) => e.symbol === 'AAPL').map((e) => e.id)).toEqual(['earn-est:AAPL:2026-08-13']);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EarningsLastRun, EarningsStatusResponse, EarningsSymbolStatus } from '@portfolio/shared';
-import { backfillText, checkedLine, checkedLines, lastPassText, totalsText } from './checked';
+import { backfillText, checkedLine, checkedLines, lastPassText, notCountedText, totalsText } from './checked';
 
 const filing = { form: '8-K', date: '2026-10-29', accession: '0001-26-1' };
 const run = (stage: EarningsLastRun['stage'], detail?: string, withFiling = true): EarningsLastRun => ({ at: '2026-10-29T06:30:00.000Z', stage, ...(detail === undefined ? {} : { detail }), ...(withFiling ? { filing } : {}) });
@@ -57,6 +57,13 @@ describe('totals and the last full pass', () => {
     expect(totalsText(status({ symbols: [entry('A')] }))).toBe('1 holdings · 1 companies · 0 with a summary');
   });
 
+  it('says how many symbols are not counted because they are no longer held, only when there are any', () => {
+    expect(notCountedText(status())).toBeUndefined();
+    expect(notCountedText(status({ notHeld: 0 }))).toBeUndefined();
+    expect(notCountedText(status({ notHeld: 1 }))).toBe('Not counted: 1 symbol you no longer hold.');
+    expect(notCountedText(status({ notHeld: 94 }))).toBe('Not counted: 94 symbols you no longer hold.');
+  });
+
   it('says when every company was looked at, or that not all were', () => {
     expect(lastPassText(status())).toBe('Last full pass: not every company has been looked at yet.');
     expect(lastPassText(status({ lastFullPassAt: '2026-10-29T06:30:00.000Z' }))).toMatch(/^Last full pass: every company was looked at since 29-10-2026, \d\d:\d\d\.$/);
@@ -69,6 +76,10 @@ describe('backfillText', () => {
   it('is absent without a status and says the start is near before the first step', () => {
     expect(backfillText(undefined)).toBeUndefined();
     expect(backfillText({ ...base, status: 'not-started' })).toEqual({ headline: expect.stringContaining('within 15 minutes') });
+  });
+
+  it('says a rescan is starting while nothing is planned yet', () => {
+    expect(backfillText({ ...base, status: 'running', total: 0, done: 0, stored: 0, planned: 0, companies: 0 })).toEqual({ headline: expect.stringContaining('Rescanning every holding'), detail: 'Working on it: a step runs every 15 minutes.' });
   });
 
   it('shows the progress with the reason and the time of a pause', () => {

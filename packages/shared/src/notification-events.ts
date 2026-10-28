@@ -22,7 +22,8 @@ import {
   type NotificationMessage,
 } from './notification-messages.js';
 import { RECEIVED_FRESH_DAYS, type NotificationSettings, type NotificationType } from './notifications.js';
-import { buildPositions } from './portfolio.js';
+import { isMarketSymbol } from './management-api.js';
+import { buildPositions, HELD_DUST_QUANTITY } from './portfolio.js';
 import type { DividendEvent, FxRates, Transaction } from './types.js';
 
 /** The identity of a ledger entry inside a set of notified entries. */
@@ -63,8 +64,6 @@ export interface Detection {
   silent: LedgerRef[];
 }
 
-const EPSILON = 1e-9;
-
 interface Context {
   input: DetectInput;
   held: ReadonlyMap<string, number>;
@@ -72,11 +71,22 @@ interface Context {
   timeline: FxTimeline | undefined;
 }
 
-/** Shares held on `today` per symbol (positions above zero). Throws when the transactions cannot be replayed (an oversold position). */
+/** Shares held on `today` per symbol (positions above the dust threshold). Throws when the transactions cannot be replayed (an oversold position). */
 export function heldQuantities(transactions: readonly Transaction[], today: string): Map<string, number> {
   const held = new Map<string, number>();
-  for (const [symbol, position] of buildPositions(transactions, today)) if (position.quantity > EPSILON) held.set(symbol, position.quantity);
+  for (const [symbol, position] of buildPositions(transactions, today)) if (position.quantity > HELD_DUST_QUANTITY) held.set(symbol, position.quantity);
   return held;
+}
+
+/** The market symbols held on `today`, sorted, and the other market symbols traded up to then that are no longer held. */
+export function currentHoldings(transactions: readonly Transaction[], today: string): { held: string[]; former: string[] } {
+  const open = heldQuantities(transactions, today);
+  const traded = new Set(transactions.filter((transaction) => transaction.date <= today).map((transaction) => transaction.symbol).filter(isMarketSymbol));
+  const byName = (a: string, b: string): number => a.localeCompare(b);
+  return {
+    held: [...open.keys()].filter(isMarketSymbol).sort(byName),
+    former: [...traded].filter((symbol) => !open.has(symbol)).sort(byName),
+  };
 }
 
 /** One event per symbol and ex-date (the last stored wins), oldest first. */

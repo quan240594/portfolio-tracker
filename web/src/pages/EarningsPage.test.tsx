@@ -110,6 +110,7 @@ describe('the page', () => {
     serveStatus(
       status({
         lastFullPassAt: '2026-10-25T06:30:00.000Z',
+        notHeld: 94,
         backfill: { status: 'running', quarters: 4, total: 80, done: 34, stored: 30, failed: 4, planned: 18, companies: 20, waitReason: 'allowance', waitUntil: '2026-10-26T00:05:00.000Z' },
         symbols: [
           { symbol: 'MSFT', eligible: true, lastRun: run('ai', 'invalid JSON', { form: '8-K', date: '2026-10-29', accession: 'a-1' }), releases: { planned: 4, stored: 1, failed: 2 } },
@@ -128,6 +129,7 @@ describe('the page', () => {
     expect(screen.getByText('FOO.DE: not found in the SEC company list')).toBeInTheDocument();
     expect(screen.queryByText(/VWRL/)).not.toBeInTheDocument();
     expect(screen.getByText('5 holdings · 4 companies · 0 with a summary · 1 without quarterly results (funds, crypto, ...)')).toBeInTheDocument();
+    expect(screen.getByText('Not counted: 94 symbols you no longer hold.')).toBeInTheDocument();
     expect(screen.getByText(`Last full pass: every company was looked at since ${formatDateTime('2026-10-25T06:30:00.000Z')}.`)).toBeInTheDocument();
     expect(screen.getByText(/34 of 80 releases read \(4 could not be read\)\. The SEC list of 2 of 20 companies is not read yet\./)).toBeInTheDocument();
     expect(screen.getByText(/Resumes at 00:00 UTC .* when the daily AI allowance is used up/)).toBeInTheDocument();

@@ -54,6 +54,11 @@ export class EarningsRepository {
     return new Map(states.map((state) => [state.symbol, state]));
   }
 
+  /** Deletes the check state of the symbols (the stored summaries stay: they are public data). */
+  async deleteStates(symbols: readonly string[]): Promise<void> {
+    await this.store.batchWrite(symbols.map((symbol) => ({ type: 'delete', key: earningsKeys.state(symbol) })));
+  }
+
   /** Stores `patch` over the symbol's state (a missing state starts empty). */
   async patchState(symbol: string, patch: Partial<EarningsSymbolState>, now: Date): Promise<EarningsSymbolState> {
     const current = (await this.getState(symbol)) ?? { symbol, updatedAt: now.toISOString() };
