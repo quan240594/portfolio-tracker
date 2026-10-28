@@ -91,6 +91,36 @@ export interface AssumptionOptions {
 
 const ready = <T,>(value: T): Source<T> => ({ status: 'ready', value });
 
+interface InflationQueryState {
+  isError: boolean;
+  error: unknown;
+  data: InflationResponse | undefined;
+}
+
+function buildInflationSource(mode: InflationMode, query: Readonly<InflationQueryState>, horizon: InflationHorizon, range: AssumptionRange): Source<InflationData> {
+  if (mode === 'manual') return ready({ kind: 'none' });
+  if (mode === 'target') return ready({ kind: 'target', target: ecbTargetInflation(range) });
+  if (query.isError) return { status: 'error', message: errorMessage(query.error) };
+  if (!query.data) return { status: 'loading' };
+  return ready({ kind: 'ecb', series: query.data, suggestion: averageInflation(query.data.points, horizon, range) });
+}
+
+function inflationTargetText(source: Source<InflationData>): string | null {
+  if (source.status !== 'ready') return null;
+  const data = source.value;
+  if (data.kind === 'target') return inputText(data.target.pct);
+  return data.kind === 'ecb' && data.suggestion.available ? inputText(data.suggestion.pct) : null;
+}
+
+/** The inputs whose text differs from what their helper suggests. */
+function fillPatch(targets: Readonly<{ growthTarget: string | null; yieldTarget: string | null; inflationTarget: string | null }>, current: Readonly<Record<AssumptionField, string>>): Partial<Record<AssumptionField, string>> {
+  const patch: Partial<Record<AssumptionField, string>> = {};
+  if (targets.growthTarget !== null && targets.growthTarget !== current.dividendGrowthPct) patch.dividendGrowthPct = targets.growthTarget;
+  if (targets.yieldTarget !== null && targets.yieldTarget !== current.yieldOnNewMoneyPct) patch.yieldOnNewMoneyPct = targets.yieldTarget;
+  if (targets.inflationTarget !== null && targets.inflationTarget !== current.inflationPct) patch.inflationPct = targets.inflationTarget;
+  return patch;
+}
+
 /**
  * One state machine for the three assumption helpers, shared by the Goals page and the Analytics goal tab. The inputs stay the
  * source of truth (the goal calculation only ever receives their numbers): a helper in a calculated mode writes the figure into its
@@ -131,13 +161,11 @@ export function useGoalAssumptions({ scope, enabled = true, values, fill, ranges
   }, [overview.isError, overview.error, overview.data, ranges.yield]);
 
   const inflationQuery = useInflation(area, { enabled: enabled && withInflation && inflationMode === 'ecb' });
-  const inflationSource = useMemo((): Source<InflationData> => {
-    if (inflationMode === 'manual') return ready({ kind: 'none' });
-    if (inflationMode === 'target') return ready({ kind: 'target', target: ecbTargetInflation(ranges.inflation) });
-    if (inflationQuery.isError) return { status: 'error', message: errorMessage(inflationQuery.error) };
-    if (!inflationQuery.data) return { status: 'loading' };
-    return ready({ kind: 'ecb', series: inflationQuery.data, suggestion: averageInflation(inflationQuery.data.points, horizon, ranges.inflation) });
-  }, [inflationMode, inflationQuery.isError, inflationQuery.error, inflationQuery.data, horizon, ranges.inflation]);
+  const { isError: inflationIsError, error: inflationError, data: inflationSeries } = inflationQuery;
+  const inflationSource = useMemo(
+    () => buildInflationSource(inflationMode, { isError: inflationIsError, error: inflationError, data: inflationSeries }, horizon, ranges.inflation),
+    [inflationMode, inflationIsError, inflationError, inflationSeries, horizon, ranges.inflation],
+  );
 
   const growthMode: GrowthMode = growthChoice ?? 'manual';
   const defaultPreset = yieldSource.status === 'ready' ? yieldSource.value.defaultPreset : 'portfolio';
@@ -146,17 +174,11 @@ export function useGoalAssumptions({ scope, enabled = true, values, fill, ranges
   const growthTarget = growthMode === 'portfolio' && growthSource.status === 'ready' && growthSource.value.available ? inputText(growthSource.value.pct) : null;
   const yieldPick = yieldMode !== 'manual' && yieldSource.status === 'ready' ? yieldSource.value.candidates[yieldMode] : null;
   const yieldTarget = yieldPick?.available ? inputText(yieldPick.pct) : null;
-  const inflationData = inflationSource.status === 'ready' ? inflationSource.value : null;
-  let inflationTarget: string | null = null;
-  if (inflationData?.kind === 'target') inflationTarget = inputText(inflationData.target.pct);
-  else if (inflationData?.kind === 'ecb' && inflationData.suggestion.available) inflationTarget = inputText(inflationData.suggestion.pct);
+  const inflationTarget = inflationTargetText(inflationSource);
 
   const { dividendGrowthPct, yieldOnNewMoneyPct, inflationPct } = values;
   useEffect(() => {
-    const patch: Partial<Record<AssumptionField, string>> = {};
-    if (growthTarget !== null && growthTarget !== dividendGrowthPct) patch.dividendGrowthPct = growthTarget;
-    if (yieldTarget !== null && yieldTarget !== yieldOnNewMoneyPct) patch.yieldOnNewMoneyPct = yieldTarget;
-    if (withInflation && inflationTarget !== null && inflationTarget !== inflationPct) patch.inflationPct = inflationTarget;
+    const patch = fillPatch({ growthTarget, yieldTarget, inflationTarget: withInflation ? inflationTarget : null }, { dividendGrowthPct, yieldOnNewMoneyPct, inflationPct });
     if (Object.keys(patch).length > 0) fill(patch);
   }, [growthTarget, yieldTarget, inflationTarget, dividendGrowthPct, yieldOnNewMoneyPct, inflationPct, withInflation, fill]);
 

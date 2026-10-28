@@ -203,6 +203,11 @@ function InflationNote({ helper }: Readonly<{ helper: InflationHelper }>) {
   );
 }
 
+function inflationDetail(mode: (typeof INFLATION_MODES)[number], ecbFigure: string | undefined): string | undefined {
+  if (mode.value === 'ecb') return ecbFigure;
+  return 'detail' in mode ? mode.detail : undefined;
+}
+
 export function InflationChoices({ helper }: Readonly<{ helper: InflationHelper }>) {
   const { source } = helper;
   const data = source.status === 'ready' ? source.value : null;
@@ -214,7 +219,7 @@ export function InflationChoices({ helper }: Readonly<{ helper: InflationHelper 
         legend="Inflation source"
         value={helper.mode}
         onChange={helper.setMode}
-        options={INFLATION_MODES.map((mode) => ({ ...mode, detail: mode.value === 'ecb' ? ecbFigure : ('detail' in mode ? mode.detail : undefined) }))}
+        options={INFLATION_MODES.map((mode) => ({ ...mode, detail: inflationDetail(mode, ecbFigure) }))}
         tip={
           <>
             <p>ECB history: the average yearly price increase (HICP, the European consumer price index) over the period you choose, for the euro area or the Netherlands. It is the compound rate of the price level from that many years ago to the latest month. The server reads it from the ECB and stores it for a month.</p>

@@ -200,6 +200,8 @@ test.describe('Goals', () => {
     await page.goto('/goals');
     const verdict = page.locator('output').filter({ hasText: /Achievable in|Not reached within|already reached/ });
     await expect(verdict).toBeVisible();
+    // The demo goal is unsaved, so on load the yield helper settles on its default and the preview replaces the first verdict once: read the verdict only after that.
+    await expect(page.getByText('Preview of unsaved changes')).toBeVisible();
     const text = await verdict.textContent();
     const chart = page.getByTestId('goal-chart');
     const legend = page.getByTestId('goal-legend');
