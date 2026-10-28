@@ -221,7 +221,7 @@ infrastructure: the paths are covered by the API Gateway `$default` route, and t
 
 | Endpoint (all accept `?portfolioId=`) | Content |
 |---|---|
-| `GET /analytics/summary` | IRR, TWR (+ annualised), passive income, top 5 day gainers/losers, insights |
+| `GET /analytics/summary` | IRR, TWR (+ annualised), passive income, top 5 day gainers/losers, insights; optional `?period=ttm\|ytd\|5y\|10y\|all` adds `periodPerformance` (see "Dashboard period and calendar card") |
 | `GET /analytics/returns?period=year\|quarter\|month` | TWR per calendar period (+ IRR per year) |
 | `GET /analytics/risk?benchmark=` | volatility, Sharpe, Sortino, max drawdown (+ dates), beta, correlation |
 | `GET /analytics/benchmark?benchmark=&range=` | portfolio vs a benchmark ETF replayed with the same cash flows |
@@ -3753,3 +3753,31 @@ A held symbol the market-data provider does not know (`FWRA.MI`) can be pointed 
 **UI.** Edit classification has a text input "Price history symbol" with helper text (suffix is the exchange: .DE Xetra, .AS Amsterdam, .PA Paris, .MI Milan, .L London; empty for automatic). It works in mock mode (`web/src/mocks/classification-handlers.ts`).
 
 **Tests.** `pnpm --filter @portfolio/shared test` (schema, coverage note), `@portfolio/prices` (`jobs/history-override.test.ts`, `refresh-prices.test.ts`, `repository.test.ts`), `@portfolio/api` (`classification.test.ts`), `@portfolio/cloudflare-app` (`history-symbol.test.ts` and the Hub suite, Node and workerd), `@portfolio/web` (`EditClassificationDialog.test.tsx`, `classificationForm.test.ts`; Playwright `e2e/classification.spec.ts`, `e2e-github/diagnostics.spec.ts`). All clocks are pinned.
+
+## Dashboard period and calendar card
+
+The Dashboard has a period control next to its title (`TTM`, `YTD`, `5 years`, `10 years`, `All time`; default All time, the previous behaviour). The choice is kept in `localStorage` under `pt-dashboard-period`
+(one plain key, so a later modular layout can keep its own settings beside it). A second request is only made for a window: All time sends no parameter.
+
+**API (additive, no new route, so no infrastructure change; AWS and Cloudflare serve it through the same shared handler).** `GET /analytics/summary?period=ttm|ytd|5y|10y|all` (`analyticsSummaryQuerySchema`;
+an empty value counts as omitted; anything else is `400 VALIDATION_ERROR`). With a period the response gains the optional `periodPerformance` (`PeriodPerformance`, `packages/shared/src/analytics-api.ts`; computed by
+`computePeriodPerformance` in `analytics-period.ts`, called from `computeAnalyticsSummary(data, period?)`). Without it the response is byte-for-byte what it was. Windows: `ttm` = the last 365 days, `5y`/`10y` = 5 and 10 times 365 days,
+`ytd` = since 1 January; the figures cover the days after the baseline (the day before the window starts). Fields: `from`/`to`, `truncated`, `days`, `irrPct`/`irrAnnualised`, `twrPct`/`twrAnnualisedPct`, `startValue`/`endValue`,
+`dividends`, `realizedPnl`, `totalReturn`, `totalReturnPct`. They use the all-time rules (average cost, transaction-date FX, net dividends): `dividends` and `realizedPnl` are the difference of the positions replayed at today and at the
+baseline, `totalReturn` = change of the unrealized P&L (today's minus the baseline's value minus cost) + realized + dividends, `totalReturnPct` is on the cost at the baseline plus what was bought inside the window. IRR uses the
+baseline value as the opening flow, TWR chains the daily returns after the baseline. A window longer than the history is cut at the first transaction and flagged `truncated` (`from` is then that date, not the window start); a window
+that reaches back to the first transaction reproduces the all-time numbers (tested for `all`). Portfolios with cash or custom assets: the windowed figures are transaction-based (cash interest and fees are not in them).
+
+**Cards.** Period-dependent: Total return, Dividends received, Realized P&L, Money-weighted return, Time-weighted return; their hint names the period ("Last 12 months", "Year to date", ...) or, when truncated, "Since dd-mm-yyyy, the
+start of your history (shorter than the period)". The dividend yield and growth cards stay TTM; Total value, Day change, Unrealized P&L, Currency effect and Passive income (next 12 months) are snapshots. Both groups carry a quiet note as
+`title` plus an `aria-describedby` text (`KpiCard` `note`), no extra visible text. A failed period request shows "Could not load this period" on the three period cards and leaves the others alone.
+
+**Projected rest of year.** The Dividends received card ends with "Projected rest of year: EUR x": `useProjectedRestOfYear` asks `GET /calendar?from=<today>&to=<31 Dec>&status=CONFIRMED,ESTIMATED&scope=holdings` through the calendar hook
+(`useCalendar`) and sums `remainingIncome` (calendarModel): events with `countsAsIncome` and a date from today to 31 December, received (`PAID`) ones excluded. It ignores the period on purpose (it is about this calendar year).
+
+**Calendar card.** `DashboardCalendarCard` (right of Top holdings; the watchlist card takes the full row below when there is one) shows a month of the holdings' events with the Calendar page's own pieces: the same `useCalendar` hook and
+`requestRange`, `MonthNavigator` (previous, next, today) and `ColourKey` from `CalendarControls`, `EventMarker`, and the colours of `calendarColours` through `CompactMonthGrid` (`features/calendar`): a marker per event (shape and letter, violet for
+the ex-dividend, green received, blue confirmed or reported, yellow dashed estimated), at most three per day and "+N", the month's expected dividends and "Open full calendar" (`/calendar?month=YYYY-MM&scope=holdings`).
+
+**Tests.** `pnpm --filter @portfolio/shared test` (`analytics-period.test.ts`), `@portfolio/api` (`analytics.test.ts`), `@portfolio/web` unit (`features/dashboard/*.test.ts(x)`, `mocks/analyticsPeriod.test.ts`, `calendarModel.test.ts`) and
+Playwright `e2e/dashboard-period-calendar.spec.ts` (`E2E_PORT=<free port> pnpm exec playwright test e2e/dashboard-period-calendar.spec.ts`). Clocks are pinned.

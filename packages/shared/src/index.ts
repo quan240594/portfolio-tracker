@@ -15,6 +15,7 @@ export * from './analytics-income.js';
 export * from './dividend-forecast.js';
 export * from './dividend-growth-stats.js';
 export * from './analytics-insights.js';
+export * from './analytics-period.js';
 export * from './analytics-api.js';
 export * from './analytics-compute.js';
 export * from './dividends-overview.js';

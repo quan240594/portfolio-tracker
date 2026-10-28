@@ -11,6 +11,7 @@ import {
   monthGrid,
   monthIncome,
   parseCalendarState,
+  remainingIncome,
   requestRange,
   shiftMonth,
   sourceLabel,
@@ -176,6 +177,21 @@ describe('events', () => {
     ];
     expect(monthIncome(income, '2026-10')).toBe(4.5);
     expect(monthIncome([], '2026-10')).toBe(0);
+  });
+
+  it('sums the income still to come in a date range, leaving out what was received', () => {
+    const income = [
+      event({ id: '1', countsAsIncome: true, expectedAmount: 3.4, date: '2026-10-15', status: 'CONFIRMED' }),
+      event({ id: '2', countsAsIncome: true, expectedAmount: 1.1, date: '2026-12-31', status: 'ESTIMATED' }),
+      event({ id: '3', countsAsIncome: true, expectedAmount: 50, date: '2026-10-10', status: 'PAID' }),
+      event({ id: '4', countsAsIncome: true, expectedAmount: 20, date: '2026-10-20', status: 'PAID' }),
+      event({ id: '5', countsAsIncome: false, expectedAmount: 99, date: '2026-11-01', status: 'CONFIRMED' }),
+      event({ id: '6', countsAsIncome: true, expectedAmount: 7, date: '2027-01-02', status: 'CONFIRMED' }),
+      event({ id: '7', countsAsIncome: true, date: '2026-11-03', status: 'CONFIRMED' }),
+      event({ id: '8', countsAsIncome: true, expectedAmount: 8, date: '2026-10-14', status: 'CONFIRMED' }),
+    ];
+    expect(remainingIncome(income, '2026-10-15', '2026-12-31')).toBe(4.5);
+    expect(remainingIncome([], '2026-10-15', '2026-12-31')).toBe(0);
   });
 
   it('names events for assistive technology', () => {

@@ -8,6 +8,7 @@ import {
   type AnalyticsReturnsResponse,
   type AnalyticsRiskResponse,
   type AnalyticsSummaryResponse,
+  type DashboardPeriod,
   type HistoryRange,
   type ReturnPeriod,
 } from '@portfolio/shared';
@@ -20,8 +21,9 @@ const stringify = (params: AnalyticsGoalParams): Record<string, string> =>
   Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]));
 
 export const analyticsApi = {
-  summary: (scope: string, signal?: AbortSignal) =>
-    request<AnalyticsSummaryResponse>('GET', '/analytics/summary', { query: scopeQuery(scope), signal }),
+  /** `period` adds `periodPerformance` to the response; left out, the request is exactly the all-time summary. */
+  summary: (scope: string, signal?: AbortSignal, period?: DashboardPeriod) =>
+    request<AnalyticsSummaryResponse>('GET', '/analytics/summary', { query: { ...scopeQuery(scope), ...(period && { period }) }, signal }),
   returns: (scope: string, period: ReturnPeriod, signal?: AbortSignal) =>
     request<AnalyticsReturnsResponse>('GET', '/analytics/returns', { query: { ...scopeQuery(scope), period }, signal }),
   risk: (scope: string, benchmark: string, signal?: AbortSignal) =>

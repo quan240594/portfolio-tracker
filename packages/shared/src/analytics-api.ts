@@ -4,7 +4,7 @@
  * plain numbers (12.5 = 12.5 %) in fields suffixed `Pct`; ratios such as Sharpe/beta are unitless.
  * Errors use the standard envelope (400 VALIDATION_ERROR for malformed query parameters).
  *
- * - GET /analytics/summary          IRR, TWR, passive income, top day movers and portfolio insights
+ * - GET /analytics/summary          IRR, TWR, passive income, top day movers and portfolio insights; `?period=ttm|ytd|5y|10y|all` adds `periodPerformance`
  * - GET /analytics/returns          `?period=year|quarter|month` TWR bars (+ IRR for years)
  * - GET /analytics/risk             `?benchmark=` volatility, Sharpe, Sortino, max drawdown, beta
  * - GET /analytics/benchmark        `?benchmark=&range=` portfolio value vs the benchmark replayed with the same flows
@@ -53,6 +53,12 @@ const queryNumber = (min: number, max: number) => z.coerce.number().min(min).max
 /** Query values arrive as strings; an empty value counts as omitted so the default applies. */
 const withDefault = <T extends z.ZodTypeAny>(schema: z.ZodDefault<T>) => z.preprocess(emptyToUndefined, schema);
 
+/** Dashboard windows of `GET /analytics/summary?period=`: trailing 365 days, calendar year to date, 5 and 10 years of 365 days, or everything. */
+export const DASHBOARD_PERIODS = ['ttm', 'ytd', '5y', '10y', 'all'] as const;
+export type DashboardPeriod = (typeof DASHBOARD_PERIODS)[number];
+/** An omitted or empty `period` leaves the response exactly as it was before the parameter existed (no `periodPerformance`). */
+export const analyticsSummaryQuerySchema = portfolioScopeSchema.extend({ period: z.preprocess(emptyToUndefined, z.enum(DASHBOARD_PERIODS).optional()) });
+
 export const analyticsReturnsQuerySchema = portfolioScopeSchema.extend({ period: z.enum(RETURN_PERIODS).default('year') });
 export const analyticsRiskQuerySchema = portfolioScopeSchema.extend({ benchmark: benchmarkSchema });
 export const analyticsBenchmarkQuerySchema = portfolioScopeSchema.extend({
@@ -88,6 +94,35 @@ export interface PerformanceSummary {
   twrAnnualisedPct: number | null;
 }
 
+/** The figures of one dashboard window, computed like their all-time counterparts (same cost, FX and dividend rules). */
+export interface PeriodPerformance {
+  period: DashboardPeriod;
+  /** First day the figures cover: the window start, or the first transaction when the history is shorter (see `truncated`). Null without transactions. */
+  from: string | null;
+  to: string;
+  /** True when the history starts after the requested window start, so `from` is later than the window asked for. */
+  truncated: boolean;
+  days: number;
+  /** Money-weighted return over the window: annualised when it spans a year or more, else the return over the window. */
+  irrPct: number | null;
+  irrAnnualised: boolean;
+  /** Time-weighted return over the window (incl. dividends). */
+  twrPct: number | null;
+  /** Annualised TWR; null for windows shorter than a year. */
+  twrAnnualisedPct: number | null;
+  /** Portfolio value the day before the window starts (0 when the window starts with the history). */
+  startValue: number;
+  endValue: number;
+  /** Net dividends received inside the window. */
+  dividends: number;
+  /** Realized P&L of the sales inside the window. */
+  realizedPnl: number;
+  /** Change of the unrealized P&L over the window + realized P&L + dividends. */
+  totalReturn: number;
+  /** `totalReturn` on the cost basis at the window start plus what was bought inside it, percent. */
+  totalReturnPct: number;
+}
+
 export interface AnalyticsSummaryResponse {
   baseCurrency: string;
   asOf: string;
@@ -97,6 +132,8 @@ export interface AnalyticsSummaryResponse {
   gainers: Mover[];
   losers: Mover[];
   insights: Insight[];
+  /** Only present when the request carried `?period=`. */
+  periodPerformance?: PeriodPerformance;
 }
 
 export interface ReturnPeriodRow {

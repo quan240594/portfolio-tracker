@@ -70,6 +70,18 @@ describe('GET /analytics/summary', () => {
     expect((await handler(apiEvent('GET', '/analytics/summary', { query: { portfolioId: 'Bad Id!' } }))).statusCode).toBe(400);
   });
 
+  it('adds the figures of the window for ?period= and only then', async () => {
+    const { handler } = setup();
+    expect(json(await handler(apiEvent('GET', '/analytics/summary'))).periodPerformance).toBeUndefined();
+    expect(json(await handler(apiEvent('GET', '/analytics/summary', { query: { period: '' } }))).periodPerformance).toBeUndefined();
+    const ytd = json(await handler(apiEvent('GET', '/analytics/summary', { query: { period: 'ytd' } }))).periodPerformance;
+    // 2026-06-15: the year started at 110 for the 10 VWRL shares and 400 → 480 EUR for AAPL
+    expect(ytd).toMatchObject({ period: 'ytd', from: '2026-01-01', to: '2026-06-15', truncated: false, dividends: 0, realizedPnl: 0 });
+    const ten = json(await handler(apiEvent('GET', '/analytics/summary', { query: { period: '10y' } }))).periodPerformance;
+    expect(ten).toMatchObject({ truncated: true, from: '2025-06-15', dividends: 10 });
+    expect((await handler(apiEvent('GET', '/analytics/summary', { query: { period: '3y' } }))).statusCode).toBe(400);
+  });
+
   it('works for a user without transactions', async () => {
     const { handler } = setup();
     const res = await handler(apiEvent('GET', '/analytics/summary', { sub: 'newcomer' }));

@@ -33,6 +33,7 @@ describe('portfolio-scoped pages', () => {
           '/api/allocation?trading-212',
           '/api/history?trading-212',
           '/api/analytics/summary?trading-212',
+          '/api/calendar?trading-212',
           '/api/dividends/overview?trading-212',
         ]),
       ),

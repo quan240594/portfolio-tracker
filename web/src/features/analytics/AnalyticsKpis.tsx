@@ -1,10 +1,11 @@
-import type { AnalyticsSummaryResponse } from '@portfolio/shared';
+import type { AnalyticsSummaryResponse, DashboardPeriod } from '@portfolio/shared';
 import { useAnalyticsSummary } from '../../api/analyticsHooks';
 import { Change } from '../../components/Change';
 import { ErrorState } from '../../components/ErrorState';
 import { KpiCard } from '../../components/KpiCard';
 import { formatDate, formatMoney, formatPercent } from '../../lib/format';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
+import { SNAPSHOT_NOTE, coverageLabel, queryPeriod } from '../dashboard/dashboardPeriod';
 
 type Performance = AnalyticsSummaryResponse['performance'];
 
@@ -21,10 +22,20 @@ function twrHint(p: Performance): string {
 
 const ReturnValue = ({ pct }: Readonly<{ pct: number | null }>) => (pct === null ? '—' : <Change pct={pct} />);
 
-/** Money-weighted and time-weighted return cards (grid cells), from GET /analytics/summary. */
-export function ReturnKpis() {
+/** The figures of the selected window when the response carries them, else the all-time ones. */
+function performanceFor(data: AnalyticsSummaryResponse): { perf: Performance; truncatedNote: string | undefined } {
+  const pp = data.periodPerformance;
+  if (!pp) return { perf: data.performance, truncatedNote: undefined };
+  const { period, from, days, irrPct, irrAnnualised, twrPct, twrAnnualisedPct } = pp;
+  return { perf: { since: from, days, irrPct, irrAnnualised, twrPct, twrAnnualisedPct }, truncatedNote: pp.truncated ? coverageLabel(period, pp) : undefined };
+}
+
+const withNote = (hint: string, note: string | undefined): string => (note ? `${hint} · ${note}` : hint);
+
+/** Money-weighted and time-weighted return cards (grid cells), from GET /analytics/summary (of the selected period when one is given). */
+export function ReturnKpis({ period = 'all' }: Readonly<{ period?: DashboardPeriod }>) {
   const { scope, ready } = usePortfolioScope();
-  const { data, isPending, isError, error, refetch } = useAnalyticsSummary(scope, { enabled: ready });
+  const { data, isPending, isError, error, refetch } = useAnalyticsSummary(scope, { enabled: ready, period: queryPeriod(period) });
   if (isError) {
     return (
       <div className="sm:col-span-2 lg:col-span-2">
@@ -32,19 +43,20 @@ export function ReturnKpis() {
       </div>
     );
   }
+  const shown = data && performanceFor(data);
   return (
     <>
       <KpiCard
         loading={isPending}
         label="Money-weighted return (IRR)"
-        value={data && <ReturnValue pct={data.performance.irrPct} />}
-        hint={data && irrHint(data.performance)}
+        value={shown && <ReturnValue pct={shown.perf.irrPct} />}
+        hint={shown && withNote(irrHint(shown.perf), shown.truncatedNote)}
       />
       <KpiCard
         loading={isPending}
         label="Time-weighted return (TWR)"
-        value={data && <ReturnValue pct={data.performance.twrPct} />}
-        hint={data && twrHint(data.performance)}
+        value={shown && <ReturnValue pct={shown.perf.twrPct} />}
+        hint={shown && withNote(twrHint(shown.perf), shown.truncatedNote)}
       />
     </>
   );
@@ -61,6 +73,7 @@ export function PassiveIncomeKpi() {
     <KpiCard
       loading={isPending}
       label="Passive income (next 12 months)"
+      note={SNAPSHOT_NOTE}
       value={income && formatMoney(income.forward12m, ccy)}
       hint={
         income &&

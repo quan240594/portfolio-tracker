@@ -3,6 +3,7 @@ import { Change } from '../../components/Change';
 import { ErrorState } from '../../components/ErrorState';
 import { KpiCard } from '../../components/KpiCard';
 import { formatMoney, formatPercent } from '../../lib/format';
+import { TTM_NOTE } from '../dashboard/dashboardPeriod';
 import { useScopedDividendsOverview } from './useDividendsOverview';
 
 const YIELD_INFO = (
@@ -47,6 +48,7 @@ function YieldCard({ currency, summary }: Readonly<Props>) {
   return (
     <KpiCard
       label="Dividend yield (TTM)"
+      note={TTM_NOTE}
       info={YIELD_INFO}
       value={formatPercent(summary.ttmYieldOnValuePct)}
       change={
@@ -64,6 +66,7 @@ function GrowthCard({ currency, summary }: Readonly<Props>) {
   return (
     <KpiCard
       label="Dividend growth (TTM)"
+      note={TTM_NOTE}
       info={GROWTH_INFO}
       value={ttmGrowthPct === null ? 'n/a' : <Change pct={ttmGrowthPct} digits={1} />}
       change={
@@ -91,8 +94,8 @@ export function TrailingDividendKpis() {
   if (isPending || !data) {
     return (
       <>
-        <KpiCard loading label="Dividend yield (TTM)" info={YIELD_INFO} value={null} />
-        <KpiCard loading label="Dividend growth (TTM)" info={GROWTH_INFO} value={null} />
+        <KpiCard loading label="Dividend yield (TTM)" note={TTM_NOTE} info={YIELD_INFO} value={null} />
+        <KpiCard loading label="Dividend growth (TTM)" note={TTM_NOTE} info={GROWTH_INFO} value={null} />
       </>
     );
   }

@@ -229,11 +229,24 @@ describe('ManagePortfoliosDialog', () => {
   });
 
   it('shows an error with retry when the portfolios cannot be loaded, and resets when closed', async () => {
-    server.use(http.get('/api/portfolios', () => apiError(500, 'INTERNAL', 'down'), { once: true }));
+    // The failure is held back until the dialog is open, so the dialog shares the failing request however busy the page is.
+    let fail!: () => void;
+    const gate = new Promise<void>((resolve) => (fail = resolve));
+    server.use(
+      http.get(
+        '/api/portfolios',
+        async () => {
+          await gate;
+          return apiError(500, 'INTERNAL', 'down');
+        },
+        { once: true },
+      ),
+    );
     const user = userEvent.setup();
     renderApp('/');
     await user.click(screen.getByRole('button', { name: 'Manage portfolios' }));
     const dialog = screen.getByRole('dialog', { name: 'Manage portfolios' });
+    fail();
     const alert = await within(dialog).findByRole('alert');
     expect(alert).toHaveTextContent('Could not load portfolios');
     await user.click(within(alert).getByRole('button', { name: 'Try again' }));
