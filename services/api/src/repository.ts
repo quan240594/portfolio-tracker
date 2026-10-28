@@ -1,14 +1,17 @@
 import {
   calendarKeys,
   earningsKeys,
+  earningsRunKeys,
   ENTITY,
   fromItem,
   keys,
+  parseEarningsRun,
   majorDividend,
   majorEod,
   majorQuote,
   transactionItem,
   type DividendEvent,
+  type EarningsRunRecord,
   type EarningsSummary,
   type EodPrice,
   type FxDay,
@@ -23,6 +26,17 @@ import {
   type Transaction,
 } from '@portfolio/shared';
 import { cond, listByPrefix, listTransactions, queryAll, registerUser, trackTickers, type ItemStore } from '@portfolio/platform';
+
+/** What the earnings dates diagnostics read: the upcoming stored dates, the tracked symbols and the records the calendar job left. */
+export interface EarningsDatesData {
+  /** `createdAt` of the tracked-ticker item of each tracked symbol (null: tracked, since an unknown time); an untracked symbol is absent. */
+  tracked: Map<string, string | null>;
+  /** Stored earnings dates on or after `today`. */
+  upcoming: StoredEarningsEvent[];
+  /** The last calendar run, and the last one that read the provider's calendar (see `EarningsRunRecord`). */
+  run: EarningsRunRecord | null;
+  lastOk: EarningsRunRecord | null;
+}
 
 /** Data access used by the route handlers. Implemented by `ItemRepository` (any ItemStore) and by in-memory fakes in tests. */
 export interface Repository {
@@ -51,6 +65,8 @@ export interface Repository {
   getDividendEvents(symbol: string): Promise<DividendEvent[]>;
   /** Stored earnings and split events of `symbols` dated `from`..`to` (inclusive, YYYY-MM-DD); see calendarKeys. */
   getCalendarEvents(symbols: string[], from: string, to: string): Promise<StoredCalendarEvents>;
+  /** What the earnings dates diagnostics read for `symbols` (see `EarningsDatesData`). */
+  getEarningsDatesData(symbols: string[], today: string): Promise<EarningsDatesData>;
   /** The newest stored earnings summaries of a symbol, newest first (see earningsKeys). */
   getEarningsSummaries(symbol: string, limit: number): Promise<EarningsSummary[]>;
   getEarningsSummary(symbol: string, reportDate: string): Promise<EarningsSummary | null>;
@@ -162,6 +178,23 @@ export class ItemRepository implements Repository {
     return {
       earnings: earnings.flat().map((i) => fromItem<StoredEarningsEvent>(i)),
       splits: splits.flat().map((i) => fromItem<StoredSplitEvent>(i)),
+    };
+  }
+
+  async getEarningsDatesData(symbols: string[], today: string): Promise<EarningsDatesData> {
+    const ahead = (symbol: string) =>
+      queryAll(this.store, { pk: calendarKeys.tickerPk(symbol), sk: { between: [calendarKeys.earnings(symbol, today).SK, calendarKeys.earnings(symbol, '9999-12-31').SK] } });
+    const [trackedItems, upcoming, runItems] = await Promise.all([
+      symbols.length > 0 ? this.store.getMany(symbols.map((symbol) => keys.trackedTicker(symbol))) : [],
+      Promise.all(symbols.map((symbol) => ahead(symbol))),
+      this.store.getMany([earningsRunKeys.last, earningsRunKeys.lastOk]),
+    ]);
+    const runOf = (key: { PK: string; SK: string }) => parseEarningsRun(runItems.find((item) => item.PK === key.PK && item.SK === key.SK));
+    return {
+      tracked: new Map(trackedItems.map((item) => [item.SK.slice(keys.trackedTicker('').SK.length), typeof item.createdAt === 'string' ? item.createdAt : null])),
+      upcoming: upcoming.flat().map((item) => fromItem<StoredEarningsEvent>(item)),
+      run: runOf(earningsRunKeys.last),
+      lastOk: runOf(earningsRunKeys.lastOk),
     };
   }
 

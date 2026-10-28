@@ -6,6 +6,8 @@
 | Split event     | TICKER#{symbol}   | SPLIT#{date}            | SPLIT_EVENT       |
 | Symbol marker   | TICKER#{symbol}   | CAL#STATE               | CALENDAR_STATE    |
 | Daily budget    | CALENDAR          | BUDGET#{provider}       | CALENDAR_BUDGET   |
+| Earnings run    | CALENDAR          | EARNINGS#LASTRUN        | EARNINGS_RUN      |
+| Earnings run ok | CALENDAR          | EARNINGS#LASTOK         | EARNINGS_RUN      |
 
 Dividend events keep living in `DIV#{exDate}` items written by the enrichment (see keys.py).
 """
@@ -21,11 +23,14 @@ ENTITY_EARNINGS_EVENT = "EARNINGS_EVENT"
 ENTITY_SPLIT_EVENT = "SPLIT_EVENT"
 ENTITY_CALENDAR_STATE = "CALENDAR_STATE"
 ENTITY_CALENDAR_BUDGET = "CALENDAR_BUDGET"
+ENTITY_EARNINGS_RUN = "EARNINGS_RUN"
 
 EARNINGS_PREFIX = "EARN#"
 SPLIT_PREFIX = "SPLIT#"
 STATE_SK = "CAL#STATE"
 BUDGET_PK = "CALENDAR"
+EARNINGS_RUN_LAST_SK = "EARNINGS#LASTRUN"
+EARNINGS_RUN_OK_SK = "EARNINGS#LASTOK"
 TIMES_OF_DAY = ("BMO", "AMC", "unknown")
 
 

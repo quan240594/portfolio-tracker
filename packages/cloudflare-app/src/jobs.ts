@@ -10,6 +10,8 @@ import {
   type EventPublisher,
   type FileStore,
   type ItemStore,
+  type JobCeiling,
+  type JobDecision,
   type JobHandler,
   type JobName,
   type JobPayloads,
@@ -20,9 +22,10 @@ import {
   type SecretStore,
 } from '@portfolio/platform';
 import { ItemNotificationRepository, ItemRepository, MAX_PUSHES_PER_USER_STEP, notifyDividendsJob } from '@portfolio/api';
+import { describeDiagnosticError } from '@portfolio/cloudflare';
 import { END_OF_DAY_ZONE, ItemBrokerStore, ItemProfileStore, ItemQuoteStore, SecretCredentialStore, Trading212Client, brokerSyncJob, refreshQuotesAfterSync, refreshQuotesJob, type HandlerResult, type QuoteDeps, type SyncDeps } from '@portfolio/broker-sync';
 import { ItemIngestStore, importUploadedJob } from '@portfolio/ingest';
-import { DEFAULT_STEP_SUBREQUESTS, PRICE_SCHEDULES, createPriceJobs, type PriceJobDeps } from '@portfolio/prices';
+import { DEFAULT_STEP_SUBREQUESTS, PRICE_SCHEDULES, PriceRepository, createPriceJobs, type PriceJobDeps } from '@portfolio/prices';
 import { BACKFILL_STEP_SUBREQUESTS, CHECKS_PER_STEP, createBackfillEarningsJob, createFetchEarningsSummaryJob, createWatchEarningsJob, type AiLike, type NeuronMeter } from '@portfolio/earnings';
 import type { HubConfig } from './config.js';
 import { earningsJobDeps } from './earnings.js';
@@ -230,7 +233,13 @@ export interface GuardOptions {
   guard: BudgetGuard;
   budget: SubrequestBudget;
   now: () => Date;
+  /** Called when the guard refuses a job that is dropped (never for a deferred one); a failure of it is logged and changes nothing. */
+  onDropped?: (name: JobName, payload: unknown, decision: JobDecision) => Promise<void>;
 }
+
+/** An owner-requested run of a convenience job may use the `warn` band of the budget (the owner is waiting for it). */
+const OWNER_REQUESTED_CEILING: Readonly<Partial<Record<JobName, JobCeiling>>> = { refreshCalendar: 'warn' };
+const isOwnerRequested = (payload: unknown): boolean => typeof payload === 'object' && payload !== null && (payload as { trigger?: unknown }).trigger === 'manual';
 
 /**
  * Gates a job handler behind the budget guard. A denied job that is non-essential (the price and calendar refreshes, whose
@@ -239,15 +248,18 @@ export interface GuardOptions {
  * than are left in this invocation is deferred by a second, so the alarm that runs it again starts with a fresh budget.
  */
 export function guardedJob<N extends JobName>(name: N, handler: JobHandler<JobPayloads[N]>, options: GuardOptions): JobHandler<JobPayloads[N]> {
-  const { guard, budget, now } = options;
+  const { guard, budget, now, onDropped } = options;
   const reserve = JOB_SUBREQUEST_RESERVE[name] ?? 0;
   const defer = (delayMs: number, cursor: string | undefined): JobStep => ({ done: false, next: cursor ?? DEFERRED_CURSOR, delayMs });
   return async ({ payload, cursor }) => {
     const resume = cursor === DEFERRED_CURSOR ? undefined : cursor;
-    const decision = await guardJob(guard, name);
+    const decision = await guardJob(guard, name, isOwnerRequested(payload) ? OWNER_REQUESTED_CEILING[name] : undefined);
     if (!decision.allowed) {
       logger.info('Job not run', { job: name, reason: decision.reason });
-      if (dropsWhenDenied(name)) return { done: true, result: { skipped: decision.reason } };
+      if (dropsWhenDenied(name)) {
+        await onDropped?.(name, payload, decision).catch((error: unknown) => logger.warn('Could not record a dropped job', { job: name, error: describeDiagnosticError(error).message }));
+        return { done: true, result: { skipped: decision.reason } };
+      }
       const pause = decision.reason === 'store-unavailable' ? UNAVAILABLE_DEFER_MS : Math.min(secondsUntilReset(now()) * 1000 + RESET_MARGIN_MS, BLOCKED_DEFER_MAX_MS);
       return defer(pause, resume);
     }
@@ -256,9 +268,25 @@ export function guardedJob<N extends JobName>(name: N, handler: JobHandler<JobPa
   };
 }
 
+const DROPPED_REASONS: Readonly<Record<JobDecision['reason'], string>> = {
+  'within-budget': 'it was allowed to run.',
+  'deferred-by-priority': 'the free-plan budget of this deployment was above 60% when the job was due, so the convenience jobs gave way.',
+  blocked: 'the daily budget of this deployment was used up, so background jobs were held back.',
+  'store-unavailable': 'the budget ledger could not be read.',
+};
+
+/** A calendar run the guard dropped is recorded for the Diagnostics page: the daily job is not retried before the next day. */
+function recordDroppedCalendar(context: JobContext): NonNullable<GuardOptions['onDropped']> {
+  const repo = new PriceRepository(context.items);
+  return async (name, payload, decision) => {
+    if (name !== JOBS.refreshCalendar) return;
+    await repo.putEarningsRun({ at: context.now().toISOString(), trigger: isOwnerRequested(payload) ? 'manual' : 'scheduled', status: 'skipped', reason: DROPPED_REASONS[decision.reason], tracked: 0 });
+  };
+}
+
 /** Handlers of every registered job, each behind `guardedJob`, over the Hub's ports. */
 export function createJobRegistry(context: JobContext, options: Omit<GuardOptions, 'budget' | 'now'>, factories: JobFactories = ALL_JOB_FACTORIES): JobRegistry {
-  const guardOptions: GuardOptions = { ...options, budget: context.budget, now: context.now };
+  const guardOptions: GuardOptions = { onDropped: recordDroppedCalendar(context), ...options, budget: context.budget, now: context.now };
   const registry: JobRegistry = {};
   for (const name of registeredJobs(factories)) {
     const factory = factories[name] as JobFactory<typeof name>;

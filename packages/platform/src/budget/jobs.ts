@@ -45,13 +45,16 @@ export interface JobDecision {
   reason: 'within-budget' | 'deferred-by-priority' | 'blocked' | 'store-unavailable';
 }
 
-/** May the background job `jobName` run now? Call it first thing in the alarm/job handler; a denied job is retried by its own schedule. */
-export async function guardJob(guard: BudgetGuard, jobName: string): Promise<JobDecision> {
+/**
+ * May the background job `jobName` run now? Call it first thing in the alarm/job handler; a denied job is retried by its own schedule.
+ * `ceiling` replaces the job's own ceiling for one run (an owner-requested run of a convenience job may use the `warn` band).
+ */
+export async function guardJob(guard: BudgetGuard, jobName: string, ceiling?: JobCeiling): Promise<JobDecision> {
   const decision = await guard.check('job');
   const { state } = decision;
   if (state === 'unavailable') return { allowed: false, state, reason: 'store-unavailable' };
   if (!decision.allowed) return { allowed: false, state, reason: 'blocked' };
-  const ceiling = Object.hasOwn(JOB_CEILINGS, jobName) ? JOB_CEILINGS[jobName as JobName] : UNKNOWN_JOB_CEILING;
-  if (state === 'warn' && ceiling === 'ok') return { allowed: false, state, reason: 'deferred-by-priority' };
+  const limit = ceiling ?? (Object.hasOwn(JOB_CEILINGS, jobName) ? JOB_CEILINGS[jobName as JobName] : UNKNOWN_JOB_CEILING);
+  if (state === 'warn' && limit === 'ok') return { allowed: false, state, reason: 'deferred-by-priority' };
   return { allowed: true, state, reason: 'within-budget' };
 }

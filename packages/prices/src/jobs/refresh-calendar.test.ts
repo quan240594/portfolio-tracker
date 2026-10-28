@@ -173,11 +173,16 @@ describe('refreshCalendar', () => {
       expect(keysWith(h, 'EARN#')).toEqual(['TICKER#AAPL|EARN#2026-07-30', 'TICKER#MSFT|EARN#2026-10-28', 'TICKER#AAPL|EARN#2026-11-02']);
     });
 
-    it.each([new RateLimitError('quota', { provider: 'alphavantage' }), new RetryableProviderError('down'), new ProviderError('bad'), new Error('storage')])('reports %s as failed and still checks splits', async (error) => {
+    it.each([
+      [new RateLimitError('quota', { provider: 'alphavantage' }), 'rate-limited'],
+      [new RetryableProviderError('down'), 'failed'],
+      [new ProviderError('bad'), 'failed'],
+      [new Error('storage'), 'failed'],
+    ])('reports %s as %s and still checks splits', async (error, status) => {
       const h = fakeHarness({ earnings: new FakeEarnings([], error), actions: new FakeActions() });
       track(h, 'AAPL');
       const { result } = await run(h);
-      expect(result.earnings).toEqual({ status: 'failed', error: error.name });
+      expect(result.earnings).toEqual({ status, error: error.name });
       expect(result.corporateActions).toMatchObject({ checkedSymbols: ['AAPL'] });
     });
   });
@@ -208,7 +213,7 @@ AMZN,AMAZON COM INC,2026-10-30,2026-09-30,1.5,USD,post-market
       const fake = new FakeFetch().add('alphavantage.co', note, { text: XETRA_CSV });
       const h = liveHarness(fake);
       track(h, 'AMZN');
-      expect((await run(h)).result.earnings).toEqual({ status: 'failed', error: 'RateLimitError' });
+      expect((await run(h)).result.earnings).toEqual({ status: 'rate-limited', error: 'RateLimitError' });
       h.clock.advance(6 * 3_600_000);
       expect((await run(h)).result.earnings.status).toBe('budget-exhausted');
       expect(fake.urls.filter((url) => url.includes('alphavantage.co'))).toHaveLength(1);

@@ -24,7 +24,7 @@ const isoDay = (d: Date): string => d.toISOString().slice(0, 10);
 const REPORTS_PER_SYMBOL = 6;
 
 /** The report date and fiscal period of the stored earnings summaries of `symbols`. */
-async function loadReports(ctx: RouteContext, symbols: readonly string[]): Promise<ReportedEarnings[]> {
+export async function loadReports(ctx: RouteContext, symbols: readonly string[]): Promise<ReportedEarnings[]> {
   const lists = await Promise.all(symbols.map((symbol) => ctx.deps.repo.getEarningsSummaries(symbol, REPORTS_PER_SYMBOL)));
   return lists.flat().map((summary) => ({ symbol: summary.symbol, reportDate: summary.reportDate, period: summary.period }));
 }

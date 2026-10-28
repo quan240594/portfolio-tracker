@@ -130,7 +130,8 @@ def test_calendar_refresh_with_the_mock_provider_covers_holdings_and_watchlist(i
     assert marker is not None
     assert (marker["splitsCheckedAt"], marker["dividendsCheckedAt"]) == (STAMP, STAMP)
     assert infra.get("TICKER#BTC-EUR", "CAL#STATE") is None
-    assert infra.items("CALENDAR") == []  # the mock source is not budgeted
+    # The mock source is not budgeted; only the record of the earnings run is there.
+    assert [i["SK"] for i in infra.items("CALENDAR")] == ["EARNINGS#LASTOK", "EARNINGS#LASTRUN"]
 
 
 @time_machine.travel(NOW, tick=False)
@@ -239,10 +240,88 @@ def test_earnings_failures_are_reported_not_raised(
     infra.track("AAPL")
     with caplog.at_level(logging.WARNING, logger="prices.calendar_handlers"):
         result = ch.run_calendar_refresh(deps, NOW)
-    assert result["earnings"] == {"status": "failed", "error": type(error).__name__}
+    status = "rate-limited" if isinstance(error, RateLimitError) else "failed"
+    assert result["earnings"] == {"status": status, "error": type(error).__name__}
     assert "earnings refresh failed" in caplog.text
     # The corporate-action part still runs.
     assert result["corporateActions"]["checkedSymbols"] == ["AAPL"]
+
+
+def _run_record(infra: Infra, sk: str) -> dict[str, Any] | None:
+    return infra.get("CALENDAR", sk)
+
+
+def test_the_earnings_run_is_recorded_for_the_diagnostics_page(infra: Infra) -> None:
+    fake = FakeEarnings([EarningsEvent("GOOGL", "2026-10-28", time_of_day="AMC", source="alphavantage")])
+    deps = make_deps(earnings=fake)
+    ch._refresh_earnings(deps, ["GOOGL", "AAPL"], TODAY, STAMP)
+    last = _run_record(infra, "EARNINGS#LASTRUN")
+    assert last is not None
+    assert {
+        k: last[k] for k in ("at", "trigger", "status", "reason", "tracked", "events", "matchedSymbols")
+    } == {
+        "at": STAMP,
+        "trigger": "scheduled",
+        "status": "ok",
+        "reason": "",
+        "tracked": 2,
+        "events": 1,
+        "matchedSymbols": ["GOOGL"],
+    }
+    assert last["entityType"] == "EARNINGS_RUN"
+    assert _run_record(infra, "EARNINGS#LASTOK") == {**last, "SK": "EARNINGS#LASTOK"}
+
+
+def test_a_failed_earnings_run_keeps_the_last_good_record_and_a_clean_reason(infra: Infra) -> None:
+    ok = make_deps(earnings=FakeEarnings([EarningsEvent("GOOGL", "2026-10-28", source="alphavantage")]))
+    ch._refresh_earnings(ok, ["GOOGL"], TODAY, STAMP)
+    boom = ProviderError("alphavantage: 500 for https://x.example/q?apikey=abc", provider="alphavantage")
+    failing = make_deps(earnings=FakeEarnings(error=boom))
+    ch._refresh_earnings(failing, ["GOOGL"], TODAY + timedelta(days=1), "2026-10-16T05:30:00.000Z")
+    last = _run_record(infra, "EARNINGS#LASTRUN")
+    assert last is not None
+    assert (last["status"], last["reason"]) == ("failed", "alphavantage: 500 for [url]")
+    kept = _run_record(infra, "EARNINGS#LASTOK")
+    assert kept is not None
+    assert (kept["status"], kept["at"]) == ("ok", STAMP)
+
+
+def test_rate_limits_and_budget_skips_are_recorded_with_their_status(infra: Infra) -> None:
+    limited = make_deps(
+        earnings=FakeEarnings(
+            error=RateLimitError("rate limit " + " ".join(["words"] * 40), provider="alphavantage")
+        )
+    )
+    ch._refresh_earnings(limited, ["AAPL"], TODAY, STAMP)
+    last = _run_record(infra, "EARNINGS#LASTRUN")
+    assert last is not None
+    assert last["status"] == "rate-limited"
+    assert len(last["reason"]) == 120
+    ch._refresh_earnings(limited, ["AAPL"], TODAY, STAMP)
+    skipped = _run_record(infra, "EARNINGS#LASTRUN")
+    assert skipped is not None
+    assert (skipped["status"], skipped["reason"]) == ("budget-exhausted", "")
+    assert _run_record(infra, "EARNINGS#LASTOK") is None
+
+
+def test_a_reasonless_failure_falls_back_to_the_error_name(infra: Infra) -> None:
+    deps = make_deps(earnings=FakeEarnings(error=ProviderError("", provider="alphavantage")))
+    ch._refresh_earnings(deps, ["AAPL"], TODAY, STAMP)
+    last = _run_record(infra, "EARNINGS#LASTRUN")
+    assert last is not None
+    assert last["reason"] == "ProviderError"
+
+
+def test_failing_to_record_the_earnings_run_is_not_fatal(
+    infra: Infra, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deps = make_deps(earnings=FakeEarnings([EarningsEvent("AAPL", "2026-10-29", source="alphavantage")]))
+
+    def boom(run: dict[str, Any]) -> None:
+        raise ClientError({"Error": {"Code": "Boom", "Message": "x"}}, "PutItem")
+
+    monkeypatch.setattr(deps.crepo, "put_earnings_run", boom)
+    assert ch._refresh_earnings(deps, ["AAPL"], TODAY, STAMP)["status"] == "ok"
 
 
 # --------------------------------------------------------------------------- splits and dividends

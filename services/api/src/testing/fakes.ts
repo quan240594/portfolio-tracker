@@ -1,5 +1,6 @@
 import type {
   DividendEvent,
+  EarningsRunRecord,
   EarningsSummary,
   EodPrice,
   FxDay,
@@ -34,6 +35,10 @@ export class InMemoryRepository implements Repository {
   splitEvents: StoredSplitEvent[] = [];
   users = new Set<string>();
   tracked = new Map<string, string>();
+  /** `createdAt` of tracked symbols (a tracked symbol without one reads as null). */
+  trackedAt = new Map<string, string>();
+  earningsRun: EarningsRunRecord | null = null;
+  earningsLastOk: EarningsRunRecord | null = null;
   imports = new Map<string, ImportStatus>();
 
   listPortfolios(userId: string) {
@@ -104,6 +109,11 @@ export class InMemoryRepository implements Repository {
   getCalendarEvents(symbols: string[], from: string, to: string) {
     const inRange = (e: { symbol: string; date: string }) => symbols.includes(e.symbol) && e.date >= from && e.date <= to;
     return Promise.resolve({ earnings: this.earningsEvents.filter(inRange), splits: this.splitEvents.filter(inRange) });
+  }
+  getEarningsDatesData(symbols: string[], today: string) {
+    const tracked = new Map(symbols.filter((symbol) => this.tracked.has(symbol)).map((symbol) => [symbol, this.trackedAt.get(symbol) ?? null]));
+    const upcoming = this.earningsEvents.filter((e) => symbols.includes(e.symbol) && e.date >= today);
+    return Promise.resolve({ tracked, upcoming, run: this.earningsRun, lastOk: this.earningsLastOk });
   }
   getEarningsSummaries(symbol: string, limit: number) {
     const own = this.earningsSummaries.filter((summary) => summary.symbol === symbol);

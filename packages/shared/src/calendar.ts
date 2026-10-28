@@ -296,6 +296,21 @@ interface Ctx {
   netFactor: (symbol: string) => number;
 }
 
+/** What the earnings entries need of the context: the day, who the symbol belongs to and its name. */
+type EarningsCtx = Pick<Ctx, 'today' | 'originOf' | 'nameOf'>;
+
+/** HOLDING for a symbol in the transactions, WATCHLIST for one that is only watched, null otherwise. */
+function originResolver(transactions: readonly Transaction[], watchlist: readonly string[]): (symbol: string) => CalendarOrigin | null {
+  const traded = new Set(transactions.map((t) => t.symbol));
+  const watched = new Set(watchlist);
+  return (symbol) => {
+    if (traded.has(symbol)) return 'HOLDING';
+    return watched.has(symbol) ? 'WATCHLIST' : null;
+  };
+}
+
+const profileName = (profiles: CalendarData['profiles']) => (symbol: string, fallback?: string): string => profiles[symbol]?.name ?? fallback ?? symbol;
+
 function createContext(data: CalendarData): Ctx {
   const timeline = new FxTimeline(data.fx, data.fxHistory);
   const cache = new Map<string, ReadonlyMap<string, Position>>();
@@ -307,8 +322,6 @@ function createContext(data: CalendarData): Ctx {
     }
     return positions;
   };
-  const tradedSymbols = new Set(data.transactions.map((t) => t.symbol));
-  const watched = new Set(data.watchlist);
   const trailingStart = addIsoDays(data.today, -DAYS_PER_YEAR);
   const trailing = data.transactions.filter((t) => t.type === 'DIVIDEND' && t.date > trailingStart && t.date <= data.today);
 
@@ -319,11 +332,8 @@ function createContext(data: CalendarData): Ctx {
     currentPositions: positionsAsOf(data.today),
     // Shares bought on the ex-date are not entitled; a future ex-date assumes the current position.
     quantityOn: (symbol, date) => positionsAsOf(date > data.today ? data.today : addIsoDays(date, -1)).get(symbol)?.quantity ?? 0,
-    originOf: (symbol) => {
-      if (tradedSymbols.has(symbol)) return 'HOLDING';
-      return watched.has(symbol) ? 'WATCHLIST' : null;
-    },
-    nameOf: (symbol, fallback) => data.profiles[symbol]?.name ?? fallback ?? symbol,
+    originOf: originResolver(data.transactions, data.watchlist),
+    nameOf: profileName(data.profiles),
     // Same observed-withholding rule as calculatePassiveIncome, so event amounts add up to the analytics figures.
     netFactor: (symbol) => {
       const own = trailing.filter((t) => t.symbol === symbol);
@@ -559,7 +569,7 @@ const REPORT_MATCH_DAYS = 4;
 const OVERDUE_GRACE_DAYS = 14;
 const MAX_PROJECTED_QUARTERS = 4;
 
-function providerEarnings(ctx: Ctx, e: StoredEarningsEvent, origin: CalendarOrigin): CalendarEvent {
+function providerEarnings(ctx: EarningsCtx, e: StoredEarningsEvent, origin: CalendarOrigin): CalendarEvent {
   return {
     id: `earn:${e.symbol}:${e.date}`,
     date: e.date,
@@ -579,7 +589,7 @@ function providerEarnings(ctx: Ctx, e: StoredEarningsEvent, origin: CalendarOrig
 }
 
 /** Released results: CONFIRMED (the date has passed; there is no separate "reported" status), labelled "Reported" in the text. */
-function reportedEarnings(ctx: Ctx, report: ReportedEarnings, origin: CalendarOrigin, provider: StoredEarningsEvent | undefined): CalendarEvent {
+function reportedEarnings(ctx: EarningsCtx, report: ReportedEarnings, origin: CalendarOrigin, provider: StoredEarningsEvent | undefined): CalendarEvent {
   const period = report.period?.trim() || undefined;
   return {
     id: `earn:${report.symbol}:${report.reportDate}`,
@@ -611,7 +621,7 @@ export function projectedEarningsDate(lastReport: string, today: string): string
   return null;
 }
 
-function projectedEarnings(ctx: Ctx, symbol: string, lastReport: ReportedEarnings, origin: CalendarOrigin): CalendarEvent | null {
+function projectedEarnings(ctx: EarningsCtx, symbol: string, lastReport: ReportedEarnings, origin: CalendarOrigin): CalendarEvent | null {
   const date = projectedEarningsDate(lastReport.reportDate, ctx.today);
   if (date === null) return null;
   return {
@@ -639,7 +649,7 @@ function latestReports(reports: readonly ReportedEarnings[]): Map<string, Report
 }
 
 /** The released reports as events, and the provider dates they replace. */
-function reportedEntries(ctx: Ctx, stored: readonly StoredEarningsEvent[], reports: readonly ReportedEarnings[]): { events: CalendarEvent[]; matched: Set<StoredEarningsEvent> } {
+function reportedEntries(ctx: EarningsCtx, stored: readonly StoredEarningsEvent[], reports: readonly ReportedEarnings[]): { events: CalendarEvent[]; matched: Set<StoredEarningsEvent> } {
   const events: CalendarEvent[] = [];
   const matched = new Set<StoredEarningsEvent>();
   for (const report of reports) {
@@ -653,7 +663,7 @@ function reportedEntries(ctx: Ctx, stored: readonly StoredEarningsEvent[], repor
 }
 
 /** The provider dates that no released report replaced, and the symbols that have one still ahead. */
-function scheduledEntries(ctx: Ctx, stored: readonly StoredEarningsEvent[], matched: ReadonlySet<StoredEarningsEvent>): { events: CalendarEvent[]; ahead: Set<string> } {
+function scheduledEntries(ctx: EarningsCtx, stored: readonly StoredEarningsEvent[], matched: ReadonlySet<StoredEarningsEvent>): { events: CalendarEvent[]; ahead: Set<string> } {
   const events: CalendarEvent[] = [];
   const ahead = new Set<string>();
   for (const e of stored) {
@@ -669,7 +679,7 @@ function scheduledEntries(ctx: Ctx, stored: readonly StoredEarningsEvent[], matc
  * Earnings of every symbol the user holds or watches: the provider's dates, the released reports (which replace the provider date
  * they match), and, for a company with a released report but no provider date still ahead, one projected next date.
  */
-function earningsEntries(ctx: Ctx, stored: readonly StoredEarningsEvent[], reports: readonly ReportedEarnings[]): CalendarEvent[] {
+function earningsEntries(ctx: EarningsCtx, stored: readonly StoredEarningsEvent[], reports: readonly ReportedEarnings[]): CalendarEvent[] {
   const reported = reportedEntries(ctx, stored, reports);
   const scheduled = scheduledEntries(ctx, stored, reported.matched);
   const projections: CalendarEvent[] = [];
@@ -681,6 +691,27 @@ function earningsEntries(ctx: Ctx, stored: readonly StoredEarningsEvent[], repor
   return [...reported.events, ...scheduled.events, ...projections];
 }
 
+export interface EarningsOutlookInput {
+  today: string;
+  transactions: readonly Transaction[];
+  watchlist: readonly string[];
+  profiles: CalendarData['profiles'];
+  earnings: readonly StoredEarningsEvent[];
+  reportedEarnings?: readonly ReportedEarnings[];
+}
+
+/**
+ * The next earnings event (on or after today) of each symbol the user holds or watches, exactly as the calendar lists it: a provider
+ * date (`scheduled`), a released report of today (`reported`) or a projection from the last report (`projected`). A symbol without one is absent.
+ */
+export function nextEarningsEvents(input: EarningsOutlookInput): Map<string, CalendarEvent> {
+  const ctx: EarningsCtx = { today: input.today, originOf: originResolver(input.transactions, input.watchlist), nameOf: profileName(input.profiles) };
+  const next = new Map<string, CalendarEvent>();
+  for (const event of [...earningsEntries(ctx, input.earnings, input.reportedEarnings ?? [])].sort(compareEvents)) {
+    if (event.date >= input.today && !next.has(event.symbol)) next.set(event.symbol, event);
+  }
+  return next;
+}
 interface SplitSource {
   symbol: string;
   date: string;

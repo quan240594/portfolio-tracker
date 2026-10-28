@@ -66,6 +66,18 @@ export interface FxProvider {
   getHistory(base: string, start: string, end: string): Promise<FxDay[]>;
 }
 
+/** What one earnings call returned, for the status report: the dates kept and how the provider's list related to the tracked symbols. */
+export interface EarningsFetchReport {
+  /** The upcoming dates of the tracked symbols. */
+  events: StoredEarningsEvent[];
+  /** Rows the provider's calendar had (every listed company, not only the tracked ones). */
+  rows: number;
+  /** Tracked symbols whose ticker the provider's calendar lists at all (on any date). */
+  listed: string[];
+  /** Tracked symbols whose ticker is listed but whose company name did not match, so no date was taken. */
+  unvouched: string[];
+}
+
 /** Upcoming earnings of the tracked symbols; at most one provider call. */
 export interface EarningsSource {
   readonly name: string;
@@ -73,6 +85,8 @@ export interface EarningsSource {
   readonly budgeted: boolean;
   /** `names` are the profile names of the symbols, used to vouch for a listing that is not the source's own ticker. */
   fetch(symbols: readonly string[], today: string, names?: ReadonlyMap<string, string>): Promise<StoredEarningsEvent[]>;
+  /** `fetch` with the counts of the answer; when absent the job records the dates only. */
+  fetchReport?(symbols: readonly string[], today: string, names?: ReadonlyMap<string, string>): Promise<EarningsFetchReport>;
 }
 
 export interface CorporateActionsSource {
@@ -117,7 +131,7 @@ export type CalendarStatus = 'ok' | 'no-provider' | 'no-symbols' | 'budget-exhau
 
 export interface CalendarRefreshSummary {
   tracked: number;
-  earnings: { status: CalendarStatus; symbols?: number; events?: number; staleDeleted?: number; error?: string };
+  earnings: { status: CalendarStatus; symbols?: number; events?: number; staleDeleted?: number; error?: string; reason?: string; rows?: number };
   corporateActions: { status: CalendarStatus; checked?: number; splits?: number; dividends?: number; failed?: number };
 }
 

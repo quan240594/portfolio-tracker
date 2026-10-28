@@ -1,8 +1,8 @@
-import type { StoredEarningsEvent } from '@portfolio/shared';
-import type { CalendarRefreshSummary, JobHandler, JobPayloads } from '@portfolio/platform';
+import { MAX_RUN_SYMBOLS, sanitizeAttemptError, type EarningsRunRecord, type StoredEarningsEvent } from '@portfolio/shared';
+import type { CalendarRefreshSummary, EarningsFetchReport, EarningsSource, JobHandler, JobPayloads } from '@portfolio/platform';
 import { z } from 'zod';
 import { errorMessage, errorName, RateLimitError } from '../errors.js';
-import { byText } from '../parse.js';
+import { byText, definedOnly } from '../parse.js';
 import { earningsTargets } from '../providers/calendar.js';
 import type { CalendarState } from '../repository.js';
 import { isCrypto } from '../symbols.js';
@@ -14,10 +14,11 @@ import { createStepContext, decodeState, pendingStep, runStep, rethrowBudget, ru
 const SYMBOL_CALLS = 2;
 const MS_PER_DAY = 86_400_000;
 
-const earningsSchema = z.object({ status: z.enum(['ok', 'no-provider', 'no-symbols', 'budget-exhausted', 'failed']), symbols: z.number().optional(), events: z.number().optional(), staleDeleted: z.number().optional(), error: z.string().optional() });
+const earningsSchema = z.object({ status: z.enum(['ok', 'no-provider', 'no-symbols', 'budget-exhausted', 'rate-limited', 'failed']), symbols: z.number().optional(), events: z.number().optional(), staleDeleted: z.number().optional(), error: z.string().optional() });
 const stateSchema = z.object({
   v: z.literal(1),
   now: z.string(),
+  trigger: z.enum(['scheduled', 'manual']).optional(),
   symbols: z.array(z.string()),
   phase: z.enum(['earnings', 'actions', 'done']),
   earnings: earningsSchema.nullable(),
@@ -55,28 +56,67 @@ export function dueSymbols(symbols: readonly string[], states: ReadonlyMap<strin
 
 // --- earnings ---
 
-/** One provider call lists the upcoming earnings of every company; only tracked tickers are stored. */
-async function refreshEarnings(ctx: StepContext, state: State, today: string, stamp: string): Promise<NonNullable<State['earnings']>> {
+type Earnings = NonNullable<State['earnings']>;
+type RunDetail = Omit<EarningsRunRecord, 'at' | 'trigger' | 'tracked'>;
+
+/** What an attempt returns to the job (the summary) and leaves for the status report (the run record). */
+interface Attempt {
+  summary: Earnings;
+  detail: RunDetail;
+}
+
+const withoutCall = (summary: Earnings): Attempt => ({ summary, detail: { status: summary.status, reason: '' } });
+
+/** The provider's calendar with its counts where the source reports them. */
+async function readCalendar(source: EarningsSource, symbols: readonly string[], today: string, names: ReadonlyMap<string, string>): Promise<Partial<EarningsFetchReport> & Pick<EarningsFetchReport, 'events'>> {
+  if (source.fetchReport) return source.fetchReport(symbols, today, names);
+  return { events: await source.fetch(symbols, today, names) };
+}
+
+async function attemptEarnings(ctx: StepContext, state: State, today: string, stamp: string): Promise<Attempt> {
   const source = ctx.md.earnings;
-  if (source === undefined) return { status: 'no-provider' };
+  if (source === undefined) return withoutCall({ status: 'no-provider' });
   const eligible = state.symbols.filter((symbol) => !isCrypto(symbol));
-  if (earningsTargets(eligible).size === 0) return { status: 'no-symbols' };
+  if (earningsTargets(eligible).size === 0) return withoutCall({ status: 'no-symbols' });
   const { calendar } = ctx.deps.config;
-  // The token is the run's stamp: a step delivered again does not pay twice, and is not refused for having paid before.
-  if (source.budgeted && !(await ctx.repo.consumeBudget(source.name, today, 1, calendar.alphavantageDailyCalls, `${stamp}#earnings`))) {
+  // The token is the run's stamp: a step delivered again does not pay twice, and is not refused for having paid before. A manual run asked for
+  // the call itself (the provider's own daily quota still applies), so it is not held to the calendar's one call a day.
+  if (state.trigger !== 'manual' && source.budgeted && !(await ctx.repo.consumeBudget(source.name, today, 1, calendar.alphavantageDailyCalls, `${stamp}#earnings`))) {
     ctx.logger.info('earnings refresh skipped: daily budget used', { provider: source.name });
-    return { status: 'budget-exhausted' };
+    return withoutCall({ status: 'budget-exhausted' });
   }
   try {
-    const events = await source.fetch(eligible, today, await ctx.repo.profileNames(eligible));
-    const written = await ctx.repo.putEarnings(events, stamp);
-    const stale = await dropMovedReports(ctx, events, today);
-    return { status: 'ok', symbols: new Set(events.map((event) => event.symbol)).size, events: written, staleDeleted: stale };
+    const report = await readCalendar(source, eligible, today, await ctx.repo.profileNames(eligible));
+    const written = await ctx.repo.putEarnings(report.events, stamp);
+    const stale = await dropMovedReports(ctx, report.events, today);
+    const matched = [...new Set(report.events.map((event) => event.symbol))];
+    const detail = definedOnly<RunDetail>({
+      status: 'ok',
+      reason: '',
+      rows: report.rows,
+      events: written,
+      matchedSymbols: matched.slice(0, MAX_RUN_SYMBOLS),
+      listed: report.listed?.slice(0, MAX_RUN_SYMBOLS),
+      unvouched: report.unvouched?.slice(0, MAX_RUN_SYMBOLS),
+    });
+    return { summary: { status: 'ok', symbols: matched.length, events: written, staleDeleted: stale }, detail };
   } catch (error) {
     rethrowBudget(error);
     ctx.logger.warn('earnings refresh failed', { provider: source.name, error: errorMessage(error) });
-    return { status: 'failed', error: errorName(error) };
+    const status = error instanceof RateLimitError ? 'rate-limited' : 'failed';
+    return { summary: { status, error: errorName(error) }, detail: { status, reason: sanitizeAttemptError(errorMessage(error)) || errorName(error) } };
   }
+}
+
+/** One provider call lists the upcoming earnings of every company; only tracked tickers are stored. The outcome is recorded for the Diagnostics page. */
+async function refreshEarnings(ctx: StepContext, state: State, today: string, stamp: string): Promise<Earnings> {
+  const { summary, detail } = await attemptEarnings(ctx, state, today, stamp);
+  try {
+    await ctx.repo.putEarningsRun({ at: stamp, trigger: state.trigger ?? 'scheduled', tracked: state.symbols.length, ...detail });
+  } catch (error) {
+    ctx.logger.warn('could not record the earnings run', { error: errorMessage(error) });
+  }
+  return summary;
 }
 
 /** Removes stored upcoming report dates that the provider no longer lists (the company rescheduled). */
@@ -198,9 +238,9 @@ export type RefreshCalendarJob = JobHandler<JobPayloads['refreshCalendar'], Cale
  * per symbol/provider: counted in the result, never thrown.
  */
 export function createRefreshCalendarJob(deps: PriceJobDeps): RefreshCalendarJob {
-  return async ({ cursor }) => {
+  return async ({ payload, cursor }) => {
     const ctx = createStepContext(deps);
-    const state = cursor === undefined ? await begin(ctx, deps.clock()) : decodeState(stateSchema, cursor);
+    const state = cursor === undefined ? await begin(ctx, deps.clock(), payload.trigger) : decodeState(stateSchema, cursor);
     const now = new Date(state.now);
     const today = utcDay(now);
     const stamp = now.toISOString();
@@ -215,10 +255,11 @@ export function createRefreshCalendarJob(deps: PriceJobDeps): RefreshCalendarJob
   };
 }
 
-async function begin(ctx: StepContext, now: Date): Promise<State> {
+async function begin(ctx: StepContext, now: Date, trigger: JobPayloads['refreshCalendar']['trigger']): Promise<State> {
   return {
     v: 1,
     now: now.toISOString(),
+    trigger,
     symbols: await ctx.repo.listTracked(),
     phase: 'earnings',
     earnings: null,

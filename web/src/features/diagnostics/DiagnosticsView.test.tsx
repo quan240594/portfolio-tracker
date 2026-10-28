@@ -127,7 +127,7 @@ describe('Diagnostics page layout', () => {
     serve();
     renderApp('/settings/diagnostics');
     await screen.findByRole('region', { name: 'Last 24 hours' });
-    expect(cardOrder()).toEqual(['price-coverage', 'valuation-report', 'alarm-summary', 'alarm-runs', 'alarm-arms']);
+    expect(cardOrder()).toEqual(['price-coverage', 'earnings-dates', 'valuation-report', 'alarm-summary', 'alarm-runs', 'alarm-arms']);
     const actions = document.querySelector<HTMLElement>('[data-page-header-actions]')!;
     expect(within(actions).getByRole('button', { name: 'Customize layout' })).toBeInTheDocument();
     expect(within(actions).getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
@@ -140,7 +140,7 @@ describe('Diagnostics page layout', () => {
     await screen.findByRole('region', { name: 'Last 24 hours' });
     await user.click(screen.getByRole('button', { name: 'Customize layout' }));
     await user.click(screen.getByRole('button', { name: 'Move Alarm runs up' }));
-    expect(cardOrder()).toEqual(['price-coverage', 'valuation-report', 'alarm-runs', 'alarm-summary', 'alarm-arms']);
+    expect(cardOrder()).toEqual(['price-coverage', 'earnings-dates', 'valuation-report', 'alarm-runs', 'alarm-summary', 'alarm-arms']);
 
     await user.click(screen.getByRole('button', { name: 'Hide Alarm changes' }));
     expect(screen.queryByRole('heading', { name: 'Alarm changes outside a normal run' })).not.toBeInTheDocument();
