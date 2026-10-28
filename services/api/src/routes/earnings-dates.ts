@@ -1,6 +1,6 @@
 import {
   buildEarningsDatesReport,
-  isMarketSymbol,
+  currentHoldings,
   nextEarningsEvents,
   type EARNINGS_DATES_ROUTES,
   type GetEarningsDatesResponse,
@@ -11,7 +11,6 @@ import { HttpError, ok, type RouteResult } from '../lib/http.js';
 import { loadProfiles } from '../lib/profiles.js';
 import type { RouteHandler } from '../router.js';
 import { loadReports } from './calendar.js';
-import { heldSymbols } from './portfolio.js';
 import { resolveScope } from './portfolios.js';
 
 const isoDay = (d: Date): string => d.toISOString().slice(0, 10);
@@ -31,11 +30,9 @@ export async function getEarningsDates(ctx: RouteContext): Promise<RouteResult> 
   const { repo, now, calendarDates } = ctx.deps;
   const scope = await resolveScope(ctx);
   const transactions = await repo.listTransactions(ctx.userId, scope);
-  const held = heldSymbols(transactions)
-    .filter((symbol) => isMarketSymbol(symbol))
-    .sort((a, b) => a.localeCompare(b));
   const at = now();
   const today = isoDay(at);
+  const { held } = currentHoldings(transactions, today);
   const [data, profiles, reportedEarnings, status] = await Promise.all([
     repo.getEarningsDatesData(held, today),
     loadProfiles(ctx, held),

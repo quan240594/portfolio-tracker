@@ -3484,12 +3484,27 @@ Every outcome of the watcher, the fetch job and the backfill leaves, per symbol,
 The Earnings page renders "What was checked" (a native `details`, **open by default while there is no summary**) with the totals, the last full pass, the backfill progress with its pause ("34 of 80 releases read. Resumes at 00:00 UTC (...) when the daily AI allowance is used up.") and one line per company,
 for example `MSFT: found 8-K from 29-10-2026, the AI could not read it (invalid JSON)`, `ASML.AS: no results release in the last 135 days`, `JPM: blocked by the SEC until 25-10-2026, 11:30`, `FOO.DE: not found in the SEC company list (...)`. The Settings diagnostics page does not repeat it (not trivial: it has no earnings endpoint).
 
+### Only what is held now (root cause of "120 holdings" against 26 on the Dashboard)
+
+`GET /earnings/status` and the other per-symbol routes took their symbols from `ownSymbols`, which returned **every market symbol in the user's
+transactions, sold ones included** ("holds or ever held"). A position that was bought and sold out stays in the history for ever, so a long
+Trading 212 history gave 120 "holdings" (26 on the Dashboard), and the 94 sold-out symbols had no stored state: "not checked yet" for ever,
+which also kept "Last full pass" at "not every company has been looked at yet" while the backfill (which already used the held set) said 65 of 65. The
+watcher, the backfill, the notifications and the calendar's stored dates were already limited to held symbols; the status, the list, the single
+summary and the refresh were not. Now one definition serves all: `currentHoldings(transactions, today)` in `packages/shared/src/notification-events.ts`
+(market symbols whose replayed quantity is above `HELD_DUST_QUANTITY`, 1e-6 share, `portfolio.ts`: a leftover of a sale is not a holding; the
+same threshold as `heldQuantities`). It returns `held` and `former` (traded, no longer held). The API lists, counts, reads and refreshes `held` only and
+adds `notHeld: former.length` to the status; the Hub's `createEarningsInputs.build` returns `former` next to `holdings`/`calendar` (symbols held by
+nobody); the calendar's earnings entries use `earningsOriginOf` (a sold-out symbol is a holding no more, it shows only on the watchlist).
+Stored summaries of sold symbols stay in the store (public data) but are not shown. A replay error (an oversold history) is a 422 like on the other routes.
+
 ### Backfill (`backfillEarnings`, `packages/earnings/src/backfill.ts`)
 
 The latest `EARNINGS_BACKFILL_QUARTERS` (default 4, at most 8) quarterly releases of **every** eligible holding, **newest first across all companies**: the next release is always the one of the company with the fewest stored quarters (alphabetical among equals), so pass one is the latest quarter of every company and a partial run is already useful.
 It is a cloudflareOnly schedule `earnings-backfill` (every 15 minutes, every day, Europe/Amsterdam) plus `POST /earnings/backfill` ("Fetch all now", once per hour). State: one marker row `EARNINGS/BACKFILL` (`EarningsBackfillMarker`: `status running|complete`, `quarters`, counters, `waitUntil` and `waitReason` `allowance | sec-blocked | sec-error | attempts | ai-error`) and a **plan** on every symbol (`EARNSTATE.plan`, newest first: accession, form, dates, `todo | stored | skipped | failed`, tries, `nextTryAt`).
 
 - **No-op:** the first thing a scheduled step reads is the marker. `complete`, or `waitUntil` in the future: it returns after **one row read** (96 of those a day, nothing else). A new `EARNINGS_BACKFILL_QUARTERS` re-arms a finished backfill by itself.
+- **Rescan (`POST /earnings/backfill`):** the marker restarts with zero counters (no stale numbers), and the first step of that job rebuilds the held list (`loadHeld(force)`), deletes the `EARNSTATE` of `former` symbols (`EarningsRepository.deleteStates`; summaries and user data are never touched), clears `cikMissingAt` of the unmapped, and every plan is made again (`needsPlan`; a release planned again keeps its tries of the day, so nothing gets new attempts). The counters count held companies only, so "N of N releases" and "Last full pass" agree with the holdings count.
 - **A step does one thing:** reopen failed releases after "Fetch all now"; map symbols to CIKs (one ticker table request); build the plans of up to 4 symbols (one `submissions` request each: 8-Ks with item 2.02, one per quarter (a second one within 45 days is no new quarter); for a foreign issuer its 6-Ks, up to 4 candidates per wanted quarter, any of which may be the results); or read **one** release (index, up to 4 documents, at most 2 model calls). The step reserves 8 subrequests (the alarm plans 45).
 - **Foreign issuers (6-K):** a 6-K counts as results only when its first 3,000 characters hold at least 3 of the keywords results / quarter / revenue / earnings per share / net income / operating income / three months ended (`headKeywordScore`); the other 6-Ks are `skipped` without any AI call.
 - **Quarter over quarter:** a summary is derived against the newest stored older one. When the backfill stores an older quarter after a newer one, the newer summary is re-derived against it (`withPrevious`, idempotent: stale figures are removed first).
@@ -3555,15 +3570,15 @@ operatingMargin, operatingCashFlow, capex, fcf, fcfPerShare, dilutedShares } (ea
 unit, metric? }], guidance [{ label, period, low, high, point, raw, direction }], segments, keyUpdates, quote, previousReportDate, verification { dropped, droppedFields, model, neuronsEstimate, calls },
 generatedAt, status`. Writes are idempotent (same key).
 
-### API (additive, owner only, only symbols the user holds or held)
+### API (additive, owner only, only symbols the user holds now)
 
 | Route | Result |
 |---|---|
 | `GET /earnings?symbol=&limit=` | `{ available, summaries (newest first, limit 1 to 24, default 12), symbols }` |
 | `GET /earnings/{symbol}/{period}` | one summary (`period` = the report date, `YYYY-MM-DD`); 404 otherwise |
 | `GET /earnings/status` | `{ available, configured, missing: ('sec-contact' \| 'ai-binding')[], estimatesConfigured, secBlockedUntil?, neurons { used, dailyCap, allowance, state, resetsAt }, backfill { status, quarters, total, done, stored, failed, planned, companies, waitReason?, waitUntil?, completedAt? }, lastFullPassAt?, symbols [{ eligible, lastCheckedAt, lastResult, lastReason, retryAfter, latestReportDate, lastRun?, releases? }] }`, sanitised (see "Observability") |
-| `POST /earnings/backfill` | "Fetch all now": re-arms the backfill and reopens failed releases; `202 { accepted: true }`; `429 RATE_LIMITED` (once per hour) with `retry-after`; 503 `NOT_CONFIGURED` |
-| `POST /earnings/{symbol}/refresh` | `202 { accepted: true }`; `429 RATE_LIMITED` with `retry-after` and `details.retryAfterSeconds` (1 per symbol per hour); 404 for a symbol the user never held, 503 `NOT_CONFIGURED`, 422 `NOT_ELIGIBLE` (ETF, crypto) |
+| `POST /earnings/backfill` | "Fetch all now" = "Rescan all": starts the backfill over with empty counters; its first job step re-derives the current holdings, drops the check state of symbols nobody holds, forgets "not in the SEC" and plans every holding again; `202 { accepted: true }`; `429 RATE_LIMITED` (once per hour) with `retry-after`; 503 `NOT_CONFIGURED` |
+| `POST /earnings/{symbol}/refresh` | `202 { accepted: true }`; `429 RATE_LIMITED` with `retry-after` and `details.retryAfterSeconds` (1 per symbol per hour); 404 for a symbol the user does not hold now, 503 `NOT_CONFIGURED`, 422 `NOT_ELIGIBLE` (ETF, crypto) |
 
 ### Push
 
@@ -3593,7 +3608,7 @@ the watcher itself costs 1 row read per run and no subrequest when nothing is du
 `/earnings` (Portfolio menu, shown only when `GET /earnings/status` says `available`): cards newest first with company filter chips, each card = scorecard table (Expected | Actual | Beat/Miss, stacked rows below 640 px), growth
 lines, FCF with a `reported` / `calculated` badge, EPS basis badge (`GAAP` / `adjusted`), template KPI rows, collapsible native `details` sections (operating, guidance, cash flow, segments, key updates, quote), the source link
 (`rel="noopener noreferrer"`) and the disclaimer "Auto-generated from the company's press release; every number was checked against the text. Check the source before acting." Dates are dd-mm-yyyy (`web/src/lib/format.ts`),
-numbers nl-NL, compact amounts English (`$20.71B`). States: not configured (explains `SEC_CONTACT` and the AI binding), none yet, blocked by the SEC, AI allowance used up (resumes at 00:00 UTC). Under the cards (and under "No earnings summaries yet") the section "What was checked" (native `details`, open while there is no summary): totals, last full pass, the backfill progress with a native `progress` bar, the button **Fetch all now** (`POST /earnings/backfill`, once per hour, also retries failed releases) and one line per company (`web/src/features/earnings/checked.ts`, `CheckedSection.tsx`), no wider than 320 px. The asset detail page has a
+numbers nl-NL, compact amounts English (`$20.71B`). States: not configured (explains `SEC_CONTACT` and the AI binding), none yet, blocked by the SEC, AI allowance used up (resumes at 00:00 UTC). Under the cards (and under "No earnings summaries yet") the section "What was checked" (native `details`, open while there is no summary): totals, "Not counted: N symbols you no longer hold" (only when N > 0), last full pass, the backfill progress with a native `progress` bar, the button **Fetch all now** (`POST /earnings/backfill`, once per hour, also retries failed releases) and one line per company (`web/src/features/earnings/checked.ts`, `CheckedSection.tsx`), no wider than 320 px. The asset detail page has a
 "Latest earnings" section, the calendar's earnings dialog a "View summary" link. The GitHub Pages demo (MSW) has two **invented** summaries (a bank and a software company, fictional).
 
 ### Tests and how to run them

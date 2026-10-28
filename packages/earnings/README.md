@@ -13,7 +13,7 @@ Earnings summaries for the Cloudflare personal deployment: SEC press release in,
 | `derive.ts`, `estimates.ts` | YoY, QoQ, beat/miss, FCF, FCF per share, margins computed by code; EPS estimate from Alpha Vantage |
 | `select.ts`, `jobs.ts`, `pipeline.ts`, `common.ts`, `store.ts` | which symbols to check, the `watchEarnings` / `fetchEarningsSummary` jobs, back-off, the structured `lastRun` of every outcome, storing with QoQ recomputation |
 | `backfill.ts` | the `backfillEarnings` job: the latest N quarters of every holding, newest first across companies, resumable, within the daily AI allowance |
-| `service.ts` | status (with `lastRun`, backfill progress, last full pass), refresh and "Fetch all now" |
+| `service.ts` | status (with `lastRun`, backfill progress, last full pass), refresh and "Fetch all now" (rescan of the current holdings) |
 | `repository.ts` | storage port (`TICKER#<symbol>` / `EARNSUM#<date>`, `EARNSTATE`) |
 | `testing/` | eleven invented release fixtures (six plain, five messy), `FakeSec` (also the HTML rate-limit page, per-URL statuses, one-off rejections), `FakeAi`, a harness (also used by the cloudflare-app suites) |
 

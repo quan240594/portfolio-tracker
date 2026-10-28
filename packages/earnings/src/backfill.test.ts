@@ -253,6 +253,46 @@ describe('Fetch all now', () => {
     expect(await service(h).backfill()).toEqual({ accepted: true });
   });
 
+  it('starts over with empty counters, so a finished run never shows old numbers', async () => {
+    const h = setup([GENERIC_RELEASE]);
+    await run(h);
+    h.clock.advance(EARNINGS_REFRESH_INTERVAL_MS);
+    expect(await service(h).backfill()).toEqual({ accepted: true });
+    expect(await h.repo.getBackfill()).toMatchObject({ armedBy: 'manual', status: 'running', total: 0, done: 0, stored: 0, failed: 0, planned: 0, companies: 0 });
+  });
+
+  it('rescans: the sold-out company disappears (its state is dropped) and every holding is planned again', async () => {
+    const h = setup([GENERIC_RELEASE, REIT_RELEASE]);
+    await run(h);
+    expect(await h.repo.getState(REIT_RELEASE.symbol)).not.toBeNull();
+    const before = h.sec.urls.filter((url) => url.includes('submissions')).length;
+    h.holdings.splice(1, 1);
+    h.former.push(REIT_RELEASE.symbol);
+    h.clock.advance(EARNINGS_REFRESH_INTERVAL_MS);
+    expect(await service(h).backfill()).toEqual({ accepted: true });
+    await h.queue.drain();
+    expect(await h.repo.getState(REIT_RELEASE.symbol)).toBeNull();
+    expect(await h.repo.getBackfill()).toMatchObject({ status: 'complete', total: 2, done: 2, stored: 2, planned: 1, companies: 1 });
+    expect(h.sec.urls.filter((url) => url.includes('submissions')).length - before).toBe(1);
+    const status = await service(h).status(h.holdings.map((entry) => ({ symbol: entry.symbol, eligible: true })));
+    expect(status.symbols.map((entry) => entry.symbol)).toEqual([GENERIC_RELEASE.symbol]);
+    expect(h.ai.calls).toHaveLength(4);
+  });
+
+  it('rescans: a company the SEC did not know is looked up again at once, not after a month', async () => {
+    const tickers: Record<string, { cik: number; title: string }> = { OTHER: { cik: 5, title: 'Other Inc.' } };
+    const h = setup([GENERIC_RELEASE], { tickers });
+    await run(h);
+    expect(await h.repo.getState(GENERIC_RELEASE.symbol)).toMatchObject({ lastResult: 'not-in-sec' });
+    Object.assign(tickers, tickersOf(GENERIC_RELEASE));
+    await run(h);
+    expect(await h.repo.getState(GENERIC_RELEASE.symbol)).toMatchObject({ lastResult: 'not-in-sec' });
+    h.clock.advance(EARNINGS_REFRESH_INTERVAL_MS);
+    expect(await service(h).backfill()).toEqual({ accepted: true });
+    await h.queue.drain();
+    expect(await h.repo.getBackfill()).toMatchObject({ status: 'complete', stored: 2, planned: 1 });
+  });
+
   it('is refused when the feature is not configured', async () => {
     const h = earningsHarness({ configured: false });
     const svc = new EarningsService({ repo: h.repo, config: h.config, aiBound: false, queue: h.queue, now: h.clock.now, neurons: () => Promise.resolve({ used: 0, allowance: 10_000, state: 'ok', resetsAt: '' }) });

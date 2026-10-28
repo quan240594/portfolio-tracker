@@ -36,15 +36,17 @@ describe('on a deployment without the feature (AWS)', () => {
 });
 
 describe('GET /earnings', () => {
-  it('lists the newest summaries of the symbols you hold or held, newest first, and the symbols that have one', async () => {
+  it('lists the newest summaries of the symbols you hold now, newest first, and the symbols that have one', async () => {
     const { call, hold, summary } = setup();
     hold('NWND');
-    hold('NWND', 'STOCK', 'SELL');
     hold('CLDV');
     hold('NOSUM');
+    hold('SOLD');
+    hold('SOLD', 'STOCK', 'SELL');
     summary('NWND', '2026-07-22');
     summary('NWND', '2026-10-21');
     summary('CLDV', '2026-10-14');
+    summary('SOLD', '2026-10-28');
     summary('STRANGER', '2026-10-30');
     const { body } = (await call('GET', '/earnings')) as { body: EarningsListResponse };
     expect(body.available).toBe(true);
@@ -81,6 +83,10 @@ describe('GET /earnings/{symbol}/{period}', () => {
     hold('NWND');
     const made = summary('NWND', '2026-10-21');
     summary('STRANGER', '2026-10-21');
+    hold('SOLD');
+    hold('SOLD', 'STOCK', 'SELL');
+    summary('SOLD', '2026-10-21');
+    expect((await call('GET', '/earnings/SOLD/2026-10-21')).status).toBe(404);
     expect((await call('GET', '/earnings/NWND/2026-10-21')).body).toEqual(made);
     expect((await call('GET', '/earnings/NWND/2026-01-01')).status).toBe(404);
     expect((await call('GET', '/earnings/STRANGER/2026-10-21')).status).toBe(404);
@@ -97,6 +103,32 @@ describe('GET /earnings/status', () => {
     const { body } = (await call('GET', '/earnings/status')) as { body: EarningsStatusResponse };
     expect(body).toMatchObject({ available: true, configured: true, neurons: { used: 120, dailyCap: 6000 } });
     expect(body.symbols).toEqual([{ symbol: 'NWND', eligible: true }, { symbol: 'VWRL', eligible: false }]);
+  });
+
+  it('lists only what is held now (the Dashboard holdings) and counts the sold-out symbols apart', async () => {
+    const { call, hold, repo } = setup();
+    const heldNow = Array.from({ length: 26 }, (_, index) => `HELD${String(index).padStart(2, '0')}`);
+    const soldOut = Array.from({ length: 94 }, (_, index) => `SOLD${String(index).padStart(2, '0')}`);
+    for (const symbol of heldNow) hold(symbol);
+    for (const symbol of soldOut) {
+      hold(symbol);
+      hold(symbol, 'STOCK', 'SELL');
+    }
+    hold('LEFTOVER');
+    repo.transactions.push(txn({ id: 't-leftover-sell', date: '2026-02-01', type: 'SELL', symbol: 'LEFTOVER', quantity: 5 - 1e-8, price: 10, currency: 'USD' }));
+    const { body } = (await call('GET', '/earnings/status')) as { body: EarningsStatusResponse };
+    expect(body.symbols.map((entry) => entry.symbol)).toEqual(heldNow);
+    expect(body.notHeld).toBe(95);
+  });
+
+  it('leaves out a symbol that was sold when its position moved to a new ticker', async () => {
+    const { call, hold } = setup();
+    hold('OLDT');
+    hold('OLDT', 'STOCK', 'SELL');
+    hold('NEWT');
+    const { body } = (await call('GET', '/earnings/status')) as { body: EarningsStatusResponse };
+    expect(body.symbols.map((entry) => entry.symbol)).toEqual(['NEWT']);
+    expect(body.notHeld).toBe(1);
   });
 
   it('an instrument whose class is not known counts unless its name reads like a fund', async () => {
@@ -128,6 +160,11 @@ describe('POST /earnings/{symbol}/refresh', () => {
     const stranger = setup();
     expect((await stranger.call('POST', '/earnings/STRANGER/refresh')).status).toBe(404);
     expect(stranger.refreshed).toEqual([]);
+    const sold = setup();
+    sold.hold('SOLD');
+    sold.hold('SOLD', 'STOCK', 'SELL');
+    expect((await sold.call('POST', '/earnings/SOLD/refresh')).status).toBe(404);
+    expect(sold.refreshed).toEqual([]);
     const etf = setup();
     etf.hold('VWRL', 'ETF');
     const notEligible = await etf.call('POST', '/earnings/VWRL/refresh');

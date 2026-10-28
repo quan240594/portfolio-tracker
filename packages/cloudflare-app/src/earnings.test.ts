@@ -22,6 +22,10 @@ async function seed(store: ItemStore) {
     tx('github-1', 'SOLD', { type: 'SELL', date: '2025-02-10' }),
     tx('github-2', 'LMFG'),
     tx('github-2', 'NOPROFILE'),
+    tx('github-2', 'JPM'),
+    tx('github-2', 'JPM', { type: 'SELL', date: '2025-02-10' }),
+    tx('github-2', 'DUST'),
+    tx('github-2', 'DUST', { type: 'SELL', date: '2025-02-10', quantity: 5 - 1e-8 }),
     tx('github-3', 'BROKEN', { type: 'SELL', quantity: 99 }),
   ];
   await store.batchWrite(transactions.map((t) => ({ type: 'put' as const, item: transactionItem(t) })));
@@ -49,6 +53,7 @@ describe('createEarningsInputs', () => {
       { symbol: 'NOPROFILE', name: 'NOPROFILE', template: 'generic' },
     ]);
     expect(built.calendar).toEqual({ JPM: ['2027-02-15'], LMFG: ['2026-10-21'] });
+    expect(built.former).toEqual(['DUST', 'SOLD']);
   });
 
   it('applies the owner\'s classification: an override makes a holding a stock (or a fund), with its name, and the ISIN of the profile is passed on', async () => {
@@ -74,11 +79,11 @@ describe('createEarningsInputs', () => {
 
   it('is empty without holdings and reads no calendar then', async () => {
     const store = new MemoryItemStore();
-    expect(await createEarningsInputs(store).build(DAY, NOW)).toEqual({ holdings: [], calendar: {} });
+    expect(await createEarningsInputs(store).build(DAY, NOW)).toEqual({ holdings: [], calendar: {}, former: [] });
     await registerUser(store, 'github-1', 'x');
     await store.put(transactionItem(tx('github-1', 'VWRL.AS')));
     await store.put({ ...keys.profile('VWRL.AS'), entityType: 'PROFILE', symbol: 'VWRL.AS', name: 'World', assetClass: 'ETF', currency: 'EUR' });
-    expect(await createEarningsInputs(store).build(DAY, NOW)).toEqual({ holdings: [], calendar: {} });
+    expect(await createEarningsInputs(store).build(DAY, NOW)).toEqual({ holdings: [], calendar: {}, former: [] });
   });
 });
 

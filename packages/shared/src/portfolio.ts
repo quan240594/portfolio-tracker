@@ -24,6 +24,11 @@ export class PortfolioError extends Error {
 }
 
 const EPSILON = 1e-9;
+/**
+ * A position below this many shares is a leftover of a sale (a broker rounding), not a holding: worth nothing for any listed share, so the
+ * features that follow "what you currently hold" (earnings summaries, their notifications and calendar entries) do not count it.
+ */
+export const HELD_DUST_QUANTITY = 1e-6;
 const round = (n: number, dp = 2) => Math.round((n + Number.EPSILON) * 10 ** dp) / 10 ** dp;
 const pct = (num: number, den: number) => (Math.abs(den) < EPSILON ? 0 : round((num / den) * 100, 2));
 

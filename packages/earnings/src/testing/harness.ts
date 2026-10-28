@@ -47,6 +47,8 @@ export interface EarningsHarness {
   config: EarningsConfig;
   holdings: EarningsHolding[];
   calendar: Record<string, string[]>;
+  /** Symbols traded but held by nobody now: a test pushes to it to simulate a sale. */
+  former: string[];
   registry: JobRegistry;
 }
 
@@ -55,6 +57,7 @@ export interface HarnessOptions {
   tickers?: Record<string, { cik: number; title: string }>;
   holdings?: EarningsHolding[];
   calendar?: Record<string, string[]>;
+  former?: string[];
   ai?: FakeAi;
   configured?: boolean;
   start?: Date;
@@ -75,7 +78,8 @@ export function earningsHarness(options: HarnessOptions = {}): EarningsHarness {
   const config = parseEarningsConfig(options.configured === false ? {} : { SEC_CONTACT: 'PortfolioTracker/1.0 (personal use; owner@example.invalid)', ALPHAVANTAGE_API_KEY: 'av-test-key', ...options.env });
   const holdings = options.holdings ?? [];
   const calendar = options.calendar ?? {};
-  const inputs: EarningsInputs = { build: () => Promise.resolve({ holdings, calendar }) };
+  const former = options.former ?? [];
+  const inputs: EarningsInputs = { build: () => Promise.resolve({ holdings: [...holdings], calendar, former: [...former] }) };
   const registry: JobRegistry = {};
   const queue = new MemoryJobQueue(registry);
   const deps: EarningsJobDeps = {
@@ -97,5 +101,5 @@ export function earningsHarness(options: HarnessOptions = {}): EarningsHarness {
   registry.fetchEarningsSummary = createFetchEarningsSummaryJob(() => deps);
   registry.backfillEarnings = createBackfillEarningsJob(() => deps);
   registry.notifyDividends = () => Promise.resolve({ done: true, result: {} });
-  return { store, repo, sec, ai, meter, clock, queue, deps, config, holdings, calendar, registry };
+  return { store, repo, sec, ai, meter, clock, queue, deps, config, holdings, calendar, former, registry };
 }

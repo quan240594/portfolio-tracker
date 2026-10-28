@@ -16,11 +16,11 @@
  * `EARNSUM#` does not start with the calendar's `EARN#`, so the two prefixes never meet.
  *
  * Routes (authenticated, same-origin; `available: false` on a deployment without the feature, e.g. the AWS demo):
- * - GET  /earnings?symbol=&limit=      latest summaries, newest first, only for symbols the user holds or held
+ * - GET  /earnings?symbol=&limit=      latest summaries, newest first, only for symbols the user holds now
  * - GET  /earnings/status              is the feature configured, per-symbol checks, neurons used today
  * - GET  /earnings/{symbol}/{period}   one summary (`period` = the report date, YYYY-MM-DD)
  * - POST /earnings/{symbol}/refresh    owner-triggered re-check, at most once per symbol per hour
- * - POST /earnings/backfill            owner-triggered "fetch all now": re-arms the backfill of the last quarters of every holding, at most once per hour
+ * - POST /earnings/backfill            owner-triggered "fetch all now" (rescan all): re-derives the current holdings, drops the check state of sold ones, starts the backfill of every holding over, at most once per hour
  */
 import { z } from 'zod';
 
@@ -366,6 +366,8 @@ export interface EarningsHeldCache {
   holdings: EarningsHolding[];
   /** Expected report dates (YYYY-MM-DD) from the calendar, per symbol. */
   calendar: Record<string, string[]>;
+  /** Market symbols that were traded but are held by nobody now: "Fetch all now" drops their stored check state. */
+  former?: string[];
 }
 
 /** A held company the watcher looks at (never carries amounts or quantities). */
@@ -430,7 +432,7 @@ export interface EarningsBackfillStatus {
 export interface EarningsListResponse {
   available: boolean;
   summaries: EarningsSummary[];
-  /** The held (or formerly held) symbols that have at least one summary, for the filter chips. */
+  /** The currently held symbols that have at least one summary, for the filter chips. */
   symbols: string[];
 }
 
@@ -464,6 +466,9 @@ export interface EarningsStatusResponse {
   backfill?: EarningsBackfillStatus;
   /** When the oldest of the last runs of the eligible companies happened: every company was looked at since. */
   lastFullPassAt?: string;
+  /** How many symbols you traded but no longer hold: they are neither listed nor counted nor checked. */
+  notHeld?: number;
+  /** The currently held symbols only (the same ones as the Dashboard's holdings). */
   symbols: EarningsSymbolStatus[];
 }
 

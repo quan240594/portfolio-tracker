@@ -111,7 +111,10 @@ export class EarningsService {
     };
   }
 
-  /** "Fetch all now": the owner re-arms the backfill (failed releases get another chance); at most once an hour. The work itself runs as a job. */
+  /**
+   * "Fetch all now" is the "Rescan all": the backfill starts over with empty counters (its first step, a job, re-derives the current holdings,
+   * drops the check state of sold ones and plans every holding again); at most once an hour.
+   */
   async backfill(): Promise<EarningsBackfillResponse> {
     const { repo, queue, config } = this.deps;
     if (this.missing().length > 0) return { accepted: false, reason: 'not-configured' };
@@ -119,8 +122,7 @@ export class EarningsService {
     const marker = await repo.getBackfill();
     const age = marker?.armedBy === 'manual' ? now.getTime() - Date.parse(marker.armedAt) : Number.POSITIVE_INFINITY;
     if (age < EARNINGS_REFRESH_INTERVAL_MS) return { accepted: false, reason: 'rate-limited', retryAfterSeconds: Math.ceil((EARNINGS_REFRESH_INTERVAL_MS - age) / 1000) };
-    const { total = 0, done = 0, stored = 0, failed = 0, planned = 0, companies = 0 } = marker ?? {};
-    await repo.putBackfill({ ...armedMarker(config.backfillQuarters, 'manual', now), total, done, stored, failed, planned, companies });
+    await repo.putBackfill(armedMarker(config.backfillQuarters, 'manual', now));
     await queue.enqueue({ job: 'backfillEarnings', payload: { trigger: 'manual' } });
     return { accepted: true };
   }

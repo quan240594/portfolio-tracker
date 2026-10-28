@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { baselineEntries, detectDueNotifications, ledgerId, type DetectInput } from './notification-events.js';
+import { baselineEntries, currentHoldings, detectDueNotifications, heldQuantities, ledgerId, type DetectInput } from './notification-events.js';
+import { customSymbol } from './management-api.js';
 import { defaultNotificationSettings } from './notifications.js';
 import type { DividendEvent, FxRates, Transaction } from './types.js';
 
@@ -246,5 +247,29 @@ describe('baselineEntries', () => {
     const { due, silent } = detectDueNotifications(base({ transactions, dividendEvents: events, notified }));
     expect(due.map((d) => d.type)).toEqual(['exDividend']);
     expect(silent).toEqual([]);
+  });
+});
+
+describe('current holdings', () => {
+  const sell = (symbol: string, quantity: number, date = '2026-02-01') => tx({ symbol, type: 'SELL', quantity, date });
+
+  it('keeps what is held, and sets sold-out symbols and sub-dust leftovers apart', () => {
+    const transactions = [
+      tx({ symbol: 'KEEP', quantity: 3 }),
+      tx({ symbol: 'GONE', quantity: 5 }),
+      sell('GONE', 5),
+      tx({ symbol: 'LEFT', quantity: 5 }),
+      sell('LEFT', 5 - 1e-7),
+      tx({ symbol: 'TINY', quantity: 2 }),
+      sell('TINY', 2 - 1e-5),
+      tx({ symbol: 'LATER', quantity: 1, date: '2027-01-01' }),
+      tx({ symbol: customSymbol('house'), quantity: 1 }),
+    ];
+    expect(heldQuantities(transactions, TODAY).get('TINY')).toBeCloseTo(1e-5, 9);
+    expect(currentHoldings(transactions, TODAY)).toEqual({ held: ['KEEP', 'TINY'], former: ['GONE', 'LEFT'] });
+  });
+
+  it('is empty without transactions', () => {
+    expect(currentHoldings([], TODAY)).toEqual({ held: [], former: [] });
   });
 });

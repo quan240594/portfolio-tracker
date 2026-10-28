@@ -44,6 +44,7 @@ export function defineEarningsSuite(label: string, start: StartStack): void {
       const buy = { portfolioId: portfolio, date: '2025-06-02', type: 'BUY', symbol: release.symbol, quantity: 10, price: 100, currency: 'USD' };
       expect((await call('POST', '/transactions', buy)).status).toBe(201);
       await stack.seed([profile(release), calendarEvent(release)]);
+      return portfolio;
     }
 
     const settle = { ignoreJobs: ['enrichTransactions'] };
@@ -160,6 +161,29 @@ export function defineEarningsSuite(label: string, start: StartStack): void {
       expect(await stack.failedJobs()).toEqual([]);
       const again = await call('POST', '/earnings/backfill');
       expect([again.status, again.body.error.code]).toEqual([429, 'RATE_LIMITED']);
+    });
+
+    it('checks and lists only what is held now: a position bought and sold out is neither read, listed nor counted', async () => {
+      const older = (release: FixtureRelease): FixtureRelease => ({ ...release, filingDate: '2025-12-10' });
+      const kept = older(GENERIC_RELEASE);
+      const sold = older(REIT_RELEASE);
+      const { stack, call } = await ownerOf({ releases: [kept, sold], contact: CONTACT, ai: true });
+      await hold(stack, call, kept);
+      const portfolio = await hold(stack, call, sold);
+      expect((await call('POST', '/transactions', { portfolioId: portfolio, date: '2025-07-02', type: 'SELL', symbol: sold.symbol, quantity: 10, price: 110, currency: 'USD' })).status).toBe(201);
+
+      await stack.enqueue('backfillEarnings', { trigger: 'scheduled' });
+      await stack.drain(settle);
+      expect(await stack.failedJobs()).toEqual([]);
+
+      const list = await call('GET', '/earnings');
+      expect(list.body.symbols).toEqual(['LMFG']);
+      const status = (await call('GET', '/earnings/status')).body as EarningsStatusResponse;
+      expect(status.symbols.map((entry) => entry.symbol)).toEqual(['LMFG']);
+      expect(status.notHeld).toBe(1);
+      expect(status.backfill).toMatchObject({ status: 'complete', total: 1, done: 1, stored: 1, planned: 1, companies: 1 });
+      expect((await call('GET', `/earnings/${sold.symbol}/2025-12-10`)).status).toBe(404);
+      expect((await call('POST', `/earnings/${sold.symbol}/refresh`)).status).toBe(404);
     });
 
     it('queues an owner-triggered re-check once an hour per symbol', async () => {

@@ -23,9 +23,9 @@ import { SecError, type SecBlockedError, type SecClient } from './sec.js';
 import { resolveTicker } from './tickers.js';
 import { utcDayOf } from './util.js';
 
-/** What the host builds from the user data: the held companies and their expected report dates. */
+/** What the host builds from the user data: the companies held today, their expected report dates, and the symbols traded but held by nobody now. */
 export interface EarningsInputs {
-  build(today: string, now: Date): Promise<{ holdings: EarningsHolding[]; calendar: Record<string, string[]> }>;
+  build(today: string, now: Date): Promise<{ holdings: EarningsHolding[]; calendar: Record<string, string[]>; former?: string[] }>;
 }
 
 export interface EarningsJobDeps {
