@@ -1,4 +1,6 @@
 import type {
+  ConsensusQuarter,
+  ConsensusState,
   DividendEvent,
   EarningsRunRecord,
   EarningsSummary,
@@ -32,6 +34,8 @@ export class InMemoryRepository implements Repository {
   dividendEvents: DividendEvent[] = [];
   earningsEvents: StoredEarningsEvent[] = [];
   earningsSummaries: EarningsSummary[] = [];
+  consensusQuarters: ConsensusQuarter[] = [];
+  consensusStates = new Map<string, ConsensusState>();
   splitEvents: StoredSplitEvent[] = [];
   users = new Set<string>();
   tracked = new Map<string, string>();
@@ -121,6 +125,9 @@ export class InMemoryRepository implements Repository {
   }
   getEarningsSummary(symbol: string, reportDate: string) {
     return Promise.resolve(this.earningsSummaries.find((summary) => summary.symbol === symbol && summary.reportDate === reportDate) ?? null);
+  }
+  getConsensus(symbol: string) {
+    return Promise.resolve({ quarters: this.consensusQuarters.filter((quarter) => quarter.symbol === symbol), state: this.consensusStates.get(symbol) ?? null });
   }
   registerUser(userId: string) {
     this.users.add(userId);
@@ -234,11 +241,12 @@ export function fakeNotifyDeps(options: { configured?: boolean; result?: PushRes
 }
 
 /** The earnings dependencies: a recording stand-in for the feature (status and refresh) over in-memory answers. */
-export function fakeEarningsDeps(options: { configured?: boolean; refusal?: 'rate-limited' | 'not-configured' } = {}) {
-  const { configured = true, refusal } = options;
+export function fakeEarningsDeps(options: { configured?: boolean; refusal?: 'rate-limited' | 'not-configured'; estimatesConfigured?: boolean } = {}) {
+  const { configured = true, refusal, estimatesConfigured } = options;
   const refreshed: { symbol: string; eligible: boolean }[] = [];
   const backfilled: number[] = [];
   const earnings: EarningsDeps = {
+    ...(estimatesConfigured === undefined ? {} : { estimatesConfigured }),
     status: (symbols) =>
       Promise.resolve({
         available: true,

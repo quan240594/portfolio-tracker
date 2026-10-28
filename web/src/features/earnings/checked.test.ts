@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EarningsLastRun, EarningsStatusResponse, EarningsSymbolStatus } from '@portfolio/shared';
-import { backfillText, checkedLine, checkedLines, lastPassText, notCountedText, totalsText } from './checked';
+import { backfillText, checkedLine, checkedLines, consensusText, lastPassText, notCountedText, totalsText } from './checked';
 
 const filing = { form: '8-K', date: '2026-10-29', accession: '0001-26-1' };
 const run = (stage: EarningsLastRun['stage'], detail?: string, withFiling = true): EarningsLastRun => ({ at: '2026-10-29T06:30:00.000Z', stage, ...(detail === undefined ? {} : { detail }), ...(withFiling ? { filing } : {}) });
@@ -98,5 +98,29 @@ describe('backfillText', () => {
   it('says when it finished', () => {
     expect(backfillText({ ...base, status: 'complete', done: 80, completedAt: '2026-10-30T08:00:00.000Z' })?.headline).toMatch(/^80 of 80 releases read, finished on 30-10-2026, \d\d:\d\d\.$/);
     expect(backfillText({ ...base, status: 'complete', done: 80 })?.headline).toBe('80 of 80 releases read, finished.');
+  });
+});
+
+describe('consensus estimates', () => {
+  it('counts the companies with figures, and is absent on a deployment without the field', () => {
+    expect(consensusText(status())).toBeUndefined();
+    expect(consensusText(status({ estimatesConfigured: true, consensus: { covered: 18, companies: 26 } }))).toBe('Consensus estimates: 18 of 26 companies.');
+  });
+
+  it('says it needs the key, and why the job waits', () => {
+    expect(consensusText(status({ consensus: { covered: 0, companies: 3 } }))).toBe('Consensus estimates: 0 of 3 companies. They need an Alpha Vantage key (the ALPHAVANTAGE_API_KEY secret).');
+    const premium = consensusText(status({ estimatesConfigured: true, consensus: { covered: 0, companies: 3, blockedReason: 'premium', blockedUntil: '2026-11-01T06:30:00.000Z' } }));
+    expect(premium).toMatch(/^Consensus estimates: 0 of 3 companies\. The free plan does not include estimates; not asked again before 01-11-2026, \d\d:\d\d\.$/);
+    const limited = consensusText(status({ estimatesConfigured: true, consensus: { covered: 1, companies: 3, blockedReason: 'rate-limited', blockedUntil: '2026-11-01T06:30:00.000Z' } }));
+    expect(limited).toContain('The data provider’s daily limit was reached; not asked again before');
+  });
+
+  it('adds the reason a company has no estimates to its line, only when there is one', () => {
+    const at = '2026-10-29T06:30:00.000Z';
+    const line = (consensus: EarningsSymbolStatus['consensus']) => checkedLine(entry('MSFT', run('ok', 'summary stored'), { consensus }), status()).text;
+    expect(line(undefined)).toBe('MSFT: found 8-K from 29-10-2026, summary stored');
+    expect(line({ outcome: 'ok', at })).toBe('MSFT: found 8-K from 29-10-2026, summary stored');
+    expect(line({ outcome: 'no-coverage', at })).toBe('MSFT: found 8-K from 29-10-2026, summary stored · estimates: not covered by the data provider');
+    expect(line({ outcome: 'error', at, detail: 'the request failed' })).toContain('· estimates: the last attempt to fetch it failed (the request failed)');
   });
 });

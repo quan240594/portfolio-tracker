@@ -4,7 +4,8 @@ import { GENERIC_RELEASE, REIT_RELEASE, type FixtureRelease } from '@portfolio/e
 import { usageSnapshotSchema, type EarningsStatusResponse, type EarningsSummary } from '@portfolio/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Browser, type Stack } from './browser.js';
-import type { EarningsStartOptions, StartStack } from './suite.js';
+import { AV_KEY } from './fakes.js';
+import type { EarningsStartOptions, StartStack, SuiteStartOptions } from './suite.js';
 
 const CONTACT = 'PortfolioTracker/1.0 (personal use; owner@example.invalid)';
 /** The pinned Hub clock (2026-01-05 12:00 UTC = 13:00 Amsterdam): the day the invented company reports, after the US close. */
@@ -26,8 +27,8 @@ export function defineEarningsSuite(label: string, start: StartStack): void {
       await Promise.all(stacks.splice(0).map((stack) => stack.dispose()));
     });
 
-    async function ownerOf(earnings: EarningsStartOptions) {
-      const stack = await start({ limits: METRIC_LIMITS, earnings });
+    async function ownerOf(earnings: EarningsStartOptions, extra: SuiteStartOptions = {}) {
+      const stack = await start({ limits: METRIC_LIMITS, earnings, ...extra });
       stacks.push(stack);
       const owner = new Browser(stack);
       await owner.signIn();
@@ -184,6 +185,106 @@ export function defineEarningsSuite(label: string, start: StartStack): void {
       expect(status.backfill).toMatchObject({ status: 'complete', total: 1, done: 1, stored: 1, planned: 1, companies: 1 });
       expect((await call('GET', `/earnings/${sold.symbol}/2025-12-10`)).status).toBe(404);
       expect((await call('POST', `/earnings/${sold.symbol}/refresh`)).status).toBe(404);
+    });
+
+    /** The shape of a real Alpha Vantage `EARNINGS_ESTIMATES` answer (strings with decimals, nulls, a year among the quarters), invented figures. */
+    const consensusAnswer = (symbol: string) => ({
+      symbol,
+      estimates: [
+        { date: '2026-12-31', horizon: 'fiscal year', eps_estimate_average: '8.1000', eps_estimate_analyst_count: '9.0000', revenue_estimate_average: '19000000000.00' },
+        {
+          date: '2026-03-31',
+          horizon: 'fiscal quarter',
+          eps_estimate_average: '2.1000',
+          eps_estimate_high: '2.2000',
+          eps_estimate_low: '2.0000',
+          eps_estimate_analyst_count: '11.0000',
+          eps_estimate_revision_down_trailing_7_days: null,
+          revenue_estimate_average: '4900000000.00',
+          revenue_estimate_high: '5000000000.00',
+          revenue_estimate_low: '4800000000.00',
+          revenue_estimate_analyst_count: '10.00',
+        },
+        {
+          date: '2025-12-31',
+          horizon: 'fiscal quarter',
+          eps_estimate_average: '1.9000',
+          eps_estimate_high: '2.0000',
+          eps_estimate_low: '1.8000',
+          eps_estimate_analyst_count: '12.0000',
+          revenue_estimate_average: '4900000000.00',
+          revenue_estimate_high: '5000000000.00',
+          revenue_estimate_low: '4800000000.00',
+          revenue_estimate_analyst_count: '10.00',
+        },
+      ],
+    });
+
+    it('fetches the analyst consensus of a held company within the Alpha Vantage allowance and joins it to the summary with beat or miss', async () => {
+      const release = dated(GENERIC_RELEASE);
+      const { stack, call } = await ownerOf({ releases: [release], contact: CONTACT, ai: true }, { prices: { ALPHAVANTAGE_API_KEY: AV_KEY } });
+      await hold(stack, call, release);
+      stack.sec.consensus.set('LMFG', consensusAnswer('LMFG'));
+      expect(await stack.schedules()).toContain('earnings-estimates');
+
+      await stack.enqueue('watchEarnings', { trigger: 'scheduled' });
+      await stack.drain(settle);
+      const before = (await call('GET', '/earnings')).body.summaries[0] as EarningsSummary;
+      expect(before.consensus).toMatchObject({ provider: 'Alpha Vantage', reason: 'pending' });
+      expect(before.consensus?.revenue).toBeUndefined();
+
+      await stack.enqueue('earningsEstimates', { trigger: 'scheduled' });
+      await stack.drain(settle);
+      expect(await stack.failedJobs()).toEqual([]);
+      expect(stack.sec.consensusRequests).toEqual(['LMFG']);
+
+      const { consensus } = (await call('GET', '/earnings')).body.summaries[0] as EarningsSummary;
+      expect(consensus).toMatchObject({ provider: 'Alpha Vantage', quarterEnd: '2025-12-31' });
+      expect(consensus?.reason).toBeUndefined();
+      expect(consensus?.eps).toMatchObject({ average: 1.9, high: 2, low: 1.8, analysts: 12, source: 'consensus', surprise: { amount: 0.08, pct: 4.2, verdict: 'beat' } });
+      expect(consensus?.revenue).toMatchObject({ average: 4_900_000_000, analysts: 10, source: 'consensus', surprise: { amount: -80_000_000, pct: -1.6, verdict: 'miss' } });
+      const status = (await call('GET', '/earnings/status')).body as EarningsStatusResponse;
+      expect(status.consensus).toEqual({ covered: 1, companies: 1 });
+      expect(status.symbols[0]?.consensus).toMatchObject({ outcome: 'ok' });
+
+      // The company was fetched just now: the next run asks nobody.
+      await stack.enqueue('earningsEstimates', { trigger: 'scheduled' });
+      await stack.drain(settle);
+      expect(stack.sec.consensusRequests).toEqual(['LMFG']);
+      expect(await stack.failedJobs()).toEqual([]);
+    });
+
+    it('records a premium notice as its own outcome, says so on the summary and stops asking', async () => {
+      const release = dated(GENERIC_RELEASE);
+      const { stack, call } = await ownerOf({ releases: [release], contact: CONTACT, ai: true }, { prices: { ALPHAVANTAGE_API_KEY: AV_KEY } });
+      await hold(stack, call, release);
+      stack.sec.consensus.set('LMFG', { Information: 'Thank you for using Alpha Vantage! This is a premium endpoint. You may subscribe to any of the premium plans (https://www.alphavantage.co/premium/) to instantly unlock all premium endpoints' });
+      await stack.enqueue('watchEarnings', { trigger: 'scheduled' });
+      await stack.drain(settle);
+
+      await stack.enqueue('earningsEstimates', { trigger: 'scheduled' });
+      await stack.drain(settle);
+      await stack.enqueue('earningsEstimates', { trigger: 'scheduled' });
+      await stack.drain(settle);
+      expect(stack.sec.consensusRequests).toEqual(['LMFG']);
+      expect(await stack.failedJobs()).toEqual([]);
+
+      const { consensus } = (await call('GET', '/earnings')).body.summaries[0] as EarningsSummary;
+      expect(consensus?.reason).toBe('premium');
+      expect(consensus?.revenue).toBeUndefined();
+      const status = (await call('GET', '/earnings/status')).body as EarningsStatusResponse;
+      expect(status.consensus).toMatchObject({ covered: 0, companies: 1, blockedReason: 'premium' });
+      expect(status.symbols[0]?.consensus).toMatchObject({ outcome: 'premium' });
+    });
+
+    it('does not ask the provider without an Alpha Vantage key', async () => {
+      const release = dated(GENERIC_RELEASE);
+      const { stack, call } = await ownerOf({ releases: [release], contact: CONTACT, ai: true });
+      await hold(stack, call, release);
+      await stack.enqueue('earningsEstimates', { trigger: 'scheduled' });
+      await stack.drain(settle);
+      expect(stack.sec.consensusRequests).toEqual([]);
+      expect(await stack.failedJobs()).toEqual([]);
     });
 
     it('queues an owner-triggered re-check once an hour per symbol', async () => {

@@ -1,15 +1,20 @@
 import {
+  CONSENSUS_READ_LIMIT,
   calendarKeys,
+  consensusKeys,
   earningsKeys,
   earningsRunKeys,
   ENTITY,
   fromItem,
   keys,
   parseEarningsRun,
+  readConsensusItems,
   majorDividend,
   majorEod,
   majorQuote,
   transactionItem,
+  type ConsensusQuarter,
+  type ConsensusState,
   type DividendEvent,
   type EarningsRunRecord,
   type EarningsSummary,
@@ -70,6 +75,8 @@ export interface Repository {
   /** The newest stored earnings summaries of a symbol, newest first (see earningsKeys). */
   getEarningsSummaries(symbol: string, limit: number): Promise<EarningsSummary[]>;
   getEarningsSummary(symbol: string, reportDate: string): Promise<EarningsSummary | null>;
+  /** The stored analyst consensus of a symbol: its newest quarters and the outcome of the last fetch (see consensusKeys). */
+  getConsensus(symbol: string): Promise<{ quarters: ConsensusQuarter[]; state: ConsensusState | null }>;
   registerUser(userId: string): Promise<void>;
   /** `currency` may be omitted when unknown (watchlist symbols). */
   trackTickers(tickers: { symbol: string; currency?: string }[]): Promise<void>;
@@ -206,6 +213,11 @@ export class ItemRepository implements Repository {
   async getEarningsSummary(symbol: string, reportDate: string): Promise<EarningsSummary | null> {
     const item = await this.store.get(earningsKeys.summary(symbol, reportDate));
     return item ? fromItem<EarningsSummary>(item) : null;
+  }
+
+  async getConsensus(symbol: string): Promise<{ quarters: ConsensusQuarter[]; state: ConsensusState | null }> {
+    const page = await this.store.query({ pk: consensusKeys.tickerPk(symbol), sk: { beginsWith: consensusKeys.prefix }, reverse: true, limit: CONSENSUS_READ_LIMIT });
+    return readConsensusItems(page.items);
   }
 
   registerUser(userId: string): Promise<void> {

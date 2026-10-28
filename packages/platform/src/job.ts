@@ -15,6 +15,7 @@ export const JOBS = {
   watchEarnings: 'watchEarnings',
   fetchEarningsSummary: 'fetchEarningsSummary',
   backfillEarnings: 'backfillEarnings',
+  earningsEstimates: 'earningsEstimates',
 } as const;
 
 export type JobName = (typeof JOBS)[keyof typeof JOBS];
@@ -45,6 +46,11 @@ export interface JobPayloads {
    * allowance (`scheduled`: every 15 minutes, a one-row no-op once complete or while waiting; `manual`: the owner pressed "Fetch all now").
    */
   backfillEarnings: { trigger: 'scheduled' | 'manual' };
+  /**
+   * Fetch the analyst consensus (EPS and revenue per fiscal quarter) of the held companies, one symbol per step, within the Alpha Vantage
+   * allowance (at most 8 calls a day, none when fewer than 5 of the 25 are left). Needs the optional `ALPHAVANTAGE_API_KEY`.
+   */
+  earningsEstimates: { trigger: 'scheduled' | 'manual' };
 }
 
 /**

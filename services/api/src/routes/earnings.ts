@@ -13,6 +13,7 @@ import {
 } from '@portfolio/shared';
 import type { EarningsDeps, RouteContext } from '../deps.js';
 import { HttpError, ok, validate, type RouteResult } from '../lib/http.js';
+import { withConsensus } from '../lib/consensus.js';
 import { loadProfiles } from '../lib/profiles.js';
 import type { RouteHandler } from '../router.js';
 
@@ -34,7 +35,7 @@ function requireEarnings(ctx: RouteContext): EarningsDeps {
 
 const symbolParam = (ctx: RouteContext): string => validate(assetSymbolSchema.safeParse(ctx.pathParams.symbol), 'Invalid symbol');
 
-/** `GET /earnings?symbol=&limit=`: the newest summaries of the symbols you hold now, newest first. */
+/** `GET /earnings?symbol=&limit=`: the newest summaries of the symbols you hold now, newest first, each with its analyst consensus (`consensus`) where there is one. */
 async function listEarnings(ctx: RouteContext): Promise<RouteResult> {
   if (!ctx.deps.earnings) return ok({ available: false, summaries: [], symbols: [] } satisfies EarningsListResponse);
   const query = validate(earningsListQuerySchema.safeParse(ctx.query), 'Invalid query parameters');
@@ -44,7 +45,8 @@ async function listEarnings(ctx: RouteContext): Promise<RouteResult> {
   const lists = await Promise.all(own.map((symbol) => ctx.deps.repo.getEarningsSummaries(symbol, wanted.includes(symbol) ? limit : 1)));
   const symbols = own.filter((_symbol, index) => lists[index]!.length > 0);
   const listed = lists.flatMap((list, index) => (wanted.includes(own[index]!) ? list : []));
-  const summaries = [...listed].sort((a, b) => b.reportDate.localeCompare(a.reportDate) || a.symbol.localeCompare(b.symbol)).slice(0, limit);
+  const newest = [...listed].sort((a, b) => b.reportDate.localeCompare(a.reportDate) || a.symbol.localeCompare(b.symbol)).slice(0, limit);
+  const summaries = await withConsensus(ctx.deps.repo, newest, ctx.deps.earnings.estimatesConfigured);
   return ok({ available: true, summaries, symbols } satisfies EarningsListResponse);
 }
 
@@ -65,7 +67,7 @@ async function getEarnings(ctx: RouteContext): Promise<RouteResult> {
   const own = await ownSymbols(ctx);
   const summary: EarningsSummary | null = own.includes(symbol) ? await ctx.deps.repo.getEarningsSummary(symbol, period) : null;
   if (summary === null) throw new HttpError(404, 'NOT_FOUND', 'No earnings summary for this symbol and period');
-  return ok(summary);
+  return ok((await withConsensus(ctx.deps.repo, [summary], ctx.deps.earnings?.estimatesConfigured))[0]);
 }
 
 /** `POST /earnings/{symbol}/refresh`: the owner asks for a re-check; once per symbol per hour. */

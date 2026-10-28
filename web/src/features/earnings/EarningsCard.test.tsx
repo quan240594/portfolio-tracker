@@ -1,7 +1,7 @@
 import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { sampleDemoSummaries, sampleSummary, type EarningsSummary } from '@portfolio/shared';
-import { renderWithProviders } from '../../test/utils';
+import { renderWithProviders, sp } from '../../test/utils';
 import { EarningsCard } from './EarningsCard';
 
 const [bank, saas] = sampleDemoSummaries() as [EarningsSummary, EarningsSummary];
@@ -51,9 +51,9 @@ describe('the scorecard', () => {
     expect(eps.getByText('adjusted')).toBeInTheDocument();
     expect(eps.getByText(/6,45/)).toBeInTheDocument();
     expect(eps.getByText(/6,92/)).toBeInTheDocument();
-    const chip = eps.getByText('Beat').closest('[data-verdict]')!;
+    const chip = eps.getByText(/^Beat by/).closest('[data-verdict]')!;
     expect(chip).toHaveAttribute('data-verdict', 'beat');
-    expect(chip).toHaveTextContent('Beat+7,3%');
+    expect(sp(chip.textContent ?? '')).toBe('Beat by US$ 0,47 (7,3%)');
     expect(chip.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
     const revenue = within(rows[1]!);
     expect(revenue.getByText('$20.71B')).toBeInTheDocument();
@@ -64,7 +64,31 @@ describe('the scorecard', () => {
     renderCard(bank);
     expect(screen.getAllByText('In line')[0]!.closest('[data-verdict]')).toHaveAttribute('data-verdict', 'inline');
     renderCard(sampleSummary({ symbol: 'MISS', headline: { eps: { value: 1, unit: 'perShare', estimate: 1.2, verdict: 'miss', surprisePct: -16.7 } } }));
-    expect(screen.getAllByText('Miss')[0]!.closest('[data-verdict]')).toHaveTextContent('Miss−17%');
+    expect(sp(screen.getAllByText(/^Missed by/)[0]!.closest('[data-verdict]')!.textContent ?? '')).toBe('Missed by US$ 0,20 (16,7%)');
+  });
+
+  it('shows the consensus with its range, the analysts and the source, and the beat or miss in words and amounts', () => {
+    renderCard(saas);
+    const table = screen.getByRole('table', { name: /Cloudvale Software/ });
+    const [eps, revenue] = within(table).getAllByRole('row').slice(1) as [HTMLElement, HTMLElement];
+    expect(sp(eps.textContent ?? '')).toContain('US$ 1,95');
+    expect(sp(eps.textContent ?? '')).toContain('(31 analysts)');
+    expect(sp(eps.textContent ?? '')).toContain('Range US$ 1,88 to US$ 2,02');
+    expect(within(eps).getByText('Consensus: Alpha Vantage')).toBeInTheDocument();
+    expect(sp(within(eps).getByText(/^Beat by/).textContent ?? '')).toBe('Beat by US$ 0,15 (7,7%)');
+    expect(within(revenue).getByText('$3.18B')).toBeInTheDocument();
+    expect(within(revenue).getByText('(27 analysts)')).toBeInTheDocument();
+    const miss = within(revenue).getByText(/^Missed by/);
+    expect(miss.textContent).toBe('Missed by $60M (1,9%)');
+    expect(miss.closest('[data-verdict]')).toHaveAttribute('data-verdict', 'miss');
+  });
+
+  it('says why a figure has no estimate instead of a bare "no estimate available"', () => {
+    renderCard(bank);
+    const table = screen.getByRole('table', { name: /Harbor Bancorp/ });
+    const revenue = within(within(table).getAllByRole('row')[2]!);
+    expect(revenue.getAllByText('The data provider has no estimate for this figure')).toHaveLength(2);
+    expect(revenue.queryByText('no estimate available')).not.toBeInTheDocument();
   });
 
   it('says not disclosed for a figure the release did not state', () => {

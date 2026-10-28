@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { sampleDemoSummaries, sampleSummary } from '@portfolio/shared';
 import { sp } from '../../test/utils';
-import { FIRST_QUARTER_NOTE, NOT_DISCLOSED, NO_ESTIMATE, changeParts, compactCount, formatGrowth, formatMetric, formatPoints, growthLines, guidanceText, hasQuarterComparison, labelOf, metricOf, scorecardRows } from './earningsModel';
+import { FIRST_QUARTER_NOTE, NOT_DISCLOSED, NO_ESTIMATE, REASON_TEXT, beatText, changeParts, estimateOf, compactCount, formatGrowth, formatMetric, formatPoints, growthLines, guidanceText, hasQuarterComparison, labelOf, metricOf, reasonText, scorecardRows } from './earningsModel';
+import { CONSENSUS_REASONS, attachConsensus } from '@portfolio/shared';
 
 const [bank, saas] = sampleDemoSummaries();
 
@@ -44,6 +45,80 @@ describe('scorecardRows', () => {
       ['AFFO per share', NOT_DISCLOSED, false],
       ['Revenue', '$412.5M', true],
     ]);
+  });
+});
+
+const quarter = { symbol: 'NWND', quarterEnd: '2026-09-30', ticker: 'NWND', fetchedAt: '2026-10-12T06:20:00.000Z' };
+
+describe('scorecardRows with the consensus', () => {
+  it('writes the estimate with its range, the analysts, the source and the beat or miss with its amount', () => {
+    const summary = attachConsensus(sampleSummary(), { quarters: [{ ...quarter, eps: { average: 6.45, high: 6.6, low: 6.3, analysts: 12 }, revenue: { average: 21_000_000_000, analysts: 1 } }] });
+    const [eps, revenue] = scorecardRows(summary);
+    expect(sp(eps!.expected)).toBe('US$ 6,45');
+    expect([sp(eps!.range ?? ''), eps!.analysts, eps!.source, eps!.verdict, eps!.surprise]).toEqual(['Range US$ 6,30 to US$ 6,60', '12 analysts', 'Consensus: Alpha Vantage', 'beat', '+7,3%']);
+    expect(sp(eps!.beat ?? '')).toBe('Beat by US$ 0,47 (7,3%)');
+    expect(revenue).toMatchObject({ expected: '$21B', hasEstimate: true, analysts: '1 analyst', verdict: 'miss', beat: 'Missed by $290M (1,4%)' });
+    expect(revenue!.range).toBeUndefined();
+  });
+
+  it('says In line without an amount, and names the other sources of an EPS estimate', () => {
+    const inline = attachConsensus(sampleSummary(), { quarters: [{ ...quarter, eps: { average: 6.9 } }] });
+    expect(scorecardRows(inline)[0]).toMatchObject({ verdict: 'inline', beat: 'In line' });
+    const release = scorecardRows(attachConsensus(sampleSummary(), { quarters: [] }))[0]!;
+    expect(release.source).toBe('Estimate: Alpha Vantage');
+    const calendar = scorecardRows(attachConsensus(sampleSummary({ headline: { eps: { value: 1, unit: 'perShare' } } }), { quarters: [], calendar: [{ date: '2026-10-21', epsEstimate: 0.9 }] }))[0]!;
+    expect(calendar.source).toBe('Calendar estimate: Alpha Vantage');
+  });
+
+  it('shows an estimate without a verdict when the figure was not disclosed', () => {
+    const summary = attachConsensus(sampleSummary({ headline: {} }), { quarters: [{ ...quarter, eps: { average: 1 } }] });
+    const row = scorecardRows(summary)[0]!;
+    expect([row.hasEstimate, row.disclosed, row.verdict, row.beat]).toEqual([true, false, undefined, undefined]);
+  });
+
+  it('has no percentage for a zero estimate', () => {
+    const summary = attachConsensus(sampleSummary({ headline: { eps: { value: 0.1, unit: 'perShare' } } }), { quarters: [{ ...quarter, eps: { average: 0 } }] });
+    expect(sp(scorecardRows(summary)[0]!.beat ?? '')).toBe('Beat by US$ 0,10');
+    expect(scorecardRows(summary)[0]!.surprise).toBeUndefined();
+  });
+
+  it('says why there is no estimate, from the job record, in words and never the bare phrase', () => {
+    for (const reason of CONSENSUS_REASONS) {
+      const summary = { ...sampleSummary({ headline: { revenue: { value: 1, unit: 'money' } } }), consensus: { provider: 'Alpha Vantage' as const, reason } };
+      expect(scorecardRows(summary)[1]!.expected).toBe(REASON_TEXT[reason]);
+      expect(REASON_TEXT[reason]).not.toBe(NO_ESTIMATE);
+    }
+    expect(REASON_TEXT.pending).toBe('Fetched on the next free run');
+    expect(REASON_TEXT['no-coverage']).toBe('Not covered by the data provider');
+    expect(REASON_TEXT.premium).toBe('The free plan does not include estimates');
+    expect(reasonText('error', 'the provider answered 503')).toBe('The last attempt to fetch it failed (the provider answered 503)');
+    expect(reasonText('error')).toBe(REASON_TEXT.error);
+    expect(reasonText('error', '')).toBe(REASON_TEXT.error);
+    expect(reasonText('premium', 'ignored')).toBe(REASON_TEXT.premium);
+  });
+
+  it('keeps the old wording for a summary without the consensus fields, and explains a figure the consensus does not cover', () => {
+    expect(scorecardRows(sampleSummary())[1]!.expected).toBe(NO_ESTIMATE);
+    const consensusOnly = { ...sampleSummary(), consensus: { provider: 'Alpha Vantage' as const } };
+    expect(scorecardRows(consensusOnly)[1]!.expected).toBe(NO_ESTIMATE);
+    const reit = { ...sampleSummary({ template: 'reit', headline: { revenue: { value: 1, unit: 'money' } }, kpis: [{ key: 'affoPerShare', label: 'AFFO per share', unit: 'perShare' }] }), consensus: { provider: 'Alpha Vantage' as const, reason: 'pending' as const } };
+    expect(scorecardRows(reit)[0]!.expected).toBe('Consensus covers EPS and revenue only');
+  });
+
+  it('beatText reads the verdict, the amount and the percentage', () => {
+    const show = (value: number) => `#${value}`;
+    expect(beatText('beat', 0.5, 2, show)).toBe('Beat by #0.5 (2,0%)');
+    expect(beatText('miss', -3, -4.25, show)).toBe('Missed by #3 (4,3%)');
+    expect(beatText('miss', -3, undefined, show)).toBe('Missed by #3');
+    expect(beatText('inline', 0, 0, show)).toBe('In line');
+  });
+
+  it('estimateOf falls back to the estimate the release was stored with', () => {
+    const summary = sampleSummary();
+    expect(estimateOf(summary, 'eps', summary.headline.eps)).toMatchObject({ average: 6.45, source: 'release', surprise: { verdict: 'beat', pct: 7.3 } });
+    expect(estimateOf(summary, 'revenue', summary.headline.revenue)).toBeUndefined();
+    const bare = { value: 2, unit: 'perShare' as const, estimate: 1 };
+    expect(estimateOf(summary, 'eps', bare)).toEqual({ average: 1, source: 'release' });
   });
 });
 

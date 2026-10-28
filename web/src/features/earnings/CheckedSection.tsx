@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { EarningsStatusResponse } from '@portfolio/shared';
 import { errorMessage } from '../../api/client';
 import { useBackfillEarnings } from '../../api/earningsHooks';
-import { backfillText, checkedLines, lastPassText, notCountedText, totalsText, type CheckedLine } from './checked';
+import { backfillText, checkedLines, consensusText, lastPassText, notCountedText, totalsText, type CheckedLine } from './checked';
 
 const TONE_CLASS: Readonly<Record<CheckedLine['tone'], string>> = {
   ok: '',
@@ -39,6 +39,7 @@ export function CheckedSection({ status, selected, hasSummaries }: Readonly<{ st
   const lines = checkedLines(status, selected);
   const backfill = backfillText(status.backfill);
   const notCounted = notCountedText(status);
+  const consensus = consensusText(status);
   return (
     <details className="card p-3 text-sm" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary className="cursor-pointer font-medium">What was checked</summary>
@@ -46,6 +47,7 @@ export function CheckedSection({ status, selected, hasSummaries }: Readonly<{ st
         <p className="muted break-words">{totalsText(status)}</p>
         {notCounted && <p className="muted break-words">{notCounted}</p>}
         <p className="muted break-words">{lastPassText(status)}</p>
+        {consensus && <p className="muted break-words">{consensus}</p>}
         {backfill && (
           <section aria-labelledby="earnings-backfill-title" className="min-w-0 space-y-1">
             <h3 id="earnings-backfill-title" className="font-medium">

@@ -30,13 +30,16 @@ function VerdictIcon({ verdict }: Readonly<{ verdict: EarningsVerdict }>) {
   );
 }
 
-/** Beat, miss or in line against the estimate: an icon, the word and the surprise, on a pastel background (never colour alone). */
-export function VerdictChip({ verdict, surprise }: Readonly<{ verdict: EarningsVerdict; surprise?: string }>) {
+/**
+ * Beat, miss or in line against the estimate: an icon, the word and the surprise, on a pastel background (never colour alone). `text` replaces the
+ * word and the surprise with a full phrase ("Beat by US$ 0,47 (7,3%)").
+ */
+export function VerdictChip({ verdict, surprise, text }: Readonly<{ verdict: EarningsVerdict; surprise?: string; text?: string }>) {
   return (
     <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-semibold ${TONES[verdict]}`} data-verdict={verdict}>
       <VerdictIcon verdict={verdict} />
-      <span>{VERDICT_LABELS[verdict]}</span>
-      {surprise !== undefined && <span className="tabular-nums">{surprise}</span>}
+      {text === undefined ? <span>{VERDICT_LABELS[verdict]}</span> : <span className="tabular-nums">{text}</span>}
+      {text === undefined && surprise !== undefined && <span className="tabular-nums">{surprise}</span>}
     </span>
   );
 }

@@ -1,8 +1,9 @@
 /**
  * EPS consensus ("expected") from Alpha Vantage `EARNINGS` (quarterly `reportedEPS` / `estimatedEPS`), the only free source for it. It needs
  * the optional `ALPHAVANTAGE_API_KEY` and spends one call of the 25 a day (shared with the profile and calendar jobs through the same
- * `DailyQuota`), one per symbol per release. Revenue, free cash flow and guidance have no free legitimate consensus source: they are never
- * estimated here and the UI says "no estimate available".
+ * `DailyQuota`), one per symbol per release. This is the estimate a summary is stored with; the analyst consensus (EPS and revenue per fiscal
+ * quarter, with range and analyst count) is fetched separately by the `earningsEstimates` job (`estimates-job.ts`) and joined by the API. Free cash flow
+ * and guidance have no free legitimate consensus source: the UI says "no estimate available".
  */
 import { DailyQuota, alphaVantageSymbol } from '@portfolio/prices';
 import { daysBetween } from '@portfolio/shared';

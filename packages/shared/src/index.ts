@@ -54,6 +54,7 @@ export * from './notifications.js';
 export * from './notification-messages.js';
 export * from './notification-events.js';
 export * from './earnings.js';
+export * from './earnings-consensus.js';
 export * from './earnings-templates.js';
 export * from './earnings-format.js';
 export * from './earnings-sample.js';

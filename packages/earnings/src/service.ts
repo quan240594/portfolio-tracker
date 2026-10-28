@@ -1,5 +1,5 @@
 import type { JobQueue } from '@portfolio/platform';
-import type { EarningsBackfillMarker, EarningsBackfillResponse, EarningsBackfillStatus, EarningsNotReady, EarningsRefreshResponse, EarningsStatusResponse, EarningsSymbolState, EarningsSymbolStatus } from '@portfolio/shared';
+import type { ConsensusBlock, ConsensusState, EarningsBackfillMarker, EarningsBackfillResponse, EarningsBackfillStatus, EarningsNotReady, EarningsRefreshResponse, EarningsStatusResponse, EarningsSymbolState, EarningsSymbolStatus } from '@portfolio/shared';
 import { EARNINGS_REFRESH_INTERVAL_MS } from '@portfolio/shared';
 import { armedMarker } from './backfill.js';
 import type { EarningsConfig } from './config.js';
@@ -61,9 +61,31 @@ function fullPass(rows: readonly EarningsSymbolStatus[]): { lastFullPassAt?: str
   return eligible.length > 0 && times.length === eligible.length ? { lastFullPassAt: times.toSorted((a, b) => a.localeCompare(b))[0] } : {};
 }
 
+/** What the consensus job last did for a symbol, as the status shows it. */
+function consensusOf(state: ConsensusState | undefined): Pick<EarningsSymbolStatus, 'consensus'> {
+  if (state === undefined) return {};
+  return { consensus: { outcome: state.outcome, at: state.at, ...(state.detail === undefined ? {} : { detail: state.detail }), ...(state.fetchedAt === undefined ? {} : { fetchedAt: state.fetchedAt }) } };
+}
+
+/** "Consensus estimates: N of M companies": the eligible companies with figures stored, and why the job waits when it does. */
+function consensusTotals(rows: readonly EarningsSymbolStatus[], block: ConsensusBlock | null, now: Date): NonNullable<EarningsStatusResponse['consensus']> {
+  const eligible = rows.filter((row) => row.eligible);
+  const waiting = block !== null && Date.parse(block.until) > now.getTime();
+  return {
+    covered: eligible.filter((row) => row.consensus?.fetchedAt !== undefined).length,
+    companies: eligible.length,
+    ...(waiting ? { blockedUntil: block.until, blockedReason: block.reason } : {}),
+  };
+}
+
 /** What the API needs from the feature on a deployment that has it (`Deps.earnings` of the API). */
 export class EarningsService {
   constructor(private readonly deps: EarningsServiceDeps) {}
+
+  /** Whether the optional Alpha Vantage key (analyst consensus and EPS estimates) is set. */
+  get estimatesConfigured(): boolean {
+    return this.deps.config.estimatesConfigured;
+  }
 
   missing(): EarningsNotReady[] {
     const missing: EarningsNotReady[] = [];
@@ -74,12 +96,15 @@ export class EarningsService {
 
   async status(symbols: readonly SymbolRef[]): Promise<EarningsStatusResponse> {
     const { repo, config, now } = this.deps;
-    const [block, neurons, states, latest, marker] = await Promise.all([
+    const names = symbols.map((entry) => entry.symbol);
+    const [block, neurons, states, latest, marker, consensus, consensusBlock] = await Promise.all([
       repo.getSecBlock(),
       this.deps.neurons(),
-      repo.getStates(symbols.map((entry) => entry.symbol)),
+      repo.getStates(names),
       Promise.all(symbols.map((entry) => repo.latest(entry.symbol, 1))),
       repo.getBackfill(),
+      repo.getConsensusStates(names),
+      repo.getConsensusBlock(),
     ]);
     const missing = this.missing();
     const blockedUntil = block?.blockedUntil !== undefined && Date.parse(block.blockedUntil) > now().getTime() ? block.blockedUntil : undefined;
@@ -96,6 +121,7 @@ export class EarningsService {
         ...(latest[index]![0] === undefined ? {} : { latestReportDate: latest[index]![0].reportDate }),
         ...(lastRun === undefined ? {} : { lastRun }),
         ...releasesOf(state),
+        ...consensusOf(consensus.get(entry.symbol)),
       };
     });
     return {
@@ -107,6 +133,7 @@ export class EarningsService {
       neurons: { used: neurons.used, dailyCap: config.dailyNeurons, allowance: neurons.allowance, state: neurons.state, resetsAt: neurons.resetsAt },
       backfill: backfillStatus(marker, config.backfillQuarters, now()),
       ...fullPass(rows),
+      consensus: consensusTotals(rows, consensusBlock, now()),
       symbols: rows,
     };
   }

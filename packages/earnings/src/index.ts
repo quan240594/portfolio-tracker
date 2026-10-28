@@ -3,6 +3,7 @@ export * from './backfill.js';
 export * from './common.js';
 export * from './config.js';
 export * from './derive.js';
+export * from './estimates-job.js';
 export * from './estimates.js';
 export * from './jobs.js';
 export * from './numbers.js';

@@ -416,7 +416,7 @@ describe('cron schedules', () => {
   });
 
   it('uses the shared schedules by default', () => {
-    expect(SCHEDULED_JOBS.map((job) => job.name).sort((a, b) => a.localeCompare(b))).toEqual(['broker-sync', 'broker-sync-intraday', 'earnings-backfill', 'earnings-watch', 'earnings-watch-morning', 'notify-dividends', 'prices-calendar', 'prices-refresh', 't212-quotes', 't212-quotes-close']);
+    expect(SCHEDULED_JOBS.map((job) => job.name).sort((a, b) => a.localeCompare(b))).toEqual(['broker-sync', 'broker-sync-intraday', 'earnings-backfill', 'earnings-estimates', 'earnings-watch', 'earnings-watch-morning', 'notify-dividends', 'prices-calendar', 'prices-refresh', 't212-quotes', 't212-quotes-close']);
   });
 
   it('arms the alarm for the Trading 212 quote schedules and enqueues the job per slot', async () => {

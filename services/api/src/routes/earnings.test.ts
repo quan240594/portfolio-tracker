@@ -1,4 +1,4 @@
-import { sampleSummary, type EarningsListResponse, type EarningsStatusResponse, type EarningsSummary } from '@portfolio/shared';
+import { sampleSummary, type ConsensusQuarter, type EarningsListResponse, type EarningsStatusResponse, type EarningsSummary } from '@portfolio/shared';
 import { describe, expect, it } from 'vitest';
 import { createHandler } from '../lambda/handler.js';
 import { apiEvent, fakeDeps, fakeEarningsDeps, txn } from '../testing/fakes.js';
@@ -87,11 +87,80 @@ describe('GET /earnings/{symbol}/{period}', () => {
     hold('SOLD', 'STOCK', 'SELL');
     summary('SOLD', '2026-10-21');
     expect((await call('GET', '/earnings/SOLD/2026-10-21')).status).toBe(404);
-    expect((await call('GET', '/earnings/NWND/2026-10-21')).body).toEqual(made);
+    expect((await call('GET', '/earnings/NWND/2026-10-21')).body).toEqual({ ...made, consensus: expect.objectContaining({ provider: 'Alpha Vantage' }) });
     expect((await call('GET', '/earnings/NWND/2026-01-01')).status).toBe(404);
     expect((await call('GET', '/earnings/STRANGER/2026-10-21')).status).toBe(404);
     expect((await call('GET', '/earnings/NWND/Q3')).status).toBe(400);
     expect((await call('GET', '/earnings/bad symbol!/2026-10-21')).status).toBe(400);
+  });
+});
+
+describe('the analyst consensus on a summary', () => {
+  const NWND = (extra: Partial<ConsensusQuarter> = {}): ConsensusQuarter => ({
+    symbol: 'NWND',
+    quarterEnd: '2026-09-30',
+    ticker: 'NWND',
+    fetchedAt: '2026-10-12T06:20:00.000Z',
+    eps: { average: 6.45, high: 6.6, low: 6.3, analysts: 12 },
+    revenue: { average: 20_000_000_000, high: 20_500_000_000, low: 19_600_000_000, analysts: 10 },
+    ...extra,
+  });
+
+  it('joins the stored consensus of the matching quarter with beat or miss against the actual, in the list and for one summary', async () => {
+    const { call, hold, summary, repo } = setup();
+    hold('NWND');
+    summary('NWND', '2026-10-21');
+    summary('NWND', '2026-07-22');
+    repo.consensusQuarters.push(NWND(), NWND({ quarterEnd: '2026-06-30', eps: { average: 7 }, revenue: { average: 19_000_000_000 } }));
+    const { body } = (await call('GET', '/earnings')) as { body: EarningsListResponse };
+    expect(body.summaries[0]?.consensus).toEqual({
+      provider: 'Alpha Vantage',
+      quarterEnd: '2026-09-30',
+      asOf: '2026-10-12T06:20:00.000Z',
+      eps: { average: 6.45, high: 6.6, low: 6.3, analysts: 12, source: 'consensus', surprise: { amount: 0.47, pct: 7.3, verdict: 'beat' } },
+      revenue: { average: 20_000_000_000, high: 20_500_000_000, low: 19_600_000_000, analysts: 10, source: 'consensus', surprise: { amount: 710_000_000, pct: 3.6, verdict: 'beat' } },
+    });
+    expect(body.summaries[1]?.consensus).toMatchObject({ quarterEnd: '2026-06-30', eps: { surprise: { verdict: 'miss' } } });
+    const one = (await call('GET', '/earnings/NWND/2026-10-21')).body as EarningsSummary;
+    expect(one.consensus?.quarterEnd).toBe('2026-09-30');
+  });
+
+  it('uses the calendar\u2019s EPS estimate when no consensus is stored, and says why there is no revenue estimate', async () => {
+    const { call, hold, summary, repo } = setup();
+    hold('NWND');
+    summary('NWND', '2026-10-21', { headline: { eps: { value: 6.92, unit: 'perShare' }, revenue: { value: 20_710_000_000, unit: 'money' } } });
+    repo.earningsEvents.push({ symbol: 'NWND', date: '2026-10-22', epsEstimate: 6.5, currency: 'USD', source: 'alphavantage' });
+    repo.consensusStates.set('NWND', { symbol: 'NWND', outcome: 'premium', at: '2026-10-21T08:20:00.000Z', updatedAt: '2026-10-21T08:20:00.000Z' });
+    const { body } = (await call('GET', '/earnings')) as { body: EarningsListResponse };
+    expect(body.summaries[0]?.consensus).toEqual({
+      provider: 'Alpha Vantage',
+      eps: { average: 6.5, source: 'calendar', surprise: { amount: 0.42, pct: 6.5, verdict: 'beat' } },
+      reason: 'premium',
+    });
+  });
+
+  it('says a missing key is the reason, not "pending", when the deployment has no Alpha Vantage key', async () => {
+    const keyless = setup({ estimatesConfigured: false });
+    keyless.hold('NWND');
+    keyless.summary('NWND', '2026-10-21', { headline: { revenue: { value: 1, unit: 'money' } } });
+    expect(((await keyless.call('GET', '/earnings')).body as EarningsListResponse).summaries[0]?.consensus?.reason).toBe('no-key');
+    const keyed = setup({ estimatesConfigured: true });
+    keyed.hold('NWND');
+    keyed.summary('NWND', '2026-10-21', { headline: { revenue: { value: 1, unit: 'money' } } });
+    expect((await keyed.call('GET', '/earnings/NWND/2026-10-21')).body.consensus.reason).toBe('pending');
+    keyless.repo.consensusStates.set('NWND', { symbol: 'NWND', outcome: 'premium', at: '2026-10-21T08:20:00.000Z', updatedAt: '2026-10-21T08:20:00.000Z' });
+    expect((await keyless.call('GET', '/earnings/NWND/2026-10-21')).body.consensus.reason).toBe('premium');
+  });
+
+  it('leaves the summaries as they are when the consensus cannot be read', async () => {
+    const { call, hold, summary, repo } = setup();
+    hold('NWND');
+    const made = summary('NWND', '2026-10-21');
+    repo.getConsensus = () => Promise.reject(new Error('store down'));
+    const { body } = (await call('GET', '/earnings')) as { body: EarningsListResponse };
+    expect(body.summaries).toEqual([made]);
+    repo.getConsensus = () => Promise.reject('not an error');
+    expect(((await call('GET', '/earnings')).body as EarningsListResponse).summaries).toEqual([made]);
   });
 });
 

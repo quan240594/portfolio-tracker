@@ -136,17 +136,18 @@ describe('the job registry and the price registration point', () => {
   const context = { budget: new SubrequestBudget(), now: () => NOON } as unknown as JobContext;
 
   it('registers the import, the Trading 212 sync and the three price jobs', () => {
-    expect(registeredJobs().toSorted((a, b) => a.localeCompare(b))).toEqual(['backfillEarnings', 'enrichTransactions', 'fetchEarningsSummary', 'importUploaded', 'notifyDividends', 'refreshCalendar', 'refreshPrices', 'refreshT212Quotes', 'syncBroker', 'watchEarnings']);
+    expect(registeredJobs().toSorted((a, b) => a.localeCompare(b))).toEqual(['backfillEarnings', 'earningsEstimates', 'enrichTransactions', 'fetchEarningsSummary', 'importUploaded', 'notifyDividends', 'refreshCalendar', 'refreshPrices', 'refreshT212Quotes', 'syncBroker', 'watchEarnings']);
     expect(Object.keys(PRICE_JOB_FACTORIES).toSorted((a, b) => a.localeCompare(b))).toEqual(['enrichTransactions', 'refreshCalendar', 'refreshPrices']);
     expect(hasPriceService()).toBe(true);
     expect(hasPriceService(CORE_JOB_FACTORIES)).toBe(false);
   });
 
   it('keeps the schedules of the registered jobs, the price service schedules among them', () => {
-    expect(schedulesFor().map((schedule) => schedule.name).toSorted((a, b) => a.localeCompare(b))).toEqual(['broker-sync', 'broker-sync-intraday', 'earnings-backfill', 'earnings-watch', 'earnings-watch-morning', 'notify-dividends', 'prices-calendar', 'prices-refresh', 't212-quotes', 't212-quotes-close']);
+    expect(schedulesFor().map((schedule) => schedule.name).toSorted((a, b) => a.localeCompare(b))).toEqual(['broker-sync', 'broker-sync-intraday', 'earnings-backfill', 'earnings-estimates', 'earnings-watch', 'earnings-watch-morning', 'notify-dividends', 'prices-calendar', 'prices-refresh', 't212-quotes', 't212-quotes-close']);
     expect(schedulesFor(undefined, false).map((schedule) => schedule.name)).not.toContain('earnings-watch');
     expect(schedulesFor(undefined, false).map((schedule) => schedule.name)).not.toContain('earnings-watch-morning');
     expect(schedulesFor(undefined, false).map((schedule) => schedule.name)).not.toContain('earnings-backfill');
+    expect(schedulesFor(undefined, false).map((schedule) => schedule.name)).not.toContain('earnings-estimates');
     expect(PRICE_SCHEDULE_NAMES.toSorted((a, b) => a.localeCompare(b))).toEqual(['prices-calendar', 'prices-refresh']);
     expect(schedulesFor(CORE_JOB_FACTORIES).map((schedule) => schedule.name)).toEqual(['broker-sync', 'broker-sync-intraday', 'notify-dividends', 't212-quotes', 't212-quotes-close']);
   });
@@ -162,7 +163,9 @@ describe('the job registry and the price registration point', () => {
     expect(JOB_SUBREQUEST_RESERVE.fetchEarningsSummary).toBe(8);
     expect(Math.max(JOB_SUBREQUEST_RESERVE.watchEarnings!, JOB_SUBREQUEST_RESERVE.fetchEarningsSummary!)).toBeLessThanOrEqual(SUBREQUEST_CEILING);
     expect(JOB_SUBREQUEST_RESERVE.backfillEarnings).toBe(8);
-    expect(Object.keys(EARNINGS_JOB_FACTORIES)).toEqual(['watchEarnings', 'fetchEarningsSummary', 'backfillEarnings']);
+    // The consensus step makes one Alpha Vantage request.
+    expect(JOB_SUBREQUEST_RESERVE.earningsEstimates).toBe(2);
+    expect(Object.keys(EARNINGS_JOB_FACTORIES)).toEqual(['watchEarnings', 'fetchEarningsSummary', 'backfillEarnings', 'earningsEstimates']);
   });
 
   it('plans a price step into the subrequests of an alarm', () => {

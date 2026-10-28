@@ -3430,8 +3430,9 @@ A token bucket allows 4 requests per second (capacity 3) against the SEC's 10; a
 (shared `EARNINGS/SEC` row) for an hour, doubling to a day (or the `Retry-After`), and the status says "blocked by the SEC". Per symbol: at most one
 check per 30 minutes (doubling to 24 h after failures), 30 checks and 3 extraction attempts per UTC day.
 
-**Not used:** no real-time or paid data, no scraping of any estimate site. **Revenue, free cash flow and guidance consensus have no free legitimate source**: those cells
-say "no estimate available". If a release prints a comparison to analysts' expectations, it is not extracted.
+**Not used:** no real-time or paid data, no scraping of any estimate site. **Free cash flow and guidance consensus have no free legitimate source**: those cells
+say "no estimate available". If a release prints a comparison to analysts' expectations, it is not extracted. EPS and revenue consensus come from Alpha Vantage
+`EARNINGS_ESTIMATES`, see "Analyst consensus estimates" at the end of this document.
 
 ### When a symbol is checked (`watchEarnings`, `packages/earnings/src/jobs.ts`)
 
@@ -3978,3 +3979,81 @@ Last run time, trigger and outcome; "The provider returned N rows, M of your K h
 ### Tests
 
 `pnpm --filter @portfolio/prices test` (`earnings-googl.test.ts`: realistic CSV with GOOG, GOOGL, `postmarket`, `BRK.B`, a row dated today; `earnings-run.test.ts`: the records), `pnpm --filter @portfolio/shared test` (`earnings-dates.test.ts`), `pnpm --filter @portfolio/api test` (`earnings-dates.test.ts`, `repository.test.ts`), `pnpm --filter @portfolio/cloudflare-app test` (`calendar-dates.test.ts`, `jobs.test.ts`, the Hub suite in Node and workerd), `pnpm --filter @portfolio/web test` (`EarningsDatesCard.test.tsx`, `earningsDatesClient.test.ts`), `services/prices` `pytest`. All clocks are pinned.
+
+## Analyst consensus estimates
+
+The "Expected" and "Beat/Miss" cells of the earnings cards used to say "no estimate available" for revenue and for every past quarter: the only estimate stored was the
+calendar's `epsEstimate` of an upcoming date, and a press release carries none. They now come from Alpha Vantage `EARNINGS_ESTIMATES` (EPS and revenue per fiscal quarter:
+`eps_estimate_average/high/low/analyst_count`, `revenue_estimate_average/high/low/analyst_count`, past quarters back to about 2017 and the next unreported ones), the same
+free key the app already uses. The answer was checked against the provider documentation and one live call with the public demo key (strings with decimals such as
+`"24.0000"`, `null` values, fiscal years mixed with `"fiscal quarter"` entries). **Not verified: whether a real free key may call this function.** An answer that says
+"premium endpoint" is therefore its own recorded outcome, never mistaken for "no coverage" or a rate limit.
+
+### Storage (`@portfolio/shared` `earnings-consensus.ts`, additive, item store, no TTL)
+
+| Entity | PK | SK | Fields |
+|---|---|---|---|
+| Consensus of one fiscal quarter | `TICKER#{symbol}` | `EARNEST#{quarterEnd}` | `eps` / `revenue`: `{average, high?, low?, analysts?}`, `ticker` (the provider ticker), `fetchedAt` |
+| Last fetch of a symbol | `TICKER#{symbol}` | `EARNEST#STATE` | `outcome` (`ok`, `no-coverage`, `premium`, `rate-limited`, `error`), `at`, `fetchedAt?` (when figures were last stored), `detail?` (sanitised, at most 120 characters), `quarters?` |
+| Provider block | `EARNINGS` | `ESTIMATES` | `until`, `reason` (`premium` or `rate-limited`), `at` |
+
+`EARNEST#` shares no prefix with the calendar's `EARN#` or the summaries' `EARNSUM#`; a reverse query of the prefix returns the state first, then the newest quarters
+(`CONSENSUS_READ_LIMIT`). A fetch stores the newest 12 fiscal quarters (the unreported ones and the last reported) in one `batchWrite`, the state last. Nothing is added to
+the AWS tables: the Dynamo path has the rows only if a job writes them, and its routes answer without them.
+
+### Fetching (`packages/prices/src/providers/estimates.ts`, `estimate-budget.ts`)
+
+`parseEarningsEstimates(json)` never throws and never uses `.catch`: each entry is parsed on its own with zod (a lenient number: `"None"`, `""`, `null`, junk are absent;
+counts are rounded), years are skipped, and a notice maps to an outcome: `premium endpoint` -> `premium`; `rate limit`, `requests per day`, `call frequency` ->
+`rate-limited` (checked second, because the standard rate-limit message also names the premium plans); `Error Message` or no usable quarter -> `no-coverage`; any other
+notice or shape -> `error` with a short reason without URLs. `estimateTicker(symbol)` uses a US ticker as it is and a suffixed listing only through `TICKER_ALIASES`
+(`FOO.DE` is `CRM`): the bare ticker of another exchange can be another company, so a listing without an alias is recorded as "no coverage" without a call.
+`AlphaVantageEstimatesClient.fetchEstimates` makes one request through the host's counted `fetch` (a host subrequest limit is rethrown so the step is deferred).
+
+### The budget (`EstimateBudget`)
+
+The provider allows 25 calls a day, shared with the profile enrichment and the daily calendar call (`USAGE/alphavantage`, 24 for the general counter: the calendar keeps its
+call). The consensus job spends from its own counter (`USAGE/alphavantage#estimates`, at most **8 a day**) and from the shared one, and **makes no call when fewer than 5
+of the 25 are left**; both reset at 00:00 UTC. A run makes at most 3 calls (so the 8 spread over the day), one symbol per step.
+
+### The job `earningsEstimates` (`packages/earnings/src/estimates-job.ts`)
+
+Schedule `earnings-estimates` (cloudflareOnly, daily 08:20, 13:20, 18:20, 22:20 Europe/Amsterdam; kept only while the earnings feature is on). Ceiling `ok`: dropped above
+60 % of the budget like the other earnings jobs; step reserve 2 subrequests. Held companies only (`loadHeld`: the current holdings with an earnings KPI template, funds and
+crypto excluded). Order, by need (`planEstimates`, pure and tested):
+
+0. the newest stored summary has no consensus stored (after a failed attempt cools down: error 6 h, rate limit 12 h, a fetch that matched nothing 3 days);
+1. about to report (a calendar date within 3 days) or reported in the last 3, once the figures are 3 days old, or a live release newer than the figures;
+2. the stalest: every 14 days at most (a company never fetched first).
+
+`no-coverage` waits 30 days, `premium` 7 days. A `premium` answer also blocks the job for 7 days and a `rate-limited` one until the next UTC midnight (`EARNINGS/ESTIMATES`);
+both stop the run. A failed attempt keeps the figures of an earlier fetch and their date.
+
+### The join (`attachConsensus`, pure, in `@portfolio/shared`; used by `GET /earnings` and `GET /earnings/{symbol}/{period}`)
+
+A summary has no fiscal period end, so the quarter is found from: the calendar event of the release (within 4 days of the report date) and its `fiscalPeriodEnd`, else a date
+the release names in its period ("quarter ended June 30, 2026"), taking the stored quarter that ends on it or the nearest within 20 days; else the latest quarter that ended
+1 to 120 days before the release. The EPS estimate is the consensus; without one the estimate the release was stored with (Alpha Vantage `EARNINGS`), then the calendar's
+`epsEstimate` (only when its currency is the reporting currency). Revenue only has the consensus. Beat or miss, by code, from the actual of the summary (`headline.eps`,
+`headline.revenue`; money in whole currency units, EPS per share): amount = actual - estimate; percent = amount / |estimate| (one decimal, so a smaller loss than expected is
+a beat: estimate -0.50, actual -0.30 is +40 %; no percentage for a zero estimate); "in line" within 0.5 % of the estimate (`classifyBeat`, shared with the derivation).
+A consensus whose revenue is more than 5 times off the reported revenue (another currency, company or quarter) is dropped as a `mismatch`. The result is the additive field
+`consensus` of the summary: `{provider, quarterEnd?, asOf?, eps?, revenue?, reason?, detail?}` with `eps`/`revenue` = `{average, high?, low?, analysts?, source:
+'consensus'|'release'|'calendar', surprise?: {amount, pct?, verdict}}`; `reason` (`pending`, `no-coverage`, `premium`, `rate-limited`, `error`, `no-quarter`, `no-figure`,
+`mismatch`) says why a figure has none. A failure to read the consensus leaves the summaries unchanged.
+
+`GET /earnings/status` adds `consensus: {covered, companies, blockedUntil?, blockedReason?}` and a per-symbol `consensus: {outcome, at, detail?, fetchedAt?}`.
+
+### Web (`web/src/features/earnings`)
+
+Expected shows the value, `(N analysts)`, the range and the source ("Consensus: Alpha Vantage"); Beat/Miss is a chip with an icon and words ("Beat by US$ 0,47 (7,3%)",
+"Missed by $60M (1,9%)", "In line"), never colour alone. A figure without an estimate says why ("Fetched on the next free run", "Not covered by the data provider",
+"The free plan does not include estimates", ...) instead of the bare "no estimate available", which stays for summaries from a deployment without the field. "What was
+checked" says "Consensus estimates: N of M companies." (and why the job waits). Mock mode shows invented estimates.
+
+### Tests
+
+`pnpm --filter @portfolio/shared test` (`earnings-consensus.test.ts`: beat and miss maths, quarter matching, fallbacks, reasons), `pnpm --filter @portfolio/prices test`
+(`estimates.test.ts`: the real answer shape, `None` and junk, premium versus rate limit, the 8-a-day and 5-left budget), `pnpm --filter @portfolio/earnings test`
+(`estimates-job.test.ts`: order, caps, cooldowns, premium and rate-limit stops), `pnpm --filter @portfolio/api test`, `pnpm --filter @portfolio/web test`, and
+`pnpm --filter @portfolio/cloudflare-app test` (the whole path in Node and in real workerd: `earnings-suite.ts`). Playwright: `e2e/earnings.spec.ts`.
