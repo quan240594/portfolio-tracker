@@ -1,5 +1,5 @@
 import type { JobQueue } from '@portfolio/platform';
-import type { ConsensusBlock, ConsensusState, EarningsBackfillMarker, EarningsBackfillResponse, EarningsBackfillStatus, EarningsNotReady, EarningsRefreshResponse, EarningsStatusResponse, EarningsSymbolState, EarningsSymbolStatus } from '@portfolio/shared';
+import type { ConsensusBlock, ConsensusEndpoint, ConsensusState, EarningsBackfillMarker, EarningsBackfillResponse, EarningsBackfillStatus, EarningsNotReady, EarningsRefreshResponse, EarningsStatusResponse, EarningsSymbolState, EarningsSymbolStatus } from '@portfolio/shared';
 import { EARNINGS_REFRESH_INTERVAL_MS } from '@portfolio/shared';
 import { armedMarker } from './backfill.js';
 import type { EarningsConfig } from './config.js';
@@ -67,11 +67,11 @@ function fullPass(rows: readonly EarningsSymbolStatus[]): { lastFullPassAt?: str
 /** What the consensus job last did for a symbol, as the status shows it. */
 function consensusOf(state: ConsensusState | undefined): Pick<EarningsSymbolStatus, 'consensus'> {
   if (state === undefined) return {};
-  return { consensus: { outcome: state.outcome, at: state.at, ...(state.detail === undefined ? {} : { detail: state.detail }), ...(state.fetchedAt === undefined ? {} : { fetchedAt: state.fetchedAt }), ...(state.retryAt === undefined ? {} : { retryAt: state.retryAt }) } };
+  return { consensus: { outcome: state.outcome, at: state.at, ...(state.detail === undefined ? {} : { detail: state.detail }), ...(state.fetchedAt === undefined ? {} : { fetchedAt: state.fetchedAt }), ...(state.retryAt === undefined ? {} : { retryAt: state.retryAt }), ...(state.source === undefined ? {} : { source: state.source }) } };
 }
 
 /** "Consensus estimates: N of M companies": the eligible companies with figures stored, and why the job waits when it does. */
-function consensusTotals(rows: readonly EarningsSymbolStatus[], block: ConsensusBlock | null, now: Date): NonNullable<EarningsStatusResponse['consensus']> {
+function consensusTotals(rows: readonly EarningsSymbolStatus[], block: ConsensusBlock | null, endpoint: ConsensusEndpoint | null, now: Date): NonNullable<EarningsStatusResponse['consensus']> {
   const eligible = rows.filter((row) => row.eligible);
   const waiting = block !== null && Date.parse(block.until) > now.getTime();
   const limited = eligible.filter((row) => row.consensus?.outcome === 'rate-limited' && row.consensus.fetchedAt === undefined).length;
@@ -80,6 +80,7 @@ function consensusTotals(rows: readonly EarningsSymbolStatus[], block: Consensus
     companies: eligible.length,
     ...(waiting ? { blockedUntil: block.until, blockedReason: block.reason } : {}),
     ...(limited === 0 ? {} : { waiting: limited }),
+    ...(endpoint === null ? {} : { endpoint: { state: endpoint.state, at: endpoint.at, retryAt: endpoint.retryAt } }),
   };
 }
 
@@ -102,7 +103,7 @@ export class EarningsService {
   async status(symbols: readonly SymbolRef[]): Promise<EarningsStatusResponse> {
     const { repo, config, now } = this.deps;
     const names = symbols.map((entry) => entry.symbol);
-    const [block, neurons, states, latest, marker, consensus, consensusBlock] = await Promise.all([
+    const [block, neurons, states, latest, marker, consensus, consensusBlock, endpoint] = await Promise.all([
       repo.getSecBlock(),
       this.deps.neurons(),
       repo.getStates(names),
@@ -110,6 +111,7 @@ export class EarningsService {
       repo.getBackfill(),
       repo.getConsensusStates(names),
       repo.getConsensusBlock(),
+      repo.getConsensusEndpoint(),
     ]);
     const missing = this.missing();
     const blockedUntil = block?.blockedUntil !== undefined && Date.parse(block.blockedUntil) > now().getTime() ? block.blockedUntil : undefined;
@@ -138,7 +140,7 @@ export class EarningsService {
       neurons: { used: neurons.used, dailyCap: config.dailyNeurons, allowance: neurons.allowance, state: neurons.state, resetsAt: neurons.resetsAt },
       backfill: backfillStatus(marker, config.backfillQuarters, now()),
       ...fullPass(rows),
-      consensus: consensusTotals(rows, consensusBlock, now()),
+      consensus: consensusTotals(rows, consensusBlock, endpoint, now()),
       symbols: rows,
     };
   }

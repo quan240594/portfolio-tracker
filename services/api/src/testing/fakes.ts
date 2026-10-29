@@ -1,4 +1,5 @@
 import type {
+  ConsensusEndpoint,
   ConsensusQuarter,
   ConsensusState,
   DividendEvent,
@@ -36,6 +37,7 @@ export class InMemoryRepository implements Repository {
   earningsSummaries: EarningsSummary[] = [];
   consensusQuarters: ConsensusQuarter[] = [];
   consensusStates = new Map<string, ConsensusState>();
+  consensusEndpoint: ConsensusEndpoint | null = null;
   splitEvents: StoredSplitEvent[] = [];
   users = new Set<string>();
   tracked = new Map<string, string>();
@@ -128,6 +130,9 @@ export class InMemoryRepository implements Repository {
   }
   getConsensus(symbol: string) {
     return Promise.resolve({ quarters: this.consensusQuarters.filter((quarter) => quarter.symbol === symbol), state: this.consensusStates.get(symbol) ?? null });
+  }
+  getConsensusEndpoint() {
+    return Promise.resolve(this.consensusEndpoint);
   }
   registerUser(userId: string) {
     this.users.add(userId);

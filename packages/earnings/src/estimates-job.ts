@@ -8,14 +8,20 @@
  *   1. a company about to report (a calendar date within 3 days) or that reported a live release since its last fetch,
  *   2. the stalest: a company is refreshed at most every 14 days otherwise.
  * Every attempt leaves its outcome on the symbol (`ok`, `no-coverage`, `premium`, `rate-limited`, `error`) so the page says why a figure is missing.
- * A `premium` answer stops the job for a week; a `rate-limited` one for as long as the kind of limit says (the rest of the UTC day for the daily
+ * A `rate-limited` answer stops the job for as long as the kind of limit says (the rest of the UTC day for the daily
  * quota, 2 minutes for a burst, 15 minutes for any other notice, doubling with each repeat the same day up to the next UTC midnight): there is
  * no point asking again before. Steps are a minute apart and the client spaces its requests (`ProviderPacer`), since the provider also refuses
  * bursts. The provider's own words (sanitised, at most 300 characters) are kept with the outcome.
+ *
+ * A free key often cannot read `EARNINGS_ESTIMATES`: Alpha Vantage then answers with a "premium endpoint" notice or the generic limit text although the
+ * key is nowhere near its limits. When that happens the step makes a control call of the free `EARNINGS` function (same ticker, 1.5 s later): if it works,
+ * the endpoint is noted as `unavailable-on-key` (`ConsensusEndpoint`, retried after 7 days) and the control's figures are stored as EPS-only rows; if it is
+ * refused too, it is a real throttle and the back-off above applies. While the endpoint is noted, every step is one `EARNINGS` call for the next symbol
+ * (same order, budget, pacing and caps), storing the EPS estimate of each past quarter and nothing else (no range, no analyst count, no revenue).
  */
 import { logger, type JobHandler, type JobPayloads } from '@portfolio/platform';
 import { estimateTicker, resumeAtMs, sanitizeNotice, type AlphaVantageEstimatesClient, type EstimateBudget, type EstimatesAnswer } from '@portfolio/prices';
-import { daysBetween, matchQuarter, type ConsensusBlock, type ConsensusOutcome, type ConsensusQuarter, type ConsensusState, type EarningsHolding, type EarningsSummary } from '@portfolio/shared';
+import { daysBetween, matchQuarter, ENDPOINT_RETRY_DAYS, EPS_ONLY_SOURCE, type ConsensusBlock, type ConsensusEndpoint, type ConsensusOutcome, type ConsensusQuarter, type ConsensusState, type EarningsHolding, type EarningsSummary } from '@portfolio/shared';
 import { iso, loadHeld, type EarningsInputs } from './common.js';
 import type { EarningsRepository } from './repository.js';
 import { isSubrequestError } from './sec.js';
@@ -47,7 +53,7 @@ export interface EstimatesJobDeps {
   repo: EarningsRepository;
   inputs: EarningsInputs;
   /** Absent without the optional Alpha Vantage key: the job then finishes at once. */
-  client?: Pick<AlphaVantageEstimatesClient, 'fetchEstimates'>;
+  client?: Pick<AlphaVantageEstimatesClient, 'fetchEstimates' | 'fetchEarnings'>;
   budget: Pick<EstimateBudget, 'room' | 'spend'>;
   now: () => Date;
 }
@@ -58,6 +64,8 @@ export interface EstimatesResult {
   skipped?: 'no-key' | 'blocked' | 'budget' | 'nothing-to-do';
   /** The answer that stopped the run, when one did. */
   stoppedBy?: 'premium' | 'rate-limited' | 'invalid-key';
+  /** Set when this step found that the key cannot read `EARNINGS_ESTIMATES` (the free `EARNINGS` function is used for a week). */
+  endpoint?: 'unavailable-on-key';
 }
 
 // --- Who is asked, in which order ----------------------------------------------------------------------------------------
@@ -134,6 +142,8 @@ interface Cursor {
   index: number;
   fetched: number;
   stored: number;
+  /** Set once a step of the run noted the endpoint as unavailable. */
+  endpoint?: 'unavailable-on-key';
 }
 
 type Step = { done: true; result: EstimatesResult } | { done: false; next: string; delayMs: number };
@@ -202,40 +212,137 @@ async function recordFailure(deps: EstimatesJobDeps, target: EstimateTarget, ans
   if (answer.status === 'premium') await deps.repo.putConsensusBlock({ until: iso(now.getTime() + PREMIUM_BLOCK_MS), reason: 'premium', at: state.at, ...(detail === undefined ? {} : { detail }) });
 }
 
-async function recordFigures(deps: EstimatesJobDeps, target: EstimateTarget, answer: Extract<EstimatesAnswer, { status: 'ok' }>): Promise<void> {
+type Figures = Extract<EstimatesAnswer, { status: 'ok' }>;
+
+async function recordFigures(deps: EstimatesJobDeps, target: EstimateTarget, answer: Figures): Promise<void> {
   const { symbol, ticker } = target;
   const at = deps.now().toISOString();
   const quarters: ConsensusQuarter[] = answer.quarters.map((quarter) => ({ symbol, ...quarter, ticker, fetchedAt: at }));
   await deps.repo.putConsensus(quarters, { symbol, outcome: 'ok', at, fetchedAt: at, ticker, quarters: quarters.length, updatedAt: at });
 }
 
-/** Asks the provider about one symbol and records the answer. A failure that is not the host's subrequest limit is that symbol's `error`. */
-async function ask(deps: EstimatesJobDeps, target: EstimateTarget): Promise<EstimatesAnswer> {
-  let answer: EstimatesAnswer;
+/**
+ * The EPS-only rows of an `EARNINGS` answer, in the same keys as the consensus rows and flagged `source: 'eps-only'`. A quarter that already has a full
+ * consensus row (from `EARNINGS_ESTIMATES`, back when the key could read it) is left as it is. An answer without any estimate is "no coverage".
+ */
+async function recordEpsOnly(deps: EstimatesJobDeps, target: EstimateTarget, answer: Figures): Promise<boolean> {
+  if (answer.quarters.length === 0) {
+    await recordFailure(deps, target, { status: 'no-coverage' });
+    return false;
+  }
+  const { symbol, ticker } = target;
+  const at = deps.now().toISOString();
+  const full = new Set((await deps.repo.getConsensus(symbol)).quarters.filter((quarter) => quarter.source === undefined).map((quarter) => quarter.quarterEnd));
+  const quarters: ConsensusQuarter[] = answer.quarters.filter((quarter) => !full.has(quarter.quarterEnd)).map((quarter) => ({ symbol, ...quarter, ticker, fetchedAt: at, source: EPS_ONLY_SOURCE }));
+  await deps.repo.putConsensus(quarters, { symbol, outcome: 'ok', at, fetchedAt: at, ticker, quarters: quarters.length, source: EPS_ONLY_SOURCE, updatedAt: at });
+  return true;
+}
+
+/** One provider call. A failure that is not the host's subrequest limit is an `error` answer (the host's limit is rethrown: the step is deferred). */
+async function guarded(call: () => Promise<EstimatesAnswer>): Promise<EstimatesAnswer> {
   try {
-    answer = await deps.client!.fetchEstimates(target.ticker);
+    return await call();
   } catch (error) {
     if (isSubrequestError(error)) throw error;
     logger.warn('Fetching consensus estimates failed', { error: error instanceof Error ? error.name : 'unknown' });
-    answer = { status: 'error', reason: 'the request failed' };
+    return { status: 'error', reason: 'the request failed' };
   }
-  if (answer.status === 'ok') await recordFigures(deps, target, answer);
-  else await recordFailure(deps, target, answer);
-  return answer;
 }
 
-/** The answers that make further calls pointless: no estimates on this plan, a limit, or a key the provider refuses. */
+/** What a step did, for what follows: calls made, whether figures were stored, and the answer that makes further calls pointless. */
+interface Asked {
+  calls: number;
+  stored: boolean;
+  stopped?: EstimatesResult['stoppedBy'];
+  /** The endpoint was noted as unavailable on the key in this step. */
+  endpoint?: 'unavailable-on-key';
+}
+
+/** The answers that make further calls pointless: a limit, no estimates on this plan, or a key the provider refuses. */
 function stoppedBy(answer: EstimatesAnswer): EstimatesResult['stoppedBy'] {
   if (answer.status === 'premium' || answer.status === 'rate-limited') return answer.status;
   return answer.status === 'error' && answer.invalidKey === true ? 'invalid-key' : undefined;
 }
 
-/** What follows an answer: stop on a notice that makes further calls pointless, stop at the run's cap or the end of the queue, else the next symbol a minute later. */
-function afterAnswer(run: Cursor, answer: EstimatesAnswer): Step {
-  const next: Cursor = { ...run, index: run.index + 1, fetched: run.fetched + 1, stored: run.stored + (answer.status === 'ok' ? 1 : 0) };
-  const stopped = stoppedBy(answer);
-  if (stopped !== undefined) return finished({ fetched: next.fetched, stored: next.stored, stoppedBy: stopped });
-  if (next.fetched >= ESTIMATES_CALLS_PER_RUN || next.index >= next.queue.length) return finished({ fetched: next.fetched, stored: next.stored });
+/** Records an answer that is not `EARNINGS_ESTIMATES` figures: the EPS-only rows of an `ok`, else the symbol's failure. */
+async function recordEarnings(deps: EstimatesJobDeps, target: EstimateTarget, answer: EstimatesAnswer): Promise<Asked> {
+  if (answer.status === 'ok') return { calls: 1, stored: await recordEpsOnly(deps, target, answer) };
+  await recordFailure(deps, target, answer);
+  return { calls: 1, stored: false, stopped: stoppedBy(answer) };
+}
+
+/** Whether one more provider call may be made now (and spends it). */
+async function callAllowed(deps: EstimatesJobDeps): Promise<boolean> {
+  return (await deps.budget.room()).allowed && (await deps.budget.spend());
+}
+
+/** The control call after a refusal: the free `EARNINGS` function for the same ticker, a second later (the client paces). `undefined` when the budget is spent or the host defers it. */
+async function controlCall(deps: EstimatesJobDeps, target: EstimateTarget): Promise<EstimatesAnswer | undefined> {
+  if (!(await callAllowed(deps))) return undefined;
+  try {
+    return await guarded(() => deps.client!.fetchEarnings(target.ticker));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Notes that `EARNINGS_ESTIMATES` is not readable with this key: it is asked again after a week. */
+async function markUnavailable(deps: EstimatesJobDeps, answer: Extract<Failure, { status: 'premium' | 'rate-limited' }>): Promise<void> {
+  const now = deps.now();
+  const detail = detailOf(answer);
+  await deps.repo.putConsensusEndpoint({ state: 'unavailable-on-key', at: now.toISOString(), retryAt: iso(now.getTime() + ENDPOINT_RETRY_DAYS * DAY_MS), ...(detail === undefined ? {} : { detail }) });
+}
+
+/** The estimates endpoint answered with a premium notice or generic limit text. */
+const refused = (answer: EstimatesAnswer): answer is Extract<Failure, { status: 'premium' | 'rate-limited' }> =>
+  answer.status === 'premium' || (answer.status === 'rate-limited' && (answer.scope ?? 'other') === 'other');
+
+/**
+ * `EARNINGS_ESTIMATES` was refused with a premium notice or generic limit text. A control call of `EARNINGS` (same key, same ticker) tells which it is: when
+ * that one works, the key cannot read the estimates (noted for a week, and the control's figures are this symbol's EPS-only rows); when it is refused the same
+ * way it is a real throttle and the symbol and the provider back off as for any limit. An explicit "premium endpoint" needs no proof.
+ */
+async function classify(deps: EstimatesJobDeps, target: EstimateTarget, answer: Extract<Failure, { status: 'premium' | 'rate-limited' }>): Promise<Asked> {
+  const control = await controlCall(deps, target);
+  const calls = control === undefined ? 1 : 2;
+  if (answer.status === 'rate-limited' && control?.status !== 'ok') {
+    await recordFailure(deps, target, answer);
+    return { calls, stored: false, stopped: 'rate-limited' };
+  }
+  await markUnavailable(deps, answer);
+  const stored = control?.status === 'ok' && (await recordEpsOnly(deps, target, control));
+  return { calls, stored, endpoint: 'unavailable-on-key' };
+}
+
+/** A symbol's consensus from `EARNINGS_ESTIMATES`; a refusal is classified (see `classify`), and figures clear what was noted about the endpoint. */
+async function askEstimates(deps: EstimatesJobDeps, target: EstimateTarget, endpoint: ConsensusEndpoint | null): Promise<Asked> {
+  const answer = await guarded(() => deps.client!.fetchEstimates(target.ticker));
+  if (answer.status === 'ok') {
+    await recordFigures(deps, target, answer);
+    if (endpoint !== null) await deps.repo.clearConsensusEndpoint();
+    return { calls: 1, stored: true };
+  }
+  if (refused(answer)) return classify(deps, target, answer);
+  await recordFailure(deps, target, answer);
+  return { calls: 1, stored: false, stopped: stoppedBy(answer) };
+}
+
+/** While the endpoint is noted as unavailable (for a week), the symbol's EPS estimates come from `EARNINGS`; after it, `EARNINGS_ESTIMATES` is asked once more. */
+const fallbackActive = (endpoint: ConsensusEndpoint | null, now: Date): endpoint is ConsensusEndpoint => endpoint !== null && Date.parse(endpoint.retryAt) > now.getTime();
+
+/** Asks the provider about one symbol and records the answer. */
+async function ask(deps: EstimatesJobDeps, target: EstimateTarget, endpoint: ConsensusEndpoint | null): Promise<Asked> {
+  if (!fallbackActive(endpoint, deps.now())) return askEstimates(deps, target, endpoint);
+  return recordEarnings(deps, target, await guarded(() => deps.client!.fetchEarnings(target.ticker)));
+}
+
+/** What follows a step: stop on a notice that makes further calls pointless, stop at the run's cap or the end of the queue, else the next symbol a minute later. */
+function afterAnswer(run: Cursor, asked: Asked): Step {
+  const endpoint = asked.endpoint ?? run.endpoint;
+  const next: Cursor = { ...run, index: run.index + 1, fetched: run.fetched + asked.calls, stored: run.stored + (asked.stored ? 1 : 0), ...(endpoint === undefined ? {} : { endpoint }) };
+  const result: EstimatesResult = { fetched: next.fetched, stored: next.stored, ...(endpoint === undefined ? {} : { endpoint }) };
+  if (asked.stopped !== undefined) return finished({ ...result, stoppedBy: asked.stopped });
+  if (next.fetched >= ESTIMATES_CALLS_PER_RUN || next.index >= next.queue.length) return finished(result);
   return { done: false, next: JSON.stringify(next), delayMs: ESTIMATES_STEP_DELAY_MS };
 }
 
@@ -251,9 +358,9 @@ export function createEarningsEstimatesJob(getDeps: () => EstimatesJobDeps): Job
     if (target === undefined) return finished({ fetched: run.fetched, stored: run.stored, ...(run.fetched === 0 ? { skipped: 'nothing-to-do' as const } : {}) });
     if (!(await deps.budget.room()).allowed || !(await deps.budget.spend())) return finished({ fetched: run.fetched, stored: run.stored, skipped: 'budget' });
     try {
-      const answer = await ask(deps, target);
-      if (answer.status === 'ok' && block !== null) await deps.repo.clearConsensusBlock();
-      return afterAnswer(run, answer);
+      const asked = await ask(deps, target, await deps.repo.getConsensusEndpoint());
+      if (asked.stored && block !== null) await deps.repo.clearConsensusBlock();
+      return afterAnswer(run, asked);
     } catch (error) {
       if (isSubrequestError(error)) return { done: false, next: JSON.stringify(run), delayMs: 1000 };
       throw error;

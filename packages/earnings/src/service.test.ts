@@ -57,6 +57,18 @@ describe('EarningsService.status', () => {
     expect((await svc.status(refs)).consensus).toEqual({ covered: 1, companies: 3 });
   });
 
+  it('says when the key cannot read the estimates endpoint and the figures are EPS-only', async () => {
+    const { svc, repo } = service({ contact: CONTACT });
+    const at = NOW.toISOString();
+    await repo.putConsensus([{ symbol: 'AAA', quarterEnd: '2026-09-30', ticker: 'AAA', fetchedAt: at, eps: { average: 1 }, source: 'eps-only' }], { symbol: 'AAA', outcome: 'ok', at, fetchedAt: at, ticker: 'AAA', quarters: 1, source: 'eps-only', updatedAt: at });
+    const refs = [{ symbol: 'AAA', eligible: true }, { symbol: 'BBB', eligible: true }];
+    expect((await svc.status(refs)).consensus).toEqual({ covered: 1, companies: 2 });
+    await repo.putConsensusEndpoint({ state: 'unavailable-on-key', at, retryAt: '2026-10-28T10:00:00.000Z', detail: 'x' });
+    const status = await svc.status(refs);
+    expect(status.consensus).toEqual({ covered: 1, companies: 2, endpoint: { state: 'unavailable-on-key', at, retryAt: '2026-10-28T10:00:00.000Z' } });
+    expect(status.symbols[0]?.consensus).toEqual({ outcome: 'ok', at, fetchedAt: at, source: 'eps-only' });
+  });
+
   it('counts the companies that wait for the provider\u2019s limit and gives the time of their next try', async () => {
     const { svc, repo } = service({ contact: CONTACT });
     const at = NOW.toISOString();
