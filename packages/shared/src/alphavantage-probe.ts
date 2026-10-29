@@ -95,7 +95,7 @@ export function probeSummary(outcome: ProbeOutcome, quarters?: number): string {
   }
 }
 
-const LIMITED: readonly ProbeOutcome[] = ['daily-limit', 'burst-limit', 'rate-limited'];
+const LIMITED: ReadonlySet<ProbeOutcome> = new Set<ProbeOutcome>(['daily-limit', 'burst-limit', 'rate-limited']);
 
 /** The words of an outcome in the side-by-side line: `ok, 80 quarters`, `refused (generic limit text)`. */
 export function probeShort(outcome: ProbeOutcome, quarters?: number): string {
@@ -145,7 +145,7 @@ function conclusionKind(estimates: ProbeOutcome, control: ProbeOutcome | undefin
   if (control === undefined) return estimates === 'daily-limit' ? 'throttled' : undefined;
   if (estimates === 'ok' && control === 'ok') return 'both-ok';
   if (control === 'ok' && (estimates === 'rate-limited' || estimates === 'premium')) return 'estimates-unavailable';
-  return LIMITED.includes(estimates) && LIMITED.includes(control) ? 'throttled' : 'inconclusive';
+  return LIMITED.has(estimates) && LIMITED.has(control) ? 'throttled' : 'inconclusive';
 }
 
 const count = z.number().int().nonnegative();

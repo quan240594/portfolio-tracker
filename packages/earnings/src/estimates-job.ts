@@ -253,7 +253,7 @@ async function guarded(call: () => Promise<EstimatesAnswer>): Promise<EstimatesA
 interface Asked {
   calls: number;
   stored: boolean;
-  stopped?: EstimatesResult['stoppedBy'];
+  stopped?: NonNullable<EstimatesResult['stoppedBy']>;
   /** The endpoint was noted as unavailable on the key in this step. */
   endpoint?: 'unavailable-on-key';
 }

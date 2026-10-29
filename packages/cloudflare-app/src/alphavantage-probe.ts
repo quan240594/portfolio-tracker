@@ -88,7 +88,7 @@ function said(answer: EstimatesAnswer): Said {
 }
 
 /** The answers that make a control call pointless: the day's quota is used, or the key is refused. */
-const NO_CONTROL: readonly ProbeOutcome[] = ['daily-limit', 'invalid-key'];
+const NO_CONTROL: ReadonlySet<ProbeOutcome> = new Set<ProbeOutcome>(['daily-limit', 'invalid-key']);
 
 /** The result of the test: the estimates answer, the control's (absent when it was not made), the two side by side and what they mean. */
 export function resultOf(answer: EstimatesAnswer, at: string, controlAnswer?: EstimatesAnswer): AlphaVantageProbeResult {
@@ -147,7 +147,7 @@ export function createAlphaVantageProbeApi({ items, config, now, fetch, pacer }:
 
   /** The control call (counted like the first): not made when the first answer makes it pointless or the allowance is gone. */
   async function controlOf(client: AlphaVantageEstimatesClient, first: ProbeOutcome, day: string): Promise<EstimatesAnswer | undefined> {
-    if (NO_CONTROL.includes(first)) return undefined;
+    if (NO_CONTROL.has(first)) return undefined;
     if (!(await ledger.consume(USAGE_KEY, USAGE_ENTITY, day, 1, config.dailyLimits.alphavantage))) return undefined;
     return client.fetchEarnings(PROBE_SYMBOL);
   }
