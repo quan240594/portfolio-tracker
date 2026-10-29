@@ -105,6 +105,44 @@ test.describe('Earnings summaries: every KPI template', () => {
   }
 });
 
+test.describe('Earnings summaries: dividend and share buybacks', () => {
+  for (const viewport of [320, 1280]) {
+    test(`shows the dividend raise with the buyback, and N/A for the company without either, without overflow at ${viewport} px`, async ({ page }) => {
+      await page.setViewportSize({ width: viewport, height: 900 });
+      await page.goto('/earnings');
+      const cards = page.getByRole('article');
+      await expect(cards).toHaveCount(2);
+
+      const bank = cards.nth(0).getByRole('list', { name: 'Dividend and share buybacks' });
+      await expect(bank.getByRole('listitem').nth(0)).toContainText('Dividend:');
+      await expect(bank.getByRole('listitem').nth(0)).toContainText('raised 4,2%');
+      await expect(bank.getByRole('listitem').nth(0)).toContainText('paid 27-11-2026 to holders of record 06-11-2026');
+      await expect(bank.locator('svg[data-icon="up"]')).toBeAttached();
+      await expect(bank.getByRole('listitem').nth(1)).toContainText('Share buybacks: repurchased $1.5B (24M shares) this quarter; $4.5B authorization remaining');
+
+      const saas = cards.nth(1).getByRole('list', { name: 'Dividend and share buybacks' });
+      await expect(saas.getByRole('listitem').nth(0)).toContainText('Dividend: N/A');
+      await expect(saas.getByText('No dividend announced')).toBeVisible();
+      await expect(saas.getByRole('listitem').nth(1)).toContainText('Share buybacks: N/A');
+      expect(await overflowing(page)).toEqual([]);
+    });
+
+    test(`says "not read yet" for summaries stored before, and shows how far the pass that reads them again is at ${viewport} px`, async ({ page }) => {
+      await page.setViewportSize({ width: viewport, height: 900 });
+      await page.addInitScript(() => sessionStorage.setItem('earnings-demo-unread', 'on'));
+      await page.goto('/earnings');
+      const cards = page.getByRole('article');
+      await expect(cards).toHaveCount(2);
+      for (const index of [0, 1]) await expect(cards.nth(index).getByRole('list', { name: 'Dividend and share buybacks' })).toContainText('Dividend and buyback: not read yet');
+      await expect(page.getByRole('list', { name: 'Dividend and share buybacks' }).getByText('N/A')).toHaveCount(0);
+      const section = page.locator('details', { hasText: 'What was checked' });
+      await section.locator('summary').click();
+      await expect(section.getByText(/Dividend and buyback: read for 3 of 8 stored quarters so far/)).toBeVisible();
+      expect(await overflowing(page)).toEqual([]);
+    });
+  }
+});
+
 test.describe('Earnings summaries: what was checked', () => {
   for (const viewport of [320, 1280]) {
     test(`says why nothing is stored, company by company, without overflow at ${viewport} px`, async ({ page }) => {

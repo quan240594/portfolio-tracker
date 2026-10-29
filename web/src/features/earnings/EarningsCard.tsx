@@ -20,6 +20,7 @@ import {
   scorecardNote,
   scorecardRows,
 } from './earningsModel';
+import { CapitalReturn } from './DividendBuyback';
 import { BasisBadge, VerdictChip } from './VerdictChip';
 
 const Period = ({ period }: Readonly<{ period: 'yoy' | 'qoq' }>) =>
@@ -296,6 +297,7 @@ export function EarningsCard({ summary, variant = 'full', withScope = (to) => to
       <div className="mt-4">
         <Scorecard summary={summary} labelledBy={headingId} />
         <GrowthList summary={summary} />
+        <CapitalReturn summary={summary} />
       </div>
       {variant === 'full' && <Details summary={summary} />}
       <p className="muted mt-4 text-xs">
