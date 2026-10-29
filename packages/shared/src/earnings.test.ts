@@ -14,7 +14,7 @@ import {
 } from './earnings.js';
 import { CURATED_TEMPLATE_TICKERS, hasEarnings, kpiTemplateFor } from './earnings-templates.js';
 import { buildEarningsNotification, formatCompactMoney, formatEarningsPct, formatMetricValue } from './earnings-format.js';
-import { sampleDemoSummaries, sampleSummary, sampleTemplateSummaries } from './earnings-sample.js';
+import { SAMPLE_EPS_ONLY_ENDPOINT, sampleDemoSummaries, sampleDemoSummariesEpsOnly, sampleSummary, sampleTemplateSummaries } from './earnings-sample.js';
 import { baselineEntries, detectDueNotifications, ledgerId, type DetectInput } from './notification-events.js';
 import { defaultNotificationSettings, effectiveNotificationSettings } from './notifications.js';
 import { classificationFieldsOf, classificationPutSchema, hasClassification } from './classification.js';
@@ -245,6 +245,19 @@ describe('the invented samples', () => {
     expect(saas!.origin).toBe('backfill');
     expect(sampleSummary().headline.fcf?.basis).toBe('calculated');
     expect(sampleSummary({ symbol: 'X' }).symbol).toBe('X');
+  });
+});
+
+describe('sampleDemoSummariesEpsOnly', () => {
+  it('has the EPS estimate only (no range, no analysts, no revenue), the free-plan reason for revenue, and one company on another EPS basis', () => {
+    const [bank, saas] = sampleDemoSummariesEpsOnly();
+    expect(bank!.consensus).toMatchObject({ eps: { average: 4.9, epsOnly: true, source: 'consensus' }, revenueReason: 'free-plan' });
+    expect(bank!.consensus?.eps).not.toHaveProperty('basisMismatch');
+    expect(bank!.consensus?.eps).not.toHaveProperty('analysts');
+    expect(bank!.consensus).not.toHaveProperty('revenue');
+    expect(saas!.consensus?.eps).toMatchObject({ epsOnly: true, basisMismatch: true });
+    expect(SAMPLE_EPS_ONLY_ENDPOINT.state).toBe('unavailable-on-key');
+    expect(sampleDemoSummariesEpsOnly().map((s) => s.symbol)).toEqual(sampleDemoSummaries().map((s) => s.symbol));
   });
 });
 

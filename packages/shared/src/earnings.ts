@@ -23,7 +23,7 @@
  * - POST /earnings/backfill            owner-triggered "fetch all now" (rescan all): re-derives the current holdings, drops the check state of sold ones, starts the backfill of every holding over, at most once per hour
  */
 import { z } from 'zod';
-import type { ConsensusOutcome, SummaryConsensus } from './earnings-consensus.js';
+import type { ConsensusEndpoint, ConsensusOutcome, SummaryConsensus } from './earnings-consensus.js';
 
 export const EARNINGS_ROUTES = {
   earningsList: 'GET /earnings',
@@ -520,7 +520,7 @@ export interface EarningsSymbolStatus {
   /** Quarterly releases of the backfill plan: how many exist and how many are stored. */
   releases?: { planned: number; stored: number; failed: number };
   /** What the consensus job last did for this company (additive: absent before its first attempt). */
-  consensus?: { outcome: ConsensusOutcome; at: string; detail?: string; fetchedAt?: string; retryAt?: string };
+  consensus?: { outcome: ConsensusOutcome; at: string; detail?: string; fetchedAt?: string; retryAt?: string; source?: 'eps-only' };
 }
 
 export type EarningsNotReady = 'sec-contact' | 'ai-binding';
@@ -549,6 +549,8 @@ export interface EarningsStatusResponse {
     blockedReason?: 'premium' | 'rate-limited';
     /** Eligible companies whose last attempt was `rate-limited`: they wait for the provider's limit to pass. */
     waiting?: number;
+    /** Set while the key cannot read `EARNINGS_ESTIMATES`: the figures are EPS-only (from the free `EARNINGS` function) and there is no revenue consensus. */
+    endpoint?: Pick<ConsensusEndpoint, 'state' | 'at' | 'retryAt'>;
   };
   /** The currently held symbols only (the same ones as the Dashboard's holdings). */
   symbols: EarningsSymbolStatus[];

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MemoryItemStore } from '@portfolio/platform';
 import { sequentially } from '@portfolio/shared';
 import { EstimateBudget, ESTIMATES_DAILY_CALLS, ESTIMATES_MIN_REMAINING } from './estimate-budget.js';
-import { AlphaVantageEstimatesClient, estimateTicker, parseEarningsEstimates } from './providers/estimates.js';
+import { AlphaVantageEstimatesClient, estimateTicker, parseEarnings, parseEarningsEstimates } from './providers/estimates.js';
 
 /** The shape of a real `EARNINGS_ESTIMATES` answer (a large company, demo key), cut to a few entries: strings with decimals, nulls, years and quarters mixed. */
 const REAL = {
@@ -121,6 +121,64 @@ describe('parseEarningsEstimates', () => {
   });
 });
 
+const EARNINGS_REAL = {
+  symbol: 'IBM',
+  annualEarnings: [{ fiscalDateEnding: '2025-12-31', reportedEPS: '10.9' }],
+  quarterlyEarnings: [
+    { fiscalDateEnding: '2026-06-30', reportedDate: '2026-07-22', reportedEPS: '2.43', estimatedEPS: '2.35', surprise: '0.08', surprisePercentage: '3.4043', reportTime: 'post-market' },
+    { fiscalDateEnding: '2026-09-30', reportedDate: '2026-10-21', reportedEPS: '2.18', estimatedEPS: '2.1', surprise: '0.08', surprisePercentage: '3.8095', reportTime: 'post-market' },
+    { fiscalDateEnding: '2026-03-31', reportedDate: '2026-04-22', reportedEPS: '1.91', estimatedEPS: 'None', surprise: 'None', surprisePercentage: 'None', reportTime: 'post-market' },
+    { fiscalDateEnding: '2025-12-31', reportedDate: '2026-01-28', reportedEPS: 'None', estimatedEPS: '4.32', surprise: 'None', surprisePercentage: 'None', reportTime: 'post-market' },
+    { fiscalDateEnding: '2025-12-31', reportedDate: '2026-01-29', reportedEPS: '4.52', estimatedEPS: '4.4', surprise: '0.12' },
+    { fiscalDateEnding: 'not a date', reportedEPS: '1', estimatedEPS: '1' },
+    'garbage',
+  ],
+};
+
+describe('parseEarnings: the free EARNINGS function', () => {
+  it('reads the EPS estimate of each past quarter, newest first, as EPS-only figures with the provider\u2019s reported EPS and surprise', () => {
+    expect(parseEarnings(EARNINGS_REAL)).toEqual({
+      status: 'ok',
+      available: 7,
+      quarters: [
+        { quarterEnd: '2026-09-30', eps: { average: 2.1 }, reportedEps: 2.18, providerSurprise: 0.08 },
+        { quarterEnd: '2026-06-30', eps: { average: 2.35 }, reportedEps: 2.43, providerSurprise: 0.08 },
+        { quarterEnd: '2025-12-31', eps: { average: 4.32 } },
+      ],
+    });
+  });
+
+  it('keeps at most the newest 12 quarters that carry an estimate, and counts every entry', () => {
+    const entries = Array.from({ length: 80 }, (_, index) => ({ fiscalDateEnding: `${2006 + Math.floor(index / 4)}-${['03-31', '06-30', '09-30', '12-31'][index % 4]}`, reportedEPS: '1', estimatedEPS: '1.1' }));
+    const answer = parseEarnings({ quarterlyEarnings: entries });
+    expect(answer).toMatchObject({ status: 'ok', available: 80 });
+    expect(answer.status === 'ok' && answer.quarters).toHaveLength(12);
+    expect(answer.status === 'ok' && answer.quarters[0]?.quarterEnd).toBe('2025-12-31');
+  });
+
+  it('is ok with no quarter when no entry has an estimate (the control still worked)', () => {
+    expect(parseEarnings({ quarterlyEarnings: [{ fiscalDateEnding: '2026-03-31', reportedEPS: '1', estimatedEPS: 'None' }] })).toEqual({ status: 'ok', quarters: [], available: 1 });
+  });
+
+  it('classifies refusals like the estimates endpoint: generic limit text, premium, a daily quota, a burst, a refused key', () => {
+    expect(parseEarnings({ Information: 'Thank you for using Alpha Vantage! Please contact premium@alphavantage.co if you are targeting a higher API call volume.' })).toMatchObject({ status: 'rate-limited', scope: 'other' });
+    expect(parseEarnings({ Information: 'This is a premium endpoint.' })).toMatchObject({ status: 'premium' });
+    expect(parseEarnings({ Note: 'Our standard API rate limit is 25 requests per day.' })).toMatchObject({ status: 'rate-limited', scope: 'daily' });
+    expect(parseEarnings({ Information: 'Burst pattern detected. Please spread out your requests (1 request per second).' })).toMatchObject({ status: 'rate-limited', scope: 'burst' });
+    expect(parseEarnings({ 'Error Message': 'the parameter apikey is invalid or missing' })).toMatchObject({ status: 'error', invalidKey: true });
+    expect(parseEarnings({ 'Error Message': 'Invalid API call.' })).toEqual({ status: 'no-coverage' });
+  });
+
+  it('says no coverage for an empty answer, an answer without quarters and an empty list; an error for anything else', () => {
+    expect(parseEarnings({})).toEqual({ status: 'no-coverage' });
+    expect(parseEarnings({ symbol: 'X', annualEarnings: [] })).toEqual({ status: 'no-coverage' });
+    expect(parseEarnings({ quarterlyEarnings: [] })).toEqual({ status: 'no-coverage' });
+    expect(parseEarnings({ symbol: 'X' })).toEqual({ status: 'error', reason: 'the answer has no list of quarterly earnings' });
+    expect(parseEarnings([])).toEqual({ status: 'error', reason: 'the answer was not a JSON object' });
+    expect(parseEarnings(null)).toEqual({ status: 'error', reason: 'the answer was not a JSON object' });
+  });
+});
+
 describe('estimateTicker', () => {
   it('uses a US ticker as it is, a class share with a dot, and a suffixed listing only through the alias table', () => {
     expect(estimateTicker('MSFT')).toEqual({ ticker: 'MSFT', via: 'direct' });
@@ -178,6 +236,27 @@ describe('AlphaVantageEstimatesClient', () => {
   it('lets the host\u2019s subrequest limit through: the step is deferred, it is not the provider\u2019s answer', async () => {
     const limit = Object.assign(new Error('Too many subrequests'), { name: 'SubrequestLimitError' });
     await expect(client(() => Promise.reject(limit)).fetchEstimates('X')).rejects.toBe(limit);
+  });
+
+  it('calls EARNINGS with the ticker and the key through the same pacing and failure mapping', async () => {
+    const urls: string[] = [];
+    const events: string[] = [];
+    const paced = new AlphaVantageEstimatesClient({
+      apiKey: 'KEY1',
+      fetch: async (url) => {
+        urls.push(url);
+        events.push('fetch');
+        return Response.json(EARNINGS_REAL);
+      },
+      pace: async () => {
+        events.push('pace');
+      },
+    });
+    expect(await paced.fetchEarnings('IBM')).toMatchObject({ status: 'ok', available: 7 });
+    expect(urls).toEqual(['https://www.alphavantage.co/query?function=EARNINGS&symbol=IBM&apikey=KEY1']);
+    expect(events).toEqual(['pace', 'fetch']);
+    expect(await client(respond('', { status: 429 })).fetchEarnings('X')).toMatchObject({ status: 'rate-limited', scope: 'other' });
+    expect(await client(respond('<html>')).fetchEarnings('X')).toEqual({ status: 'error', reason: 'the answer was not JSON' });
   });
 
   it('uses the default timeout without an option', async () => {

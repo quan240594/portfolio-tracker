@@ -10,6 +10,11 @@
  * | Consensus of one quarter   | TICKER#{symbol}  | EARNEST#{quarterEnd}    | EARNINGS_CONSENSUS         |
  * | Last fetch of a symbol     | TICKER#{symbol}  | EARNEST#STATE           | EARNINGS_CONSENSUS_STATE   |
  * | Provider block (global)    | EARNINGS         | ESTIMATES               | EARNINGS_CONSENSUS_BLOCK   |
+ * | Endpoint state (global)    | EARNINGS         | ESTIMATES#ENDPOINT      | EARNINGS_CONSENSUS_ENDPOINT |
+ *
+ * The free Alpha Vantage key may not read `EARNINGS_ESTIMATES` (it answers with generic limit text); the job then notes the endpoint as
+ * `unavailable-on-key` and fetches the free `EARNINGS` function instead, which has the EPS estimate of each past quarter and nothing else. Those
+ * rows have the same keys and shape, with `source: 'eps-only'`: EPS average only (no range, no analyst count), never revenue.
  *
  * `EARNEST#` shares no prefix with the calendar's `EARN#` or the summaries' `EARNSUM#`. Newest quarter sorts last (`reverse` gives the state
  * item first, then the newest quarters). Everything is additive: a deployment that never runs the job has none of these rows.
@@ -18,7 +23,7 @@ import { daysBetween, roundTo } from './analytics.js';
 import { fromItem } from './dynamo.js';
 import type { EarningsSummary, EarningsVerdict } from './earnings.js';
 
-export const CONSENSUS_ENTITY = { quarter: 'EARNINGS_CONSENSUS', state: 'EARNINGS_CONSENSUS_STATE', block: 'EARNINGS_CONSENSUS_BLOCK' } as const;
+export const CONSENSUS_ENTITY = { quarter: 'EARNINGS_CONSENSUS', state: 'EARNINGS_CONSENSUS_STATE', block: 'EARNINGS_CONSENSUS_BLOCK', endpoint: 'EARNINGS_CONSENSUS_ENDPOINT' } as const;
 
 export const consensusKeys = {
   quarter: (symbol: string, quarterEnd: string) => ({ PK: `TICKER#${symbol}`, SK: `EARNEST#${quarterEnd}` }),
@@ -26,6 +31,7 @@ export const consensusKeys = {
   tickerPk: (symbol: string) => `TICKER#${symbol}`,
   prefix: 'EARNEST#',
   block: { PK: 'EARNINGS', SK: 'ESTIMATES' },
+  endpoint: { PK: 'EARNINGS', SK: 'ESTIMATES#ENDPOINT' },
 } as const;
 
 /** The newest fiscal quarters kept from one fetch (the unreported ones and the last reported ones). */
@@ -34,6 +40,15 @@ export const CONSENSUS_KEEP_QUARTERS = 12;
 export const CONSENSUS_READ_LIMIT = CONSENSUS_KEEP_QUARTERS + 4;
 
 export const CONSENSUS_SOURCE_LABEL = 'Alpha Vantage';
+/** The provenance of EPS-only rows (stored as `ConsensusQuarter.source` / `ConsensusState.source`). */
+export const EPS_ONLY_SOURCE = 'eps-only';
+export type ConsensusRowSource = typeof EPS_ONLY_SOURCE;
+/** What the free `EARNINGS` function gives, in words (the label of the source of an EPS-only estimate). */
+export const EPS_ONLY_SOURCE_LABEL = 'Alpha Vantage EARNINGS (EPS only)';
+/** After this many days an endpoint noted as unavailable on the key is asked once again. */
+export const ENDPOINT_RETRY_DAYS = 7;
+/** A provider EPS that differs from the summary's actual by more than this share is on another basis (GAAP against adjusted). */
+export const EPS_BASIS_TOLERANCE = 0.05;
 
 /** One estimate: the mean of the analysts, the range and how many analysts there are. Money in whole currency units, EPS per share. */
 export interface ConsensusFigure {
@@ -53,6 +68,12 @@ export interface ConsensusQuarter {
   /** The provider ticker the figures were fetched under (a US ticker, through the alias table for another listing). */
   ticker: string;
   fetchedAt: string;
+  /** `eps-only`: from the free `EARNINGS` function (EPS average only); absent: from `EARNINGS_ESTIMATES`. */
+  source?: ConsensusRowSource;
+  /** `eps-only` rows: the EPS the provider recorded as reported, to tell the basis of the figure (GAAP or adjusted) apart. */
+  reportedEps?: number;
+  /** `eps-only` rows: the provider's own surprise (reported minus estimated): a cross-check only, beat or miss is computed from the summary. */
+  providerSurprise?: number;
 }
 
 export const CONSENSUS_OUTCOMES = ['ok', 'no-coverage', 'premium', 'rate-limited', 'error'] as const;
@@ -73,7 +94,22 @@ export interface ConsensusState {
   ticker?: string;
   /** Quarters stored by the last successful fetch. */
   quarters?: number;
+  /** `eps-only` when the last figures came from the free `EARNINGS` function. */
+  source?: ConsensusRowSource;
   updatedAt: string;
+}
+
+/**
+ * What the job knows about the `EARNINGS_ESTIMATES` endpoint for this key (`EARNINGS` / `ESTIMATES#ENDPOINT`): the key cannot read it (the provider answers
+ * with limit text although `EARNINGS` works). While `retryAt` is in the future the job uses `EARNINGS`; after it, it asks `EARNINGS_ESTIMATES` once more.
+ */
+export interface ConsensusEndpoint {
+  state: 'unavailable-on-key';
+  /** When it was noted. */
+  at: string;
+  retryAt: string;
+  /** The provider's sanitised words. */
+  detail?: string;
 }
 
 /** Why the job does not ask the provider (`EARNINGS` / `ESTIMATES`): the plan has no estimates, or the day's allowance is used. */
@@ -134,12 +170,16 @@ export interface EstimateSurprise {
 
 export interface ConsensusMetric extends ConsensusFigure {
   source: EstimateSource;
+  /** True for a consensus from the free `EARNINGS` function: EPS only, no range and no analyst count. */
+  epsOnly?: true;
+  /** Set when the provider's reported EPS differs from the summary's actual by more than 5 %: the two are probably on another basis (GAAP or adjusted). */
+  basisMismatch?: true;
   /** Absent when the summary has no actual for the figure. */
   surprise?: EstimateSurprise;
 }
 
 /** Why a figure has no estimate: shown instead of a bare "no estimate available". */
-export const CONSENSUS_REASONS = ['no-key', 'pending', 'no-coverage', 'premium', 'rate-limited', 'error', 'no-quarter', 'no-figure', 'mismatch'] as const;
+export const CONSENSUS_REASONS = ['no-key', 'pending', 'no-coverage', 'premium', 'rate-limited', 'error', 'no-quarter', 'no-figure', 'mismatch', 'free-plan'] as const;
 export type ConsensusReason = (typeof CONSENSUS_REASONS)[number];
 
 /** Additive view attached to a summary by the API (never stored). */
@@ -154,6 +194,8 @@ export interface SummaryConsensus {
   revenue?: ConsensusMetric;
   /** Set when at least one of the two has no estimate and the job record knows why. */
   reason?: ConsensusReason;
+  /** `free-plan` when there is no revenue estimate because the key only reads the free `EARNINGS` function: the reason of the revenue alone (`reason` is then about EPS, if at all). */
+  revenueReason?: 'free-plan';
   /** The sanitised detail of the last failed attempt (the provider's own words for a refusal). */
   detail?: string;
   /** For `rate-limited`: when the job tries again. */
@@ -176,6 +218,8 @@ export interface ConsensusInput {
   calendar?: readonly CalendarEstimate[];
   /** False when the deployment has no Alpha Vantage key: nothing will ever be fetched, which is not "pending". */
   keyed?: boolean;
+  /** The noted state of the estimates endpoint: `unavailable-on-key` means no revenue consensus will ever come. */
+  endpoint?: ConsensusEndpoint | null;
 }
 
 /** The nearest quarter within this many days is the fiscal quarter of a release whose period end is known. */
@@ -240,6 +284,19 @@ function metricOf(figure: ConsensusFigure, source: EstimateSource, actual: numbe
   return { ...figure, source, ...(surprise === undefined ? {} : { surprise }) };
 }
 
+/** Whether the provider's reported EPS is so far from the summary's actual that they are on another basis (GAAP against adjusted). */
+export function basisDiffers(providerEps: number | undefined, actual: number | undefined): boolean {
+  if (providerEps === undefined || actual === undefined) return false;
+  return Math.abs(providerEps - actual) > Math.max(Math.abs(actual), 0.01) * EPS_BASIS_TOLERANCE;
+}
+
+/** The EPS figure of a stored quarter, with the provenance of an EPS-only row and the check of its basis; beat or miss always uses the summary's actual. */
+function epsMetricOf(quarter: ConsensusQuarter, figure: ConsensusFigure, actual: number | undefined): ConsensusMetric {
+  const metric = metricOf(figure, 'consensus', actual);
+  if (quarter.source !== EPS_ONLY_SOURCE) return metric;
+  return { ...metric, epsOnly: true, ...(basisDiffers(quarter.reportedEps, actual) ? { basisMismatch: true as const } : {}) };
+}
+
 /** Whether the actual revenue is of the size the estimate expects (a different currency or company is off by a large factor). */
 function plausible(revenue: number | undefined, estimate: ConsensusFigure | undefined): boolean {
   if (revenue === undefined || estimate === undefined || estimate.average <= 0 || revenue <= 0) return true;
@@ -269,6 +326,15 @@ function reasonOf(state: ConsensusState | null | undefined, matched: boolean, mi
   return { reason: state.outcome, ...(state.detail === undefined ? {} : { detail: state.detail }), ...(state.retryAt === undefined ? {} : { retryAt: state.retryAt }) };
 }
 
+/** The EPS estimate: the matched quarter's, else the one the release was stored with, then the calendar's. */
+function epsOf(summary: EarningsSummary, usable: ConsensusQuarter | undefined, event: CalendarEstimate | undefined): ConsensusMetric | undefined {
+  if (usable?.eps === undefined) return releaseEps(summary) ?? calendarEps(summary, event);
+  return epsMetricOf(usable, usable.eps, summary.headline.eps?.value);
+}
+
+/** Whether the key only reads the free `EARNINGS` function (the matched quarter is EPS-only, or the endpoint is noted unavailable): there is no revenue consensus at all, said once as such. */
+const readsEpsOnly = (usable: ConsensusQuarter | undefined, endpoint: ConsensusEndpoint | null | undefined): boolean => usable?.source === EPS_ONLY_SOURCE || endpoint?.state === 'unavailable-on-key';
+
 /**
  * The summary with its estimates attached (`consensus`). The EPS estimate is the stored consensus of the matching fiscal quarter; without one,
  * the estimate the release was stored with, then the calendar's. Revenue only has the consensus. Beat or miss is computed against the actual of
@@ -280,9 +346,10 @@ export function attachConsensus(summary: EarningsSummary, input: ConsensusInput)
   const quarter = matchQuarter(summary, input.quarters, event?.fiscalPeriodEnd);
   const mismatch = quarter !== undefined && !plausible(summary.headline.revenue?.value, quarter.revenue);
   const usable = mismatch ? undefined : quarter;
-  const eps = usable?.eps === undefined ? (releaseEps(summary) ?? calendarEps(summary, event)) : metricOf(usable.eps, 'consensus', summary.headline.eps?.value);
+  const eps = epsOf(summary, usable, event);
   const revenue = usable?.revenue === undefined ? undefined : metricOf(usable.revenue, 'consensus', summary.headline.revenue?.value);
-  const missing = eps === undefined || revenue === undefined;
+  const freePlan = readsEpsOnly(usable, input.endpoint);
+  const missing = eps === undefined || (revenue === undefined && !freePlan);
   const why = missing ? reasonOf(input.state, usable !== undefined, mismatch, input.keyed ?? true) : undefined;
   const consensus: SummaryConsensus = {
     provider: CONSENSUS_SOURCE_LABEL,
@@ -290,6 +357,7 @@ export function attachConsensus(summary: EarningsSummary, input: ConsensusInput)
     ...(eps === undefined ? {} : { eps }),
     ...(revenue === undefined ? {} : { revenue }),
     ...why,
+    ...(revenue === undefined && freePlan ? { revenueReason: 'free-plan' as const } : {}),
   };
   return { ...summary, consensus };
 }
