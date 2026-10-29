@@ -13,6 +13,7 @@ import {
   majorEod,
   majorQuote,
   transactionItem,
+  type ConsensusEndpoint,
   type ConsensusQuarter,
   type ConsensusState,
   type DividendEvent,
@@ -77,6 +78,8 @@ export interface Repository {
   getEarningsSummary(symbol: string, reportDate: string): Promise<EarningsSummary | null>;
   /** The stored analyst consensus of a symbol: its newest quarters and the outcome of the last fetch (see consensusKeys). */
   getConsensus(symbol: string): Promise<{ quarters: ConsensusQuarter[]; state: ConsensusState | null }>;
+  /** Whether the consensus job found that the key cannot read `EARNINGS_ESTIMATES` (it then stores EPS-only figures); null when it did not. */
+  getConsensusEndpoint(): Promise<ConsensusEndpoint | null>;
   registerUser(userId: string): Promise<void>;
   /** `currency` may be omitted when unknown (watchlist symbols). */
   trackTickers(tickers: { symbol: string; currency?: string }[]): Promise<void>;
@@ -218,6 +221,11 @@ export class ItemRepository implements Repository {
   async getConsensus(symbol: string): Promise<{ quarters: ConsensusQuarter[]; state: ConsensusState | null }> {
     const page = await this.store.query({ pk: consensusKeys.tickerPk(symbol), sk: { beginsWith: consensusKeys.prefix }, reverse: true, limit: CONSENSUS_READ_LIMIT });
     return readConsensusItems(page.items);
+  }
+
+  async getConsensusEndpoint(): Promise<ConsensusEndpoint | null> {
+    const item = await this.store.get(consensusKeys.endpoint);
+    return item ? fromItem<ConsensusEndpoint>(item) : null;
   }
 
   registerUser(userId: string): Promise<void> {

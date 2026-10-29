@@ -10,6 +10,7 @@ import {
   fromItem,
   readConsensusItems,
   type ConsensusBlock,
+  type ConsensusEndpoint,
   type ConsensusQuarter,
   type ConsensusState,
   type EarningsBackfillMarker,
@@ -137,5 +138,19 @@ export class EarningsRepository {
   /** Forgets the pause (and its repeat count): the provider answered with figures again. */
   async clearConsensusBlock(): Promise<void> {
     await this.store.batchWrite([{ type: 'delete', key: consensusKeys.block }]);
+  }
+
+  async getConsensusEndpoint(): Promise<ConsensusEndpoint | null> {
+    const item = await this.store.get(consensusKeys.endpoint, { consistent: true });
+    return item ? fromItem<ConsensusEndpoint>(item) : null;
+  }
+
+  async putConsensusEndpoint(endpoint: ConsensusEndpoint): Promise<void> {
+    await this.store.put({ ...consensusKeys.endpoint, entityType: CONSENSUS_ENTITY.endpoint, ...dropUndefined(endpoint) });
+  }
+
+  /** Forgets that the endpoint was unavailable: `EARNINGS_ESTIMATES` answered with figures again. */
+  async clearConsensusEndpoint(): Promise<void> {
+    await this.store.batchWrite([{ type: 'delete', key: consensusKeys.endpoint }]);
   }
 }

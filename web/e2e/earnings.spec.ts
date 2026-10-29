@@ -72,6 +72,23 @@ for (const viewport of [
       expect(await overflowing(page)).toEqual([]);
     });
 
+    test('shows the EPS-only consensus of a free Alpha Vantage key: expected EPS with its source, revenue n/a with one plan reason, no overflow', async ({ page }) => {
+      await page.addInitScript(() => sessionStorage.setItem('earnings-demo-eps-only', 'on'));
+      await page.goto('/earnings');
+      const cards = page.getByRole('article');
+      await expect(cards).toHaveCount(2);
+      const bank = cards.nth(0);
+      await expect(bank.getByText('Consensus: Alpha Vantage (EPS only, no analyst count)')).toBeVisible();
+      await expect(bank.getByText('In line').first()).toBeVisible();
+      await expect(bank.getByText('Revenue consensus is not available on the free data plan')).toHaveCount(1);
+      await expect(bank.getByText(/retries automatically|limiting requests/)).toHaveCount(0);
+      await expect(bank.getByText('Provider EPS basis may differ')).toHaveCount(0);
+      const saas = cards.nth(1);
+      await expect(saas.getByText('Provider EPS basis may differ')).toBeVisible();
+      await expect(saas.getByText(/analysts\)/)).toHaveCount(0);
+      expect(await overflowing(page)).toEqual([]);
+    });
+
     test('filters by company with the chips and opens the page of one company', async ({ page }) => {
       await page.goto('/earnings');
       await expect(page.getByRole('article')).toHaveCount(2);
@@ -175,6 +192,16 @@ test.describe('Earnings summaries: what was checked', () => {
       await section.locator('summary').click();
       await expect(section.getByText(/8 of 8 releases read/)).toBeVisible();
       await expect(section.getByText('Consensus estimates: 2 of 2 companies.')).toBeVisible();
+      expect(await overflowing(page)).toEqual([]);
+    });
+
+    test(`says EPS estimates and that revenue needs a paid plan when the key cannot read the estimates, at ${viewport} px`, async ({ page }) => {
+      await page.setViewportSize({ width: viewport, height: 900 });
+      await page.addInitScript(() => sessionStorage.setItem('earnings-demo-eps-only', 'on'));
+      await page.goto('/earnings');
+      const section = page.locator('details', { hasText: 'What was checked' });
+      await section.locator('summary').click();
+      await expect(section.getByText('EPS estimates: 2 of 2 companies (revenue estimates need a paid plan).')).toBeVisible();
       expect(await overflowing(page)).toEqual([]);
     });
   }

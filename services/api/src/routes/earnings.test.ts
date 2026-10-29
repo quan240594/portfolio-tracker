@@ -152,6 +152,27 @@ describe('the analyst consensus on a summary', () => {
     expect((await keyless.call('GET', '/earnings/NWND/2026-10-21')).body.consensus.reason).toBe('premium');
   });
 
+  it('joins EPS-only figures with the provenance flag and a revenue reason of the free plan, and a basis mismatch note when the provider\u2019s EPS is another basis', async () => {
+    const { call, hold, summary, repo } = setup();
+    hold('NWND');
+    summary('NWND', '2026-10-21');
+    summary('NWND', '2026-07-22');
+    repo.consensusEndpoint = { state: 'unavailable-on-key', at: '2026-10-21T08:20:00.000Z', retryAt: '2026-10-28T08:20:00.000Z' };
+    repo.consensusQuarters.push(
+      NWND({ eps: { average: 6.45 }, revenue: undefined, source: 'eps-only', reportedEps: 6.9 }),
+      NWND({ quarterEnd: '2026-06-30', eps: { average: 7 }, revenue: undefined, source: 'eps-only', reportedEps: 9.9 }),
+    );
+    const { body } = (await call('GET', '/earnings')) as { body: EarningsListResponse };
+    expect(body.summaries[0]?.consensus).toEqual({
+      provider: 'Alpha Vantage',
+      quarterEnd: '2026-09-30',
+      asOf: '2026-10-12T06:20:00.000Z',
+      eps: { average: 6.45, source: 'consensus', epsOnly: true, surprise: { amount: 0.47, pct: 7.3, verdict: 'beat' } },
+      revenueReason: 'free-plan',
+    });
+    expect(body.summaries[1]?.consensus?.eps).toMatchObject({ epsOnly: true, basisMismatch: true });
+  });
+
   it('leaves the summaries as they are when the consensus cannot be read', async () => {
     const { call, hold, summary, repo } = setup();
     hold('NWND');

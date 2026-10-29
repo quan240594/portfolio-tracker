@@ -2,7 +2,7 @@
  * INVENTED sample summaries: fictional companies and made-up numbers, for the public demo (mock mode) and for tests. Nothing here is a real
  * company's result.
  */
-import { attachConsensus, type ConsensusFigure, type ConsensusState } from './earnings-consensus.js';
+import { attachConsensus, EPS_ONLY_SOURCE, type ConsensusEndpoint, type ConsensusFigure, type ConsensusQuarter, type ConsensusState } from './earnings-consensus.js';
 import { EARNINGS_SCHEMA_VERSION, KPI_TEMPLATES, KPI_TEMPLATE_IDS, type EarningsKpi, type EarningsMetric, type EarningsSummary, type KpiTemplateId } from './earnings.js';
 
 const metric = (value: number, unit: EarningsMetric['unit'], extra: Partial<EarningsMetric> = {}): EarningsMetric => ({ value, unit, ...extra });
@@ -147,6 +147,30 @@ export function sampleDemoSummaries(): EarningsSummary[] {
     { symbol: 'HBRB', outcome: 'ok', at: '2026-10-12T06:20:00.000Z', fetchedAt: '2026-10-12T06:20:00.000Z', ticker: 'HBRB', quarters: 1, updatedAt: '2026-10-12T06:20:00.000Z' },
   );
   return [bank, saas];
+}
+
+/** The state a free key has: it cannot read `EARNINGS_ESTIMATES`, the figures are EPS-only (invented times). */
+export const SAMPLE_EPS_ONLY_ENDPOINT: ConsensusEndpoint = { state: 'unavailable-on-key', at: '2026-10-25T06:30:00.000Z', retryAt: '2026-11-01T06:30:00.000Z', detail: 'Thank you for using Alpha Vantage! Please contact premium@alphavantage.co if you are targeting a higher API call volume.' };
+
+/**
+ * The two demo summaries as a free Alpha Vantage key gives them: only the EPS estimate (no range, no analyst count, no revenue). The provider's EPS of the
+ * first company is the one of the summary; the second's is on another basis (GAAP against the summary's adjusted EPS), so its card shows the basis note.
+ */
+export function sampleDemoSummariesEpsOnly(): EarningsSummary[] {
+  const providerEps: Readonly<Record<string, number>> = { HBRB: 4.88, CLDV: 1.7 };
+  return sampleDemoSummaries().map((summary) => {
+    const { consensus, ...base } = summary;
+    const quarter: ConsensusQuarter = {
+      symbol: summary.symbol,
+      quarterEnd: consensus?.quarterEnd ?? '2026-09-30',
+      ticker: summary.symbol,
+      fetchedAt: '2026-10-25T06:30:00.000Z',
+      source: EPS_ONLY_SOURCE,
+      ...(consensus?.eps === undefined ? {} : { eps: { average: consensus.eps.average } }),
+      ...(providerEps[summary.symbol] === undefined ? {} : { reportedEps: providerEps[summary.symbol] }),
+    };
+    return attachConsensus(base, { quarters: [quarter], endpoint: SAMPLE_EPS_ONLY_ENDPOINT });
+  });
 }
 
 /** One invented summary per KPI template (every second slot filled, the others left empty) for visual checks of all templates. */

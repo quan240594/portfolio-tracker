@@ -87,12 +87,13 @@ export function notCountedText(status: EarningsStatusResponse): string | undefin
 
 /**
  * `Consensus estimates: 18 of 26 companies.` and, when the job waits, why: the free plan has no estimates, or Alpha Vantage is limiting requests (with
- * how many companies wait for it). Absent on a deployment without the field.
+ * how many companies wait for it). When the key cannot read the estimates endpoint the figures are EPS-only: `EPS estimates: 18 of 26 companies (revenue
+ * estimates need a paid plan).` Absent on a deployment without the field.
  */
 export function consensusText(status: EarningsStatusResponse): string | undefined {
   const { consensus } = status;
   if (consensus === undefined) return undefined;
-  const base = `Consensus estimates: ${consensus.covered} of ${consensus.companies} companies.`;
+  const base = consensus.endpoint === undefined ? `Consensus estimates: ${consensus.covered} of ${consensus.companies} companies.` : `EPS estimates: ${consensus.covered} of ${consensus.companies} companies (revenue estimates need a paid plan).`;
   if (!status.estimatesConfigured) return `${base} They need an Alpha Vantage key (the ALPHAVANTAGE_API_KEY secret).`;
   const waiting = consensus.waiting ?? 0;
   const noun = waiting === 1 ? 'company is' : 'companies are';

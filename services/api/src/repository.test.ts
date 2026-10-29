@@ -266,4 +266,12 @@ describe('ItemRepository registry and imports', () => {
     expect(found.state).toEqual({ symbol: 'A', outcome: 'ok', at, updatedAt: at });
     expect(await repo.getConsensus('NOPE')).toEqual({ quarters: [], state: null });
   });
+
+  it('getConsensusEndpoint reads the noted state of the estimates endpoint, null when there is none', async () => {
+    const { items, repo } = setup();
+    expect(await repo.getConsensusEndpoint()).toBeNull();
+    const endpoint = { state: 'unavailable-on-key', at: '2026-10-29T10:00:00.000Z', retryAt: '2026-11-05T10:00:00.000Z' };
+    await items.put({ PK: 'EARNINGS', SK: 'ESTIMATES#ENDPOINT', entityType: 'EARNINGS_CONSENSUS_ENDPOINT', ...endpoint });
+    expect(await repo.getConsensusEndpoint()).toEqual(endpoint);
+  });
 });

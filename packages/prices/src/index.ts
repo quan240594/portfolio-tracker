@@ -8,7 +8,7 @@ export { providerOf, routeOf } from './symbols.js';
 export type { FxLatest, FxSource, PriceBatch, PriceSource, QuoteFailure } from './providers/base.js';
 export { AlphaVantageProvider } from './providers/alphavantage.js';
 export { AlphaVantageEarnings, EodhdCorporateActions, alphaVantageSymbol, earningsTargets, parseEarningsCsv, parseEarningsRows, parseSplitRatio, parseSplits } from './providers/calendar.js';
-export { AlphaVantageEstimatesClient, estimateTicker, parseEarningsEstimates, type EstimateLimit, type EstimateQuarter, type EstimatesAnswer, type EstimatesClientOptions } from './providers/estimates.js';
+export { AlphaVantageEstimatesClient, estimateTicker, parseEarnings, parseEarningsEstimates, type EstimateLimit, type EstimateQuarter, type EstimatesAnswer, type EstimatesClientOptions } from './providers/estimates.js';
 export { BURST_RETRY_MS, INVALID_KEY_RETRY_MS, NOTICE_MAX, OTHER_RETRY_MS, classifyNotice, errorMessageOf, nextDayStartMs, noticeOf, resumeAtMs, sanitizeNotice, type AlphaVantageNotice, type NoticeKind } from './providers/av-notice.js';
 export { ALPHAVANTAGE_MIN_GAP_MS, ProviderPacer, pacedFetch, type ProviderPacerOptions } from './pacer.js';
 export { ESTIMATES_DAILY_CALLS, ESTIMATES_MIN_REMAINING, EstimateBudget, type EstimateBudgetOptions, type EstimateRoom } from './estimate-budget.js';

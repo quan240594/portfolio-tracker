@@ -1,12 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { probeSummary, type AlphaVantageProbeStatus, type RunAlphaVantageProbeResponse } from '@portfolio/shared';
+import { probeComparison, probeConclusion, probeSummary, type AlphaVantageProbeStatus, type RunAlphaVantageProbeResponse } from '@portfolio/shared';
 import { USE_MOCKS } from '../../config';
 import { fetchAlphaVantageProbe, runAlphaVantageProbe, type ProbeOutcomeResponse } from './alphaVantageProbeClient';
 import type { DiagnosticsAvailability } from './useAlarmDiagnostics';
 
 export const ALPHAVANTAGE_PROBE_QUERY_KEY = ['diagnostics', 'alphavantage-probe'] as const;
 
-/** What the demo and the mock mode show: the answer of a free key that hits a limit, as a sample. No request is made. */
+const SAMPLE_CONTROL = { call: 'EARNINGS', outcome: 'ok', summary: probeSummary('ok', 80), quarters: 80 } as const;
+
+/** What the demo and the mock mode show: the answers of a free key that cannot read the estimates but reads EARNINGS, as a sample. No request is made. */
 export const SAMPLE_PROBE: RunAlphaVantageProbeResponse = {
   at: '2026-10-29T08:20:00.000Z',
   symbol: 'IBM',
@@ -14,7 +16,10 @@ export const SAMPLE_PROBE: RunAlphaVantageProbeResponse = {
   outcome: 'rate-limited',
   summary: probeSummary('rate-limited'),
   message: 'Thank you for using Alpha Vantage! Please contact premium@alphavantage.co if you are targeting a higher API call volume.',
-  budget: { provider: 'Alpha Vantage', day: '2026-10-29', used: 3, limit: 25, remaining: 22, calendarUsed: 1, calendarLimit: 1 },
+  control: SAMPLE_CONTROL,
+  comparison: probeComparison({ outcome: 'rate-limited' }, SAMPLE_CONTROL),
+  conclusion: probeConclusion('rate-limited', 'ok'),
+  budget: { provider: 'Alpha Vantage', day: '2026-10-29', used: 4, limit: 25, remaining: 21, calendarUsed: 1, calendarLimit: 1 },
 };
 
 const SAMPLE_STATUS: AlphaVantageProbeStatus = { available: true, reason: null, nextAllowedAt: null, budget: SAMPLE_PROBE.budget, last: null, sample: true };

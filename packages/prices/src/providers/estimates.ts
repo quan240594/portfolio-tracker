@@ -22,13 +22,16 @@ export interface EstimateQuarter {
   quarterEnd: string;
   eps?: ConsensusFigure;
   revenue?: ConsensusFigure;
+  /** From `EARNINGS` (`parseEarnings`) only: the EPS the provider recorded as reported, and its own surprise (a cross-check, never the beat or miss). */
+  reportedEps?: number;
+  providerSurprise?: number;
 }
 
 /** The kind of limit a `rate-limited` answer is: the day's quota, a burst (too fast), or a notice that is neither (`other`). */
 export type EstimateLimit = Extract<NoticeKind, 'daily' | 'burst' | 'other'>;
 
 export type EstimatesAnswer =
-  | { status: 'ok'; quarters: EstimateQuarter[] }
+  | { status: 'ok'; quarters: EstimateQuarter[]; /** `EARNINGS` only: quarterly entries in the answer, before the keep limit and whether or not they carry an estimate. */ available?: number }
   | { status: 'no-coverage' }
   | { status: 'premium'; detail?: string }
   | { status: 'rate-limited'; scope?: EstimateLimit; detail?: string }
@@ -112,6 +115,52 @@ function answerFor(kind: NoticeKind, message: string): EstimatesAnswer {
   return { status: 'rate-limited', scope: kind, detail: message };
 }
 
+// --- The free `EARNINGS` function: EPS estimate per past quarter, nothing else ----------------------------------------------
+
+const earningsEntrySchema = z.object({
+  fiscalDateEnding: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  reportedEPS: lenient,
+  estimatedEPS: lenient,
+  surprise: lenient,
+});
+
+const earningsAnswerSchema = z.object({ quarterlyEarnings: z.array(z.unknown()) });
+
+/**
+ * What an `EARNINGS` answer says, as EPS-only quarters (the average is `estimatedEPS`; there is no range, no analyst count and no revenue). The free
+ * key reads this function. Abbreviated, values are strings and a missing one is `"None"`:
+ * `{ "symbol": "IBM", "annualEarnings": [...], "quarterlyEarnings": [ { "fiscalDateEnding": "2026-03-31", "reportedDate": "2026-04-22",
+ *   "reportedEPS": "1.91", "estimatedEPS": "1.81", "surprise": "0.1", "surprisePercentage": "5.5249", "reportTime": "post-market" }, ... ] }`
+ * `available` counts every quarterly entry (about 80); `quarters` are the newest `CONSENSUS_KEEP_QUARTERS` that carry an estimate. Never throws.
+ */
+export function parseEarnings(json: unknown): EstimatesAnswer {
+  if (!isRecord(json)) return { status: 'error', reason: 'the answer was not a JSON object' };
+  const refusal = refusalOf(json);
+  if (refusal !== undefined) return refusal;
+  const answer = earningsAnswerSchema.safeParse(json);
+  if (!answer.success) return Object.keys(json).length === 0 || 'annualEarnings' in json ? { status: 'no-coverage' } : { status: 'error', reason: 'the answer has no list of quarterly earnings' };
+  if (answer.data.quarterlyEarnings.length === 0) return { status: 'no-coverage' };
+  return { status: 'ok', quarters: epsQuartersOf(answer.data.quarterlyEarnings), available: answer.data.quarterlyEarnings.length };
+}
+
+function epsQuartersOf(entries: readonly unknown[]): EstimateQuarter[] {
+  const seen = new Set<string>();
+  const quarters: EstimateQuarter[] = [];
+  for (const raw of entries) {
+    const parsed = earningsEntrySchema.safeParse(raw);
+    if (!parsed.success || parsed.data.estimatedEPS === undefined || seen.has(parsed.data.fiscalDateEnding)) continue;
+    const { fiscalDateEnding, estimatedEPS, reportedEPS, surprise } = parsed.data;
+    seen.add(fiscalDateEnding);
+    quarters.push({
+      quarterEnd: fiscalDateEnding,
+      eps: { average: estimatedEPS },
+      ...(reportedEPS === undefined ? {} : { reportedEps: reportedEPS }),
+      ...(surprise === undefined ? {} : { providerSurprise: surprise }),
+    });
+  }
+  return quarters.toSorted((a, b) => b.quarterEnd.localeCompare(a.quarterEnd)).slice(0, CONSENSUS_KEEP_QUARTERS);
+}
+
 /** What an `EARNINGS_ESTIMATES` answer says. Never throws: anything unexpected is an `error` with a short reason. */
 export function parseEarningsEstimates(json: unknown): EstimatesAnswer {
   if (!isRecord(json)) return { status: 'error', reason: 'the answer was not a JSON object' };
@@ -154,9 +203,18 @@ export class AlphaVantageEstimatesClient {
   constructor(private readonly options: EstimatesClientOptions) {}
 
   /** One call: the consensus of a ticker. Budgeting is the caller's (`EstimateBudget`). */
-  async fetchEstimates(ticker: string): Promise<EstimatesAnswer> {
+  fetchEstimates(ticker: string): Promise<EstimatesAnswer> {
+    return this.request('EARNINGS_ESTIMATES', ticker, parseEarningsEstimates);
+  }
+
+  /** One call: the EPS estimates of the past quarters of a ticker, from the free `EARNINGS` function (EPS only). Budgeting is the caller's. */
+  fetchEarnings(ticker: string): Promise<EstimatesAnswer> {
+    return this.request('EARNINGS', ticker, parseEarnings);
+  }
+
+  private async request(fn: 'EARNINGS' | 'EARNINGS_ESTIMATES', ticker: string, parse: (json: unknown) => EstimatesAnswer): Promise<EstimatesAnswer> {
     const { apiKey, timeoutMs = DEFAULT_TIMEOUT_MS } = this.options;
-    const url = `${ALPHAVANTAGE_URL}?function=EARNINGS_ESTIMATES&symbol=${encodeURIComponent(ticker)}&apikey=${encodeURIComponent(apiKey)}`;
+    const url = `${ALPHAVANTAGE_URL}?function=${fn}&symbol=${encodeURIComponent(ticker)}&apikey=${encodeURIComponent(apiKey)}`;
     await this.options.pace?.();
     let response: Response;
     try {
@@ -168,7 +226,7 @@ export class AlphaVantageEstimatesClient {
     if (response.status === 429) return { status: 'rate-limited', scope: 'other', detail: 'the provider answered 429 (too many requests)' };
     if (!response.ok) return { status: 'error', reason: `the provider answered ${response.status}` };
     try {
-      return parseEarningsEstimates(await response.json());
+      return parse(await response.json());
     } catch {
       return { status: 'error', reason: 'the answer was not JSON' };
     }

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { EstimatesAnswer } from '@portfolio/prices';
 import { sampleSummary, type ConsensusQuarter, type ConsensusState, type EarningsHolding, type EarningsSummary } from '@portfolio/shared';
 import { ESTIMATES_CALLS_PER_RUN, ESTIMATES_STEP_DELAY_MS, estimateTier, planEstimates, type EstimateSubject } from './estimates-job.js';
-import { FakeEstimates, SAMPLE_ESTIMATES } from './testing/fake-estimates.js';
+import { FakeEstimates, SAMPLE_EARNINGS, SAMPLE_ESTIMATES } from './testing/fake-estimates.js';
 import { earningsHarness, NOW, type EarningsHarness } from './testing/harness.js';
 
 const DAY = 86_400_000;
@@ -141,20 +141,13 @@ describe('the earningsEstimates job', () => {
     expect(await runJob(h)).toMatchObject({ fetched: 1 });
   });
 
-  it('records a premium notice, stops the run and does not ask again for a week', async () => {
-    const fake = new FakeEstimates({ SA: { status: 'premium' } }, SAMPLE_ESTIMATES);
+  it('notes a premium notice as an endpoint the key cannot read, and uses EARNINGS for the rest of the run instead of pausing', async () => {
+    const fake = new FakeEstimates({ SA: { status: 'premium', detail: 'This is a premium endpoint.' } }, SAMPLE_ESTIMATES, { fallback: SAMPLE_EARNINGS });
     const h = earningsHarness({ holdings: symbols(4), consensus: fake });
-    expect(await runJob(h)).toEqual({ fetched: 1, stored: 0, stoppedBy: 'premium' });
-    expect(fake.calls).toEqual(['SA']);
-    expect(await consensusState(h, 'SA')).toMatchObject({ outcome: 'premium' });
-    expect(await h.repo.getConsensusBlock()).toMatchObject({ reason: 'premium', until: '2026-10-28T19:30:00.000Z' });
-    expect(await runJob(h)).toEqual({ fetched: 0, stored: 0, skipped: 'blocked' });
-    h.clock.advance(6 * DAY);
-    expect(await runJob(h)).toEqual({ fetched: 0, stored: 0, skipped: 'blocked' });
-    h.clock.advance(2 * DAY);
-    const result = await runJob(h);
-    expect(result).toMatchObject({ fetched: 3 });
-    expect(fake.calls.slice(1)).toEqual(['SB', 'SC', 'SD']);
+    expect(await runJob(h)).toEqual({ fetched: 3, stored: 2, endpoint: 'unavailable-on-key' });
+    expect(fake.order).toEqual(['EARNINGS_ESTIMATES:SA', 'EARNINGS:SA', 'EARNINGS:SB']);
+    expect(await h.repo.getConsensusBlock()).toBeNull();
+    expect(await h.repo.getConsensusEndpoint()).toEqual({ state: 'unavailable-on-key', at: NOW.toISOString(), retryAt: iso(NOW.getTime() + 7 * DAY), detail: 'This is a premium endpoint.' });
   });
 
   it('records a daily limit, stops the run and tries again after the next UTC midnight', async () => {

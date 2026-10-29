@@ -3,6 +3,7 @@ import { sampleSummary } from './earnings-sample.js';
 import {
   QUARTER_MATCH_DAYS,
   attachConsensus,
+  basisDiffers,
   classifyBeat,
   consensusKeys,
   matchQuarter,
@@ -170,12 +171,76 @@ describe('attachConsensus', () => {
   });
 });
 
+describe('attachConsensus with EPS-only rows (the free EARNINGS function)', () => {
+  const summary = sampleSummary();
+  const epsOnly = (extra: Partial<ConsensusQuarter> = {}): ConsensusQuarter => quarter('2026-09-30', { eps: { average: 6.45 }, source: 'eps-only', reportedEps: 6.92, providerSurprise: 0.47, ...extra });
+  const unavailable = { state: 'unavailable-on-key', at: '2026-10-12T06:20:00.000Z', retryAt: '2026-10-19T06:20:00.000Z' } as const;
+
+  it('joins the EPS estimate with the provenance flag and computes the beat itself against the summary\u2019s actual', () => {
+    const joined = attachConsensus(summary, { quarters: [epsOnly()], state: state({ source: 'eps-only' }) });
+    expect(joined.consensus?.eps).toEqual({ average: 6.45, source: 'consensus', epsOnly: true, surprise: { amount: 0.47, pct: 7.3, verdict: 'beat' } });
+    expect(joined.consensus?.eps).not.toHaveProperty('analysts');
+    expect(joined.consensus?.eps).not.toHaveProperty('basisMismatch');
+    expect(joined.consensus?.provider).toBe('Alpha Vantage');
+  });
+
+  it('says once that revenue has no consensus on the free plan, and has no retry reason for it', () => {
+    const joined = attachConsensus(summary, { quarters: [epsOnly()], state: state({ source: 'eps-only' }) });
+    expect(joined.consensus?.revenue).toBeUndefined();
+    expect(joined.consensus?.revenueReason).toBe('free-plan');
+    expect(joined.consensus?.reason).toBeUndefined();
+  });
+
+  it('uses the stored surprise of the provider for nothing: a provider that says miss does not turn our beat into one', () => {
+    const joined = attachConsensus(summary, { quarters: [epsOnly({ providerSurprise: -0.5 })] });
+    expect(joined.consensus?.eps?.surprise?.verdict).toBe('beat');
+  });
+
+  it('flags a basis mismatch when the provider\u2019s reported EPS is more than 5 % from the actual (GAAP against adjusted)', () => {
+    expect(attachConsensus(summary, { quarters: [epsOnly({ reportedEps: 7.5 })] }).consensus?.eps?.basisMismatch).toBe(true);
+    expect(attachConsensus(summary, { quarters: [epsOnly({ reportedEps: 6.6 })] }).consensus?.eps).not.toHaveProperty('basisMismatch');
+    expect(attachConsensus(summary, { quarters: [epsOnly({ reportedEps: undefined })] }).consensus?.eps).not.toHaveProperty('basisMismatch');
+    expect(attachConsensus(summary, { quarters: [quarter('2026-09-30', { eps: EPS, reportedEps: 1 })] }).consensus?.eps).not.toHaveProperty('basisMismatch');
+  });
+
+  it('compares the basis against the actual with a floor for a tiny actual, and finds nothing without both figures', () => {
+    expect(basisDiffers(0.0, 0.0)).toBe(false);
+    expect(basisDiffers(0.02, 0.0)).toBe(true);
+    expect(basisDiffers(-1.04, -1)).toBe(false);
+    expect(basisDiffers(-1.2, -1)).toBe(true);
+    expect(basisDiffers(undefined, 1)).toBe(false);
+    expect(basisDiffers(1, undefined)).toBe(false);
+  });
+
+  it('keeps the revenue reason for a summary with no matching quarter while the endpoint is unavailable, next to the reason for EPS', () => {
+    const joined = attachConsensus(summary, { quarters: [], state: null, endpoint: unavailable });
+    expect(joined.consensus?.revenueReason).toBe('free-plan');
+    expect(joined.consensus?.eps).toMatchObject({ source: 'release' });
+    expect(joined.consensus?.reason).toBeUndefined();
+    const plain = sampleSummary({ headline: { eps: { value: 6.92, unit: 'perShare' } } });
+    expect(attachConsensus(plain, { quarters: [], state: null, endpoint: unavailable }).consensus).toMatchObject({ reason: 'pending', revenueReason: 'free-plan' });
+  });
+
+  it('says nothing about the plan when the endpoint works or was never judged', () => {
+    expect(attachConsensus(summary, { quarters: [quarter('2026-09-30', { eps: EPS, revenue: REVENUE })], endpoint: null }).consensus?.revenueReason).toBeUndefined();
+    expect(attachConsensus(summary, { quarters: [quarter('2026-09-30', { eps: EPS })], endpoint: null }).consensus).toMatchObject({ reason: 'no-figure' });
+  });
+
+  it('prefers a full row of the quarter (stored before the key lost the endpoint) with its revenue', () => {
+    const joined = attachConsensus(summary, { quarters: [quarter('2026-09-30', { eps: EPS, revenue: REVENUE })], endpoint: unavailable });
+    expect(joined.consensus?.revenue).toMatchObject({ source: 'consensus' });
+    expect(joined.consensus?.revenueReason).toBeUndefined();
+  });
+});
+
 describe('storage', () => {
   it('keeps its keys apart from the calendar and the summaries', () => {
     expect(consensusKeys.quarter('NWND', '2026-09-30')).toEqual({ PK: 'TICKER#NWND', SK: 'EARNEST#2026-09-30' });
     expect(consensusKeys.state('NWND')).toEqual({ PK: 'TICKER#NWND', SK: 'EARNEST#STATE' });
     expect(consensusKeys.state('NWND').SK.startsWith('EARN#')).toBe(false);
     expect(consensusKeys.state('NWND').SK.startsWith('EARNSUM#')).toBe(false);
+    expect(consensusKeys.endpoint).toEqual({ PK: 'EARNINGS', SK: 'ESTIMATES#ENDPOINT' });
+    expect(consensusKeys.endpoint.SK).not.toBe(consensusKeys.block.SK);
   });
 
   it('reads the rows of a symbol into its quarters and its state', () => {

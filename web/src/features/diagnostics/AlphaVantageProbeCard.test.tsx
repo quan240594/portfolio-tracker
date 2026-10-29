@@ -69,6 +69,30 @@ describe('Alpha Vantage test card', () => {
     expect(posts).toEqual(['asked']);
   });
 
+  it('shows both outcomes side by side and the plain conclusion, and the words of the control when it was refused', async () => {
+    const conclusion = { kind: 'estimates-unavailable', text: 'Your key can read EARNINGS but not EARNINGS_ESTIMATES: estimates (and revenue consensus) need a paid Alpha Vantage plan.' };
+    const comparison = 'EARNINGS_ESTIMATES: refused (generic limit text) / EARNINGS: ok, 80 quarters';
+    const control = { call: 'EARNINGS', outcome: 'ok', summary: 'ok: 80 quarters', quarters: 80 };
+    serve(status(), () => HttpResponse.json({ ...result({ outcome: 'rate-limited', summary: 'rate limit (unspecified): the provider asked to slow down', message: VOLUME, quarters: undefined, control, comparison, conclusion }), budget: { ...budget, used: 4 } }));
+    const user = userEvent.setup();
+    const section = await card();
+    await user.click(within(section).getByRole('button', { name: 'Test Alpha Vantage now' }));
+    expect(await within(section).findByText(conclusion.text)).toBeInTheDocument();
+    expect(within(section).getByText(comparison)).toBeInTheDocument();
+    expect(within(section).getByText(VOLUME)).toBeInTheDocument();
+    expect(within(section).getByText(/EARNINGS_ESTIMATES and EARNINGS for IBM, /)).toBeInTheDocument();
+    expect(within(section).queryByText(/Alpha Vantage says \(EARNINGS\)/)).not.toBeInTheDocument();
+  });
+
+  it('shows what Alpha Vantage said to the control call when it was refused too', async () => {
+    const control = { call: 'EARNINGS', outcome: 'rate-limited', summary: 'rate limit (unspecified): the provider asked to slow down', message: VOLUME };
+    serve(status({ last: result({ outcome: 'rate-limited', summary: 'x', message: VOLUME, control, comparison: 'EARNINGS_ESTIMATES: refused (generic limit text) / EARNINGS: refused (generic limit text)', conclusion: { kind: 'throttled', text: 'Both calls were limited: you are being throttled, try later.' } }) }));
+    const section = await card();
+    expect(within(section).getByText('Both calls were limited: you are being throttled, try later.')).toBeInTheDocument();
+    expect(within(section).getByText(/Alpha Vantage says \(EARNINGS\)/)).toBeInTheDocument();
+    expect(within(section).getAllByText(VOLUME)).toHaveLength(2);
+  });
+
   it('shows the last result of an earlier test and a good outcome as good news', async () => {
     serve(status({ last: result() }));
     const section = await card();
@@ -132,6 +156,8 @@ describe('Alpha Vantage test card in mock mode', () => {
     await user.click(within(section).getByRole('button', { name: 'Test Alpha Vantage now' }));
     expect(await within(section).findByText(/Sample, no call was made\./)).toBeInTheDocument();
     expect(within(section).getByText(/higher API call volume/)).toBeInTheDocument();
+    expect(within(section).getByText(/Your key can read EARNINGS but not EARNINGS_ESTIMATES/)).toBeInTheDocument();
+    expect(within(section).getByText('EARNINGS_ESTIMATES: refused (generic limit text) / EARNINGS: ok, 80 quarters')).toBeInTheDocument();
     expect(posts).toEqual([]);
   });
 

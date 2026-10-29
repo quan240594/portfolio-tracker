@@ -80,9 +80,10 @@ You need a Cloudflare account on the Free plan and a GitHub account. Every comma
    "Refresh earnings dates now" (`POST /api/diagnostics/earnings-dates/refresh`) queues the calendar job once; it is refused within an hour of the last ask and when fewer than 3 Alpha Vantage calls are left
    today. See `docs/architecture.md`, "Earnings dates diagnostics".
 
-   **Alpha Vantage test.** Settings > Diagnostics > Alpha Vantage (`GET`/`POST /api/diagnostics/alphavantage-probe`): "Test Alpha Vantage now" makes one real `EARNINGS_ESTIMATES` call for IBM with your key and
-   shows what Alpha Vantage answered (figures, premium endpoint, daily or burst limit, invalid key) in its own words. It costs one of the 25 daily calls, runs at most once per 10 minutes and is refused when
-   fewer than 3 calls are left. See `docs/architecture.md`, "Alpha Vantage refusals, pacing and the test".
+   **Alpha Vantage test.** Settings > Diagnostics > Alpha Vantage (`GET`/`POST /api/diagnostics/alphavantage-probe`): "Test Alpha Vantage now" makes one real `EARNINGS_ESTIMATES` call for IBM with your key and,
+   1.5 s later, a control call of the free `EARNINGS` function. It shows what Alpha Vantage answered to each (figures, premium endpoint, daily or burst limit, invalid key) in its own words, side by side, with a plain
+   conclusion (the key reads `EARNINGS` but not the estimates, you are throttled, or both work). It costs two of the 25 daily calls, runs at most once per 10 minutes and is refused when
+   fewer than 4 calls are left. See `docs/architecture.md`, "Alpha Vantage refusals, pacing and the test".
 
    **What to expect from free keys.** The free plans are small (Twelve Data: 8 credits a minute, `/profile` is not included; EODHD: 20 calls a
    day). The price jobs know that: they keep the minute and day usage in the database, remember a "limit reached" answer until the limit resets
@@ -151,13 +152,13 @@ You need a Cloudflare account on the Free plan and a GitHub account. Every comma
    ```
    Without `SEC_CONTACT` nothing is sent to the SEC and `/earnings` says "not configured". The `ai` binding (`AI`) is already in `wrangler.jsonc` and needs no key or paid plan
    (Free plan: 10,000 neurons a day; the app stops at 80 % and never goes past it; a request over the allowance would fail, not bill). Optional: the secret
-   `ALPHAVANTAGE_API_KEY` of step 7 also gives the **analyst consensus** (expected EPS and revenue with range and number of analysts, and the beat/miss): the job `earningsEstimates` makes at most 8 calls a day, one per held company in order of need, and none when fewer than 5 of the 25 a day are left; without the key, or when the plan does not include the function, each cell says why;
+   `ALPHAVANTAGE_API_KEY` of step 7 also gives the **analyst consensus** (expected EPS and revenue with range and number of analysts, and the beat/miss): the job `earningsEstimates` makes at most 8 calls a day, one per held company in order of need, and none when fewer than 5 of the 25 a day are left; without the key, or when the plan does not include the function, each cell says why. A free key usually cannot read `EARNINGS_ESTIMATES` (Alpha Vantage answers with generic limit text); the job then finds that out with a control call and uses the free `EARNINGS` function: the cards show the expected EPS ("Alpha Vantage, EPS only, no analyst count") with beat/miss, and revenue says "Revenue consensus is not available on the free data plan";
    variables `EARNINGS_AI_MODEL` (default `@cf/meta/llama-3.1-8b-instruct-fp8`), `EARNINGS_AI_DAILY_NEURONS` (default 6000, at most 8000) and `EARNINGS_BACKFILL_QUARTERS` (default 4, at most 8).
    The first scheduled step after the deploy starts a **backfill**: the latest `EARNINGS_BACKFILL_QUARTERS` quarterly releases of **every** held company, newest first across all companies (silently, no push,
    except a release from the last 48 hours), one release per step every 15 minutes, within the daily AI allowance: with about 20 companies that is about 80 releases, one to four days. The Earnings page shows the progress
    ("34 of 80 releases read, resumes at 00:00 UTC when the daily AI allowance is used up"), one line per company about what stopped it ("What was checked", open while there is nothing to show) and a **Fetch all now**
    button (once an hour: a rescan of your current holdings that also retries releases that failed; sold positions are neither listed nor checked). Only the public release text goes to Workers AI, never your
-   portfolio. Revenue and guidance consensus have no free source and are never shown. Details, cost and limits: `docs/architecture.md`, "Earnings summaries".
+   portfolio. Revenue and guidance consensus have no free source and are never shown (the cards say so). Details, cost and limits: `docs/architecture.md`, "Earnings summaries".
 
 Until the variables and secrets are valid, every API and sign-in route answers 503 `NOT_CONFIGURED` naming the missing
 variable (never a value); `/health` and the static app keep working.

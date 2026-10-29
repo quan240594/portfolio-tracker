@@ -79,6 +79,7 @@ function Scorecard({ summary, labelledBy }: Readonly<{ summary: EarningsSummary;
                 {row.analysts && <span className="muted ml-1 text-xs">({row.analysts})</span>}
                 {row.range && <span className="muted block text-xs tabular-nums">{row.range}</span>}
                 {row.source && <span className="muted block text-[11px]">{row.source}</span>}
+                {row.basisNote && <span className="muted block text-[11px]">{row.basisNote}</span>}
               </td>
               <td className="px-3 py-2 font-semibold tabular-nums max-sm:block max-sm:px-0 max-sm:py-0.5" data-label="Actual">
                 <span className="muted mr-2 font-normal sm:hidden">Actual</span>

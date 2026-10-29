@@ -10,6 +10,7 @@ import {
   formatCompactMoney,
   type ConsensusMetric,
   type ConsensusReason,
+  type SummaryConsensus,
   type EstimateSurprise,
   type CoreMetricKey,
   type EarningsBasis,
@@ -84,7 +85,13 @@ export const REASON_TEXT: Readonly<Record<ConsensusReason, string>> = {
   'no-quarter': 'The data provider has no estimate for this quarter',
   'no-figure': 'The data provider has no estimate for this figure',
   mismatch: 'The estimates did not match the size of the reported figures, so they are not shown',
+  'free-plan': 'Revenue consensus is not available on the free data plan',
 };
+
+/** The source line of an EPS-only consensus (the free `EARNINGS` function): there is no analyst count to show. */
+export const EPS_ONLY_SOURCE_TEXT = `Consensus: ${CONSENSUS_SOURCE_LABEL} (EPS only, no analyst count)`;
+/** Shown when the provider's reported EPS is far from the summary's actual: the two are probably on another basis (GAAP or adjusted). */
+export const BASIS_MISMATCH_NOTE = 'Provider EPS basis may differ';
 
 const SOURCE_TEXT: Readonly<Record<ConsensusMetric['source'], string>> = {
   consensus: `Consensus: ${CONSENSUS_SOURCE_LABEL}`,
@@ -125,8 +132,10 @@ export interface ScorecardRow {
   range?: string;
   /** `12 analysts`. */
   analysts?: string;
-  /** `Consensus: Alpha Vantage`. */
+  /** `Consensus: Alpha Vantage`, or `Consensus: Alpha Vantage (EPS only, no analyst count)`. */
   source?: string;
+  /** `Provider EPS basis may differ`: the provider's reported EPS is more than 5 % from the actual of the card. */
+  basisNote?: string;
   /** Text of the actual cell, or "not disclosed". */
   actual: string;
   disclosed: boolean;
@@ -159,7 +168,12 @@ function missingText(summary: EarningsSummary, key: string): string {
   const { consensus } = summary;
   if (consensus === undefined) return NO_ESTIMATE;
   if (key !== 'eps' && key !== 'revenue') return 'Consensus covers EPS and revenue only';
-  return consensus.reason === undefined ? NO_ESTIMATE : NOT_AVAILABLE;
+  return reasonFor(consensus, key) === undefined ? NO_ESTIMATE : NOT_AVAILABLE;
+}
+
+/** The reason a figure has no estimate: revenue may have its own (the free plan has none), else the one of the summary. */
+function reasonFor(consensus: SummaryConsensus, key: string): ConsensusReason | undefined {
+  return key === 'revenue' && consensus.revenueReason !== undefined ? consensus.revenueReason : consensus.reason;
 }
 
 function rangeText(estimate: ConsensusMetric, unit: MetricUnit, currency: string): string | undefined {
@@ -174,14 +188,15 @@ function surpriseParts(surprise: EstimateSurprise | undefined, unit: MetricUnit,
   return { verdict: surprise.verdict, beat: text, ...pct };
 }
 
-function estimateParts(estimate: ConsensusMetric, unit: MetricUnit, currency: string): Pick<ScorecardRow, 'range' | 'analysts' | 'source' | 'beat' | 'surprise' | 'verdict'> {
+function estimateParts(estimate: ConsensusMetric, unit: MetricUnit, currency: string): Pick<ScorecardRow, 'range' | 'analysts' | 'source' | 'basisNote' | 'beat' | 'surprise' | 'verdict'> {
   const range = rangeText(estimate, unit, currency);
   const noun = estimate.analysts === 1 ? 'analyst' : 'analysts';
   const analysts = estimate.analysts === undefined ? undefined : `${estimate.analysts} ${noun}`;
   return {
     ...(range === undefined ? {} : { range }),
     ...(analysts === undefined ? {} : { analysts }),
-    source: SOURCE_TEXT[estimate.source],
+    source: estimate.epsOnly === true ? EPS_ONLY_SOURCE_TEXT : SOURCE_TEXT[estimate.source],
+    ...(estimate.basisMismatch === true ? { basisNote: BASIS_MISMATCH_NOTE } : {}),
     ...surpriseParts(estimate.surprise, unit, currency),
   };
 }
@@ -211,12 +226,16 @@ export function scorecardRows(summary: EarningsSummary): ScorecardRow[] {
  */
 export function scorecardNote(summary: EarningsSummary, now: Date = new Date()): string | undefined {
   const { consensus } = summary;
-  if (consensus?.reason === undefined) return undefined;
+  if (consensus === undefined) return undefined;
   const rows = scorecardRows(summary);
   const lacking = rows.filter((row) => row.expected === NOT_AVAILABLE);
-  if (lacking.length === 0) return undefined;
-  const text = reasonText(consensus.reason, consensus.detail, consensus.retryAt, now);
-  return lacking.length === rows.length ? text : `${lacking.map((row) => row.label).join(' and ')}: ${text}`;
+  const reasons = lacking.map((row) => ({ label: row.label, reason: reasonFor(consensus, row.key) }));
+  const known = reasons.flatMap(({ label, reason }) => (reason === undefined ? [] : [{ label, text: reasonText(reason, consensus.detail, consensus.retryAt, now), own: reason === 'free-plan' }]));
+  if (known.length === 0) return undefined;
+  // One line when every figure without an estimate has the same reason; a reason that names its own figure (revenue, free plan) needs no label.
+  const texts = new Set(known.map((entry) => entry.text));
+  if (texts.size === 1 && known.length === rows.length) return known[0]!.text;
+  return known.map(({ label, text, own }) => (own ? text : `${label}: ${text}`)).join('. ');
 }
 
 export interface GrowthLine {

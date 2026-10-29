@@ -13,8 +13,8 @@ export async function getAlphaVantageProbe(ctx: RouteContext): Promise<RouteResu
 }
 
 /**
- * `POST /diagnostics/alphavantage-probe`: one real `EARNINGS_ESTIMATES` call for a fixed ticker, and what Alpha Vantage said. 404 where the deployment has
- * no such test, 503 without a key, 429 when it ran less than 10 minutes ago or fewer than 3 of the day's calls are left.
+ * `POST /diagnostics/alphavantage-probe`: one real `EARNINGS_ESTIMATES` call for a fixed ticker and an `EARNINGS` control call, and what Alpha Vantage said to each
+ * with the conclusion. 404 where the deployment has no such test, 503 without a key, 429 when it ran less than 10 minutes ago or fewer than 4 of the day's calls are left.
  */
 export async function runAlphaVantageProbe(ctx: RouteContext): Promise<RouteResult> {
   const { alphaVantageProbe } = ctx.deps;

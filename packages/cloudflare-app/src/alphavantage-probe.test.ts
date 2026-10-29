@@ -14,7 +14,26 @@ const ESTIMATES = {
   ],
 };
 
-function setup(options: { env?: Record<string, string>; used?: number; reply?: unknown | Error; day?: string; store?: MemoryItemStore } = {}) {
+const EARNINGS = {
+  symbol: 'IBM',
+  quarterlyEarnings: Array.from({ length: 80 }, (_, index) => ({ fiscalDateEnding: `${2006 + Math.floor(index / 4)}-${['03-31', '06-30', '09-30', '12-31'][index % 4]}`, reportedEPS: '1.2', estimatedEPS: index % 5 === 0 ? 'None' : '1.1' })),
+};
+const GENERIC = { Information: 'Thank you for using Alpha Vantage! Please contact premium@alphavantage.co if you are targeting a higher API call volume.' };
+
+interface SetupOptions {
+  env?: Record<string, string>;
+  used?: number;
+  /** The answer to EARNINGS_ESTIMATES. */
+  reply?: unknown | Error;
+  /** The answer to the control call (EARNINGS). */
+  control?: unknown | Error;
+  day?: string;
+  store?: MemoryItemStore;
+  /** The allowance is gone once the first call was answered (another request spent it). */
+  exhaustAfterFirst?: boolean;
+}
+
+function setup(options: SetupOptions = {}) {
   const items = options.store ?? new MemoryItemStore();
   let at = NOW;
   items.load([{ PK: 'USAGE', SK: 'alphavantage', entityType: 'PROVIDER_USAGE', day: options.day ?? '2026-10-29', used: options.used ?? 2 }]);
@@ -23,7 +42,10 @@ function setup(options: { env?: Record<string, string>; used?: number; reply?: u
   const fetch = vi.fn((url: string) => {
     urls.push(url);
     events.push('fetch');
-    return options.reply instanceof Error ? Promise.reject(options.reply) : Promise.resolve(Response.json(options.reply ?? ESTIMATES));
+    const control = url.includes('function=EARNINGS&');
+    const reply = control ? (options.control ?? EARNINGS) : (options.reply ?? ESTIMATES);
+    if (options.exhaustAfterFirst === true && !control) items.load([{ PK: 'USAGE', SK: 'alphavantage', entityType: 'PROVIDER_USAGE', day: '2026-10-29', used: 25 }]);
+    return reply instanceof Error ? Promise.reject(reply) : Promise.resolve(Response.json(reply));
   });
   const pacer = {
     wait: (provider: string) => {
@@ -48,17 +70,72 @@ describe('createAlphaVantageProbeApi', () => {
     });
   });
 
-  it('makes one paced call for IBM with the real key, counts it, and answers with the quarters', async () => {
+  it('makes two paced calls for IBM with the real key (the estimates, then the EARNINGS control), counts both, and answers with both outcomes', async () => {
     const { api, urls, events, items } = setup();
     const outcome = await api.run();
-    expect(urls).toEqual(['https://www.alphavantage.co/query?function=EARNINGS_ESTIMATES&symbol=IBM&apikey=av-secret']);
-    expect(events).toEqual(['pace alphavantage', 'fetch']);
+    expect(urls).toEqual([
+      'https://www.alphavantage.co/query?function=EARNINGS_ESTIMATES&symbol=IBM&apikey=av-secret',
+      'https://www.alphavantage.co/query?function=EARNINGS&symbol=IBM&apikey=av-secret',
+    ]);
+    expect(events).toEqual(['pace alphavantage', 'fetch', 'pace alphavantage', 'fetch']);
     expect(outcome).toMatchObject({
       accepted: true,
-      result: { at: NOW.toISOString(), symbol: 'IBM', call: 'EARNINGS_ESTIMATES', outcome: 'ok', summary: 'ok: 2 quarters', quarters: 2, budget: { used: 3, remaining: 22 } },
+      result: {
+        at: NOW.toISOString(),
+        symbol: 'IBM',
+        call: 'EARNINGS_ESTIMATES',
+        outcome: 'ok',
+        summary: 'ok: 2 quarters',
+        quarters: 2,
+        control: { call: 'EARNINGS', outcome: 'ok', summary: 'ok: 80 quarters', quarters: 80 },
+        comparison: 'EARNINGS_ESTIMATES: ok, 2 quarters / EARNINGS: ok, 80 quarters',
+        conclusion: { kind: 'both-ok' },
+        budget: { used: 4, remaining: 21 },
+      },
     });
-    expect(await items.get({ PK: 'USAGE', SK: 'alphavantage' })).toMatchObject({ used: 3 });
+    expect(await items.get({ PK: 'USAGE', SK: 'alphavantage' })).toMatchObject({ used: 4 });
     expect(JSON.stringify(outcome)).not.toContain('av-secret');
+  });
+
+  it('concludes that the key cannot read the estimates when only the control works (the generic limit text of the owner\u2019s phone)', async () => {
+    const { api } = setup({ reply: GENERIC });
+    const outcome = await api.run();
+    expect(outcome).toMatchObject({
+      accepted: true,
+      result: {
+        outcome: 'rate-limited',
+        summary: 'rate limit (unspecified): the provider asked to slow down',
+        control: { call: 'EARNINGS', outcome: 'ok', quarters: 80 },
+        comparison: 'EARNINGS_ESTIMATES: refused (generic limit text) / EARNINGS: ok, 80 quarters',
+        conclusion: { kind: 'estimates-unavailable', text: expect.stringContaining('Your key can read EARNINGS but not EARNINGS_ESTIMATES: estimates (and revenue consensus) need a paid Alpha Vantage plan') },
+      },
+    });
+    expect(await api.status()).toMatchObject({ last: { conclusion: { kind: 'estimates-unavailable' }, control: { outcome: 'ok' } } });
+  });
+
+  it('concludes a throttle when both calls are refused, and cannot tell when they disagree otherwise', async () => {
+    expect(await setup({ reply: GENERIC, control: GENERIC }).api.run()).toMatchObject({ result: { comparison: 'EARNINGS_ESTIMATES: refused (generic limit text) / EARNINGS: refused (generic limit text)', conclusion: { kind: 'throttled' } } });
+    expect(await setup({ control: GENERIC }).api.run()).toMatchObject({ result: { conclusion: { kind: 'inconclusive' } } });
+    expect(await setup({ reply: GENERIC, control: new Error('network') }).api.run()).toMatchObject({ result: { control: { outcome: 'error' }, conclusion: { kind: 'inconclusive' } } });
+  });
+
+  it('makes no control call when the first answer is the daily quota or a refused key, and counts one call', async () => {
+    const daily = setup({ reply: { Information: 'Our standard API rate limit is 25 requests per day.' } });
+    const outcome = await daily.api.run();
+    expect(daily.urls).toHaveLength(1);
+    expect(outcome).toMatchObject({ accepted: true, result: { outcome: 'daily-limit', comparison: 'EARNINGS_ESTIMATES: refused (daily limit)', conclusion: { kind: 'throttled' }, budget: { used: 3 } } });
+    expect((outcome as unknown as { result: Record<string, unknown> }).result).not.toHaveProperty('control');
+    const key = setup({ reply: { Information: 'the parameter apikey is invalid or missing.' } });
+    const refused = await key.api.run();
+    expect(key.urls).toHaveLength(1);
+    expect((refused as unknown as { result: Record<string, unknown> }).result).not.toHaveProperty('conclusion');
+  });
+
+  it('makes no control call when the allowance is gone after the first one', async () => {
+    const { api, urls } = setup({ reply: GENERIC, exhaustAfterFirst: true });
+    const outcome = await api.run();
+    expect(urls).toHaveLength(1);
+    expect((outcome as unknown as { result: Record<string, unknown> }).result).not.toHaveProperty('control');
   });
 
   it('keeps the result for the next status and refuses a second run within ten minutes, with the time to ask again', async () => {
@@ -67,26 +144,27 @@ describe('createAlphaVantageProbeApi', () => {
     advance(4 * 60_000);
     const refused = await api.run();
     expect(refused).toEqual({ accepted: false, reason: 'rate-limited', message: 'The test ran at 09:00 UTC; you can run it again after 09:10 UTC (once every 10 minutes).', retryAfterSeconds: 360 });
-    expect(urls).toHaveLength(1);
+    expect(urls).toHaveLength(2);
     expect(await api.status()).toMatchObject({ available: false, nextAllowedAt: '2026-10-29T09:10:00.000Z', last: { outcome: 'ok', quarters: 2 } });
     advance(7 * 60_000);
     expect(await api.run()).toMatchObject({ accepted: true });
-    expect(urls).toHaveLength(2);
+    expect(urls).toHaveLength(4);
   });
 
-  it('is refused when fewer than three of the 25 calls are left, without a call', async () => {
+  it('is refused when fewer than four of the 25 calls are left (the test needs two), without a call', async () => {
     const { api, urls } = setup({ used: 23 });
     const refused = await api.run();
     expect(refused).toMatchObject({ accepted: false, reason: 'budget-low', retryAfterSeconds: 54_000 });
     expect(refused.accepted === false && refused.message).toContain('23 of 25');
     expect(urls).toEqual([]);
     expect(await api.status()).toMatchObject({ available: false, nextAllowedAt: '2026-10-30T00:00:00.000Z' });
-    expect(await setup({ used: 22 }).api.run()).toMatchObject({ accepted: true });
+    expect(await setup({ used: 22 }).api.run()).toMatchObject({ accepted: false, reason: 'budget-low' });
+    expect(await setup({ used: 21 }).api.run()).toMatchObject({ accepted: true });
   });
 
   it('counts a call of another day as unused', async () => {
     const { api } = setup({ used: 25, day: '2026-10-28' });
-    expect(await api.run()).toMatchObject({ accepted: true, result: { budget: { used: 1 } } });
+    expect(await api.run()).toMatchObject({ accepted: true, result: { budget: { used: 2 } } });
   });
 
   it('is refused without a key, and says so in the status', async () => {
