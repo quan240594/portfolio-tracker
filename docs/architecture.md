@@ -4084,9 +4084,9 @@ attempt was rate-limited) and per-symbol `consensus.retryAt`; the summary's `con
 call. The consensus job makes one call per step and the steps are `ESTIMATES_STEP_DELAY_MS` = 60 s apart (the alarm queue honours `delayMs` as a due time, no sleeping); at most 3 calls a run, 8 a day.
 
 **The test** (Settings > Diagnostics > "Alpha Vantage", `GET`/`POST /diagnostics/alphavantage-probe`, `packages/cloudflare-app/src/alphavantage-probe.ts`, `ALPHAVANTAGE_PROBE_ROUTES` in
-`@portfolio/shared`): "Test Alpha Vantage now" makes one real `EARNINGS_ESTIMATES` call for `IBM` with the real key and shows `ok: N quarters`, `premium endpoint: the free key cannot use it`,
-`rate limit (daily | burst | unspecified)`, `invalid key`, `no data` or `error`, with the provider's sanitised words. It costs one call of the shared `USAGE/alphavantage` counter, is refused (429,
-`details.reason` `rate-limited` or `budget-low`, with `Retry-After`) within 10 minutes of the last test and when fewer than 3 of the 25 calls are left, 503 without a key, 404 on the AWS stack
+`@portfolio/shared`): "Test Alpha Vantage now" makes a real `EARNINGS_ESTIMATES` call for `IBM` with the real key (and, since the section "Free key: EPS consensus from `EARNINGS`", an `EARNINGS` control call) and shows `ok: N quarters`, `premium endpoint: the free key cannot use it`,
+`rate limit (daily | burst | unspecified)`, `invalid key`, `no data` or `error`, with the provider's sanitised words. It costs one call (two with the control) of the shared `USAGE/alphavantage` counter, is refused (429,
+`details.reason` `rate-limited` or `budget-low`, with `Retry-After`) within 10 minutes of the last test and when fewer than 4 of the 25 calls are left, 503 without a key, 404 on the AWS stack
 (`Deps.alphaVantageProbe` is absent; the GET then answers `available: false`). The ask is recorded before the call, so a second click while it is out is refused. The last result is kept
 (`DIAGNOSTICS/ALPHAVANTAGE#PROBE`). Mock mode shows a sample and never calls.
 
@@ -4165,3 +4165,47 @@ and repurchases, no dividend, buyback only, a cut, messy wording), `pnpm --filte
 What only the live deployment can show: whether the real Workers AI model (`llama-3.1-8b-instruct-fp8`, not on the JSON Mode list) fills the new fields reliably. Check the VICI card first (a
 raised dividend and repurchases): the `dividend`/`buyback` lines, and `verification.droppedFields` (`dividend.*`, `buyback.*`) of its summary; a `not-found` line means the model missed an amount the
 release states.
+
+## Free key: EPS consensus from `EARNINGS` (October 2026)
+
+**What the owner's phone showed.** One `EARNINGS_ESTIMATES` request for IBM, with 6 of 25 requests used and more than 1.5 s after any other call, was answered with "Thank you for using Alpha
+Vantage! Please contact premium@alphavantage.co if you are targeting a higher API call volume." while the daily calendar call and the profile enrichment worked with the same key and the same egress.
+That is not our volume or burst: Alpha Vantage answers premium-only endpoints on a free key with generic limit text. So the free key reads `EARNINGS` (the long-standing free fundamentals set) but
+not `EARNINGS_ESTIMATES`, and every card said "Alpha Vantage is limiting requests". There is no free revenue consensus at all.
+
+**Diagnose** (`alphavantage-probe.ts`, contract in `packages/shared/src/alphavantage-probe.ts`, additive). "Test Alpha Vantage now" makes the `EARNINGS_ESTIMATES` call and then, at least 1.5 s later
+(the pacer), an `EARNINGS` control call for the same ticker and key. Two calls of the shared counter, so `PROBE_MIN_CALLS` is 4 (and the control is skipped, one call, when the first answer is the daily
+quota or a refused key). The result gains `control`, `comparison` (`probeComparison`: `EARNINGS_ESTIMATES: refused (generic limit text) / EARNINGS: ok, 80 quarters`) and `conclusion`
+(`probeConclusion`, pure): `estimates-unavailable` ("Your key can read EARNINGS but not EARNINGS_ESTIMATES: estimates (and revenue consensus) need a paid Alpha Vantage plan."; the estimates call
+refused with the generic text or "premium endpoint" while the control is `ok`), `throttled` ("Both calls were limited: you are being throttled, try later."), `both-ok`, `inconclusive`. A result
+stored by the earlier version has none of the three and still parses. The Diagnostics card shows the conclusion, the two outcomes side by side and the provider's words for each refusal.
+
+**Classify** (`packages/earnings/src/estimates-job.ts`). A refusal of `EARNINGS_ESTIMATES` that is the generic notice (`rate-limited`, scope `other`) or "premium endpoint" is followed, in the same step,
+by an `EARNINGS` control call for the same symbol (budgeted and paced like any call; at most two calls in a step). If it works, or the first text was explicit "premium endpoint", the endpoint is noted
+as `unavailable-on-key` (`ConsensusEndpoint`, item `EARNINGS` / `ESTIMATES#ENDPOINT`, entity `EARNINGS_CONSENSUS_ENDPOINT`: `state`, `at`, `retryAt` = 7 days later, `detail`) and no pause or per-symbol
+rate-limit is written; if the control is refused the same way (or gives nothing) it is a real throttle and the existing back-off applies. After `retryAt`, the first step asks
+`EARNINGS_ESTIMATES` once more: refused again renews the note for 7 days; figures delete it. An explicit "premium endpoint" no longer pauses the whole job for a week, it switches to the fallback.
+
+**Fallback.** While the endpoint is noted, each step is one `EARNINGS` call for the next due symbol: same order (tiers, then longest ago), same budget (`EstimateBudget`, at most 8 a day, none under 5
+left of 25), same pacing, same cap of 3 calls a run, same alias rule for non-US listings (no alias: "no coverage" without a call). `parseEarnings` (`packages/prices/src/providers/estimates.ts`; the
+client method is `fetchEarnings`, next to `fetchEstimates`) reads `quarterlyEarnings[]` (`fiscalDateEnding`, `reportedEPS`, `estimatedEPS`, `surprise`; the string `None` is absent) into the newest 12
+quarters that have an `estimatedEPS`. They are stored in the same keys and shape as the consensus rows (`TICKER#{symbol}` / `EARNEST#{fiscalDateEnding}`), with `eps: { average }` only (no high, low,
+analyst count, revenue), `source: 'eps-only'`, `reportedEps` and `providerSurprise`; the symbol's `EARNEST#STATE` gets `source: 'eps-only'`. A quarter that already has a full row is left alone. No entry
+with an estimate is "no coverage". `GET /earnings/status` adds `consensus.endpoint` and per-symbol `consensus.source`.
+
+**Join** (`attachConsensus`). Beat or miss is computed by us against the ACTUAL EPS of the summary (`actual - estimate`, percent of the estimate); the provider's `surprise` is kept but not used.
+The metric carries `epsOnly: true`. When the provider's `reportedEps` differs from the summary's actual by more than 5 % (`EPS_BASIS_TOLERANCE`, `basisDiffers`: GAAP against adjusted) it carries
+`basisMismatch: true`. Revenue gets `revenueReason: 'free-plan'` (a matched EPS-only quarter, or the endpoint noted unavailable) instead of the overall `reason`, which is then only about EPS.
+
+**Web.** The expected EPS shows with "Consensus: Alpha Vantage (EPS only, no analyst count)" and the Beat/Miss; with the basis note "Provider EPS basis may differ" when flagged. Revenue Expected and
+Beat/Miss say `n/a`, with the one line "Revenue consensus is not available on the free data plan" under the table (not a retry message). "What was checked" says "EPS estimates: N of M companies
+(revenue estimates need a paid plan)." while the endpoint is noted. Mock mode: the session flag `earnings-demo-eps-only` (`sampleDemoSummariesEpsOnly`) shows this state; the Diagnostics sample shows
+the conclusion above. Everything is additive; the AWS stack neither runs the job nor the probe.
+
+**Tests.** `pnpm --filter @portfolio/prices test` (`estimates.test.ts`: the real `EARNINGS` shape with `None` values, refusals, the client), `@portfolio/earnings` (`estimates-fallback.test.ts`:
+classification, throttle, 7-day retry, ordering, budget, full rows kept; `estimates-job.test.ts`; `service.test.ts`), `@portfolio/shared` (`earnings-consensus.test.ts`, `alphavantage-probe.test.ts`),
+`@portfolio/api` (`routes/earnings.test.ts`, `repository.test.ts`), `@portfolio/cloudflare-app` (`alphavantage-probe.test.ts`; Node and workerd in `earnings-suite.ts`), `@portfolio/web`
+(`earningsModel.test.ts`, `EarningsCard.test.tsx`, `checked.test.ts`, `AlphaVantageProbeCard.test.tsx`), Playwright `e2e/earnings.spec.ts` (the Diagnostics page is not offered in the demo, so the card's sample is covered by `AlphaVantageProbeCard.test.tsx`).
+
+What only the live deployment can show: whether the owner's key really reads `EARNINGS` (press "Test Alpha Vantage now": both outcomes side by side), the real shape of IBM's `EARNINGS` answer, and
+whether `reportedEPS` of the provider is GAAP or adjusted for each held company (the basis note appears on the cards where it differs from the card's actual by more than 5 %).
