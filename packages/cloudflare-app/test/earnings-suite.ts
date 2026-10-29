@@ -1,6 +1,6 @@
 import { METRIC_LIMITS } from '@portfolio/platform';
 import { createTestSubscriber } from '@portfolio/platform/testing';
-import { GENERIC_RELEASE, REIT_RELEASE, type FixtureRelease } from '@portfolio/earnings/testing';
+import { DIVIDEND_RAISE_RELEASE, GENERIC_RELEASE, REIT_RELEASE, buildReleaseSummary, type FixtureRelease } from '@portfolio/earnings/testing';
 import { usageSnapshotSchema, type EarningsStatusResponse, type EarningsSummary } from '@portfolio/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Browser, type Stack } from './browser.js';
@@ -185,6 +185,55 @@ export function defineEarningsSuite(label: string, start: StartStack): void {
       expect(status.backfill).toMatchObject({ status: 'complete', total: 1, done: 1, stored: 1, planned: 1, companies: 1 });
       expect((await call('GET', `/earnings/${sold.symbol}/2025-12-10`)).status).toBe(404);
       expect((await call('POST', `/earnings/${sold.symbol}/refresh`)).status).toBe(404);
+    });
+
+    it('reads the dividend and the share buybacks with the release (one model call), serves them, and mentions the raise in the push', async () => {
+      const release = dated(DIVIDEND_RAISE_RELEASE);
+      const { stack, call } = await ownerOf({ releases: [release], contact: CONTACT, ai: true });
+      await hold(stack, call, release);
+      const device = await createTestSubscriber(`https://fcm.googleapis.com/fcm/send/dividend-${crypto.randomUUID()}`);
+      expect((await call('POST', '/notifications/subscriptions', { ...device.subscription, label: 'Test phone' })).status).toBe(201);
+
+      await stack.enqueue('watchEarnings', { trigger: 'scheduled' });
+      await stack.drain(settle);
+      expect(await stack.failedJobs()).toEqual([]);
+
+      const summary = (await call('GET', '/earnings')).body.summaries[0] as EarningsSummary;
+      // The REIT figures are dropped (the stack knows the invented company as a general one); nothing of the dividend or the buyback is.
+      expect(summary.verification.droppedFields.filter((field) => /^(dividend|buyback)/.test(field))).toEqual([]);
+      expect(summary).toMatchObject({ symbol: 'MGPR', schemaVersion: 2, verification: { calls: 1 } });
+      expect(summary.dividend).toMatchObject({ status: 'announced', perShare: 0.45, action: 'raised', actionSource: 'computed', previousPerShare: 0.43, changePct: 4.7, payDate: '2027-01-15', recordDate: '2027-01-02' });
+      expect(summary.buyback).toMatchObject({ status: 'announced', authorization: 1_000_000_000, repurchased: 120_000_000, repurchasedShares: 1_800_000, remaining: 880_000_000 });
+      expect((await call('GET', `/earnings/MGPR/${REPORT_DAY}`)).body).toEqual(summary);
+      const payload = await device.decrypt(stack.push.to(device.subscription.endpoint)[0]!.body);
+      expect(payload.body).toContain('dividend raised 4.7 %');
+    });
+
+    it('reads the stored summaries of the previous version again, only for the dividend and the buybacks, silently, and says how far it is', async () => {
+      const release: FixtureRelease = { ...DIVIDEND_RAISE_RELEASE, filingDate: '2025-12-10' };
+      const { stack, call } = await ownerOf({ releases: [release], contact: CONTACT, ai: true });
+      await hold(stack, call, release);
+      const device = await createTestSubscriber(`https://fcm.googleapis.com/fcm/send/upgrade-${crypto.randomUUID()}`);
+      expect((await call('POST', '/notifications/subscriptions', { ...device.subscription, label: 'Test phone' })).status).toBe(201);
+      const { dividend: _dividend, buyback: _buyback, ...stored } = buildReleaseSummary(release).summary;
+      await stack.seed([{ PK: `TICKER#${release.symbol}`, SK: 'EARNSUM#2025-12-10', entityType: 'EARNINGS_SUMMARY', ...stored, schemaVersion: 1 }]);
+      const before = (await call('GET', '/earnings')).body.summaries[0] as EarningsSummary;
+      expect([before.schemaVersion, before.dividend, before.buyback]).toEqual([1, undefined, undefined]);
+
+      await stack.enqueue('backfillEarnings', { trigger: 'scheduled' });
+      await stack.drain(settle);
+      expect(await stack.failedJobs()).toEqual([]);
+
+      const after = (await call('GET', '/earnings')).body.summaries[0] as EarningsSummary;
+      expect(after).toMatchObject({ schemaVersion: 2, headline: before.headline, origin: 'live', dividend: { status: 'announced', perShare: 0.45, action: 'raised' }, buyback: { status: 'announced', remaining: 880_000_000 } });
+      const status = (await call('GET', '/earnings/status')).body as EarningsStatusResponse;
+      expect(status.backfill).toMatchObject({ status: 'complete', total: 1, done: 1, stored: 1, upgrade: { total: 1, done: 1 } });
+      expect(stack.push.to(device.subscription.endpoint)).toHaveLength(0);
+
+      const requests = stack.sec.requests.length;
+      await stack.enqueue('backfillEarnings', { trigger: 'scheduled' });
+      await stack.drain(settle);
+      expect(stack.sec.requests).toHaveLength(requests);
     });
 
     /** The shape of a real Alpha Vantage `EARNINGS_ESTIMATES` answer (strings with decimals, nulls, a year among the quarters), invented figures. */
