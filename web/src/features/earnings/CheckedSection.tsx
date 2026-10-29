@@ -3,6 +3,7 @@ import type { EarningsStatusResponse } from '@portfolio/shared';
 import { errorMessage } from '../../api/client';
 import { useBackfillEarnings } from '../../api/earningsHooks';
 import { backfillText, checkedLines, consensusText, lastPassText, notCountedText, totalsText, type CheckedLine } from './checked';
+import { upgradeText } from './dividendModel';
 
 const TONE_CLASS: Readonly<Record<CheckedLine['tone'], string>> = {
   ok: '',
@@ -40,6 +41,7 @@ export function CheckedSection({ status, selected, hasSummaries }: Readonly<{ st
   const backfill = backfillText(status.backfill);
   const notCounted = notCountedText(status);
   const consensus = consensusText(status);
+  const upgrade = upgradeText(status.backfill);
   return (
     <details className="card p-3 text-sm" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary className="cursor-pointer font-medium">What was checked</summary>
@@ -56,6 +58,7 @@ export function CheckedSection({ status, selected, hasSummaries }: Readonly<{ st
             <p className="break-words">{backfill.headline}</p>
             {backfill.progress && backfill.progress.total > 0 && <progress className="h-2 w-full" aria-label="Releases read" value={backfill.progress.done} max={backfill.progress.total} />}
             {backfill.detail && <p className="muted break-words">{backfill.detail}</p>}
+            {upgrade && <p className="break-words">{upgrade}</p>}
             <FetchAll failed={status.backfill?.failed ?? 0} />
           </section>
         )}

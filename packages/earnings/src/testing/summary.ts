@@ -1,3 +1,4 @@
+import type { EarningsSummary } from '@portfolio/shared';
 import { deriveSummary } from '../derive.js';
 import { extractionSchema } from '../schema.js';
 import { htmlToText } from '../text.js';
@@ -5,9 +6,9 @@ import { verifyExtraction } from '../verify.js';
 import type { FixtureRelease } from './fixtures.js';
 
 /** A release turned into its summary the way the pipeline does (no AI, no SEC): text, verification, derivation. */
-export function buildReleaseSummary(release: FixtureRelease, now = new Date('2026-10-29T08:00:00.000Z')) {
+export function buildReleaseSummary(release: FixtureRelease, now = new Date('2026-10-29T08:00:00.000Z'), previous?: EarningsSummary) {
   const text = htmlToText(release.html);
-  const { verified, dropped } = verifyExtraction(extractionSchema.parse(release.extraction), text, release.template);
+  const { verified, dropped } = verifyExtraction(extractionSchema.parse(release.extraction), text, release.template, release.filingDate);
   const summary = deriveSummary({
     verified,
     dropped,
@@ -20,6 +21,7 @@ export function buildReleaseSummary(release: FixtureRelease, now = new Date('202
     neurons: 100,
     calls: 1,
     now,
+    previous,
   });
   return { text, verified, dropped, summary };
 }

@@ -80,6 +80,14 @@ function guidancePart(summary: EarningsSummary): string | undefined {
   return undefined;
 }
 
+/** A dividend that changed with the results: `dividend raised 4.7 %`, `dividend cut 50 %`, `dividend suspended`; nothing for a steady or absent one. */
+function dividendPart(summary: EarningsSummary): string | undefined {
+  const dividend = summary.dividend;
+  if (dividend?.status !== 'announced' || dividend.action === undefined || dividend.action === 'maintained') return undefined;
+  const change = dividend.changePct === undefined || dividend.changePct === 0 ? '' : ` ${pctValue(dividend.changePct)}`;
+  return `dividend ${dividend.action}${change}`;
+}
+
 /**
  * The push message of a stored summary: `Lockheed Martin reported Q3 2026: EPS beat by 7 %` with
  * `Revenue $20.71B +11 % YoY · FCF/share $12.9 · guidance raised`; a tap opens `/earnings/<symbol>`.
@@ -90,7 +98,7 @@ export function buildEarningsNotification(summary: EarningsSummary): Notificatio
   const titleSuffix = eps === undefined ? '' : `: ${eps}`;
   const lineSuffix = eps === undefined ? '' : ` (${eps})`;
   const title = `${label} reported ${summary.period}${titleSuffix}`;
-  const parts = [revenuePart(summary), keyKpiPart(summary), guidancePart(summary)].filter((part): part is string => part !== undefined);
+  const parts = [revenuePart(summary), keyKpiPart(summary), guidancePart(summary), dividendPart(summary)].filter((part): part is string => part !== undefined);
   const body = parts.length > 0 ? parts.join(' · ') : 'The earnings summary is ready.';
   return {
     payload: {

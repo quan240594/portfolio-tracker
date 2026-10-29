@@ -3,12 +3,14 @@ import {
   CORE_METRIC_KEYS,
   CORE_METRIC_META,
   EARNINGS_DISCLAIMER,
+  EARNINGS_SCHEMA_VERSION,
   KPI_TEMPLATES,
   KPI_TEMPLATE_IDS,
   earningsKeys,
   earningsListQuerySchema,
   earningsPeriodSchema,
   isKpiTemplateId,
+  type EarningsSummary,
 } from './earnings.js';
 import { CURATED_TEMPLATE_TICKERS, hasEarnings, kpiTemplateFor } from './earnings-templates.js';
 import { buildEarningsNotification, formatCompactMoney, formatEarningsPct, formatMetricValue } from './earnings-format.js';
@@ -132,7 +134,7 @@ describe('buildEarningsNotification', () => {
     const [bank, saas] = sampleDemoSummaries();
     const bankMessage = buildEarningsNotification(bank!);
     expect(bankMessage.payload.title).toBe('Harbor Bancorp reported Q3 2026: EPS in line');
-    expect(bankMessage.payload.body).toBe('Revenue $13.4B +3.9 % YoY · ROTCE 17.2 %');
+    expect(bankMessage.payload.body).toBe('Revenue $13.4B +3.9 % YoY · ROTCE 17.2 % · dividend raised 4.2 %');
     const saasMessage = buildEarningsNotification(saas!);
     expect(saasMessage.payload.title).toBe('Cloudvale Software reported Q2 FY2027');
     expect(saasMessage.payload.body).toBe('Revenue $3.12B +55 % YoY · FCF/share $2.28');
@@ -143,6 +145,18 @@ describe('buildEarningsNotification', () => {
     expect(miss.payload.body).toContain('guidance lowered');
     const noPct = buildEarningsNotification(sampleSummary({ headline: { eps: { value: 1, unit: 'perShare', verdict: 'beat' } } }));
     expect(noPct.payload.title).toMatch(/EPS beat$/);
+  });
+
+  it('mentions a dividend that changed with the results, and nothing for a steady, absent or unread one', () => {
+    const body = (dividend: EarningsSummary['dividend']): string => buildEarningsNotification(sampleSummary({ guidance: [], dividend })).payload.body;
+    const base = { status: 'announced' as const, perShare: 0.3, currency: 'USD' };
+    expect(body({ ...base, action: 'cut', changePct: -50 })).toBe('Revenue $20.71B +11 % YoY · FCF/share $10.67 · dividend cut 50 %');
+    expect(body({ ...base, action: 'suspended' })).toContain('· dividend suspended');
+    expect(body({ ...base, action: 'initiated', changePct: 0 })).toContain('· dividend initiated');
+    expect(body({ ...base, action: 'maintained', changePct: 0 })).not.toContain('dividend');
+    expect(body(base)).not.toContain('dividend');
+    expect(body({ status: 'none' })).not.toContain('dividend');
+    expect(body(undefined)).not.toContain('dividend');
   });
 
   it('caps the title and body', () => {
@@ -242,5 +256,19 @@ describe('sampleTemplateSummaries', () => {
     const bank = all.find((s) => s.template === 'bank');
     expect(bank?.kpis.some((k) => k.metric !== undefined)).toBe(true);
     expect(bank?.kpis.some((k) => k.metric === undefined)).toBe(true);
+  });
+});
+
+describe('the dividend and buyback of the samples', () => {
+  it('has the schema version that carries the two blocks', () => {
+    expect(EARNINGS_SCHEMA_VERSION).toBe(2);
+    expect(sampleSummary().schemaVersion).toBe(EARNINGS_SCHEMA_VERSION);
+  });
+
+  it('shows a raise with repurchases in one demo company and N/A in the other', () => {
+    const [bank, saas] = sampleDemoSummaries();
+    expect(bank!.dividend).toMatchObject({ status: 'announced', action: 'raised', perShare: 1.25, previousPerShare: 1.2, payDate: '2026-11-27' });
+    expect(bank!.buyback).toMatchObject({ status: 'announced', repurchased: 1_500_000_000, remaining: 4_500_000_000 });
+    expect([saas!.dividend, saas!.buyback]).toEqual([{ status: 'none' }, { status: 'none' }]);
   });
 });

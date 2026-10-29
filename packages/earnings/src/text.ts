@@ -203,3 +203,78 @@ export function htmlToText(html: string, max = MAX_RELEASE_CHARS): string {
     .flatMap((line) => splitLongLine(line));
   return capText(lines.join('\n'), max);
 }
+
+// --- Dividend and share repurchase passages ------------------------------------------------------------------------------------
+
+/** What `htmlToText` is given to keep the whole release: the passages about dividends and repurchases are picked from it before the text is capped. */
+export const FULL_RELEASE_CHARS = 600_000;
+/** The passages added to a release whose capped text lacks them, and the passages alone when a stored summary is read again. */
+export const MAX_PASSAGE_CHARS = 4000;
+/** The start of the release (headline, date, currency) sent with the passages alone. */
+export const HEAD_CHARS = 1200;
+const MAX_PASSAGE_LINE = 500;
+const CAPITAL_KEYWORDS = ['dividend', 'repurchas', 'buyback', 'buy-back', 'buy back'];
+
+export const mentionsCapitalReturn = (line: string): boolean => {
+  const lower = line.toLowerCase();
+  return CAPITAL_KEYWORDS.some((keyword) => lower.includes(keyword));
+};
+
+/** A sentence of prose ranks before a table row: the announcement is prose, the cash flow statement is a table. */
+const isProse = (line: string): boolean => line.length >= 60 && !line.includes(' | ');
+
+/**
+ * The lines of `text` that talk about dividends or share repurchases (a prose line first, its following line too: dates are often on the next
+ * one), in the order of the release and at most `max` characters. Lines in `skip` (what the model already reads) are left out.
+ */
+export function capitalReturnPassages(text: string, options: { skip?: ReadonlySet<string>; max?: number } = {}): string {
+  const max = options.max ?? MAX_PASSAGE_CHARS;
+  const lines = text.split('\n');
+  const wanted = new Set<number>();
+  for (const [index, line] of lines.entries()) {
+    if (!mentionsCapitalReturn(line)) continue;
+    wanted.add(index);
+    const next = lines[index + 1];
+    if (isProse(line) && next !== undefined && next.length < 300) wanted.add(index + 1);
+  }
+  const candidates = [...wanted].filter((index) => options.skip?.has(lines[index]!) !== true).toSorted((a, b) => Number(!isProse(lines[a]!)) - Number(!isProse(lines[b]!)) || a - b);
+  const chosen: number[] = [];
+  let used = 0;
+  for (const index of candidates) {
+    const length = Math.min(lines[index]!.length, MAX_PASSAGE_LINE) + 1;
+    if (used + length > max) continue;
+    chosen.push(index);
+    used += length;
+  }
+  return chosen
+    .toSorted((a, b) => a - b)
+    .map((index) => lines[index]!.slice(0, MAX_PASSAGE_LINE))
+    .join('\n');
+}
+
+/** The first lines of the release, whole lines only. */
+function leadText(full: string, max: number): string {
+  const lead: string[] = [];
+  let used = 0;
+  for (const line of full.split('\n')) {
+    if (used + line.length + 1 > max) break;
+    lead.push(line);
+    used += line.length + 1;
+  }
+  return lead.join('\n');
+}
+
+/** The release text for a model asked only about dividends and repurchases: its first lines, then the passages. */
+export function capitalReturnText(full: string): string {
+  const head = leadText(full, HEAD_CHARS);
+  const passages = capitalReturnPassages(full, { skip: new Set(head.split('\n')) });
+  return passages === '' ? head : `${head}\n\nPassages about dividends and share repurchases:\n${passages}`;
+}
+
+/** The capped release text, followed by the dividend and repurchase passages that the cap cut off (when it cut any). */
+export function textWithCapitalReturn(full: string): string {
+  const capped = capText(full);
+  if (capped.length === full.length) return capped;
+  const passages = capitalReturnPassages(full, { skip: new Set(capped.split('\n')) });
+  return passages === '' ? capped : `${capped}\n\nFurther passages about dividends and share repurchases:\n${passages}`;
+}

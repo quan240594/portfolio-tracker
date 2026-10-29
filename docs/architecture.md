@@ -3574,7 +3574,7 @@ are unaffected). `TICKER#<symbol>` / `EARNSTATE` is the watcher state (CIK, last
 kept (older ones pruned in the same step). Global rows: `EARNINGS/HELD` (held cache), `EARNINGS/SEC` (block). The summary shape is `EarningsSummary` in `packages/shared/src/earnings.ts`:
 `schemaVersion, symbol, name, period, reportDate, filingUrl, accession, form, reportingCurrency, template, origin ('live' | 'backfill'), headline { eps, revenue, operatingIncome,
 operatingMargin, operatingCashFlow, capex, fcf, fcfPerShare, dilutedShares } (each metric: value, unit, raw, yearAgo, yoyPct, qoqPct, estimate, surprisePct, verdict, basis), kpis [{ key, label,
-unit, metric? }], guidance [{ label, period, low, high, point, raw, direction }], segments, keyUpdates, quote, previousReportDate, verification { dropped, droppedFields, model, neuronsEstimate, calls },
+unit, metric? }], guidance [{ label, period, low, high, point, raw, direction }], segments, keyUpdates, quote, dividend?, buyback? (schema version 2, see "Earnings: dividend and share buybacks"), previousReportDate, verification { dropped, droppedFields, model, neuronsEstimate, calls },
 generatedAt, status`. Writes are idempotent (same key).
 
 ### API (additive, owner only, only symbols the user holds now)
@@ -4098,3 +4098,70 @@ right now; the app retries automatically (next try after 14:20)", "The free Alph
 daily, unknown, doubling, retryAt, invalid key, step delay), `@portfolio/shared`, `@portfolio/api` (`alphavantage-probe.test.ts`), `@portfolio/cloudflare-app` (`alphavantage-probe.test.ts`, and the
 whole path in Node and workerd in `earnings-suite.ts`), `@portfolio/web` (`AlphaVantageProbeCard.test.tsx`, `earningsModel.test.ts`, `checked.test.ts`). Only a live call shows which limit the
 key really hits: press "Test Alpha Vantage now" on the deployed app.
+
+## Earnings: dividend and share buybacks
+
+Every earnings summary also says what the release announced about its **dividend** and its **share buybacks** (the owner noticed that the VICI release raised its dividend and
+mentioned repurchases, and the card said nothing). Additive: `EARNINGS_SCHEMA_VERSION` is now **2**; a summary of version 1 has neither block.
+
+### Contract (`packages/shared/src/earnings.ts`)
+
+`EarningsSummary.dividend?: EarningsDividend` and `buyback?: EarningsBuyback`, each with `status: 'announced' | 'none' | 'not-found'`:
+`none` = the release states none (the card says "N/A" and "No dividend announced" / "No share buyback mentioned"); `not-found` = the release mentions an amount but nothing could be
+read and verified (the card says so instead of "N/A"); **absent block** = not read yet (schema version 1: the card says "Dividend and buyback: not read yet").
+
+- `EarningsDividend`: `perShare, raw, currency, action ('raised'|'cut'|'maintained'|'initiated'|'suspended'), actionSource ('computed'|'stated'), previousPerShare,
+  previousSource ('release'|'stored'), changePct, changeAmount, frequency ('monthly'|'quarterly'|'semi-annual'|'annual'|'special'), exDate, recordDate, payDate` (ISO dates).
+- `EarningsBuyback`: `currency, action ('new'|'increased'|'ongoing'), authorization, repurchased, repurchasedShares, remaining` (+ the `...Raw` texts of the three amounts).
+- `EarningsPlanItem.upgrade?: number`, `EarningsSymbolState.summaryVersion?: number`, `EarningsBackfillMarker.schemaVersion?` / `upgrade?: { total, done }` and the same `upgrade` on
+  `EarningsBackfillStatus` (all optional: the progress of the pass below).
+
+### Extraction and verification (`packages/earnings`)
+
+- **Same AI call.** The prompt (`ai.ts`, `RULES` and `SHAPE`) and the JSON schema (`schema.ts`) carry two more blocks, `dividend` and `buyback`; no second call per release. The model copies values as
+  printed (`"$0.45"`, `"January 15, 2027"`, `"1.8 million"`) and never calculates.
+- **Passages, not more text.** `text.ts` keeps the whole release (`FULL_RELEASE_CHARS`) before capping it; `textWithCapitalReturn` sends the capped text and, only when the cap cut something off,
+  the lines about `dividend`, `repurchas*`, `buyback` that the cap removed (at most 4,000 characters, prose before table rows, the line after a prose line too).
+- **Verification** (`capital-return.ts`, same rule as the rest: nothing is shown that the release does not print). An amount must be found by `NumberIndex` (a per-share amount has no unit word and is
+  below 1,000; a share count is a plain number; money is not a percentage); a date must parse (`printed-date.ts`: `January 15, 2027`, `15 Jan 2027`, `1/15/2027`, `2027-01-15`, a date without a year
+  takes the year after the release), be printed as the model wrote it and lie within 400 days of the release; `action` and `frequency` count only when a sentence about the dividend says the word
+  (`increas`, `reduc`, `suspend`, `quarterly`, ...); a buyback `new`/`increased` only when a sentence about the repurchase says so. What fails is dropped and counted in `verification.dropped`.
+  When the model returned nothing but the text states a dividend amount (or a repurchase amount) the status is `not-found`, never `none`.
+- **Raised or cut is arithmetic** (`capital-derive.ts`, `dividendWithPrevious`): from `perShare` and the previous amount, the one **printed in the same release** (`previousSource: 'release'`), else the
+  amount of the **previous stored summary** of the symbol (`'stored'`; same currency, a regular dividend, a special dividend is never compared). Within 0.1 % is `maintained`;
+  `changePct` (one decimal) and `changeAmount` are computed. The model's adjective is used only when no two amounts exist and the release says it (`actionSource: 'stated'`). When an older
+  quarter is stored after a newer one, `storeSummary` recomputes the newer one (`withPrevious`, idempotent), like the quarter-over-quarter figures.
+- Cost: the full question grows by about 150 output tokens (a few neurons); the small question below costs a fraction of it. Neurons are accounted like every call (`neuronsFor`), never exceeding the daily cap.
+
+### The pass that reads old summaries again (`backfill.ts`)
+
+Keyed on the schema version, resumable, inside the existing backfill machinery (the marker row, the plans, the SEC token bucket, the daily neuron allowance):
+
+1. `ensureMarker`: a finished marker of an older `schemaVersion` is armed again. `planItems` marks a stored release whose summary is older as `todo` with `upgrade: <version>`; for plans made
+   before, `upgradePhase` (database reads only, 6 symbols per step) does the same once per symbol (`summaryVersion`) through `reopenOutdated`.
+2. Releases not read yet come first; the stored ones are read again afterwards (`pickNext`). For one of them `processUpgrade` asks the model **only** for the two blocks (`focus: 'capital-return'`:
+   its own short prompt, the first lines of the release plus the passages, at most about 5,300 characters, `max_tokens` 500; it needs only `MIN_NEURONS_TO_UPGRADE` = 60 neurons, a full
+   release 150), verifies against the whole release and **merges** into the stored summary (`withCapitalReturn`): every other figure, the estimate joined at the time and the `origin` stay as they were.
+3. Silent: no `notifyDividends` is enqueued (and the ledger keys are per symbol and report date anyway). A failed read leaves the old summary untouched and is retried with the usual back-off;
+   "Fetch all now" re-plans, and reads again only what is still of an older version.
+4. The progress: the marker (and `GET /earnings/status`, `backfill.upgrade`) counts `total` and `done` of those releases; they stay counted as stored in `stored`/`done` of the releases read. The
+   Earnings page says "Dividend and buyback: read for 3 of 8 stored quarters so far." in "Reading the latest quarters".
+
+### UI and push
+
+`web/src/features/earnings/dividendModel.ts` (pure text) and `DividendBuyback.tsx` add the two lines after the growth lines of every card (also the compact card on the asset page):
+`Dividend: US$ 0,45 per share (quarterly), raised 4,7% (+US$ 0,02), paid 15-01-2027 to holders of record 02-01-2027`, `Dividend: N/A · No dividend announced`,
+`Share buybacks: repurchased $120M (1.8M shares) this quarter; $880M authorization remaining`, `Share buybacks: N/A · No share buyback mentioned`. The change is told by an icon and by words,
+dates are dd-mm-yyyy (`formatDate`). Mock mode: the bank has a raise and a buyback, the software company N/A twice (`earnings-demo-unread` shows the "not read yet" state).
+The push text adds `dividend raised 4.7 %` / `dividend cut 50 %` / `dividend initiated|suspended` when the dividend changed (`buildEarningsNotification`).
+
+### Tests
+
+`pnpm --filter @portfolio/earnings test` (`capital-return.test.ts` verification, dates, the raise/cut arithmetic; `text-capital.test.ts` passages; `capital-ai.test.ts` prompt, the small question, the
+allowance cap; `upgrade.test.ts` the pass: old versions, allowance, resume, failure, rescan, recomputation; fixtures in `testing/capital-return-fixtures.ts`, invented releases: a REIT with a raise
+and repurchases, no dividend, buyback only, a cut, messy wording), `pnpm --filter @portfolio/shared test`, `pnpm --filter @portfolio/web test` (`dividendModel.test.ts`, `DividendBuyback.test.tsx`),
+`pnpm --filter @portfolio/cloudflare-app test` (Node and workerd, `earnings-suite.ts`), Playwright `e2e/earnings.spec.ts` (`E2E_PORT=<free port> pnpm exec playwright test e2e/earnings.spec.ts`).
+
+What only the live deployment can show: whether the real Workers AI model (`llama-3.1-8b-instruct-fp8`, not on the JSON Mode list) fills the new fields reliably. Check the VICI card first (a
+raised dividend and repurchases): the `dividend`/`buyback` lines, and `verification.droppedFields` (`dividend.*`, `buyback.*`) of its summary; a `not-found` line means the model missed an amount the
+release states.

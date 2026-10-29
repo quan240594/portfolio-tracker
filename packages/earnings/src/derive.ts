@@ -20,6 +20,7 @@ import {
   type KpiTemplateId,
   type MetricUnit,
 } from '@portfolio/shared';
+import { buybackOf, dividendOf, dividendWithPrevious } from './capital-derive.js';
 import type { Verified, VerifiedGuidance, VerifiedPair, VerifiedValue } from './verify.js';
 
 /** The consensus EPS estimate of a release and, when the source has it, the EPS it recorded as reported (to confirm the basis). */
@@ -223,7 +224,8 @@ export function withPrevious(summary: EarningsSummary, rawPrevious: EarningsSumm
     return direction === undefined ? rest : { ...rest, direction };
   });
   const { previousReportDate: _previousReportDate, ...rest } = summary;
-  return { ...rest, headline, kpis, guidance, ...(previous === undefined ? {} : { previousReportDate: previous.reportDate }) };
+  const dividend = summary.dividend === undefined ? undefined : dividendWithPrevious(summary.dividend, previous);
+  return { ...rest, headline, kpis, guidance, ...(dividend === undefined ? {} : { dividend }), ...(previous === undefined ? {} : { previousReportDate: previous.reportDate }) };
 }
 
 /** Builds the stored summary of a release from its verified figures. Pure. */
@@ -270,6 +272,8 @@ export function deriveSummary(input: DeriveInput): EarningsSummary {
     segments: segmentsOf(verified),
     keyUpdates: verified.keyUpdates,
     ...(verified.quote === undefined ? {} : { quote: verified.quote }),
+    ...(verified.dividend === undefined ? {} : { dividend: dividendOf(verified.dividend, currency, previous) }),
+    ...(verified.buyback === undefined ? {} : { buyback: buybackOf(verified.buyback, currency) }),
     ...(previous === undefined ? {} : { previousReportDate: previous.reportDate }),
     verification: { dropped: input.dropped.length, droppedFields: [...input.dropped].slice(0, 20), model: input.model, neuronsEstimate: input.neurons, calls: input.calls },
     generatedAt: input.now.toISOString(),

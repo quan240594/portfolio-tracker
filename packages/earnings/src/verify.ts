@@ -5,6 +5,7 @@
  */
 import { KPI_TEMPLATES, type KpiTemplateId, type MetricUnit } from '@portfolio/shared';
 import { NumberIndex, nextNumber, normalizeForQuote, parseAmount, wordsOf, type ParsedAmount } from './numbers.js';
+import { verifyCapitalReturn, type VerifiedBuyback, type VerifiedDividend } from './capital-return.js';
 import type { ExtractedPair, Extraction } from './schema.js';
 
 /** A figure that was found in the text. */
@@ -54,6 +55,9 @@ export interface Verified {
   segments: VerifiedSegment[];
   keyUpdates: string[];
   quote?: { text: string; speaker?: string };
+  /** Present when the release date was known to the verification (the pipeline always knows it). */
+  dividend?: VerifiedDividend;
+  buyback?: VerifiedBuyback;
 }
 
 export interface Verification {
@@ -264,8 +268,8 @@ class Verifier {
   }
 }
 
-/** Verifies the model's extraction against the release text. Pure: the same inputs always give the same output. */
-export function verifyExtraction(extraction: Extraction, text: string, template: KpiTemplateId): Verification {
+/** Verifies the model's extraction against the release text. `reportDate` also verifies the dividend and buyback blocks. Pure: the same inputs always give the same output. */
+export function verifyExtraction(extraction: Extraction, text: string, template: KpiTemplateId, reportDate?: string): Verification {
   const verifier = new Verifier(text);
   const verified: Verified = { kpis: {}, guidance: [], segments: [], keyUpdates: [] };
   for (const key of PAIR_KEYS) {
@@ -275,9 +279,11 @@ export function verifyExtraction(extraction: Extraction, text: string, template:
   const currency = currencyOf(extraction.currency, text);
   const period = verifier.period(extraction.period);
   const quote = verifier.quote(extraction.quote);
+  const capital = reportDate === undefined ? undefined : verifyCapitalReturn(extraction, text, reportDate, verifier.index);
   return {
     verified: {
       ...verified,
+      ...(capital === undefined ? {} : { dividend: capital.dividend, buyback: capital.buyback }),
       ...(currency === undefined ? {} : { currency }),
       ...(period === undefined ? {} : { period }),
       ...(quote === undefined ? {} : { quote }),
@@ -286,7 +292,7 @@ export function verifyExtraction(extraction: Extraction, text: string, template:
       segments: verifier.segments(extraction.segments),
       keyUpdates: verifier.keyUpdates(extraction.keyUpdates),
     },
-    dropped: verifier.dropped,
+    dropped: [...verifier.dropped, ...(capital?.dropped ?? [])],
   };
 }
 

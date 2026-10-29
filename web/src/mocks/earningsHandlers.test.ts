@@ -25,6 +25,15 @@ describe('mock earnings API (the demo)', () => {
     expect((await fetch(apiUrl(`/earnings/${first.symbol}/refresh`), { method: 'POST' })).status).toBe(202);
   });
 
+  it('serves summaries without the dividend and buyback blocks, and the pass that reads them again, when the Playwright flag is on', async () => {
+    sessionStorage.setItem('earnings-demo-unread', 'on');
+    const list = await (await fetch(apiUrl('/earnings'))).json();
+    expect(list.summaries).toHaveLength(2);
+    for (const summary of list.summaries) expect(summary).toMatchObject({ schemaVersion: 1 });
+    for (const summary of list.summaries) expect(Object.keys(summary)).not.toEqual(expect.arrayContaining(['dividend']));
+    expect((await (await fetch(apiUrl('/earnings/status'))).json()).backfill).toMatchObject({ status: 'running', upgrade: { total: 8, done: 3 } });
+  });
+
   it('serves one summary per KPI template when the Playwright flag is on', async () => {
     sessionStorage.setItem('earnings-demo-templates', 'on');
     const list = await (await fetch(apiUrl('/earnings'))).json();

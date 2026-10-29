@@ -110,8 +110,11 @@ describe('UsageBanner', () => {
     });
     const note = await banner();
     expect(note).toHaveTextContent(/^Paused to stay inside the free plan, resumes at \S+ \d{2}:\d{2}\.$/);
-    const expected = local(new Date(before + 7_200_000).toISOString());
-    expect(note.textContent).toContain(expected);
+    // the pause is "now + Retry-After" at the moment the answer arrives: on a slow runner the minute can roll over meanwhile
+    const after = Date.now();
+    const minutes = Math.ceil((after - before) / 60_000) + 1;
+    const accepted = Array.from({ length: minutes }, (_, i) => local(new Date(before + i * 60_000 + 7_200_000).toISOString()));
+    expect(accepted.some((expected) => note.textContent?.includes(expected))).toBe(true);
     expect(within(note).queryByRole('button')).not.toBeInTheDocument();
   });
 

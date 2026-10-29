@@ -47,7 +47,8 @@ export const earningsKeys = {
 
 /** The newest quarters kept per symbol. */
 export const EARNINGS_KEEP_QUARTERS = 8;
-export const EARNINGS_SCHEMA_VERSION = 1;
+/** 2: summaries carry the `dividend` and `buyback` blocks. A stored summary with a lower version is re-read (only those two blocks) by the backfill. */
+export const EARNINGS_SCHEMA_VERSION = 2;
 /** Responses carry at most this many summaries. */
 export const EARNINGS_MAX_LIMIT = 24;
 export const EARNINGS_DEFAULT_LIMIT = 12;
@@ -238,6 +239,56 @@ export interface EarningsQuote {
   speaker?: string;
 }
 
+/** `announced`: the release states it; `none`: it states none (shown as N/A); `not-found`: the release mentions one but it could not be read and verified reliably. */
+export type CapitalReturnStatus = 'announced' | 'none' | 'not-found';
+
+export const DIVIDEND_ACTIONS = ['raised', 'cut', 'maintained', 'initiated', 'suspended'] as const;
+export type DividendAction = (typeof DIVIDEND_ACTIONS)[number];
+export const DIVIDEND_FREQUENCIES = ['monthly', 'quarterly', 'semi-annual', 'annual', 'special'] as const;
+export type DividendFrequency = (typeof DIVIDEND_FREQUENCIES)[number];
+
+/** The dividend announced with the results. Every amount was found in the release; raised or cut is computed from two printed amounts when there are two. */
+export interface EarningsDividend {
+  status: CapitalReturnStatus;
+  /** Declared amount per share, in `currency`. */
+  perShare?: number;
+  raw?: string;
+  currency?: string;
+  action?: DividendAction;
+  /** `computed`: from `perShare` and `previousPerShare`; `stated`: the release itself says increased, reduced and so on. */
+  actionSource?: 'computed' | 'stated';
+  previousPerShare?: number;
+  /** `release`: printed in the same release; `stored`: the amount of the previous stored summary of the symbol. */
+  previousSource?: 'release' | 'stored';
+  changePct?: number;
+  changeAmount?: number;
+  frequency?: DividendFrequency;
+  /** Dates as YYYY-MM-DD, only those the release prints and that parse. */
+  exDate?: string;
+  recordDate?: string;
+  payDate?: string;
+}
+
+export const BUYBACK_ACTIONS = ['new', 'increased', 'ongoing'] as const;
+export type BuybackAction = (typeof BUYBACK_ACTIONS)[number];
+
+/** Share repurchases mentioned in the release. Amounts are in whole currency units, shares as counts. */
+export interface EarningsBuyback {
+  status: CapitalReturnStatus;
+  currency?: string;
+  action?: BuybackAction;
+  /** The size of a new or increased program. */
+  authorization?: number;
+  authorizationRaw?: string;
+  /** Bought back in the period. */
+  repurchased?: number;
+  repurchasedRaw?: string;
+  repurchasedShares?: number;
+  /** Still authorized. */
+  remaining?: number;
+  remainingRaw?: string;
+}
+
 export interface EarningsVerification {
   /** Extracted values (numbers, quotes, bullets) that could not be found in the release text and were removed. */
   dropped: number;
@@ -273,6 +324,9 @@ export interface EarningsSummary {
   segments: EarningsSegment[];
   keyUpdates: string[];
   quote?: EarningsQuote;
+  /** Absent on a summary of schema version 1 (not read yet): the Earnings page says so until the backfill has read it. */
+  dividend?: EarningsDividend;
+  buyback?: EarningsBuyback;
   /** The report date of the stored summary used for the quarter-over-quarter figures; absent for the first stored quarter. */
   previousReportDate?: string;
   verification: EarningsVerification;
@@ -316,6 +370,8 @@ export interface EarningsPlanItem {
   nextTryAt?: string;
   failedAt?: string;
   reason?: string;
+  /** Set to the schema version while the stored summary of this release is read again for the blocks that version added (it keeps its other figures). */
+  upgrade?: number;
 }
 
 export type EarningsCheckResult = 'ok' | 'no-filing' | 'not-in-sec' | 'blocked' | 'failed' | 'unreadable' | 'ai-allowance' | 'not-configured' | 'skipped';
@@ -358,6 +414,8 @@ export interface EarningsSymbolState {
   plan?: EarningsPlanItem[];
   planQuarters?: number;
   plannedAt?: string;
+  /** The schema version the plan was last compared with the stored summaries (a lower one: the plan is checked for summaries to read again). */
+  summaryVersion?: number;
   updatedAt: string;
 }
 
@@ -399,6 +457,8 @@ export interface EarningsBackfillMarker {
   armedAt: string;
   /** `auto`: the first scheduled step after the feature was switched on (or `EARNINGS_BACKFILL_QUARTERS` changed); `manual`: "Fetch all now". */
   armedBy: 'auto' | 'manual';
+  /** The schema version the run was armed under (absent: 1). A finished run of an older version is armed again, so stored summaries are read for what the new version added. */
+  schemaVersion?: number;
   quarters: number;
   status: 'running' | 'complete';
   /** Why the run waits and until when (the next 00:00 UTC for the AI allowance). */
@@ -414,7 +474,14 @@ export interface EarningsBackfillMarker {
   companies: number;
   lastStepAt?: string;
   completedAt?: string;
+  /** The pass that reads stored summaries again after a schema change: summaries to read again, and how many were. */
+  upgrade?: EarningsUpgradeProgress;
   updatedAt: string;
+}
+
+export interface EarningsUpgradeProgress {
+  total: number;
+  done: number;
 }
 
 export interface EarningsBackfillStatus {
@@ -430,6 +497,7 @@ export interface EarningsBackfillStatus {
   waitReason?: EarningsBackfillWait;
   completedAt?: string;
   lastStepAt?: string;
+  upgrade?: EarningsUpgradeProgress;
 }
 
 export interface EarningsListResponse {
