@@ -56,6 +56,19 @@ describe('EarningsService.status', () => {
     expect((await svc.status(refs)).consensus).toEqual({ covered: 1, companies: 3 });
   });
 
+  it('counts the companies that wait for the provider\u2019s limit and gives the time of their next try', async () => {
+    const { svc, repo } = service({ contact: CONTACT });
+    const at = NOW.toISOString();
+    const retryAt = '2026-10-21T20:00:00.000Z';
+    await repo.putConsensusState({ symbol: 'AAA', outcome: 'rate-limited', at, detail: 'higher API call volume', retryAt, updatedAt: at });
+    await repo.putConsensusState({ symbol: 'BBB', outcome: 'rate-limited', at, retryAt, updatedAt: at });
+    await repo.putConsensusState({ symbol: 'CCC', outcome: 'rate-limited', at, fetchedAt: at, retryAt, updatedAt: at });
+    const refs = [{ symbol: 'AAA', eligible: true }, { symbol: 'BBB', eligible: true }, { symbol: 'CCC', eligible: true }, { symbol: 'DDD', eligible: true }];
+    const status = await svc.status(refs);
+    expect(status.consensus).toEqual({ covered: 1, companies: 4, waiting: 2 });
+    expect(status.symbols[0]?.consensus).toEqual({ outcome: 'rate-limited', at, detail: 'higher API call volume', retryAt });
+  });
+
   it('an expired block is not reported', async () => {
     const { svc, repo } = service({ contact: CONTACT });
     await repo.putSecBlock({ blockedUntil: '2026-10-21T09:00:00.000Z', failures: 1, updatedAt: NOW.toISOString() });

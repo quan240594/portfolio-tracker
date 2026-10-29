@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { asFloat, isRecord } from '../parse.js';
 import { exchangeSuffix, isCrypto } from '../symbols.js';
 import { ALPHAVANTAGE_URL } from './alphavantage.js';
+import { classifyNotice, errorMessageOf, noticeOf, type NoticeKind } from './av-notice.js';
 
 /**
  * Analyst consensus from Alpha Vantage `EARNINGS_ESTIMATES`: per fiscal quarter (and year) the mean, the high, the low and the number of
@@ -23,10 +24,15 @@ export interface EstimateQuarter {
   revenue?: ConsensusFigure;
 }
 
+/** The kind of limit a `rate-limited` answer is: the day's quota, a burst (too fast), or a notice that is neither (`other`). */
+export type EstimateLimit = Extract<NoticeKind, 'daily' | 'burst' | 'other'>;
+
 export type EstimatesAnswer =
   | { status: 'ok'; quarters: EstimateQuarter[] }
-  | { status: 'no-coverage' | 'premium' | 'rate-limited' }
-  | { status: 'error'; reason: string };
+  | { status: 'no-coverage' }
+  | { status: 'premium'; detail?: string }
+  | { status: 'rate-limited'; scope?: EstimateLimit; detail?: string }
+  | { status: 'error'; reason: string; /** The key was refused. */ invalidKey?: true };
 
 /** A number from a JSON number or a numeric string; "None", "", null and garbage are absent (never an error). */
 const lenient = z
@@ -90,30 +96,27 @@ function quartersOf(entries: readonly unknown[]): EstimateQuarter[] {
   return quarters.toSorted((a, b) => b.quarterEnd.localeCompare(a.quarterEnd)).slice(0, CONSENSUS_KEEP_QUARTERS);
 }
 
-const PREMIUM = /premium endpoint/i;
-const RATE_LIMITED = /rate limit|requests per day|call frequency|calls per (?:minute|day)|spreading out/i;
-
-/** A provider message as a short reason: one line, no URL, at most 100 characters. */
-function brief(message: string): string {
-  return message.replaceAll(/https?:\/\/\S+/gi, '').replaceAll(/\s+/g, ' ').trim().slice(0, 100);
+/** Alpha Vantage answers a refusal with HTTP 200 and one of `Information`, `Note` or `Error Message`; the full sanitised text is kept as the detail. */
+function refusalOf(json: Record<string, unknown>): EstimatesAnswer | undefined {
+  const notice = noticeOf(json);
+  if (notice !== undefined) return answerFor(notice.kind, notice.message);
+  const message = errorMessageOf(json);
+  if (message === undefined) return undefined;
+  // An `Error Message` is an unknown symbol (no coverage) unless it says the key was refused.
+  return classifyNotice(message) === 'invalid-key' ? answerFor('invalid-key', message) : { status: 'no-coverage' };
 }
 
-/** Alpha Vantage answers a refusal with HTTP 200 and one of `Information`, `Note` or `Error Message`. */
-function noticeOf(json: Record<string, unknown>): EstimatesAnswer | undefined {
-  const message = [json.Information, json.Note].find((value): value is string => typeof value === 'string' && value !== '');
-  if (message !== undefined) {
-    if (PREMIUM.test(message)) return { status: 'premium' };
-    if (RATE_LIMITED.test(message)) return { status: 'rate-limited' };
-    return { status: 'error', reason: brief(message) || 'the provider sent a notice' };
-  }
-  return typeof json['Error Message'] === 'string' ? { status: 'no-coverage' } : undefined;
+function answerFor(kind: NoticeKind, message: string): EstimatesAnswer {
+  if (kind === 'premium') return { status: 'premium', detail: message };
+  if (kind === 'invalid-key') return { status: 'error', reason: `the API key was refused: ${message}`, invalidKey: true };
+  return { status: 'rate-limited', scope: kind, detail: message };
 }
 
 /** What an `EARNINGS_ESTIMATES` answer says. Never throws: anything unexpected is an `error` with a short reason. */
 export function parseEarningsEstimates(json: unknown): EstimatesAnswer {
   if (!isRecord(json)) return { status: 'error', reason: 'the answer was not a JSON object' };
-  const notice = noticeOf(json);
-  if (notice !== undefined) return notice;
+  const refusal = refusalOf(json);
+  if (refusal !== undefined) return refusal;
   if (Object.keys(json).length === 0) return { status: 'no-coverage' };
   const answer = answerSchema.safeParse(json);
   if (!answer.success) return { status: 'error', reason: 'the answer has no list of estimates' };
@@ -138,6 +141,8 @@ export interface EstimatesClientOptions {
   /** The alarm's counted `fetch`. */
   fetch: (url: string, init?: RequestInit) => Promise<Response>;
   timeoutMs?: number;
+  /** Resolves when a request may start (`ProviderPacer.wait`): the provider limits bursts, so calls are spaced. Absent: no waiting. */
+  pace?: () => Promise<unknown>;
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -152,6 +157,7 @@ export class AlphaVantageEstimatesClient {
   async fetchEstimates(ticker: string): Promise<EstimatesAnswer> {
     const { apiKey, timeoutMs = DEFAULT_TIMEOUT_MS } = this.options;
     const url = `${ALPHAVANTAGE_URL}?function=EARNINGS_ESTIMATES&symbol=${encodeURIComponent(ticker)}&apikey=${encodeURIComponent(apiKey)}`;
+    await this.options.pace?.();
     let response: Response;
     try {
       response = await this.options.fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
@@ -159,7 +165,7 @@ export class AlphaVantageEstimatesClient {
       if (isHostLimit(error)) throw error;
       return { status: 'error', reason: 'the request failed' };
     }
-    if (response.status === 429) return { status: 'rate-limited' };
+    if (response.status === 429) return { status: 'rate-limited', scope: 'other', detail: 'the provider answered 429 (too many requests)' };
     if (!response.ok) return { status: 'error', reason: `the provider answered ${response.status}` };
     try {
       return parseEarningsEstimates(await response.json());

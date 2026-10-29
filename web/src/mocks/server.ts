@@ -16,6 +16,7 @@ export const server = setupServer(
   http.get(api('/diagnostics/alarms'), () => HttpResponse.json({ error: { code: 'NOT_FOUND', message: 'Not found' } }, { status: 404 })),
   http.get(api('/diagnostics/valuation'), () => HttpResponse.json({ error: { code: 'NOT_FOUND', message: 'Not found' } }, { status: 404 })),
   http.get(api('/diagnostics/earnings-dates'), () => HttpResponse.json({ error: { code: 'NOT_FOUND', message: 'Not found' } }, { status: 404 })),
+  http.get(api('/diagnostics/alphavantage-probe'), () => HttpResponse.json({ error: { code: 'NOT_FOUND', message: 'Not found' } }, { status: 404 })),
   http.get(api('/prices/status'), () => HttpResponse.json({ error: { code: 'NOT_FOUND', message: 'Not found' } }, { status: 404 })),
   http.get(api('/usage'), () => HttpResponse.json({ error: { code: 'NOT_FOUND', message: 'Not found' } }, { status: 404 })),
   ...handlers,

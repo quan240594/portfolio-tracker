@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EstimatesAnswer } from '@portfolio/prices';
 import { sampleSummary, type ConsensusQuarter, type ConsensusState, type EarningsHolding, type EarningsSummary } from '@portfolio/shared';
-import { ESTIMATES_CALLS_PER_RUN, estimateTier, planEstimates, type EstimateSubject } from './estimates-job.js';
+import { ESTIMATES_CALLS_PER_RUN, ESTIMATES_STEP_DELAY_MS, estimateTier, planEstimates, type EstimateSubject } from './estimates-job.js';
 import { FakeEstimates, SAMPLE_ESTIMATES } from './testing/fake-estimates.js';
 import { earningsHarness, NOW, type EarningsHarness } from './testing/harness.js';
 
@@ -157,16 +157,102 @@ describe('the earningsEstimates job', () => {
     expect(fake.calls.slice(1)).toEqual(['SB', 'SC', 'SD']);
   });
 
-  it('records a rate limit, stops the run and tries again after the next UTC midnight', async () => {
-    const fake = new FakeEstimates({ SA: SAMPLE_ESTIMATES, SB: { status: 'rate-limited' } }, SAMPLE_ESTIMATES);
+  it('records a daily limit, stops the run and tries again after the next UTC midnight', async () => {
+    const daily: EstimatesAnswer[] = [{ status: 'rate-limited', scope: 'daily', detail: 'Our standard API rate limit is 25 requests per day.' }, SAMPLE_ESTIMATES];
+    const fake = new FakeEstimates({ SA: SAMPLE_ESTIMATES, SB: () => daily.shift()! }, SAMPLE_ESTIMATES);
     const h = earningsHarness({ holdings: symbols(4), consensus: fake });
     expect(await runJob(h)).toEqual({ fetched: 2, stored: 1, stoppedBy: 'rate-limited' });
-    expect(await consensusState(h, 'SB')).toMatchObject({ outcome: 'rate-limited' });
-    expect(await h.repo.getConsensusBlock()).toMatchObject({ reason: 'rate-limited', until: '2026-10-22T00:05:00.000Z' });
+    expect(await consensusState(h, 'SB')).toMatchObject({ outcome: 'rate-limited', detail: 'Our standard API rate limit is 25 requests per day.', retryAt: '2026-10-22T00:01:00.000Z' });
+    expect(await h.repo.getConsensusBlock()).toMatchObject({ reason: 'rate-limited', scope: 'daily', strikes: 0, until: '2026-10-22T00:01:00.000Z' });
     expect(await runJob(h)).toMatchObject({ skipped: 'blocked' });
     h.clock.advance(5 * 3_600_000);
-    expect(await runJob(h)).toEqual({ fetched: 2, stored: 2 });
-    expect(fake.calls).toEqual(['SA', 'SB', 'SC', 'SD']);
+    expect(await runJob(h)).toEqual({ fetched: 3, stored: 3 });
+    expect(fake.calls).toEqual(['SA', 'SB', 'SC', 'SD', 'SB']);
+  });
+
+  it('holds a burst back for two minutes only, and any other notice for a quarter of an hour, not for the day', async () => {
+    const answers: EstimatesAnswer[] = [{ status: 'rate-limited', scope: 'burst', detail: 'Burst pattern detected.' }, SAMPLE_ESTIMATES];
+    const burst = new FakeEstimates({ SA: () => answers.shift()! }, SAMPLE_ESTIMATES);
+    const h = earningsHarness({ holdings: symbols(3), consensus: burst });
+    expect(await runJob(h)).toEqual({ fetched: 1, stored: 0, stoppedBy: 'rate-limited' });
+    expect(await h.repo.getConsensusBlock()).toMatchObject({ scope: 'burst', until: '2026-10-21T19:32:00.000Z' });
+    expect(await runJob(h)).toMatchObject({ skipped: 'blocked' });
+    h.clock.advance(2 * 60_000);
+    expect(await runJob(h)).toEqual({ fetched: 3, stored: 3 });
+    expect(burst.calls).toEqual(['SA', 'SB', 'SC', 'SA']);
+    expect(await h.repo.getConsensusBlock()).toBeNull();
+
+    const volume = new FakeEstimates({ SA: { status: 'rate-limited', scope: 'other', detail: 'Please contact premium@alphavantage.co if you are targeting a higher API call volume.' } }, SAMPLE_ESTIMATES);
+    const g = earningsHarness({ holdings: symbols(1), consensus: volume });
+    await runJob(g);
+    expect(await consensusState(g, 'SA')).toMatchObject({ outcome: 'rate-limited', retryAt: '2026-10-21T19:45:00.000Z', detail: expect.stringContaining('higher API call volume') });
+    expect(await g.repo.getConsensusBlock()).toMatchObject({ scope: 'other', until: '2026-10-21T19:45:00.000Z' });
+  });
+
+  it('answers a rate limit without a kind (an HTTP 429) like an unknown notice', async () => {
+    const h = earningsHarness({ holdings: symbols(1), consensus: new FakeEstimates({ SA: { status: 'rate-limited' } }) });
+    await runJob(h);
+    expect(await h.repo.getConsensusBlock()).toMatchObject({ scope: 'other', until: '2026-10-21T19:45:00.000Z' });
+    expect((await consensusState(h, 'SA'))?.detail).toBeUndefined();
+  });
+
+  it('doubles the pause with every refusal the same UTC day up to the next midnight, and starts over the next day', async () => {
+    const h = earningsHarness({ holdings: symbols(1), consensus: new FakeEstimates({ SA: { status: 'rate-limited', scope: 'other', detail: 'again' } }) });
+    const pauseMinutes = async (): Promise<number> => {
+      const block = (await h.repo.getConsensusBlock())!;
+      return Math.round((Date.parse(block.until) - Date.parse(block.at)) / 60_000);
+    };
+    // Once the pause has passed the next run asks again (the symbol's own retry time is the same instant).
+    const nextRun = async (): Promise<number> => {
+      h.clock.advance(Date.parse((await h.repo.getConsensusBlock())!.until) - h.clock.now().getTime() + 1000);
+      await runJob(h);
+      return pauseMinutes();
+    };
+    await runJob(h);
+    const minutes = [await pauseMinutes(), await nextRun(), await nextRun(), await nextRun()];
+    expect(minutes).toEqual([15, 30, 60, 120]);
+    expect((await h.repo.getConsensusBlock())?.strikes).toBe(3);
+    h.clock.advance(DAY);
+    await runJob(h);
+    expect((await h.repo.getConsensusBlock())?.strikes).toBe(0);
+  });
+
+  it('forgets the pause when figures come back', async () => {
+    const answers: EstimatesAnswer[] = [{ status: 'rate-limited', scope: 'burst', detail: 'Burst pattern detected.' }, SAMPLE_ESTIMATES];
+    const h = earningsHarness({ holdings: symbols(1), consensus: new FakeEstimates({ SA: () => answers.shift()! }) });
+    await runJob(h);
+    expect(await h.repo.getConsensusBlock()).not.toBeNull();
+    h.clock.advance(3 * 60_000);
+    expect(await runJob(h)).toEqual({ fetched: 1, stored: 1 });
+    expect(await h.repo.getConsensusBlock()).toBeNull();
+    expect((await consensusState(h, 'SA'))?.retryAt).toBeUndefined();
+  });
+
+  it('asks a symbol that waits for a limit again once its own retry time has passed, and keeps a record from before `retryAt` half a day', () => {
+    const limited = (extra: Partial<ConsensusState>) => subject({ latest: latest(), state: state({ outcome: 'rate-limited', at: ago(0.001), ...extra }) });
+    expect(estimateTier(limited({ retryAt: iso(NOW.getTime() + 60_000) }), NOW)).toBeUndefined();
+    expect(estimateTier(limited({ retryAt: iso(NOW.getTime() - 60_000) }), NOW)).toBe(0);
+    expect(estimateTier(limited({}), NOW)).toBeUndefined();
+    expect(estimateTier(subject({ latest: latest(), state: state({ outcome: 'rate-limited', at: ago(0.6) }) }), NOW)).toBe(0);
+  });
+
+  it('stops the run on a key the provider refuses and keeps the provider\u2019s words (no key, at most 300 characters)', async () => {
+    const reason = `the API key was refused: the parameter apikey is invalid or missing ${'x'.repeat(400)}`;
+    const fake = new FakeEstimates({ SA: { status: 'error', reason, invalidKey: true } }, SAMPLE_ESTIMATES);
+    const h = earningsHarness({ holdings: symbols(3), consensus: fake });
+    expect(await runJob(h)).toEqual({ fetched: 1, stored: 0, stoppedBy: 'invalid-key' });
+    expect(fake.calls).toEqual(['SA']);
+    const detail = (await consensusState(h, 'SA'))?.detail;
+    expect(detail).toHaveLength(300);
+    expect(detail).toContain('the API key was refused');
+  });
+
+  it('puts a minute between the steps, one call per step', async () => {
+    const h = earningsHarness({ holdings: symbols(3), consensus: new FakeEstimates({}, SAMPLE_ESTIMATES) });
+    const first = await h.registry.earningsEstimates!({ payload: { trigger: 'scheduled' } });
+    expect(ESTIMATES_STEP_DELAY_MS).toBeGreaterThanOrEqual(60_000);
+    expect(first).toMatchObject({ done: false, delayMs: ESTIMATES_STEP_DELAY_MS });
+    expect((h.estimatesDeps.client as FakeEstimates).calls).toHaveLength(1);
   });
 
   it('keeps the figures of an earlier fetch when a later attempt fails', async () => {

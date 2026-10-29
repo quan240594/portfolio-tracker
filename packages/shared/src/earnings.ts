@@ -452,7 +452,7 @@ export interface EarningsSymbolStatus {
   /** Quarterly releases of the backfill plan: how many exist and how many are stored. */
   releases?: { planned: number; stored: number; failed: number };
   /** What the consensus job last did for this company (additive: absent before its first attempt). */
-  consensus?: { outcome: ConsensusOutcome; at: string; detail?: string; fetchedAt?: string };
+  consensus?: { outcome: ConsensusOutcome; at: string; detail?: string; fetchedAt?: string; retryAt?: string };
 }
 
 export type EarningsNotReady = 'sec-contact' | 'ai-binding';
@@ -474,7 +474,14 @@ export interface EarningsStatusResponse {
   /** How many symbols you traded but no longer hold: they are neither listed nor counted nor checked. */
   notHeld?: number;
   /** Analyst consensus: how many of the eligible companies have figures stored, and why the job waits (the plan has no estimates, or the day's allowance is used). */
-  consensus?: { covered: number; companies: number; blockedUntil?: string; blockedReason?: 'premium' | 'rate-limited' };
+  consensus?: {
+    covered: number;
+    companies: number;
+    blockedUntil?: string;
+    blockedReason?: 'premium' | 'rate-limited';
+    /** Eligible companies whose last attempt was `rate-limited`: they wait for the provider's limit to pass. */
+    waiting?: number;
+  };
   /** The currently held symbols only (the same ones as the Dashboard's holdings). */
   symbols: EarningsSymbolStatus[];
 }

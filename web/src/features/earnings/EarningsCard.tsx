@@ -17,6 +17,7 @@ import {
   hasQuarterComparison,
   labelOf,
   metricOf,
+  scorecardNote,
   scorecardRows,
 } from './earningsModel';
 import { BasisBadge, VerdictChip } from './VerdictChip';
@@ -39,55 +40,59 @@ function Changes({ metric }: Readonly<{ metric: EarningsMetric }>) {
 /** The scorecard: expected, actual and beat or miss, as a real table that stacks its cells below 640 px. */
 function Scorecard({ summary, labelledBy }: Readonly<{ summary: EarningsSummary; labelledBy: string }>) {
   const rows = scorecardRows(summary);
+  const note = scorecardNote(summary);
   return (
-    <table aria-labelledby={labelledBy} className="w-full text-sm max-sm:block">
-      <caption className="sr-only">Expected and actual figures with beat or miss</caption>
-      <thead className="max-sm:sr-only">
-        <tr className="text-left text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-          <th scope="col" className="py-1 pr-3 font-medium">
-            <span className="sr-only">Figure</span>
-          </th>
-          <th scope="col" className="px-3 py-1 font-medium">
-            Expected
-          </th>
-          <th scope="col" className="px-3 py-1 font-medium">
-            Actual
-          </th>
-          <th scope="col" className="py-1 pl-3 font-medium">
-            Beat/Miss
-          </th>
-        </tr>
-      </thead>
-      <tbody className="max-sm:block">
-        {rows.map((row) => (
-          <tr key={row.key} className="border-t border-slate-200 align-top dark:border-slate-700 max-sm:block max-sm:py-2">
-            <th scope="row" className="py-2 pr-3 text-left font-semibold max-sm:block max-sm:py-0">
-              {row.label}
-              {row.basis && (
-                <span className="ml-2 align-middle">
-                  <BasisBadge title={`${BASIS_LABELS[row.basis]} figure`}>{BASIS_LABELS[row.basis]}</BasisBadge>
-                </span>
-              )}
+    <>
+      <table aria-labelledby={labelledBy} className="w-full text-sm max-sm:block">
+        <caption className="sr-only">Expected and actual figures with beat or miss</caption>
+        <thead className="max-sm:sr-only">
+          <tr className="text-left text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            <th scope="col" className="py-1 pr-3 font-medium">
+              <span className="sr-only">Figure</span>
             </th>
-            <td className="px-3 py-2 max-sm:block max-sm:px-0 max-sm:py-0.5" data-label="Expected">
-              <span className="muted mr-2 sm:hidden">Expected</span>
-              <span className={row.hasEstimate ? 'tabular-nums' : 'muted text-xs'}>{row.expected}</span>
-              {row.analysts && <span className="muted ml-1 text-xs">({row.analysts})</span>}
-              {row.range && <span className="muted block text-xs tabular-nums">{row.range}</span>}
-              {row.source && <span className="muted block text-[11px]">{row.source}</span>}
-            </td>
-            <td className="px-3 py-2 font-semibold tabular-nums max-sm:block max-sm:px-0 max-sm:py-0.5" data-label="Actual">
-              <span className="muted mr-2 font-normal sm:hidden">Actual</span>
-              <span className={row.disclosed ? '' : 'muted text-xs font-normal'}>{row.actual}</span>
-            </td>
-            <td className="py-2 pl-3 max-sm:block max-sm:px-0 max-sm:py-0.5" data-label="Beat/Miss">
-              <span className="muted mr-2 sm:hidden">Beat/Miss</span>
-              {row.verdict ? <VerdictChip verdict={row.verdict} surprise={row.surprise} text={row.beat} /> : <span className="muted text-xs">{row.hasEstimate ? NOT_DISCLOSED : row.expected}</span>}
-            </td>
+            <th scope="col" className="px-3 py-1 font-medium">
+              Expected
+            </th>
+            <th scope="col" className="px-3 py-1 font-medium">
+              Actual
+            </th>
+            <th scope="col" className="py-1 pl-3 font-medium">
+              Beat/Miss
+            </th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody className="max-sm:block">
+          {rows.map((row) => (
+            <tr key={row.key} className="border-t border-slate-200 align-top dark:border-slate-700 max-sm:block max-sm:py-2">
+              <th scope="row" className="py-2 pr-3 text-left font-semibold max-sm:block max-sm:py-0">
+                {row.label}
+                {row.basis && (
+                  <span className="ml-2 align-middle">
+                    <BasisBadge title={`${BASIS_LABELS[row.basis]} figure`}>{BASIS_LABELS[row.basis]}</BasisBadge>
+                  </span>
+                )}
+              </th>
+              <td className="px-3 py-2 max-sm:block max-sm:px-0 max-sm:py-0.5" data-label="Expected">
+                <span className="muted mr-2 sm:hidden">Expected</span>
+                <span className={row.hasEstimate ? 'tabular-nums' : 'muted text-xs'}>{row.expected}</span>
+                {row.analysts && <span className="muted ml-1 text-xs">({row.analysts})</span>}
+                {row.range && <span className="muted block text-xs tabular-nums">{row.range}</span>}
+                {row.source && <span className="muted block text-[11px]">{row.source}</span>}
+              </td>
+              <td className="px-3 py-2 font-semibold tabular-nums max-sm:block max-sm:px-0 max-sm:py-0.5" data-label="Actual">
+                <span className="muted mr-2 font-normal sm:hidden">Actual</span>
+                <span className={row.disclosed ? '' : 'muted text-xs font-normal'}>{row.actual}</span>
+              </td>
+              <td className="py-2 pl-3 max-sm:block max-sm:px-0 max-sm:py-0.5" data-label="Beat/Miss">
+                <span className="muted mr-2 sm:hidden">Beat/Miss</span>
+                {row.verdict ? <VerdictChip verdict={row.verdict} surprise={row.surprise} text={row.beat} /> : <span className="muted text-xs">{row.hasEstimate ? NOT_DISCLOSED : row.expected}</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {note && <p className="muted mt-2 text-xs break-words">{note}</p>}
+    </>
   );
 }
 

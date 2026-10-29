@@ -8,12 +8,15 @@
  *   1. a company about to report (a calendar date within 3 days) or that reported a live release since its last fetch,
  *   2. the stalest: a company is refreshed at most every 14 days otherwise.
  * Every attempt leaves its outcome on the symbol (`ok`, `no-coverage`, `premium`, `rate-limited`, `error`) so the page says why a figure is missing.
- * A `premium` or `rate-limited` answer also stops the job (for a week, or until the next UTC day): there is no point asking again.
+ * A `premium` answer stops the job for a week; a `rate-limited` one for as long as the kind of limit says (the rest of the UTC day for the daily
+ * quota, 2 minutes for a burst, 15 minutes for any other notice, doubling with each repeat the same day up to the next UTC midnight): there is
+ * no point asking again before. Steps are a minute apart and the client spaces its requests (`ProviderPacer`), since the provider also refuses
+ * bursts. The provider's own words (sanitised, at most 300 characters) are kept with the outcome.
  */
 import { logger, type JobHandler, type JobPayloads } from '@portfolio/platform';
-import { estimateTicker, type AlphaVantageEstimatesClient, type EstimateBudget, type EstimatesAnswer } from '@portfolio/prices';
-import { daysBetween, matchQuarter, type ConsensusOutcome, type ConsensusQuarter, type ConsensusState, type EarningsHolding, type EarningsSummary } from '@portfolio/shared';
-import { iso, loadHeld, nextAllowanceReset, sanitizeDetail, type EarningsInputs } from './common.js';
+import { estimateTicker, resumeAtMs, sanitizeNotice, type AlphaVantageEstimatesClient, type EstimateBudget, type EstimatesAnswer } from '@portfolio/prices';
+import { daysBetween, matchQuarter, type ConsensusBlock, type ConsensusOutcome, type ConsensusQuarter, type ConsensusState, type EarningsHolding, type EarningsSummary } from '@portfolio/shared';
+import { iso, loadHeld, type EarningsInputs } from './common.js';
 import type { EarningsRepository } from './repository.js';
 import { isSubrequestError } from './sec.js';
 import { utcDayOf } from './util.js';
@@ -22,6 +25,8 @@ export type EstimatesPayload = JobPayloads['earningsEstimates'];
 
 /** Calls one run makes at most (the day's own cap is the budget's). */
 export const ESTIMATES_CALLS_PER_RUN = 3;
+/** One call per step, the steps this far apart: Alpha Vantage refuses requests that come too fast. */
+export const ESTIMATES_STEP_DELAY_MS = 60_000;
 /** A company is refreshed at most this often, apart from the cases below. */
 export const ESTIMATES_REFRESH_DAYS = 14;
 /** A company is "about to report" or "just reported" within this many days of a calendar date. */
@@ -52,7 +57,7 @@ export interface EstimatesResult {
   stored: number;
   skipped?: 'no-key' | 'blocked' | 'budget' | 'nothing-to-do';
   /** The answer that stopped the run, when one did. */
-  stoppedBy?: 'premium' | 'rate-limited';
+  stoppedBy?: 'premium' | 'rate-limited' | 'invalid-key';
 }
 
 // --- Who is asked, in which order ----------------------------------------------------------------------------------------
@@ -67,7 +72,12 @@ export interface EstimateSubject {
   dates: readonly string[];
 }
 
-const coolingDown = (state: ConsensusState | null, now: Date): boolean => state !== null && state.outcome !== 'ok' && now.getTime() - Date.parse(state.at) < COOLDOWN_MS[state.outcome];
+const coolingDown = (state: ConsensusState | null, now: Date): boolean => {
+  if (state === null || state.outcome === 'ok') return false;
+  // A limit names when it passes (`retryAt`); a record written before that was kept has the old half-day.
+  if (state.outcome === 'rate-limited' && state.retryAt !== undefined) return Date.parse(state.retryAt) > now.getTime();
+  return now.getTime() - Date.parse(state.at) < COOLDOWN_MS[state.outcome];
+};
 
 /** The fetched figures are older than the newest live release: the next quarter's estimates have moved on. */
 const afterRelease = (latest: EarningsSummary | undefined, fetchedAt: string): boolean => latest?.origin === 'live' && latest.generatedAt.localeCompare(fetchedAt) > 0;
@@ -153,11 +163,29 @@ async function startRun(deps: EstimatesJobDeps): Promise<Cursor> {
 
 type Failure = Exclude<EstimatesAnswer, { status: 'ok' }>;
 
+const detailOf = (answer: Failure): string | undefined => {
+  if (answer.status === 'error') return sanitizeNotice(answer.reason);
+  return 'detail' in answer && answer.detail !== undefined ? sanitizeNotice(answer.detail) : undefined;
+};
+
+/** Refusals earlier the same UTC day, as the block remembers them: the back-off doubles with each. */
+const strikesOf = (previous: ConsensusBlock | null, now: Date): number =>
+  previous?.reason === 'rate-limited' && previous.at.slice(0, 10) === utcDayOf(now) ? (previous.strikes ?? 0) + 1 : 0;
+
+/** The pause after a `rate-limited` answer: by the kind of limit (the rest of the UTC day, 2 minutes, or 15 minutes), doubling on repeats up to the next UTC midnight. */
+async function limitBlock(deps: EstimatesJobDeps, answer: Extract<Failure, { status: 'rate-limited' }>, now: Date): Promise<ConsensusBlock> {
+  const scope = answer.scope ?? 'other';
+  const strikes = strikesOf(await deps.repo.getConsensusBlock(), now);
+  const detail = detailOf(answer);
+  return { until: iso(resumeAtMs(scope, now.getTime(), strikes)), reason: 'rate-limited', at: now.toISOString(), scope, strikes, ...(detail === undefined ? {} : { detail }) };
+}
+
 /** What a symbol's state becomes after an answer that gave no figures; figures stored earlier stay and keep their date. */
 async function recordFailure(deps: EstimatesJobDeps, target: EstimateTarget, answer: Failure): Promise<void> {
   const now = deps.now();
   const previous = (await deps.repo.getConsensus(target.symbol)).state;
-  const detail = answer.status === 'error' ? sanitizeDetail(answer.reason) : undefined;
+  const detail = detailOf(answer);
+  const block = answer.status === 'rate-limited' ? await limitBlock(deps, answer, now) : undefined;
   const state: ConsensusState = {
     symbol: target.symbol,
     outcome: answer.status,
@@ -166,11 +194,12 @@ async function recordFailure(deps: EstimatesJobDeps, target: EstimateTarget, ans
     ...(previous?.fetchedAt === undefined ? {} : { fetchedAt: previous.fetchedAt }),
     ...(previous?.quarters === undefined ? {} : { quarters: previous.quarters }),
     ...(detail === undefined ? {} : { detail }),
+    ...(block === undefined ? {} : { retryAt: block.until }),
     updatedAt: now.toISOString(),
   };
   await deps.repo.putConsensusState(state);
-  if (answer.status === 'premium') await deps.repo.putConsensusBlock({ until: iso(now.getTime() + PREMIUM_BLOCK_MS), reason: 'premium', at: state.at });
-  if (answer.status === 'rate-limited') await deps.repo.putConsensusBlock({ until: nextAllowanceReset(now), reason: 'rate-limited', at: state.at });
+  if (block !== undefined) await deps.repo.putConsensusBlock(block);
+  if (answer.status === 'premium') await deps.repo.putConsensusBlock({ until: iso(now.getTime() + PREMIUM_BLOCK_MS), reason: 'premium', at: state.at, ...(detail === undefined ? {} : { detail }) });
 }
 
 async function recordFigures(deps: EstimatesJobDeps, target: EstimateTarget, answer: Extract<EstimatesAnswer, { status: 'ok' }>): Promise<void> {
@@ -181,7 +210,7 @@ async function recordFigures(deps: EstimatesJobDeps, target: EstimateTarget, ans
 }
 
 /** Asks the provider about one symbol and records the answer. A failure that is not the host's subrequest limit is that symbol's `error`. */
-async function ask(deps: EstimatesJobDeps, target: EstimateTarget): Promise<EstimatesAnswer['status']> {
+async function ask(deps: EstimatesJobDeps, target: EstimateTarget): Promise<EstimatesAnswer> {
   let answer: EstimatesAnswer;
   try {
     answer = await deps.client!.fetchEstimates(target.ticker);
@@ -192,18 +221,22 @@ async function ask(deps: EstimatesJobDeps, target: EstimateTarget): Promise<Esti
   }
   if (answer.status === 'ok') await recordFigures(deps, target, answer);
   else await recordFailure(deps, target, answer);
-  return answer.status;
+  return answer;
 }
 
-const stoppedBy = (status: EstimatesAnswer['status']): EstimatesResult['stoppedBy'] => (status === 'premium' || status === 'rate-limited' ? status : undefined);
+/** The answers that make further calls pointless: no estimates on this plan, a limit, or a key the provider refuses. */
+function stoppedBy(answer: EstimatesAnswer): EstimatesResult['stoppedBy'] {
+  if (answer.status === 'premium' || answer.status === 'rate-limited') return answer.status;
+  return answer.status === 'error' && answer.invalidKey === true ? 'invalid-key' : undefined;
+}
 
-/** What follows an answer: stop on a notice that makes further calls pointless, stop at the run's cap or the end of the queue, else the next symbol. */
-function afterAnswer(run: Cursor, status: EstimatesAnswer['status']): Step {
-  const next: Cursor = { ...run, index: run.index + 1, fetched: run.fetched + 1, stored: run.stored + (status === 'ok' ? 1 : 0) };
-  const stopped = stoppedBy(status);
+/** What follows an answer: stop on a notice that makes further calls pointless, stop at the run's cap or the end of the queue, else the next symbol a minute later. */
+function afterAnswer(run: Cursor, answer: EstimatesAnswer): Step {
+  const next: Cursor = { ...run, index: run.index + 1, fetched: run.fetched + 1, stored: run.stored + (answer.status === 'ok' ? 1 : 0) };
+  const stopped = stoppedBy(answer);
   if (stopped !== undefined) return finished({ fetched: next.fetched, stored: next.stored, stoppedBy: stopped });
   if (next.fetched >= ESTIMATES_CALLS_PER_RUN || next.index >= next.queue.length) return finished({ fetched: next.fetched, stored: next.stored });
-  return { done: false, next: JSON.stringify(next), delayMs: 1000 };
+  return { done: false, next: JSON.stringify(next), delayMs: ESTIMATES_STEP_DELAY_MS };
 }
 
 /** `earningsEstimates`: see the module comment. One symbol per step; the host's guard runs it only below 60 % of the budget. */
@@ -218,7 +251,9 @@ export function createEarningsEstimatesJob(getDeps: () => EstimatesJobDeps): Job
     if (target === undefined) return finished({ fetched: run.fetched, stored: run.stored, ...(run.fetched === 0 ? { skipped: 'nothing-to-do' as const } : {}) });
     if (!(await deps.budget.room()).allowed || !(await deps.budget.spend())) return finished({ fetched: run.fetched, stored: run.stored, skipped: 'budget' });
     try {
-      return afterAnswer(run, await ask(deps, target));
+      const answer = await ask(deps, target);
+      if (answer.status === 'ok' && block !== null) await deps.repo.clearConsensusBlock();
+      return afterAnswer(run, answer);
     } catch (error) {
       if (isSubrequestError(error)) return { done: false, next: JSON.stringify(run), delayMs: 1000 };
       throw error;

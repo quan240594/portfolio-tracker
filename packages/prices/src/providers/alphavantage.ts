@@ -1,6 +1,6 @@
 import type { DividendEvent, EodPrice, InstrumentProfile, Quote } from '@portfolio/shared';
 import { majorCurrencyCode } from '@portfolio/shared';
-import { ProviderError, RateLimitError } from '../errors.js';
+import { ProviderError } from '../errors.js';
 import type { HttpClient } from '../http.js';
 import type { DailyQuota, TokenBucket } from '../limits.js';
 import { makeProfile } from '../models.js';
@@ -8,9 +8,13 @@ import { asFloat, cleanText, isRecord, nonEmpty, ownValue, positiveNumber, title
 import { utcDay } from '../time.js';
 import { COUNTRY_NAMES, assetClassFromType } from './twelvedata.js';
 import { failureOf, type PriceBatch, type PriceSource } from './base.js';
+import { limitError, noticeOf, type AlphaVantageNotice } from './av-notice.js';
 
 /** Alpha Vantage: used for US instrument profiles (`OVERVIEW`) only; the free tier is 25 calls a day. */
 export const ALPHAVANTAGE_URL = 'https://www.alphavantage.co/query';
+
+/** A `Note`/`Information` key without text is still a refusal. */
+const EMPTY_NOTICE: AlphaVantageNotice = { kind: 'other', message: 'the provider sent an empty notice' };
 
 const PLACEHOLDERS = new Set(['NONE', 'N/A', '-']);
 
@@ -38,7 +42,7 @@ export class AlphaVantageProvider implements PriceSource {
     const raw = await this.options.http.getJson(ALPHAVANTAGE_URL, { function: 'OVERVIEW', symbol: symbol.replaceAll('-', '.'), apikey: this.options.apiKey }, undefined, symbol);
     const data = isRecord(raw) ? raw : {};
     // Alpha Vantage reports throttling and quota as HTTP 200 with a Note/Information message.
-    if ('Note' in data || 'Information' in data) throw new RateLimitError(`${this.name}: rate limited`, { provider: this.name, symbol });
+    if ('Note' in data || 'Information' in data) throw limitError(noticeOf(data) ?? EMPTY_NOTICE, symbol);
     if ('Error Message' in data || !nonEmpty(data.Symbol)) return null;
     return this.profileFrom(symbol, data);
   }

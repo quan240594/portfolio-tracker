@@ -40,13 +40,14 @@ function releasesNote(entry: EarningsSymbolStatus): string {
   return ` · ${entry.releases.stored} of ${entry.releases.planned} quarters stored${failed}`;
 }
 
-const lowerFirst = (text: string): string => text.charAt(0).toLowerCase() + text.slice(1);
+/** The first letter in lower case, except for the name of the provider. */
+const lowerFirst = (text: string): string => (text.startsWith('Alpha Vantage') ? text : text.charAt(0).toLowerCase() + text.slice(1));
 
 /** ` · estimates: not covered by the data provider`: why the consensus of a company is missing; nothing when it was fetched. */
 function consensusNote(entry: EarningsSymbolStatus): string {
   const outcome = entry.consensus?.outcome;
   if (outcome === undefined || outcome === 'ok') return '';
-  return ` · estimates: ${lowerFirst(reasonText(outcome, entry.consensus?.detail))}`;
+  return ` · estimates: ${lowerFirst(reasonText(outcome, entry.consensus?.detail, entry.consensus?.retryAt))}`;
 }
 
 /** The line of one company. Without a run (an older deployment, or never checked) the older fields say what they can. */
@@ -85,17 +86,20 @@ export function notCountedText(status: EarningsStatusResponse): string | undefin
 }
 
 /**
- * `Consensus estimates: 18 of 26 companies.` and, when the job waits, why: the free plan has no estimates, or the daily limit of the provider was
- * reached. Absent on a deployment without the field.
+ * `Consensus estimates: 18 of 26 companies.` and, when the job waits, why: the free plan has no estimates, or Alpha Vantage is limiting requests (with
+ * how many companies wait for it). Absent on a deployment without the field.
  */
 export function consensusText(status: EarningsStatusResponse): string | undefined {
   const { consensus } = status;
   if (consensus === undefined) return undefined;
   const base = `Consensus estimates: ${consensus.covered} of ${consensus.companies} companies.`;
   if (!status.estimatesConfigured) return `${base} They need an Alpha Vantage key (the ALPHAVANTAGE_API_KEY secret).`;
-  if (consensus.blockedReason === undefined || consensus.blockedUntil === undefined) return base;
-  const why = consensus.blockedReason === 'premium' ? 'The free plan does not include estimates' : 'The data provider’s daily limit was reached';
-  return `${base} ${why}; not asked again before ${formatDateTime(consensus.blockedUntil)}.`;
+  const waiting = consensus.waiting ?? 0;
+  const noun = waiting === 1 ? 'company is' : 'companies are';
+  const counted = waiting > 0 ? `${base} ${waiting} ${noun} waiting because Alpha Vantage is limiting requests.` : base;
+  if (consensus.blockedReason === undefined || consensus.blockedUntil === undefined) return waiting > 0 ? `${counted} The app retries automatically.` : counted;
+  const why = consensus.blockedReason === 'premium' ? 'The free Alpha Vantage plan does not include estimates' : 'Alpha Vantage is limiting requests right now';
+  return `${counted} ${why}; not asked again before ${formatDateTime(consensus.blockedUntil)}.`;
 }
 
 export function lastPassText(status: EarningsStatusResponse): string {

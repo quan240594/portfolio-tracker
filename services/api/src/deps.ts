@@ -1,5 +1,5 @@
 import type { EventPublisher, FileStore, ItemStore } from '@portfolio/platform';
-import type { EarningsBackfillResponse, EarningsRefreshResponse, EarningsStatusResponse, ProviderBudgetReport, RefreshEarningsDatesResponse, RefreshRefusal, RefreshReport } from '@portfolio/shared';
+import type { AlphaVantageProbeStatus, EarningsBackfillResponse, EarningsRefreshResponse, EarningsStatusResponse, ProbeRefusal, ProviderBudgetReport, RefreshEarningsDatesResponse, RefreshRefusal, RefreshReport, RunAlphaVantageProbeResponse } from '@portfolio/shared';
 import type { BrokerDeps } from './broker-deps.js';
 import type { Config } from './config.js';
 import type { InflationFetch } from './inflation/source.js';
@@ -25,6 +25,17 @@ export interface CalendarDatesDeps {
   status(): Promise<{ budget: ProviderBudgetReport | null; refresh: RefreshReport }>;
   /** Queues the calendar job once; refuses (without queuing) when it was asked for less than an hour ago or the allowance of the day is nearly used. */
   refresh(): Promise<RefreshEarningsDatesResponse | { accepted: false; reason: RefreshRefusal; message: string; retryAfterSeconds?: number }>;
+}
+
+/**
+ * The Diagnostics "Test Alpha Vantage now" action (the Cloudflare app): one real `EARNINGS_ESTIMATES` call for a fixed ticker and the provider's own words.
+ * The AWS stack has none: the status route says so and the run route answers 404.
+ */
+export interface AlphaVantageProbeDeps {
+  /** Whether a probe may run now, when it may next, the allowance of the day and the last result. */
+  status(): Promise<AlphaVantageProbeStatus>;
+  /** Makes the call; refuses (without calling) when there is no key, it ran less than 10 minutes ago, or fewer than 3 of the day's calls are left. */
+  run(): Promise<{ accepted: true; result: RunAlphaVantageProbeResponse } | { accepted: false; reason: ProbeRefusal; message: string; retryAfterSeconds?: number }>;
 }
 
 /**
@@ -57,6 +68,8 @@ export interface Deps {
   earnings?: EarningsDeps;
   /** Earnings dates diagnostics (provider allowance and manual refresh); the report answers without them, the refresh route answers 404. */
   calendarDates?: CalendarDatesDeps;
+  /** The "Test Alpha Vantage now" diagnostics action; the status route answers `available: false` and the run route 404 without it. */
+  alphaVantageProbe?: AlphaVantageProbeDeps;
   /** The price history symbol override reaching the price jobs; absent = the field is only stored. */
   historySymbols?: HistorySymbolDeps;
   /** ECB inflation series (`GET /inflation`); the route answers 503 when absent. */

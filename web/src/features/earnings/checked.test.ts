@@ -110,9 +110,17 @@ describe('consensus estimates', () => {
   it('says it needs the key, and why the job waits', () => {
     expect(consensusText(status({ consensus: { covered: 0, companies: 3 } }))).toBe('Consensus estimates: 0 of 3 companies. They need an Alpha Vantage key (the ALPHAVANTAGE_API_KEY secret).');
     const premium = consensusText(status({ estimatesConfigured: true, consensus: { covered: 0, companies: 3, blockedReason: 'premium', blockedUntil: '2026-11-01T06:30:00.000Z' } }));
-    expect(premium).toMatch(/^Consensus estimates: 0 of 3 companies\. The free plan does not include estimates; not asked again before 01-11-2026, \d\d:\d\d\.$/);
+    expect(premium).toMatch(/^Consensus estimates: 0 of 3 companies\. The free Alpha Vantage plan does not include estimates; not asked again before 01-11-2026, \d\d:\d\d\.$/);
     const limited = consensusText(status({ estimatesConfigured: true, consensus: { covered: 1, companies: 3, blockedReason: 'rate-limited', blockedUntil: '2026-11-01T06:30:00.000Z' } }));
-    expect(limited).toContain('The data provider’s daily limit was reached; not asked again before');
+    expect(limited).toContain('Alpha Vantage is limiting requests right now; not asked again before');
+  });
+
+  it('says how many companies wait because of the limit, and that the app retries by itself', () => {
+    expect(consensusText(status({ estimatesConfigured: true, consensus: { covered: 1, companies: 3, waiting: 2 } }))).toBe('Consensus estimates: 1 of 3 companies. 2 companies are waiting because Alpha Vantage is limiting requests. The app retries automatically.');
+    expect(consensusText(status({ estimatesConfigured: true, consensus: { covered: 0, companies: 3, waiting: 1 } }))).toBe('Consensus estimates: 0 of 3 companies. 1 company is waiting because Alpha Vantage is limiting requests. The app retries automatically.');
+    const both = consensusText(status({ estimatesConfigured: true, consensus: { covered: 0, companies: 3, waiting: 3, blockedReason: 'rate-limited', blockedUntil: '2026-11-01T06:30:00.000Z' } }));
+    expect(both).toMatch(/^Consensus estimates: 0 of 3 companies\. 3 companies are waiting because Alpha Vantage is limiting requests\. Alpha Vantage is limiting requests right now; not asked again before 01-11-2026, \d\d:\d\d\.$/);
+    expect(consensusText(status({ consensus: { covered: 0, companies: 3, waiting: 3 } }))).toContain('They need an Alpha Vantage key');
   });
 
   it('adds the reason a company has no estimates to its line, only when there is one', () => {
@@ -122,5 +130,8 @@ describe('consensus estimates', () => {
     expect(line({ outcome: 'ok', at })).toBe('MSFT: found 8-K from 29-10-2026, summary stored');
     expect(line({ outcome: 'no-coverage', at })).toBe('MSFT: found 8-K from 29-10-2026, summary stored · estimates: not covered by the data provider');
     expect(line({ outcome: 'error', at, detail: 'the request failed' })).toContain('· estimates: the last attempt to fetch it failed (the request failed)');
+    const retryAt = new Date(2026, 9, 29, 23, 59).toISOString();
+    expect(line({ outcome: 'rate-limited', at, retryAt })).toMatch(/· estimates: Alpha Vantage is limiting requests right now; the app retries automatically \(next try after /);
+    expect(line({ outcome: 'premium', at })).toContain('· estimates: the free Alpha Vantage plan does not include estimates');
   });
 });

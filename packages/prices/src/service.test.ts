@@ -93,6 +93,25 @@ describe('createMarketData', () => {
     expect(all.provider.name).toBe('live');
   });
 
+  it('spaces the requests to Alpha Vantage, and only those, through the pacer', async () => {
+    const waits: string[] = [];
+    const fake = new FakeFetch().add('alphavantage.co', { Symbol: 'IBM', Name: 'International Business Machines' }).add('frankfurter.dev/v1/latest', { base: 'EUR', date: '2026-10-13', rates: { USD: 1.16 } });
+    const h = harness({ fake });
+    const md = createMarketData({
+      ...h.deps,
+      pacer: {
+        wait: (provider) => {
+          waits.push(provider);
+          return Promise.resolve(0);
+        },
+      },
+    });
+    await md.provider.getProfile('IBM');
+    await md.fx.getLatest('EUR');
+    expect(waits).toEqual(['alphavantage']);
+    expect(fake.urls.filter((url) => url.includes('alphavantage.co'))).toHaveLength(1);
+  });
+
   it('exposes the public contract', () => {
     expect(Object.keys(api).toSorted()).toEqual(
       expect.arrayContaining(['createMarketDataService', 'createPriceJobs', 'createRefreshPricesJob', 'createEnrichTransactionsJob', 'createRefreshCalendarJob', 'createMarketData', 'parsePricesConfig', 'budgetedFetch', 'PriceRepository', 'RoutingProvider', 'FrankfurterFx', 'backfillFxHistory']),

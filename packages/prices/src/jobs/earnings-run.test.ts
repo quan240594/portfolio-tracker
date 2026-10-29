@@ -65,7 +65,7 @@ describe('the calendar job records what it did to the earnings dates', () => {
     const h = live({ text: JSON.stringify({ Information: 'Our standard API rate limit is 25 requests per day.' }) });
     track(h.store, 'GOOGL');
     await run(h);
-    expect(lastRun(h)).toMatchObject({ status: 'rate-limited', reason: 'alphavantage: rate limited' });
+    expect(lastRun(h)).toMatchObject({ status: 'rate-limited', reason: 'alphavantage: daily limit: Our standard API rate limit is 25 requests per day.' });
     expect(lastOk(h)).toBeNull();
   });
 

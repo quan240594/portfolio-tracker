@@ -64,17 +64,19 @@ function fullPass(rows: readonly EarningsSymbolStatus[]): { lastFullPassAt?: str
 /** What the consensus job last did for a symbol, as the status shows it. */
 function consensusOf(state: ConsensusState | undefined): Pick<EarningsSymbolStatus, 'consensus'> {
   if (state === undefined) return {};
-  return { consensus: { outcome: state.outcome, at: state.at, ...(state.detail === undefined ? {} : { detail: state.detail }), ...(state.fetchedAt === undefined ? {} : { fetchedAt: state.fetchedAt }) } };
+  return { consensus: { outcome: state.outcome, at: state.at, ...(state.detail === undefined ? {} : { detail: state.detail }), ...(state.fetchedAt === undefined ? {} : { fetchedAt: state.fetchedAt }), ...(state.retryAt === undefined ? {} : { retryAt: state.retryAt }) } };
 }
 
 /** "Consensus estimates: N of M companies": the eligible companies with figures stored, and why the job waits when it does. */
 function consensusTotals(rows: readonly EarningsSymbolStatus[], block: ConsensusBlock | null, now: Date): NonNullable<EarningsStatusResponse['consensus']> {
   const eligible = rows.filter((row) => row.eligible);
   const waiting = block !== null && Date.parse(block.until) > now.getTime();
+  const limited = eligible.filter((row) => row.consensus?.outcome === 'rate-limited' && row.consensus.fetchedAt === undefined).length;
   return {
     covered: eligible.filter((row) => row.consensus?.fetchedAt !== undefined).length,
     companies: eligible.length,
     ...(waiting ? { blockedUntil: block.until, blockedReason: block.reason } : {}),
+    ...(limited === 0 ? {} : { waiting: limited }),
   };
 }
 

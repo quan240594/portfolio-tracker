@@ -8,6 +8,7 @@ import { asFloat, asText, byText, definedOnly, isoDateOrNull, isRecord, ownValue
 import { hasExchangeSuffix, isCrypto } from '../symbols.js';
 import { EODHD_URL, toEodhdSymbol, type EodhdProvider } from './eodhd.js';
 import { ALPHAVANTAGE_URL } from './alphavantage.js';
+import { errorMessageOf, limitError, noticeOf } from './av-notice.js';
 
 /**
  * Calendar data sources (free tier, researched in docs/architecture.md "Calendar"):
@@ -32,6 +33,7 @@ export function alphaVantageSymbol(symbol: string): string | null {
   return symbol.replaceAll('-', '.');
 }
 
+/** An `Information`/`Note` is a limit (daily, burst or unrecognised: `RateLimitError`); an `Error Message` or anything else is a plain failure. Both keep the provider's text. */
 function raiseForJsonBody(body: string): void {
   let payload: unknown;
   try {
@@ -39,11 +41,12 @@ function raiseForJsonBody(body: string): void {
   } catch {
     return;
   }
-  const message = isRecord(payload) ? asText(payload.Information) || asText(payload.Note) || asText(payload['Error Message']) : '';
-  if (message.includes('call frequency') || message.includes('requests per day') || message.toLowerCase().includes('rate limit')) {
-    throw new RateLimitError('alphavantage: rate limited', { provider: 'alphavantage' });
-  }
-  throw new ProviderError('alphavantage: unexpected JSON response for EARNINGS_CALENDAR', { provider: 'alphavantage' });
+  const json = isRecord(payload) ? payload : {};
+  const notice = noticeOf(json);
+  if (notice !== undefined) throw limitError(notice);
+  const message = errorMessageOf(json);
+  const detail = message === undefined ? '' : `: ${message}`;
+  throw new ProviderError(`alphavantage: unexpected JSON response for EARNINGS_CALENDAR${detail}`, { provider: 'alphavantage' });
 }
 
 const estimate = (value: string | undefined): number | undefined => asFloat((value ?? '').trim() || null) ?? undefined;

@@ -41,7 +41,7 @@ for (const viewport of [
       const bank = cards.nth(0);
       await expect(bank.getByRole('table')).toBeVisible();
       await expect(bank.getByText('In line').first()).toBeVisible();
-      await expect(bank.getByText('The data provider has no estimate for this figure').first()).toBeVisible();
+      await expect(bank.getByText('Revenue: The data provider has no estimate for this figure')).toBeVisible();
       await expect(bank.getByText('Consensus: Alpha Vantage').first()).toBeVisible();
       await expect(bank.getByRole('list', { name: 'Growth' })).toContainText('EPS up 12%');
       await expect(bank.getByText('Source: SEC filing')).toBeVisible();
@@ -120,7 +120,7 @@ test.describe('Earnings summaries: what was checked', () => {
       await expect(section.getByText(/^Last full pass: every company was looked at since 25-10-2026/)).toBeVisible();
       await expect(section.getByText(/3 of 12 releases read/)).toBeVisible();
       await expect(section.getByText(/Resumes at 00:00 UTC/)).toBeVisible();
-      await expect(section.getByText(/^Consensus estimates: 0 of 3 companies\. The free plan does not include estimates; not asked again before/)).toBeVisible();
+      await expect(section.getByText(/^Consensus estimates: 0 of 3 companies\. The free Alpha Vantage plan does not include estimates; not asked again before/)).toBeVisible();
       await expect(section.getByText(/^NRDV\.AS: .* · estimates: not covered by the data provider/)).toBeVisible();
       await expect(section.getByRole('button', { name: 'Fetch all now' })).toBeVisible();
       await section.getByRole('button', { name: 'Fetch all now' }).click();

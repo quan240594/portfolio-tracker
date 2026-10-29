@@ -83,12 +83,32 @@ describe('the scorecard', () => {
     expect(miss.closest('[data-verdict]')).toHaveAttribute('data-verdict', 'miss');
   });
 
-  it('says why a figure has no estimate instead of a bare "no estimate available"', () => {
+  it('says n/a in the expected and beat/miss cells of a figure without an estimate, and the reason once under the table', () => {
     renderCard(bank);
     const table = screen.getByRole('table', { name: /Harbor Bancorp/ });
     const revenue = within(within(table).getAllByRole('row')[2]!);
-    expect(revenue.getAllByText('The data provider has no estimate for this figure')).toHaveLength(2);
+    expect(revenue.getAllByText('n/a')).toHaveLength(2);
     expect(revenue.queryByText('no estimate available')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Revenue: The data provider has no estimate for this figure')).toHaveLength(1);
+    expect(within(table).queryByText(/The data provider has no estimate/)).not.toBeInTheDocument();
+  });
+
+  it('says the reason of a rate limit once for the whole card, with the time of the next try and none of the provider\u2019s words', () => {
+    const retryAt = new Date(2026, 9, 29, 14, 20).toISOString();
+    const limited = { ...sampleSummary({ headline: { eps: { value: 1, unit: 'perShare' }, revenue: { value: 2, unit: 'money' } } }), consensus: { provider: 'Alpha Vantage' as const, reason: 'rate-limited' as const, detail: 'Please contact premium@alphavantage.co if you are targeting a higher API call volume.', retryAt } };
+    renderCard(limited);
+    const table = screen.getByRole('table');
+    expect(within(table).getAllByText('n/a')).toHaveLength(4);
+    expect(screen.getAllByText(/Alpha Vantage is limiting requests right now; the app retries automatically \(next try after /)).toHaveLength(1);
+    expect(screen.queryByText(/premium@alphavantage\.co/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/The last attempt to fetch it failed/)).not.toBeInTheDocument();
+  });
+
+  it('says the free plan has no estimates, once', () => {
+    const premium = { ...sampleSummary({ headline: { eps: { value: 1, unit: 'perShare' }, revenue: { value: 2, unit: 'money' } } }), consensus: { provider: 'Alpha Vantage' as const, reason: 'premium' as const } };
+    renderCard(premium);
+    expect(screen.getAllByText('The free Alpha Vantage plan does not include estimates')).toHaveLength(1);
+    expect(within(screen.getByRole('table')).getAllByText('n/a')).toHaveLength(4);
   });
 
   it('says not disclosed for a figure the release did not state', () => {

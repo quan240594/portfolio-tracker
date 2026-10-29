@@ -277,6 +277,50 @@ export function defineEarningsSuite(label: string, start: StartStack): void {
       expect(status.symbols[0]?.consensus).toMatchObject({ outcome: 'premium' });
     });
 
+    it('records "contact premium@... higher API call volume" as a rate limit with a short pause and says so on the summary and the status', async () => {
+      const release = dated(GENERIC_RELEASE);
+      const { stack, call } = await ownerOf({ releases: [release], contact: CONTACT, ai: true }, { prices: { ALPHAVANTAGE_API_KEY: AV_KEY } });
+      await hold(stack, call, release);
+      stack.sec.consensus.set('LMFG', { Information: 'Thank you for using Alpha Vantage! Please contact premium@alphavantage.co if you are targeting a higher API call volume.' });
+      await stack.enqueue('watchEarnings', { trigger: 'scheduled' });
+      await stack.drain(settle);
+
+      await stack.enqueue('earningsEstimates', { trigger: 'scheduled' });
+      await stack.drain(settle);
+      expect(stack.sec.consensusRequests).toEqual(['LMFG']);
+      expect(await stack.failedJobs()).toEqual([]);
+
+      const { consensus } = (await call('GET', '/earnings')).body.summaries[0] as EarningsSummary;
+      expect(consensus).toMatchObject({ reason: 'rate-limited', detail: expect.stringContaining('higher API call volume') });
+      expect(consensus?.retryAt).toEqual(expect.any(String));
+      expect(consensus?.revenue).toBeUndefined();
+      const status = (await call('GET', '/earnings/status')).body as EarningsStatusResponse;
+      expect(status.consensus).toMatchObject({ covered: 0, companies: 1, waiting: 1, blockedReason: 'rate-limited' });
+      expect(status.symbols[0]?.consensus).toMatchObject({ outcome: 'rate-limited', retryAt: consensus?.retryAt });
+      // A short pause, not the rest of the day: the next try is minutes away.
+      expect(Date.parse(status.consensus!.blockedUntil!) - Date.parse(status.symbols[0]!.consensus!.at)).toBe(15 * 60_000);
+    });
+
+    it('tests Alpha Vantage on request: one paced call for IBM, the provider\u2019s words on screen, once per ten minutes', async () => {
+      const { stack, call } = await ownerOf({ releases: [], contact: CONTACT, ai: true }, { prices: { ALPHAVANTAGE_API_KEY: AV_KEY } });
+      const volume = 'Thank you for using Alpha Vantage! Please contact premium@alphavantage.co if you are targeting a higher API call volume.';
+      stack.sec.consensus.set('IBM', { Information: volume });
+      const before = await call('GET', '/diagnostics/alphavantage-probe');
+      expect(before.body).toMatchObject({ available: true, last: null, budget: { used: 0, limit: 25 } });
+
+      const ran = await call('POST', '/diagnostics/alphavantage-probe');
+      expect(ran.status).toBe(200);
+      expect(ran.body).toMatchObject({ symbol: 'IBM', call: 'EARNINGS_ESTIMATES', outcome: 'rate-limited', message: volume, budget: { used: 1 } });
+      expect(JSON.stringify(ran.body)).not.toContain(AV_KEY);
+      expect(stack.sec.consensusRequests).toEqual(['IBM']);
+
+      const again = await call('POST', '/diagnostics/alphavantage-probe');
+      expect(again.status).toBe(429);
+      expect(again.body.error).toMatchObject({ code: 'RATE_LIMITED', details: { reason: 'rate-limited' } });
+      expect(stack.sec.consensusRequests).toEqual(['IBM']);
+      expect((await call('GET', '/diagnostics/alphavantage-probe')).body).toMatchObject({ available: false, last: { outcome: 'rate-limited', message: volume } });
+    });
+
     it('does not ask the provider without an Alpha Vantage key', async () => {
       const release = dated(GENERIC_RELEASE);
       const { stack, call } = await ownerOf({ releases: [release], contact: CONTACT, ai: true });

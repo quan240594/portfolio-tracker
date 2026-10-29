@@ -3,6 +3,7 @@ import { alphaVantageGeneralLimit, type PricesConfig } from './config.js';
 import { HttpClient, type FetchLike, type Sleep } from './http.js';
 import { BlockBook, DailyQuota, MinuteQuota, ProviderGate, StorePlanMemory, StoreQuotaLedger, TokenBucket } from './limits.js';
 import { AlphaVantageProvider } from './providers/alphavantage.js';
+import { pacedFetch, type ProviderPacer } from './pacer.js';
 import { AlphaVantageEarnings, EodhdCorporateActions } from './providers/calendar.js';
 import { CoinGeckoProvider } from './providers/coingecko.js';
 import { EodhdProvider } from './providers/eodhd.js';
@@ -28,6 +29,8 @@ export interface MarketDataDeps {
   timeoutSignal?: (ms: number) => AbortSignal;
   /** Replaces the live sources (an offline provider for local runs, fakes in tests). Receives the step's budgeted `fetch`. */
   marketData?: (deps: MarketDataDeps, fetch: FetchLike) => MarketData;
+  /** Spaces the requests to Alpha Vantage (its free key refuses bursts); absent: no waiting between them. */
+  pacer?: Pick<ProviderPacer, 'wait'>;
 }
 
 /** The sources a job step works with. */
@@ -51,7 +54,7 @@ export function createMarketData(deps: MarketDataDeps, fetch: FetchLike = deps.f
   const { config, clock, sleep } = deps;
   const logger = deps.logger ?? silentLogger;
   const nowMs = (): number => clock().getTime();
-  const http = (provider: string): HttpClient => new HttpClient({ provider, fetch, sleep, timeoutMs: deps.timeoutMs, random: deps.random, timeoutSignal: deps.timeoutSignal, logger });
+  const http = (provider: string): HttpClient => new HttpClient({ provider, fetch: provider === 'alphavantage' && deps.pacer ? pacedFetch(fetch, deps.pacer, provider) : fetch, sleep, timeoutMs: deps.timeoutMs, random: deps.random, timeoutSignal: deps.timeoutSignal, logger });
   const ledger = new StoreQuotaLedger(deps.store, sleep);
   const quota = (provider: string, limit: number): DailyQuota => new DailyQuota(ledger, provider, limit, () => utcDay(clock()));
   const bucket = (capacity: number, perSecond: number): TokenBucket => new TokenBucket(capacity, perSecond, nowMs, sleep, MAX_INLINE_WAIT_MS);

@@ -6,7 +6,7 @@ export { createApp, errorToResult } from './app.js';
 export type { BrokerDeps } from './broker-deps.js';
 export { verifyWithTrading212 } from './broker-deps.js';
 export { loadConfig, type Config } from './config.js';
-export type { CalendarDatesDeps, Deps, EarningsDeps, HistorySymbolDeps, InflationDeps, RouteContext } from './deps.js';
+export type { AlphaVantageProbeDeps, CalendarDatesDeps, Deps, EarningsDeps, HistorySymbolDeps, InflationDeps, RouteContext } from './deps.js';
 export { EcbInflationSource, InflationSourceError, type InflationFetch, type InflationSource } from './inflation/source.js';
 export { InflationService, InflationUnavailableError } from './inflation/service.js';
 export { ItemManagementRepository, type ManagementRepository } from './management-repository.js';

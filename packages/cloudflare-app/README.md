@@ -80,6 +80,10 @@ You need a Cloudflare account on the Free plan and a GitHub account. Every comma
    "Refresh earnings dates now" (`POST /api/diagnostics/earnings-dates/refresh`) queues the calendar job once; it is refused within an hour of the last ask and when fewer than 3 Alpha Vantage calls are left
    today. See `docs/architecture.md`, "Earnings dates diagnostics".
 
+   **Alpha Vantage test.** Settings > Diagnostics > Alpha Vantage (`GET`/`POST /api/diagnostics/alphavantage-probe`): "Test Alpha Vantage now" makes one real `EARNINGS_ESTIMATES` call for IBM with your key and
+   shows what Alpha Vantage answered (figures, premium endpoint, daily or burst limit, invalid key) in its own words. It costs one of the 25 daily calls, runs at most once per 10 minutes and is refused when
+   fewer than 3 calls are left. See `docs/architecture.md`, "Alpha Vantage refusals, pacing and the test".
+
    **What to expect from free keys.** The free plans are small (Twelve Data: 8 credits a minute, `/profile` is not included; EODHD: 20 calls a
    day). The price jobs know that: they keep the minute and day usage in the database, remember a "limit reached" answer until the limit resets
    (next minute, or the next UTC midnight) instead of retrying, try a symbol at most 3 times a day, and fetch dividends last. With about 25 holdings

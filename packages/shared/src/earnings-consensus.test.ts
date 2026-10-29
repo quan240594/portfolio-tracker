@@ -158,6 +158,8 @@ describe('attachConsensus', () => {
     expect(reasonFor(state({ outcome: 'rate-limited' }))?.reason).toBe('rate-limited');
     expect(reasonFor(state({ outcome: 'error', detail: 'the request failed' }))).toMatchObject({ reason: 'error', detail: 'the request failed' });
     expect(reasonFor(state({ outcome: 'error' }))?.detail).toBeUndefined();
+    expect(reasonFor(state({ outcome: 'rate-limited', detail: 'higher API call volume', retryAt: '2026-10-22T00:01:00.000Z' }))).toMatchObject({ reason: 'rate-limited', detail: 'higher API call volume', retryAt: '2026-10-22T00:01:00.000Z' });
+    expect(reasonFor(state({ outcome: 'rate-limited' }))?.retryAt).toBeUndefined();
     expect(reasonFor(state())?.reason).toBe('no-quarter');
     expect(reasonFor(state({ outcome: 'error' }), [quarter('2026-09-30', { eps: EPS })])?.reason).toBe('no-figure');
   });
