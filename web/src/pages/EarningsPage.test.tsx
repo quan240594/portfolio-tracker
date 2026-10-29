@@ -72,7 +72,8 @@ describe('the page', () => {
     expect(within(saas!).getByText('(27 analysts)')).toBeInTheDocument();
     expect(within(saas!).getByText(/^Beat by/)).toBeInTheDocument();
     expect(within(saas!).getByText(/^Missed by/)).toBeInTheDocument();
-    expect(within(bank!).getAllByText('The data provider has no estimate for this figure')).toHaveLength(2);
+    expect(within(bank!).getAllByText('Revenue: The data provider has no estimate for this figure')).toHaveLength(1);
+    expect(within(bank!).getAllByText('n/a')).toHaveLength(2);
     await user.click(screen.getByText('What was checked'));
     expect(screen.getByText('Consensus estimates: 2 of 2 companies.')).toBeInTheDocument();
   });

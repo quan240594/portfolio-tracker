@@ -137,6 +137,29 @@ describe('earningsJobDeps and createEarningsApi', () => {
     expect(noKey.client).toBeUndefined();
   });
 
+  it('makes both Alpha Vantage clients wait for the Hub\u2019s pacer before every request, and works without one', async () => {
+    const waits: string[] = [];
+    const requests: string[] = [];
+    const pacer = {
+      wait: (provider: string) => {
+        waits.push(provider);
+        return Promise.resolve(0);
+      },
+    };
+    const fetchFn = ((url: string) => {
+      requests.push(url);
+      return Promise.resolve(Response.json({}));
+    }) as unknown as typeof fetch;
+    const paced = { ...context(hubConfig()), fetch: fetchFn, pacer };
+    await estimatesJobDeps(paced).client!.fetchEstimates('AAPL');
+    await earningsJobDeps(paced).estimates!.epsEstimate('AAPL', '2026-10-21');
+    expect(waits).toEqual(['alphavantage', 'alphavantage']);
+    expect(requests).toHaveLength(2);
+    await estimatesJobDeps({ ...context(hubConfig()), fetch: fetchFn }).client!.fetchEstimates('AAPL');
+    expect(waits).toHaveLength(2);
+    expect(requests).toHaveLength(3);
+  });
+
   it('is configured only with both', () => {
     const config = hubConfig({ SEC_CONTACT: 'PortfolioTracker/1.0 (me@example.invalid)' });
     expect(earningsConfigured(config, new FakeAi({}))).toBe(true);

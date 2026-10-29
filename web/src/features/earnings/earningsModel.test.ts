@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { sampleDemoSummaries, sampleSummary } from '@portfolio/shared';
 import { sp } from '../../test/utils';
-import { FIRST_QUARTER_NOTE, NOT_DISCLOSED, NO_ESTIMATE, REASON_TEXT, beatText, changeParts, estimateOf, compactCount, formatGrowth, formatMetric, formatPoints, growthLines, guidanceText, hasQuarterComparison, labelOf, metricOf, reasonText, scorecardRows } from './earningsModel';
+import { FIRST_QUARTER_NOTE, NOT_AVAILABLE, NOT_DISCLOSED, NO_ESTIMATE, REASON_TEXT, beatText, changeParts, estimateOf, compactCount, formatGrowth, formatMetric, formatPoints, growthLines, guidanceText, hasQuarterComparison, labelOf, metricOf, reasonText, scorecardNote, scorecardRows } from './earningsModel';
 import { CONSENSUS_REASONS, attachConsensus } from '@portfolio/shared';
 
 const [bank, saas] = sampleDemoSummaries();
+const NOW = new Date(2026, 9, 29, 9, 0);
 
 describe('formats', () => {
   it('writes sums compactly in English and per-share amounts and percentages in the app locale', () => {
@@ -82,19 +83,43 @@ describe('scorecardRows with the consensus', () => {
     expect(scorecardRows(summary)[0]!.surprise).toBeUndefined();
   });
 
-  it('says why there is no estimate, from the job record, in words and never the bare phrase', () => {
+  it('says n/a in the cells and, from the job record, the reason in words once (never the bare phrase)', () => {
     for (const reason of CONSENSUS_REASONS) {
       const summary = { ...sampleSummary({ headline: { revenue: { value: 1, unit: 'money' } } }), consensus: { provider: 'Alpha Vantage' as const, reason } };
-      expect(scorecardRows(summary)[1]!.expected).toBe(REASON_TEXT[reason]);
+      expect(scorecardRows(summary)[1]!.expected).toBe(NOT_AVAILABLE);
+      expect(scorecardNote(summary, NOW)).toBe(reasonText(reason, undefined, undefined, NOW));
       expect(REASON_TEXT[reason]).not.toBe(NO_ESTIMATE);
     }
     expect(REASON_TEXT.pending).toBe('Fetched on the next free run');
     expect(REASON_TEXT['no-coverage']).toBe('Not covered by the data provider');
-    expect(REASON_TEXT.premium).toBe('The free plan does not include estimates');
+    expect(REASON_TEXT.premium).toBe('The free Alpha Vantage plan does not include estimates');
+    expect(REASON_TEXT['rate-limited']).toBe('Alpha Vantage is limiting requests right now; the app retries automatically');
     expect(reasonText('error', 'the provider answered 503')).toBe('The last attempt to fetch it failed (the provider answered 503)');
     expect(reasonText('error')).toBe(REASON_TEXT.error);
     expect(reasonText('error', '')).toBe(REASON_TEXT.error);
     expect(reasonText('premium', 'ignored')).toBe(REASON_TEXT.premium);
+    expect(reasonText('error', 'x'.repeat(200))).toBe(`${REASON_TEXT.error} (${'x'.repeat(120)}…)`);
+  });
+
+  it('says when the app asks again after a rate limit: the time today, the date and time another day, nothing without one', () => {
+    const today = new Date(2026, 9, 29, 14, 20).toISOString();
+    const tomorrow = new Date(2026, 9, 30, 2, 1).toISOString();
+    expect(reasonText('rate-limited', undefined, today, NOW)).toBe('Alpha Vantage is limiting requests right now; the app retries automatically (next try after 14:20)');
+    expect(reasonText('rate-limited', 'words', tomorrow, NOW)).toMatch(/\(next try after 30-10-2026, 02:01\)$/);
+    expect(reasonText('rate-limited', undefined, undefined, NOW)).toBe(REASON_TEXT['rate-limited']);
+    expect(reasonText('rate-limited', undefined, 'not a date', NOW)).toBe(REASON_TEXT['rate-limited']);
+    expect(reasonText('premium', undefined, today, NOW)).toBe(REASON_TEXT.premium);
+  });
+
+  it('names the figures that lack an estimate when only some do, and has no note when none lacks one or there is no reason', () => {
+    const partial = { ...sampleSummary({ headline: { eps: { value: 1, unit: 'perShare', estimate: 0.9 }, revenue: { value: 1, unit: 'money' } } }), consensus: { provider: 'Alpha Vantage' as const, reason: 'no-figure' as const } };
+    expect(scorecardNote(partial, NOW)).toBe('Revenue: The data provider has no estimate for this figure');
+    const both = { ...sampleSummary({ headline: { eps: { value: 1, unit: 'perShare' }, revenue: { value: 1, unit: 'money' } } }), consensus: { provider: 'Alpha Vantage' as const, reason: 'pending' as const } };
+    expect(scorecardNote(both, NOW)).toBe('Fetched on the next free run');
+    const full = { ...sampleSummary(), consensus: { provider: 'Alpha Vantage' as const, reason: 'pending' as const, eps: { average: 1, source: 'consensus' as const }, revenue: { average: 2, source: 'consensus' as const } } };
+    expect(scorecardNote(full, NOW)).toBeUndefined();
+    expect(scorecardNote(sampleSummary(), NOW)).toBeUndefined();
+    expect(scorecardNote({ ...sampleSummary(), consensus: { provider: 'Alpha Vantage' as const } }, NOW)).toBeUndefined();
   });
 
   it('keeps the old wording for a summary without the consensus fields, and explains a figure the consensus does not cover', () => {

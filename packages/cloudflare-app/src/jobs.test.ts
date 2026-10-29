@@ -180,6 +180,9 @@ describe('the job registry and the price registration point', () => {
     const deps = priceJobDeps({ items, fetch: vi.fn(), now: () => NOON, sleep: () => Promise.resolve(), config: { prices: { baseCurrency: 'EUR' } } } as unknown as JobContext);
     expect(deps).toMatchObject({ store: items, config: { baseCurrency: 'EUR' } });
     expect(deps.clock()).toEqual(NOON);
+    expect(deps.pacer).toBeUndefined();
+    const pacer = { wait: () => Promise.resolve(0) };
+    expect(priceJobDeps({ items, fetch: vi.fn(), now: () => NOON, sleep: () => Promise.resolve(), pacer, config: { prices: { baseCurrency: 'EUR' } } } as unknown as JobContext).pacer).toBe(pacer);
   });
 
   it('lets the price refresh start the enrichment of symbols that never had one, as a job on the Hub queue', async () => {

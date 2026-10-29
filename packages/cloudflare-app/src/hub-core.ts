@@ -20,12 +20,13 @@ import { ItemManagementRepository, ItemNotificationRepository, ItemRepository, c
 import { ItemBrokerStore, ItemQuoteStore, SecretCredentialStore, Trading212Client } from '@portfolio/broker-sync';
 import { AlarmDiagnostics, MAX_FILE_BYTES, createDurableObjectPlatform, describeDiagnosticError, uploadTokenFromUrl, type AlarmJobQueueOptions, type ArmEvent, type DurableObjectPlatform } from '@portfolio/cloudflare';
 import type { AiLike } from '@portfolio/earnings';
-import { createMarketDataService } from '@portfolio/prices';
+import { ALPHAVANTAGE_MIN_GAP_MS, ProviderPacer, createMarketDataService } from '@portfolio/prices';
 import { parseImportObjectKey, type PriceHistoryCoverage } from '@portfolio/shared';
 import { readBodyBounded } from './body.js';
 import type { HubConfig } from './config.js';
 import { createHistorySymbolApi } from './history-symbol.js';
 import { createCalendarDatesApi } from './calendar-dates.js';
+import { createAlphaVantageProbeApi } from './alphavantage-probe.js';
 import { createEarningsApi, earningsConfigured, neuronMeter } from './earnings.js';
 import { createHubLogoRoute, logoLookupGate } from './logos.js';
 import { alarmReport, finishOf, limitOf, triggerOf, type AlarmInfo } from './diagnostics.js';
@@ -80,6 +81,8 @@ export class HubCore {
   private readonly now: () => Date;
   private readonly fetchImpl: typeof fetch;
   private readonly sleep: (ms: number) => Promise<void>;
+  /** Spaces every Alpha Vantage request this Durable Object makes, whichever job or route makes it. */
+  private readonly pacer: ProviderPacer;
   private readonly logger: Logger | undefined;
   private readonly ai: AiLike | undefined;
   private readonly storage: HubState['storage'];
@@ -100,6 +103,7 @@ export class HubCore {
     this.factories = options.jobFactories ?? ALL_JOB_FACTORIES;
     this.fetchImpl = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    this.pacer = new ProviderPacer({ minGapMs: ALPHAVANTAGE_MIN_GAP_MS, now: () => Date.now(), sleep: this.sleep });
     // The guard exists only after the platform (its ledger is a platform adapter): rows of the first statements are not counted.
     const guardRef: { current?: BudgetGuard } = {};
     this.platform = createDurableObjectPlatform({
@@ -250,6 +254,7 @@ export class HubCore {
       budget,
       fetch: budget.wrap(this.fetchImpl),
       sleep: this.sleep,
+      pacer: this.pacer,
       ...(this.ai === undefined ? {} : { ai: this.ai }),
       neurons: neuronMeter(this.guard, this.config.earnings.dailyNeurons),
     };
@@ -371,6 +376,8 @@ export class HubCore {
       historySymbols: createHistorySymbolApi({ items, ...(hasPriceService(this.factories) ? { queue: jobs } : {}), guard: this.guard, now: this.now }),
       // The earnings dates section of Settings > Diagnostics: the Alpha Vantage allowance and the "Refresh earnings dates now" button.
       ...(hasPriceService(this.factories) ? { calendarDates: createCalendarDatesApi({ items, config: this.config.prices, queue: jobs, now: this.now }) } : {}),
+      // "Test Alpha Vantage now" next to it: one real EARNINGS_ESTIMATES call, paced like the jobs' calls.
+      alphaVantageProbe: createAlphaVantageProbeApi({ items, config: this.config.prices, now: this.now, fetch: (url, init) => this.fetchImpl(url, init), pacer: this.pacer }),
       earnings: createEarningsApi({ items, config: this.config, ai: this.ai, queue: jobs, now: this.now, guard: this.guard }),
       // One request and one row written per area and month (see docs/architecture.md "Goal assumption helpers").
       inflation: { items, fetch: (url, init) => this.fetchImpl(url, init) },

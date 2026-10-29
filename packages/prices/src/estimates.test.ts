@@ -101,19 +101,19 @@ describe('parseEarningsEstimates', () => {
     const premium = { Information: 'Thank you for using Alpha Vantage! This is a premium endpoint. You may subscribe to any of the premium plans (https://www.alphavantage.co/premium/) to instantly unlock all premium endpoints' };
     const limit = { Information: 'Thank you for using Alpha Vantage! Our standard API rate limit is 25 requests per day. Please subscribe to any of the premium plans at https://www.alphavantage.co/premium/ to instantly remove all daily rate limits.' };
     const frequency = { Note: 'Thank you for using Alpha Vantage! Our standard API call frequency is 5 calls per minute and 500 calls per day.' };
-    expect(parseEarningsEstimates(premium)).toEqual({ status: 'premium' });
-    expect(parseEarningsEstimates(limit)).toEqual({ status: 'rate-limited' });
-    expect(parseEarningsEstimates(frequency)).toEqual({ status: 'rate-limited' });
+    expect(parseEarningsEstimates(premium)).toMatchObject({ status: 'premium' });
+    expect(parseEarningsEstimates(limit)).toMatchObject({ status: 'rate-limited', scope: 'daily' });
+    expect(parseEarningsEstimates(frequency)).toMatchObject({ status: 'rate-limited', scope: 'burst' });
     expect(parseEarningsEstimates({ 'Error Message': 'Invalid API call. Please retry or visit the documentation.' })).toEqual({ status: 'no-coverage' });
     expect(parseEarningsEstimates({})).toEqual({ status: 'no-coverage' });
     expect(parseEarningsEstimates({ symbol: 'ZZZZ', estimates: [] })).toEqual({ status: 'no-coverage' });
     expect(parseEarningsEstimates({ estimates: [{ date: '2026-03-31', horizon: 'fiscal year', eps_estimate_average: '3' }] })).toEqual({ status: 'no-coverage' });
   });
 
-  it('records an unknown notice and a malformed answer as an error with a short reason without a URL', () => {
-    expect(parseEarningsEstimates({ Information: 'Something new happened, see https://example.test/x?apikey=SECRET for details' })).toEqual({ status: 'error', reason: 'Something new happened, see for details' });
-    expect(parseEarningsEstimates({ Information: ' ' })).toEqual({ status: 'error', reason: 'the provider sent a notice' });
-    expect(parseEarningsEstimates({ Note: 'https://example.test/only' })).toEqual({ status: 'error', reason: 'the provider sent a notice' });
+  it('records an unknown notice as a rate limit with the provider\u2019s words (no URL), and a malformed answer as an error with a short reason', () => {
+    expect(parseEarningsEstimates({ Information: 'Something new happened, see https://example.test/x?apikey=SECRET for details' })).toEqual({ status: 'rate-limited', scope: 'other', detail: 'Something new happened, see (link) for details' });
+    expect(parseEarningsEstimates({ Information: ' ' })).toEqual({ status: 'error', reason: 'the answer has no list of estimates' });
+    expect(parseEarningsEstimates({ Note: 'https://example.test/only' })).toEqual({ status: 'rate-limited', scope: 'other', detail: '(link)' });
     expect(parseEarningsEstimates({ symbol: 'X', estimates: 'soon' })).toEqual({ status: 'error', reason: 'the answer has no list of estimates' });
     expect(parseEarningsEstimates([])).toEqual({ status: 'error', reason: 'the answer was not a JSON object' });
     expect(parseEarningsEstimates('premium endpoint')).toEqual({ status: 'error', reason: 'the answer was not a JSON object' });
@@ -151,11 +151,28 @@ describe('AlphaVantageEstimatesClient', () => {
   });
 
   it('maps HTTP failures, a rate-limit status, a body that is not JSON and a failed request', async () => {
-    expect(await client(respond('', { status: 429 })).fetchEstimates('X')).toEqual({ status: 'rate-limited' });
+    expect(await client(respond('', { status: 429 })).fetchEstimates('X')).toEqual({ status: 'rate-limited', scope: 'other', detail: 'the provider answered 429 (too many requests)' });
     expect(await client(respond('', { status: 503 })).fetchEstimates('X')).toEqual({ status: 'error', reason: 'the provider answered 503' });
     expect(await client(respond('<html>')).fetchEstimates('X')).toEqual({ status: 'error', reason: 'the answer was not JSON' });
     expect(await client(() => Promise.reject(new Error('network'))).fetchEstimates('X')).toEqual({ status: 'error', reason: 'the request failed' });
-    expect(await client(respond(JSON.stringify({ Information: 'This is a premium endpoint.' }))).fetchEstimates('X')).toEqual({ status: 'premium' });
+    expect(await client(respond(JSON.stringify({ Information: 'This is a premium endpoint.' }))).fetchEstimates('X')).toEqual({ status: 'premium', detail: 'This is a premium endpoint.' });
+  });
+
+  it('waits for the pacer before it sends, and again for every call', async () => {
+    const events: string[] = [];
+    const paced = new AlphaVantageEstimatesClient({
+      apiKey: 'K',
+      fetch: async () => {
+        events.push('fetch');
+        return Response.json({});
+      },
+      pace: async () => {
+        events.push('pace');
+      },
+    });
+    await paced.fetchEstimates('X');
+    await paced.fetchEstimates('Y');
+    expect(events).toEqual(['pace', 'fetch', 'pace', 'fetch']);
   });
 
   it('lets the host\u2019s subrequest limit through: the step is deferred, it is not the provider\u2019s answer', async () => {

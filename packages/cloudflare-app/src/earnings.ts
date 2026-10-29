@@ -19,7 +19,7 @@ import {
   type NeuronMeter,
   type NeuronsToday,
 } from '@portfolio/earnings';
-import { AlphaVantageEstimatesClient, DailyQuota, EstimateBudget, StoreQuotaLedger, alphaVantageGeneralLimit } from '@portfolio/prices';
+import { AlphaVantageEstimatesClient, DailyQuota, EstimateBudget, StoreQuotaLedger, alphaVantageGeneralLimit, type ProviderPacer } from '@portfolio/prices';
 import { classificationFieldsOf, currentHoldings, kpiTemplateFor, type EarningsHolding } from '@portfolio/shared';
 import type { HubConfig } from './config.js';
 
@@ -102,8 +102,15 @@ export interface EarningsContext {
   config: HubConfig;
   fetch: typeof fetch;
   sleep: (ms: number) => Promise<void>;
+  /** Spaces the requests to Alpha Vantage; absent: no waiting between them. */
+  pacer?: Pick<ProviderPacer, 'wait'>;
   ai?: AiLike;
   neurons: NeuronMeter;
+}
+
+/** The Alpha Vantage `pace` option of a client: wait for the provider's next free slot before each request. */
+function paceOf({ pacer }: EarningsContext): { pace?: () => Promise<number> } {
+  return pacer === undefined ? {} : { pace: () => pacer.wait('alphavantage') };
 }
 
 /** What `watchEarnings` and `fetchEarningsSummary` need for one alarm run; every outbound call goes through the alarm's counted `fetch`. */
@@ -119,7 +126,7 @@ export function earningsJobDeps(context: EarningsContext): EarningsJobDeps {
     config: earnings,
     ...(earnings.secUserAgent === undefined ? {} : { sec: new SecClient({ userAgent: earnings.secUserAgent, fetch: fetchFn, now, sleep: context.sleep }) }),
     ...(context.ai === undefined ? {} : { extractor: new WorkersAiExtractor({ ai: context.ai, meter: context.neurons, model: earnings.model }) }),
-    estimates: new AlphaVantageEstimates({ apiKey: config.prices.keys.alphavantage, fetch: fetchFn, quota: new DailyQuota(new StoreQuotaLedger(items), 'alphavantage', alphaVantageGeneralLimit(config.prices), today) }),
+    estimates: new AlphaVantageEstimates({ apiKey: config.prices.keys.alphavantage, fetch: fetchFn, quota: new DailyQuota(new StoreQuotaLedger(items), 'alphavantage', alphaVantageGeneralLimit(config.prices), today), ...paceOf(context) }),
     queue: context.queue,
     now,
   };
@@ -137,7 +144,7 @@ export function estimatesJobDeps(context: EarningsContext): EstimatesJobDeps {
     repo: new EarningsRepository(items),
     inputs: createEarningsInputs(items),
     budget: new EstimateBudget({ store: items, dailyLimit: prices.dailyLimits.alphavantage, generalLimit: alphaVantageGeneralLimit(prices), today: () => now().toISOString().slice(0, 10) }),
-    ...(apiKey === undefined ? {} : { client: new AlphaVantageEstimatesClient({ apiKey, fetch: (url, init) => context.fetch(url, init) }) }),
+    ...(apiKey === undefined ? {} : { client: new AlphaVantageEstimatesClient({ apiKey, fetch: (url, init) => context.fetch(url, init), ...paceOf(context) }) }),
     now,
   };
 }

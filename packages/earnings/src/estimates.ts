@@ -48,6 +48,8 @@ export interface AlphaVantageEstimatesOptions {
   /** The alarm's counted `fetch`. */
   fetch: (url: string, init?: RequestInit) => Promise<Response>;
   quota: DailyQuota;
+  /** Resolves when a request to Alpha Vantage may start (`ProviderPacer.wait`); absent: no waiting. */
+  pace?: () => Promise<unknown>;
 }
 
 export class AlphaVantageEstimates implements EstimateSource {
@@ -64,6 +66,7 @@ export class AlphaVantageEstimates implements EstimateSource {
       return { status: 'quota' };
     }
     try {
+      await this.options.pace?.();
       const url = `${ALPHAVANTAGE_URL}?function=EARNINGS&symbol=${encodeURIComponent(listed)}&apikey=${encodeURIComponent(apiKey)}`;
       const response = await this.options.fetch(url, { signal: AbortSignal.timeout(15_000) });
       if (!response.ok) return { status: 'error' };

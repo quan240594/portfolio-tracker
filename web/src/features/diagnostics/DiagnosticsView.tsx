@@ -5,8 +5,10 @@ import { PageHeader } from '../../components/Layout';
 import { LoadingRegion, Skeleton } from '../../components/Skeleton';
 import { CardGrid } from '../layout/CardGrid';
 import { EarningsDatesCard } from './EarningsDatesCard';
+import { AlphaVantageProbeCard } from './AlphaVantageProbeCard';
 import { PriceCoverageCard } from './PriceCoverageCard';
 import { ValuationReportCard } from './ValuationReportCard';
+import { useAlphaVantageProbe, type AlphaVantageProbeHook } from './useAlphaVantageProbe';
 import { useEarningsDates, type EarningsDatesResult } from './useEarningsDates';
 import { usePriceCoverage, type PriceCoverageResult } from './usePriceCoverage';
 import { jobLine, formatDuration, formatInstant, retryLabel, RUN_STATUS_LABELS, statusOf, type RunStatus } from './runFormat';
@@ -189,7 +191,7 @@ function EarningsDatesSlot({ earnings }: Readonly<{ earnings: EarningsDatesResul
   );
 }
 
-function Loaded({ report, prices, earnings }: Readonly<{ report: AlarmDiagnosticsReport; prices: PriceCoverageResult; earnings: EarningsDatesResult }>) {
+function Loaded({ report, prices, earnings, probe }: Readonly<{ report: AlarmDiagnosticsReport; prices: PriceCoverageResult; earnings: EarningsDatesResult; probe: AlphaVantageProbeHook }>) {
   return (
     <div className="space-y-6">
       <CardGrid
@@ -197,6 +199,7 @@ function Loaded({ report, prices, earnings }: Readonly<{ report: AlarmDiagnostic
         cards={[
           { id: 'price-coverage', title: 'Price data coverage', defaultWidth: 'full', render: () => <CoverageSlot prices={prices} /> },
           { id: 'earnings-dates', title: 'Earnings dates', defaultWidth: 'full', render: () => <EarningsDatesSlot earnings={earnings} /> },
+          { id: 'alphavantage-probe', title: 'Alpha Vantage', defaultWidth: 'full', render: () => <AlphaVantageProbeCard probe={probe} /> },
           { id: 'valuation-report', title: 'Valuation report', defaultWidth: 'full', render: () => <ValuationReportCard /> },
           { id: 'alarm-summary', title: 'Last 24 hours', defaultWidth: 'full', render: () => <Summary report={report} /> },
           { id: 'alarm-runs', title: 'Alarm runs', defaultWidth: 'full', render: () => <Runs runs={report.runs} /> },
@@ -219,10 +222,11 @@ export function DiagnosticsView() {
   const diagnostics = useAlarmDiagnostics();
   const prices = usePriceCoverage();
   const earnings = useEarningsDates();
+  const probe = useAlphaVantageProbe();
   let body: React.ReactNode;
   if (diagnostics.availability === 'not-exposed') body = <EmptyState title="Diagnostics are not available" description="This deployment does not keep an alarm log or price coverage details." />;
   else if (diagnostics.availability === 'error') body = <ErrorState error={diagnostics.error} onRetry={diagnostics.refetch} />;
-  else if (diagnostics.report) body = <Loaded report={diagnostics.report} prices={prices} earnings={earnings} />;
+  else if (diagnostics.report) body = <Loaded report={diagnostics.report} prices={prices} earnings={earnings} probe={probe} />;
   else {
     body = (
       <LoadingRegion label="Loading diagnostics">

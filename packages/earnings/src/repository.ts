@@ -133,4 +133,9 @@ export class EarningsRepository {
   async putConsensusBlock(block: ConsensusBlock): Promise<void> {
     await this.store.put({ ...consensusKeys.block, entityType: CONSENSUS_ENTITY.block, ...block });
   }
+
+  /** Forgets the pause (and its repeat count): the provider answered with figures again. */
+  async clearConsensusBlock(): Promise<void> {
+    await this.store.batchWrite([{ type: 'delete', key: consensusKeys.block }]);
+  }
 }

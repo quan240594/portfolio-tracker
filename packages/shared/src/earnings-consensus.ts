@@ -66,8 +66,10 @@ export interface ConsensusState {
   at: string;
   /** When figures were last stored. */
   fetchedAt?: string;
-  /** Sanitised reason (at most 120 characters). */
+  /** Sanitised reason: the provider's own words for a refusal (at most 300 characters). */
   detail?: string;
+  /** For `rate-limited`: when the job asks again for this symbol. */
+  retryAt?: string;
   ticker?: string;
   /** Quarters stored by the last successful fetch. */
   quarters?: number;
@@ -79,6 +81,11 @@ export interface ConsensusBlock {
   until: string;
   reason: 'premium' | 'rate-limited';
   at: string;
+  /** For `rate-limited`: the kind of limit (`daily`, `burst` or `other`), and how many refusals came before it the same UTC day (the back-off doubles with them). */
+  scope?: 'daily' | 'burst' | 'other';
+  strikes?: number;
+  /** The provider's sanitised words. */
+  detail?: string;
 }
 
 // --- Reading the rows ----------------------------------------------------------------------------------------------------
@@ -147,8 +154,10 @@ export interface SummaryConsensus {
   revenue?: ConsensusMetric;
   /** Set when at least one of the two has no estimate and the job record knows why. */
   reason?: ConsensusReason;
-  /** The sanitised detail of the last failed attempt (for `error`). */
+  /** The sanitised detail of the last failed attempt (the provider's own words for a refusal). */
   detail?: string;
+  /** For `rate-limited`: when the job tries again. */
+  retryAt?: string;
 }
 
 /** An earnings date of the calendar, as far as the join needs it (a stored `StoredEarningsEvent`). */
@@ -252,12 +261,12 @@ function calendarEps(summary: EarningsSummary, event: CalendarEstimate | undefin
 }
 
 /** Why there is no (or no usable) consensus, from the job record of the symbol. */
-function reasonOf(state: ConsensusState | null | undefined, matched: boolean, mismatch: boolean, keyed: boolean): { reason: ConsensusReason; detail?: string } {
+function reasonOf(state: ConsensusState | null | undefined, matched: boolean, mismatch: boolean, keyed: boolean): { reason: ConsensusReason; detail?: string; retryAt?: string } {
   if (mismatch) return { reason: 'mismatch' };
   if (matched) return { reason: 'no-figure' };
   if (state === null || state === undefined) return { reason: keyed ? 'pending' : 'no-key' };
   if (state.outcome === 'ok') return { reason: 'no-quarter' };
-  return { reason: state.outcome, ...(state.detail === undefined ? {} : { detail: state.detail }) };
+  return { reason: state.outcome, ...(state.detail === undefined ? {} : { detail: state.detail }), ...(state.retryAt === undefined ? {} : { retryAt: state.retryAt }) };
 }
 
 /**

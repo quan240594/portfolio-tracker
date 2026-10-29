@@ -25,7 +25,7 @@ import { ItemNotificationRepository, ItemRepository, MAX_PUSHES_PER_USER_STEP, n
 import { describeDiagnosticError } from '@portfolio/cloudflare';
 import { END_OF_DAY_ZONE, ItemBrokerStore, ItemProfileStore, ItemQuoteStore, SecretCredentialStore, Trading212Client, brokerSyncJob, refreshQuotesAfterSync, refreshQuotesJob, type HandlerResult, type QuoteDeps, type SyncDeps } from '@portfolio/broker-sync';
 import { ItemIngestStore, importUploadedJob } from '@portfolio/ingest';
-import { DEFAULT_STEP_SUBREQUESTS, PRICE_SCHEDULES, PriceRepository, createPriceJobs, type PriceJobDeps } from '@portfolio/prices';
+import { DEFAULT_STEP_SUBREQUESTS, PRICE_SCHEDULES, PriceRepository, createPriceJobs, type PriceJobDeps, type ProviderPacer } from '@portfolio/prices';
 import { BACKFILL_STEP_SUBREQUESTS, CHECKS_PER_STEP, createBackfillEarningsJob, createEarningsEstimatesJob, createFetchEarningsSummaryJob, createWatchEarningsJob, type AiLike, type NeuronMeter } from '@portfolio/earnings';
 import type { HubConfig } from './config.js';
 import { earningsJobDeps, estimatesJobDeps } from './earnings.js';
@@ -49,6 +49,8 @@ export interface JobContext {
   fetch: typeof fetch;
   /** Pauses (`setTimeout`); the price service's HTTP client backs off with it, never for long. */
   sleep: (ms: number) => Promise<void>;
+  /** Spaces the requests to Alpha Vantage (its free key refuses bursts); absent: no waiting between them. */
+  pacer?: Pick<ProviderPacer, 'wait'>;
   /** The Workers AI binding; absent until the owner adds it (the earnings feature is then off). */
   ai?: AiLike;
   /** The Workers AI allowance of the day (the budget guard's `aiNeurons` counter). */
@@ -145,7 +147,7 @@ export const EARNINGS_JOB_FACTORIES: JobFactories = {
 };
 
 /** What the price jobs need, built from the Hub's ports (`@portfolio/prices`' `PriceJobDeps`). */
-export function priceJobDeps({ items, fetch, now, sleep, config, queue }: JobContext): PriceJobDeps {
+export function priceJobDeps({ items, fetch, now, sleep, config, queue, pacer }: JobContext): PriceJobDeps {
   // Every fetch of a price step goes through the alarm's counted `fetch`; the service's own per-step budget (40) sits below it.
   return {
     store: items,
@@ -154,6 +156,7 @@ export function priceJobDeps({ items, fetch, now, sleep, config, queue }: JobCon
     sleep,
     config: config.prices,
     logger,
+    ...(pacer === undefined ? {} : { pacer }),
     // The scheduled refresh starts the enrichment of tracked symbols that never had one (once a day).
     enqueueEnrichment: (symbols) => queue.enqueue({ job: JOBS.enrichTransactions, payload: { userId: '', portfolioId: '', reason: 'IMPORTED', symbols: [...symbols] } }),
   };

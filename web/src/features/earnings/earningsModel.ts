@@ -20,7 +20,7 @@ import {
   type GuidanceDirection,
   type MetricUnit,
 } from '@portfolio/shared';
-import { formatCount, formatMoney, formatPercent } from '../../lib/format';
+import { formatCount, formatDateTime, formatMoney, formatPercent, formatTime } from '../../lib/format';
 
 export const NOT_DISCLOSED = 'not disclosed';
 export const NO_ESTIMATE = 'no estimate available';
@@ -73,13 +73,13 @@ export function metricOf(summary: EarningsSummary, key: string): EarningsMetric 
   return summary.headline[key as CoreMetricKey] ?? summary.kpis.find((kpi) => kpi.key === key)?.metric;
 }
 
-/** Why a figure has no estimate, in the words the card shows instead of a bare "no estimate available". */
+/** Why a figure has no estimate, in the words the card shows once instead of a bare "no estimate available". */
 export const REASON_TEXT: Readonly<Record<ConsensusReason, string>> = {
   'no-key': 'Needs an Alpha Vantage key, which is not set on this deployment',
   pending: 'Fetched on the next free run',
   'no-coverage': 'Not covered by the data provider',
-  premium: 'The free plan does not include estimates',
-  'rate-limited': 'The data provider’s daily limit was reached; tried again later',
+  premium: 'The free Alpha Vantage plan does not include estimates',
+  'rate-limited': 'Alpha Vantage is limiting requests right now; the app retries automatically',
   error: 'The last attempt to fetch it failed',
   'no-quarter': 'The data provider has no estimate for this quarter',
   'no-figure': 'The data provider has no estimate for this figure',
@@ -92,9 +92,26 @@ const SOURCE_TEXT: Readonly<Record<ConsensusMetric['source'], string>> = {
   calendar: `Calendar estimate: ${CONSENSUS_SOURCE_LABEL}`,
 };
 
-/** The reason line of a figure without an estimate; the detail of a failed attempt is added in brackets. */
-export function reasonText(reason: ConsensusReason, detail?: string): string {
-  return reason === 'error' && detail !== undefined && detail !== '' ? `${REASON_TEXT.error} (${detail})` : REASON_TEXT[reason];
+/** What the cells of a figure without an estimate say; the reason is said once under the table (`scorecardNote`). */
+export const NOT_AVAILABLE = 'n/a';
+
+/** `14:20` today, `30-10-2026, 00:05` another day: when the job asks again (the time of the viewer). */
+function retryClock(retryAt: string, now: Date): string {
+  const at = new Date(retryAt);
+  return at.toDateString() === now.toDateString() ? formatTime(retryAt) : formatDateTime(retryAt);
+}
+
+const DETAIL_SHOWN = 120;
+const shortDetail = (detail: string): string => (detail.length > DETAIL_SHOWN ? `${detail.slice(0, DETAIL_SHOWN)}…` : detail);
+
+/**
+ * The reason line of a figure without an estimate. The detail of a failed attempt is added in brackets; a rate limit says when the job asks again
+ * (`retryAt`) when it is known. The provider's own words stay in the Diagnostics, not here.
+ */
+export function reasonText(reason: ConsensusReason, detail?: string, retryAt?: string, now: Date = new Date()): string {
+  if (reason === 'error' && detail !== undefined && detail !== '') return `${REASON_TEXT.error} (${shortDetail(detail)})`;
+  if (reason === 'rate-limited' && retryAt !== undefined && !Number.isNaN(Date.parse(retryAt))) return `${REASON_TEXT[reason]} (next try after ${retryClock(retryAt, now)})`;
+  return REASON_TEXT[reason];
 }
 
 export interface ScorecardRow {
@@ -137,12 +154,12 @@ export function estimateOf(summary: EarningsSummary, key: string, metric: Earnin
   return { average: metric.estimate, source: 'release', ...(surprise === undefined ? {} : { surprise }) };
 }
 
-/** What the expected cell says when there is no estimate. */
+/** What the expected cell says when there is no estimate: `n/a` when the card gives the reason once (`scorecardNote`), else the bare phrase. */
 function missingText(summary: EarningsSummary, key: string): string {
   const { consensus } = summary;
   if (consensus === undefined) return NO_ESTIMATE;
   if (key !== 'eps' && key !== 'revenue') return 'Consensus covers EPS and revenue only';
-  return consensus.reason === undefined ? NO_ESTIMATE : reasonText(consensus.reason, consensus.detail);
+  return consensus.reason === undefined ? NO_ESTIMATE : NOT_AVAILABLE;
 }
 
 function rangeText(estimate: ConsensusMetric, unit: MetricUnit, currency: string): string | undefined {
@@ -186,6 +203,20 @@ export function scorecardRows(summary: EarningsSummary): ScorecardRow[] {
       ...(estimate === undefined ? {} : estimateParts(estimate, unit, summary.reportingCurrency)),
     };
   });
+}
+
+/**
+ * The reason, said once for the whole scorecard, why its `n/a` cells have no estimate (`Alpha Vantage is limiting requests right now; ...`); `undefined`
+ * when every figure has one or the summary has no reason. When only some figures lack an estimate they are named first (`Revenue: ...`).
+ */
+export function scorecardNote(summary: EarningsSummary, now: Date = new Date()): string | undefined {
+  const { consensus } = summary;
+  if (consensus?.reason === undefined) return undefined;
+  const rows = scorecardRows(summary);
+  const lacking = rows.filter((row) => row.expected === NOT_AVAILABLE);
+  if (lacking.length === 0) return undefined;
+  const text = reasonText(consensus.reason, consensus.detail, consensus.retryAt, now);
+  return lacking.length === rows.length ? text : `${lacking.map((row) => row.label).join(' and ')}: ${text}`;
 }
 
 export interface GrowthLine {

@@ -4004,9 +4004,9 @@ the AWS tables: the Dynamo path has the rows only if a job writes them, and its 
 ### Fetching (`packages/prices/src/providers/estimates.ts`, `estimate-budget.ts`)
 
 `parseEarningsEstimates(json)` never throws and never uses `.catch`: each entry is parsed on its own with zod (a lenient number: `"None"`, `""`, `null`, junk are absent;
-counts are rounded), years are skipped, and a notice maps to an outcome: `premium endpoint` -> `premium`; `rate limit`, `requests per day`, `call frequency` ->
-`rate-limited` (checked second, because the standard rate-limit message also names the premium plans); `Error Message` or no usable quarter -> `no-coverage`; any other
-notice or shape -> `error` with a short reason without URLs. `estimateTicker(symbol)` uses a US ticker as it is and a suffixed listing only through `TICKER_ALIASES`
+counts are rounded), years are skipped, and a notice maps to an outcome (see "Alpha Vantage refusals, pacing and the test" at the end): `premium endpoint` -> `premium`; any
+other `Information` or `Note` (the daily quota, a burst, "contact premium@alphavantage.co ... higher API call volume", an unknown text) -> `rate-limited` with the kind of limit
+and the provider's sanitised words; `Error Message` or no usable quarter -> `no-coverage` (a refused key is an `error`). `estimateTicker(symbol)` uses a US ticker as it is and a suffixed listing only through `TICKER_ALIASES`
 (`FOO.DE` is `CRM`): the bare ticker of another exchange can be another company, so a listing without an alias is recorded as "no coverage" without a call.
 `AlphaVantageEstimatesClient.fetchEstimates` makes one request through the host's counted `fetch` (a host subrequest limit is rethrown so the step is deferred).
 
@@ -4022,12 +4022,12 @@ Schedule `earnings-estimates` (cloudflareOnly, daily 08:20, 13:20, 18:20, 22:20 
 60 % of the budget like the other earnings jobs; step reserve 2 subrequests. Held companies only (`loadHeld`: the current holdings with an earnings KPI template, funds and
 crypto excluded). Order, by need (`planEstimates`, pure and tested):
 
-0. the newest stored summary has no consensus stored (after a failed attempt cools down: error 6 h, rate limit 12 h, a fetch that matched nothing 3 days);
+0. the newest stored summary has no consensus stored (after a failed attempt cools down: error 6 h, a rate limit until its own `retryAt` (12 h for a record written before that existed), a fetch that matched nothing 3 days);
 1. about to report (a calendar date within 3 days) or reported in the last 3, once the figures are 3 days old, or a live release newer than the figures;
 2. the stalest: every 14 days at most (a company never fetched first).
 
-`no-coverage` waits 30 days, `premium` 7 days. A `premium` answer also blocks the job for 7 days and a `rate-limited` one until the next UTC midnight (`EARNINGS/ESTIMATES`);
-both stop the run. A failed attempt keeps the figures of an earlier fetch and their date.
+`no-coverage` waits 30 days, `premium` 7 days. A `premium` answer also blocks the job for 7 days and a `rate-limited` one for as long as its kind says (`EARNINGS/ESTIMATES`: the
+rest of the UTC day for the daily quota, 2 minutes for a burst, 15 minutes for any other notice, doubling per repeat the same day up to the next UTC midnight); both stop the run. A failed attempt keeps the figures of an earlier fetch and their date.
 
 ### The join (`attachConsensus`, pure, in `@portfolio/shared`; used by `GET /earnings` and `GET /earnings/{symbol}/{period}`)
 
@@ -4048,7 +4048,7 @@ A consensus whose revenue is more than 5 times off the reported revenue (another
 
 Expected shows the value, `(N analysts)`, the range and the source ("Consensus: Alpha Vantage"); Beat/Miss is a chip with an icon and words ("Beat by US$ 0,47 (7,3%)",
 "Missed by $60M (1,9%)", "In line"), never colour alone. A figure without an estimate says why ("Fetched on the next free run", "Not covered by the data provider",
-"The free plan does not include estimates", ...) instead of the bare "no estimate available", which stays for summaries from a deployment without the field. "What was
+"The free Alpha Vantage plan does not include estimates", "Alpha Vantage is limiting requests right now; the app retries automatically (next try after 14:20)", ...) instead of the bare "no estimate available", which stays for summaries from a deployment without the field; the cells say "n/a" and the reason is said once under the table. "What was
 checked" says "Consensus estimates: N of M companies." (and why the job waits). Mock mode shows invented estimates.
 
 ### Tests
@@ -4057,3 +4057,44 @@ checked" says "Consensus estimates: N of M companies." (and why the job waits). 
 (`estimates.test.ts`: the real answer shape, `None` and junk, premium versus rate limit, the 8-a-day and 5-left budget), `pnpm --filter @portfolio/earnings test`
 (`estimates-job.test.ts`: order, caps, cooldowns, premium and rate-limit stops), `pnpm --filter @portfolio/api test`, `pnpm --filter @portfolio/web test`, and
 `pnpm --filter @portfolio/cloudflare-app test` (the whole path in Node and in real workerd: `earnings-suite.ts`). Playwright: `e2e/earnings.spec.ts`.
+
+## Alpha Vantage refusals, pacing and the test (October 2026)
+
+**What went wrong.** The owner's Earnings summary said "The last attempt to fetch it failed (Thank you for using Alpha Vantage! Please contact premium@alphavantage.co if you are
+targeting a hig)" in all four consensus cells. Alpha Vantage refuses with HTTP 200 and a JSON object (`Information`, `Note`, `Error Message`); `EARNINGS_ESTIMATES` only knew
+three texts ("premium endpoint", "rate limit" / "requests per day", "call frequency"), so the "contact premium@..." text fell through to a plain `error`, was cooled down for 6 hours as a
+failure and its first 100 characters were shown. The same text is also what a throttle answers when a key is called too often or from a busy address, so it must never be a failure.
+
+**One classifier** (`packages/prices/src/providers/av-notice.ts`, used by the estimates client, the calendar `raiseForJsonBody` and the `OVERVIEW` profile): `classifyNotice(text)` is, in
+this order, `premium` ("premium endpoint"; the premium-plans pitch of a quota text does not count), `invalid-key` ("apikey is invalid or missing"), `burst` ("burst", "per second", "more
+sparingly", "call frequency", "per minute"), `daily` ("per day", "25 requests", "daily") and `other` (anything else in `Information` or `Note`, including "contact premium@alphavantage.co ...
+higher API call volume"). `sanitizeNotice` keeps one line of at most 300 characters with no URL (so no `apikey=`), no control character. `resumeAtMs(kind, now, strikes)` says when to ask
+again: `daily` and `premium` at the next 00:01 UTC; `burst` after 2 minutes, `other` after 15 minutes and `invalid-key` after an hour, each doubling per earlier refusal the same UTC day, never past
+the next midnight. Callers: the estimates answer is `{status: 'rate-limited', scope: 'daily'|'burst'|'other', detail}` (`premium` carries `detail` too; a refused key is
+`{status: 'error', invalidKey: true}` and stops the run); calendar and profile throw `RateLimitError` with the provider's words in the message, `scope: 'day'` for the daily quota and
+`retryAfterMs` for the others (the calendar run then records `rate-limited`, never `failed`). `Error Message` stays "no coverage" (an unknown symbol).
+
+**Stored.** The consensus state of a symbol keeps `detail` (up to 300 characters) and, for `rate-limited`, `retryAt`; the job's pause (`EARNINGS/ESTIMATES`) keeps `scope`, `strikes` and
+`detail`, and is deleted when figures come back. A symbol waits for its own `retryAt` (not 12 hours). `GET /earnings/status` adds `consensus.waiting` (eligible companies without figures whose last
+attempt was rate-limited) and per-symbol `consensus.retryAt`; the summary's `consensus` adds `retryAt`. All additive.
+
+**Pacing** (`packages/prices/src/pacer.ts`). `ProviderPacer.wait(provider)` reserves the next slot synchronously (concurrent callers queue) and sleeps until it; the Cloudflare Hub holds one
+(`ALPHAVANTAGE_MIN_GAP_MS` = 1.5 s) and passes it to every Alpha Vantage caller: the consensus client and the release-time `EARNINGS` call (`pace` option), the profile and calendar
+(`MarketDataDeps.pacer`, through `pacedFetch`) and the test below. A timer is wall time, not CPU, so it costs no CPU on the Worker or the Durable Object; a wait is at most one gap per queued
+call. The consensus job makes one call per step and the steps are `ESTIMATES_STEP_DELAY_MS` = 60 s apart (the alarm queue honours `delayMs` as a due time, no sleeping); at most 3 calls a run, 8 a day.
+
+**The test** (Settings > Diagnostics > "Alpha Vantage", `GET`/`POST /diagnostics/alphavantage-probe`, `packages/cloudflare-app/src/alphavantage-probe.ts`, `ALPHAVANTAGE_PROBE_ROUTES` in
+`@portfolio/shared`): "Test Alpha Vantage now" makes one real `EARNINGS_ESTIMATES` call for `IBM` with the real key and shows `ok: N quarters`, `premium endpoint: the free key cannot use it`,
+`rate limit (daily | burst | unspecified)`, `invalid key`, `no data` or `error`, with the provider's sanitised words. It costs one call of the shared `USAGE/alphavantage` counter, is refused (429,
+`details.reason` `rate-limited` or `budget-low`, with `Retry-After`) within 10 minutes of the last test and when fewer than 3 of the 25 calls are left, 503 without a key, 404 on the AWS stack
+(`Deps.alphaVantageProbe` is absent; the GET then answers `available: false`). The ask is recorded before the call, so a second click while it is out is refused. The last result is kept
+(`DIAGNOSTICS/ALPHAVANTAGE#PROBE`). Mock mode shows a sample and never calls.
+
+**The card.** The expected and Beat/Miss cells of a figure without an estimate say `n/a`; the reason is said once under the scorecard (`scorecardNote`): "Alpha Vantage is limiting requests
+right now; the app retries automatically (next try after 14:20)", "The free Alpha Vantage plan does not include estimates", "Not covered by the data provider" (a partial card names the figures:
+"Revenue: ..."). The provider's own words are only in the Diagnostics. "What was checked" adds how many companies wait because of the limit.
+
+**Tests.** `pnpm --filter @portfolio/prices test` (`av-notice.test.ts`: every text above verbatim, back-off; `pacer.test.ts`: fake timers), `@portfolio/earnings` (`estimates-job.test.ts`: burst,
+daily, unknown, doubling, retryAt, invalid key, step delay), `@portfolio/shared`, `@portfolio/api` (`alphavantage-probe.test.ts`), `@portfolio/cloudflare-app` (`alphavantage-probe.test.ts`, and the
+whole path in Node and workerd in `earnings-suite.ts`), `@portfolio/web` (`AlphaVantageProbeCard.test.tsx`, `earningsModel.test.ts`, `checked.test.ts`). Only a live call shows which limit the
+key really hits: press "Test Alpha Vantage now" on the deployed app.

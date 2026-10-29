@@ -60,6 +60,24 @@ describe('AlphaVantageEstimates', () => {
     expect(await make(() => Promise.resolve(new Response('not json'))).epsEstimate('LMFG', '2026-10-21')).toEqual({ status: 'error' });
   });
 
+  it('waits for the pacer before it sends', async () => {
+    const events: string[] = [];
+    const source = new AlphaVantageEstimates({
+      apiKey: 'k',
+      quota: quota(),
+      fetch: () => {
+        events.push('fetch');
+        return respond(quarters)();
+      },
+      pace: () => {
+        events.push('pace');
+        return Promise.resolve(0);
+      },
+    });
+    expect(await source.epsEstimate('LMFG', '2026-10-21')).toMatchObject({ status: 'ok' });
+    expect(events).toEqual(['pace', 'fetch']);
+  });
+
   it('passes a subrequest limit through', async () => {
     const limit = Object.assign(new Error('budget'), { name: 'SubrequestLimitError' });
     await expect(new AlphaVantageEstimates({ apiKey: 'k', fetch: () => Promise.reject(limit), quota: quota() }).epsEstimate('LMFG', '2026-10-21')).rejects.toBe(limit);
