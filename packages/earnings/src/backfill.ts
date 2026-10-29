@@ -10,12 +10,25 @@
  * backfill costs one row read.
  */
 import { logger, type JobHandler, type JobPayloads, type JobStep } from '@portfolio/platform';
-import { daysBetween, sequentially, type EarningsBackfillMarker, type EarningsBackfillWait, type EarningsHolding, type EarningsLastRun, type EarningsPlanItem, type EarningsSummary, type EarningsSymbolState } from '@portfolio/shared';
+import {
+  EARNINGS_SCHEMA_VERSION,
+  daysBetween,
+  sequentially,
+  type EarningsBackfillMarker,
+  type EarningsBackfillWait,
+  type EarningsHolding,
+  type EarningsLastRun,
+  type EarningsPlanItem,
+  type EarningsSummary,
+  type EarningsSymbolState,
+} from '@portfolio/shared';
 import {
   activeBlock,
   announce,
   clearBlockHistory,
   describeFailure,
+  hasSummary,
+  isUpgrade,
   iso,
   loadHeld,
   markerWithCounts,
@@ -26,7 +39,7 @@ import {
   runOf,
   type EarningsJobDeps,
 } from './common.js';
-import { processRelease, type ReleaseOutcome } from './pipeline.js';
+import { processRelease, processUpgrade, type ReleaseOutcome, type ReleaseRef, type UpgradeOutcome } from './pipeline.js';
 import { SecBlockedError, SecError, isSubrequestError, resultsFilings, type SecClient, type SecFiling } from './sec.js';
 import { notInSec } from './select.js';
 import { storeSummary } from './store.js';
@@ -45,6 +58,10 @@ export const PLAN_PER_STEP = 4;
 export const BACKFILL_STEP_SUBREQUESTS = 8;
 /** Below this many neurons the day's allowance cannot read a release: the run waits for 00:00 UTC instead of fetching documents it cannot use. */
 export const MIN_NEURONS_TO_READ = 150;
+/** The pass that reads a stored summary again asks one small question (a few thousand characters): it needs far fewer neurons. */
+export const MIN_NEURONS_TO_UPGRADE = 60;
+/** Symbols whose stored summaries are looked at per step (database reads only, no SEC request). */
+export const UPGRADE_CHECKS_PER_STEP = 6;
 export const MAX_TRIES_PER_DAY = 2;
 const MAX_TRIES_UNREADABLE = 2;
 const MAX_TRIES_ERROR = 4;
@@ -69,7 +86,7 @@ const marked = (marker: EarningsBackfillMarker, patch: Partial<EarningsBackfillM
 /** A new marker: the backfill starts (or starts over) with these quarters. */
 export function armedMarker(quarters: number, armedBy: EarningsBackfillMarker['armedBy'], now: Date): EarningsBackfillMarker {
   const at = now.toISOString();
-  return { armedAt: at, armedBy, quarters, status: 'running', total: 0, done: 0, stored: 0, failed: 0, planned: 0, companies: 0, updatedAt: at };
+  return { armedAt: at, armedBy, schemaVersion: EARNINGS_SCHEMA_VERSION, quarters, status: 'running', total: 0, done: 0, stored: 0, failed: 0, planned: 0, companies: 0, updatedAt: at };
 }
 
 /**
@@ -86,8 +103,11 @@ export function planItems(filings: readonly SecFiling[], quarters: number, today
     const forms = items.filter((item) => item.form === form).length;
     if (sameQuarter || forms >= (form === '8-K' ? quarters : quarters * FOREIGN_CANDIDATES_PER_QUARTER)) continue;
     if (form === '8-K') kept.push(filing.reportDate);
-    const have = stored.some((summary) => summary.accession === filing.accession || summary.reportDate === filing.reportDate);
-    items.push({ accession: filing.accession, form, filingDate: filing.filingDate, reportDate: filing.reportDate, primaryDocument: filing.primaryDocument, status: have ? 'stored' : 'todo', tries: 0 });
+    const found = stored.find((summary) => summary.accession === filing.accession || summary.reportDate === filing.reportDate);
+    // A stored summary of an older schema version is read again (only for what the new version added): its release is `todo` and marked.
+    const outdated = found !== undefined && found.schemaVersion < EARNINGS_SCHEMA_VERSION;
+    const reread = outdated ? { upgrade: EARNINGS_SCHEMA_VERSION } : {};
+    items.push({ accession: filing.accession, form, filingDate: filing.filingDate, reportDate: filing.reportDate, primaryDocument: filing.primaryDocument, status: found === undefined || outdated ? 'todo' : 'stored', tries: 0, ...reread });
   }
   return items;
 }
@@ -105,7 +125,7 @@ interface Run {
 
 type StepEnd = { kind: 'continue'; failed?: true } | { kind: 'wait'; reason: EarningsBackfillWait; until: string } | { kind: 'retry' } | { kind: 'complete' };
 
-const stored = (state: EarningsSymbolState | undefined): number => state?.plan?.filter((item) => item.status === 'stored').length ?? 0;
+const stored = (state: EarningsSymbolState | undefined): number => state?.plan?.filter((item) => hasSummary(item)).length ?? 0;
 
 async function patch(run: Run, symbol: string, change: Partial<EarningsSymbolState>): Promise<EarningsSymbolState> {
   const next = await run.deps.repo.patchState(symbol, change, run.now);
@@ -159,7 +179,7 @@ async function planSymbol(run: Run, symbol: string): Promise<void> {
   let note = runOf(now, 'select-filing', `${open} release(s) to read, the latest first`);
   if (items.length === 0) note = runOf(now, 'no-release-found', 'no results release (8-K item 2.02 or 6-K) in the SEC list for this period');
   else if (open === 0) note = runOf(now, 'ok', `${items.length} quarter(s) already stored`);
-  await patch(run, symbol, { plan: items, planQuarters: run.marker.quarters, plannedAt: now.toISOString(), lastCheckedAt: now.toISOString(), lastRun: note, ...(items.length === 0 ? { lastResult: 'no-filing' as const } : {}) });
+  await patch(run, symbol, { plan: items, planQuarters: run.marker.quarters, plannedAt: now.toISOString(), summaryVersion: EARNINGS_SCHEMA_VERSION, lastCheckedAt: now.toISOString(), lastRun: note, ...(items.length === 0 ? { lastResult: 'no-filing' as const } : {}) });
 }
 
 /** Maps the symbols that have no CIK yet and builds the plans of a few symbols. `true` when it did something this step. */
@@ -186,15 +206,27 @@ const dueItem = (item: EarningsPlanItem, run: Run): boolean => {
 
 type Next = { symbol: string; item: EarningsPlanItem } | { waitUntil: string; reason: EarningsBackfillWait } | undefined;
 
-/** The next release: of the company with the fewest stored quarters (alphabetical among equals), its newest one that is due. */
-function pickNext(run: Run): Next {
-  const wanting = [...run.states.values()].filter((state) => run.holdings.has(state.symbol) && state.plan !== undefined && state.planQuarters === run.marker.quarters && stored(state) < run.marker.quarters);
-  const ranked = wanting.toSorted((a, b) => stored(a) - stored(b) || a.symbol.localeCompare(b.symbol));
-  for (const state of ranked) {
-    const item = state.plan!.find((entry) => dueItem(entry, run));
+/** The newest due release of the company with the fewest stored quarters (alphabetical among equals); `upgrade` picks among the stored summaries to read again instead. */
+function nextDue(run: Run, states: readonly EarningsSymbolState[], upgrade: boolean): Next {
+  for (const state of states) {
+    const item = state.plan!.find((entry) => isUpgrade(entry) === upgrade && dueItem(entry, run));
     if (item !== undefined) return { symbol: state.symbol, item };
   }
-  const waiting = wanting.flatMap((state) => state.plan!.filter((item) => item.status === 'todo'));
+  return undefined;
+}
+
+/**
+ * The next release: of the company with the fewest stored quarters (alphabetical among equals), its newest one that is due. Releases not read
+ * yet come before the stored summaries that are read again for the dividend and the repurchases.
+ */
+function pickNext(run: Run): Next {
+  const planned = [...run.states.values()].filter((state) => run.holdings.has(state.symbol) && state.plan !== undefined && state.planQuarters === run.marker.quarters);
+  const wanting = planned.filter((state) => stored(state) < run.marker.quarters);
+  const fresh = nextDue(run, wanting.toSorted((a, b) => stored(a) - stored(b) || a.symbol.localeCompare(b.symbol)), false);
+  if (fresh !== undefined) return fresh;
+  const reread = nextDue(run, planned.toSorted((a, b) => a.symbol.localeCompare(b.symbol)), true);
+  if (reread !== undefined) return reread;
+  const waiting = [...wanting.flatMap((state) => state.plan!.filter((item) => item.status === 'todo' && !isUpgrade(item))), ...planned.flatMap((state) => state.plan!.filter((item) => item.status === 'todo' && isUpgrade(item)))];
   if (waiting.length === 0) return undefined;
   const times = waiting.map((item) => (item.nextTryAt !== undefined && Date.parse(item.nextTryAt) > run.now.getTime() ? item.nextTryAt : nextAllowanceReset(run.now)));
   return { waitUntil: times.toSorted((a, b) => a.localeCompare(b))[0]!, reason: 'attempts' };
@@ -215,11 +247,21 @@ function noReleaseNote(state: EarningsSymbolState, run: Run): Partial<EarningsSy
     : {};
 }
 
-async function finishItem(run: Run, symbol: string, item: EarningsPlanItem, outcome: ReleaseOutcome): Promise<StepEnd> {
+async function finishItem(run: Run, symbol: string, item: EarningsPlanItem, outcome: ReleaseOutcome | UpgradeOutcome): Promise<StepEnd> {
   const { now, deps } = run;
   const filing = filingOf(item);
   const state = run.states.get(symbol)!;
   switch (outcome.status) {
+    case 'upgraded': {
+      // The summary was announced (or not) when it was new: reading it again is silent and keeps its origin.
+      await storeSummary(deps.repo, outcome.summary);
+      await patch(run, symbol, {
+        plan: withItem(state, item.accession, { status: 'stored', reason: undefined, nextTryAt: undefined, upgrade: EARNINGS_SCHEMA_VERSION }),
+        lastCheckedAt: now.toISOString(),
+        lastRun: runOf(now, 'ok', 'dividend and share buybacks read', { filing, dropped: outcome.dropped, neurons: outcome.neurons }),
+      });
+      return { kind: 'continue' };
+    }
     case 'stored': {
       await storeSummary(deps.repo, outcome.summary);
       const newest = (await deps.repo.latest(symbol, 1))[0]?.reportDate === item.reportDate;
@@ -270,6 +312,15 @@ async function failedItem(run: Run, symbol: string, item: EarningsPlanItem, outc
   return unreadable ? { kind: 'continue' } : { kind: 'continue', failed: true };
 }
 
+/** Reads the release of a plan item: the whole release when nothing is stored, only the dividend and the repurchases when an older summary is. */
+function readOutcome(run: Run, ref: ReleaseRef, holding: EarningsHolding, previous: EarningsSummary | undefined, existing: EarningsSummary | null): Promise<ReleaseOutcome | UpgradeOutcome> {
+  const { deps } = run;
+  if (existing !== null) return processUpgrade({ sec: run.sec, extractor: run.extractor, now: deps.now }, ref, holding, existing, previous);
+  // Only a release that notifies asks for the EPS estimate: the 25 Alpha Vantage calls a day are shared with the price service, and 80 old quarters would use them all.
+  const estimates = ref.origin === 'live' ? deps.estimates : undefined;
+  return processRelease({ sec: run.sec, extractor: run.extractor, estimates, now: deps.now }, ref, holding, previous);
+}
+
 /** Reads one release. Everything that can go wrong is an outcome; an SEC block or the subrequest limit ends the step. */
 async function readItem(run: Run, symbol: string, item: EarningsPlanItem): Promise<StepEnd> {
   const { deps, now } = run;
@@ -277,7 +328,7 @@ async function readItem(run: Run, symbol: string, item: EarningsPlanItem): Promi
   const day = utcDayOf(now);
   const counted = { tries: item.tries + 1, triesDay: day, triesToday: (item.triesDay === day ? (item.triesToday ?? 0) : 0) + 1 };
   const existing = await deps.repo.getSummary(symbol, item.reportDate);
-  if (existing !== null) {
+  if (existing !== null && existing.schemaVersion >= EARNINGS_SCHEMA_VERSION) {
     await patch(run, symbol, { plan: withItem(run.states.get(symbol)!, item.accession, { status: 'stored' }) });
     return { kind: 'continue' };
   }
@@ -286,11 +337,10 @@ async function readItem(run: Run, symbol: string, item: EarningsPlanItem): Promi
   const tried = { ...item, ...counted };
   try {
     const previous = (await deps.repo.latest(symbol, 12)).find((summary) => summary.reportDate < item.reportDate);
-    const ref = { symbol, cik: started.cik!, accession: item.accession, form: item.form, reportDate: item.reportDate, primaryDocument: item.primaryDocument, origin: originFor(item.reportDate, now, 'by-age') };
-    // Only a release that notifies asks for the EPS estimate: the 25 Alpha Vantage calls a day are shared with the price service, and 80 old quarters would use them all.
-    const estimates = ref.origin === 'live' ? deps.estimates : undefined;
-    const outcome = await processRelease({ sec: run.sec, extractor: run.extractor, estimates, now: deps.now }, ref, holding, previous);
-    return await finishItem(run, symbol, tried, outcome);
+    // A summary that is read again keeps its origin: whether it was announced is settled.
+    const origin = existing?.origin ?? originFor(item.reportDate, now, 'by-age');
+    const ref = { symbol, cik: started.cik!, accession: item.accession, form: item.form, reportDate: item.reportDate, primaryDocument: item.primaryDocument, origin };
+    return await finishItem(run, symbol, tried, await readOutcome(run, ref, holding, previous, existing));
   } catch (error) {
     return interrupted(run, symbol, tried, error);
   }
@@ -312,22 +362,51 @@ async function interrupted(run: Run, symbol: string, item: EarningsPlanItem, err
   return failedItem(run, symbol, item, { status: 'sec-error', stage: 'exhibit', detail: describeFailure(error) });
 }
 
+/** The plan with the releases whose stored summary is of an older schema version made `todo` again (marked, tries reset): they are read for what the new version added. */
+export function reopenOutdated(plan: readonly EarningsPlanItem[], summaries: readonly EarningsSummary[]): EarningsPlanItem[] {
+  return plan.map((item) => {
+    const found = summaries.find((summary) => summary.accession === item.accession || summary.reportDate === item.reportDate);
+    if (item.status !== 'stored' || found === undefined || found.schemaVersion >= EARNINGS_SCHEMA_VERSION) return item;
+    return { ...item, status: 'todo', tries: 0, triesDay: undefined, triesToday: undefined, nextTryAt: undefined, reason: undefined, upgrade: EARNINGS_SCHEMA_VERSION };
+  });
+}
+
+/**
+ * Compares the plans with the stored summaries (database reads only) of a few symbols per step, once per schema version: a plan made before
+ * the version existed has its already stored releases reopened for the pass that reads them again. `true` when it did something.
+ */
+async function upgradePhase(run: Run): Promise<boolean> {
+  const due = [...run.states.values()]
+    .filter((state) => run.holdings.has(state.symbol) && state.plan !== undefined && state.planQuarters === run.marker.quarters && state.summaryVersion !== EARNINGS_SCHEMA_VERSION)
+    .slice(0, UPGRADE_CHECKS_PER_STEP);
+  await Promise.all(
+    due.map(async (state) => {
+      const summaries = await run.deps.repo.latest(state.symbol, 12);
+      await patch(run, state.symbol, { plan: reopenOutdated(state.plan!, summaries), summaryVersion: EARNINGS_SCHEMA_VERSION });
+    }),
+  );
+  return due.length > 0;
+}
+
 /** One step of a running backfill. */
 async function runStep(run: Run): Promise<StepEnd> {
   if (await reopenFailed(run)) return { kind: 'continue' };
   if (await planPhase(run)) return { kind: 'continue' };
+  if (await upgradePhase(run)) return { kind: 'continue' };
   const pick = pickNext(run);
   if (pick === undefined) return { kind: 'complete' };
   if ('waitUntil' in pick) return { kind: 'wait', reason: pick.reason, until: pick.waitUntil };
   const remaining = (await run.deps.neurons?.remaining()) ?? Number.POSITIVE_INFINITY;
-  if (remaining < MIN_NEURONS_TO_READ) return { kind: 'wait', reason: 'allowance', until: nextAllowanceReset(run.now) };
+  if (remaining < (isUpgrade(pick.item) ? MIN_NEURONS_TO_UPGRADE : MIN_NEURONS_TO_READ)) return { kind: 'wait', reason: 'allowance', until: nextAllowanceReset(run.now) };
   return readItem(run, pick.symbol, pick.item);
 }
 
 async function ensureMarker(deps: EarningsJobDeps, now: Date): Promise<EarningsBackfillMarker> {
   const marker = await deps.repo.getBackfill();
   const quarters = deps.config.backfillQuarters;
-  if (marker !== null && (marker.status === 'running' || marker.quarters === quarters)) return marker;
+  // A finished run of an older schema version starts again: the stored summaries are read for what the new version added.
+  const current = (marker?.schemaVersion ?? 1) >= EARNINGS_SCHEMA_VERSION;
+  if (marker !== null && (marker.status === 'running' || (marker.quarters === quarters && current))) return marker;
   const armed = armedMarker(quarters, 'auto', now);
   await deps.repo.putBackfill(armed);
   return armed;

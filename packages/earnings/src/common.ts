@@ -5,12 +5,14 @@
 import { logger, type JobQueue } from '@portfolio/platform';
 import {
   EARNINGS_LIVE_HOURS,
+  EARNINGS_SCHEMA_VERSION,
   localDayAndHour,
   type EarningsBackfillMarker,
   type EarningsHeldCache,
   type EarningsHolding,
   type EarningsLastRun,
   type EarningsOrigin,
+  type EarningsPlanItem,
   type EarningsRunStage,
   type EarningsSecBlock,
   type EarningsSymbolState,
@@ -174,9 +176,16 @@ export async function announce(deps: Pick<EarningsJobDeps, 'queue'>): Promise<vo
   }
 }
 
+/** A release with a stored summary: read, or read before and now read again for the blocks a schema change added. */
+export const hasSummary = (item: EarningsPlanItem): boolean => item.status === 'stored' || (item.upgrade !== undefined && item.status !== 'skipped');
+
+/** A release that is being read again for the blocks of the current schema version. */
+export const isUpgrade = (item: EarningsPlanItem): boolean => item.upgrade === EARNINGS_SCHEMA_VERSION;
+
 /**
  * The marker of the backfill with its counters rebuilt from the plans of the symbols. A symbol's target is `quarters` releases (fewer when
  * its list of candidates is shorter): its stored and failed releases are done, a 6-K that turned out not to be a results release is neither.
+ * The pass that reads stored summaries again has its own counters (`upgrade`): it never lowers the counts of releases read.
  */
 export function markerWithCounts(marker: EarningsBackfillMarker, states: readonly EarningsSymbolState[], companies: number, now: Date): EarningsBackfillMarker {
   let total = 0;
@@ -184,16 +193,23 @@ export function markerWithCounts(marker: EarningsBackfillMarker, states: readonl
   let stored = 0;
   let failed = 0;
   let planned = 0;
+  let upgradeTotal = 0;
+  let upgradeDone = 0;
   for (const state of states) {
     if (state.plan === undefined || state.planQuarters !== marker.quarters) continue;
     planned += 1;
-    const count = (status: string): number => state.plan!.filter((item) => item.status === status).length;
-    const [saved, lost, open] = [count('stored'), count('failed'), count('todo')];
+    const saved = state.plan.filter((item) => hasSummary(item)).length;
+    const lost = state.plan.filter((item) => item.status === 'failed' && item.upgrade === undefined).length;
+    const open = state.plan.filter((item) => item.status === 'todo' && item.upgrade === undefined).length;
     const target = Math.min(marker.quarters, saved + lost + open);
     total += target;
     done += Math.min(saved + lost, target);
     stored += saved;
     failed += lost;
+    const reread = state.plan.filter((item) => isUpgrade(item));
+    upgradeTotal += reread.length;
+    upgradeDone += reread.filter((item) => item.status !== 'todo').length;
   }
-  return { ...marker, total, done, stored, failed, planned, companies, updatedAt: now.toISOString() };
+  const { upgrade: _previous, ...rest } = marker;
+  return { ...rest, total, done, stored, failed, planned, companies, ...(upgradeTotal === 0 ? {} : { upgrade: { total: upgradeTotal, done: upgradeDone } }), updatedAt: now.toISOString() };
 }

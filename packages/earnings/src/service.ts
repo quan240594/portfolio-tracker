@@ -32,8 +32,10 @@ export interface SymbolRef {
 /** Releases of the plan of a symbol: how many are wanted, stored and given up on. */
 function releasesOf(state: EarningsSymbolState | undefined): Pick<EarningsSymbolStatus, 'releases'> {
   if (state?.plan === undefined) return {};
-  const count = (status: string): number => state.plan!.filter((item) => item.status === status).length;
-  return { releases: { planned: count('todo') + count('stored') + count('failed'), stored: count('stored'), failed: count('failed') } };
+  const count = (status: string): number => state.plan!.filter((item) => item.status === status && item.upgrade === undefined).length;
+  // A release read again for the new blocks still has its summary: it counts as stored.
+  const reread = state.plan.filter((item) => item.upgrade !== undefined && item.status !== 'skipped').length;
+  return { releases: { planned: count('todo') + count('stored') + count('failed') + reread, stored: count('stored') + reread, failed: count('failed') } };
 }
 
 function backfillStatus(marker: EarningsBackfillMarker | null, quarters: number, now: Date): EarningsBackfillStatus {
@@ -51,6 +53,7 @@ function backfillStatus(marker: EarningsBackfillMarker | null, quarters: number,
     ...(marker.waitReason === undefined ? {} : { waitReason: marker.waitReason }),
     ...(marker.completedAt === undefined ? {} : { completedAt: marker.completedAt }),
     ...(marker.lastStepAt === undefined ? {} : { lastStepAt: marker.lastStepAt }),
+    ...(marker.upgrade === undefined ? {} : { upgrade: marker.upgrade }),
   };
 }
 

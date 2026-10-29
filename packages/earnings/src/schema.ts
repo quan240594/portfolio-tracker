@@ -11,6 +11,38 @@ const label = z.string().trim().min(1).max(80);
 
 const pair = z.object({ value: printed, yearAgo: printed.optional() });
 
+/** A model sometimes answers a yes/no as the text "true" or "false". */
+function asFlag(input: unknown): unknown {
+  if (input === 'true') return true;
+  if (input === 'false') return false;
+  return input;
+}
+
+const flag = z.preprocess(asFlag, z.boolean());
+const word = z.string().trim().min(1).max(30);
+
+/** The dividend announced with the results, every value as printed (dates too); a release without one has no such object, or `announced: false`. */
+const dividendBlock = z.object({
+  announced: flag.optional(),
+  perShare: printed.optional(),
+  previousPerShare: printed.optional(),
+  action: word.optional(),
+  frequency: word.optional(),
+  exDate: printed.optional(),
+  recordDate: printed.optional(),
+  payDate: printed.optional(),
+});
+
+/** Share repurchases mentioned in the release, every amount as printed. */
+const buybackBlock = z.object({
+  mentioned: flag.optional(),
+  action: word.optional(),
+  authorization: printed.optional(),
+  repurchased: printed.optional(),
+  repurchasedShares: printed.optional(),
+  remaining: printed.optional(),
+});
+
 /** `null` means "not in the release" to a model; it is the same as leaving the field out. */
 function withoutNulls(input: unknown): unknown {
   if (Array.isArray(input)) return input.filter((entry) => entry !== null).map((entry) => withoutNulls(entry));
@@ -47,6 +79,8 @@ const fieldShape = {
   segments: z.array(z.object({ name: label, value: printed, yearAgo: printed.optional() })).max(10).optional(),
   keyUpdates: z.array(z.string().trim().min(1).max(160)).max(8).optional(),
   quote: z.object({ text: z.string().trim().min(1).max(400), speaker: z.string().trim().max(80).optional() }).optional(),
+  dividend: dividendBlock.optional(),
+  buyback: buybackBlock.optional(),
 };
 
 export const extractionSchema = z.preprocess(withoutNulls, z.object(fieldShape));
@@ -93,6 +127,15 @@ export function parseExtraction(input: unknown): { extraction: Extraction; lenie
 
 const STRING = { type: 'string' } as const;
 const PAIR_SCHEMA = { type: 'object', properties: { value: STRING, yearAgo: STRING }, required: ['value'] } as const;
+const BOOLEAN = { type: 'boolean' } as const;
+const DIVIDEND_SCHEMA = {
+  type: 'object',
+  properties: { announced: BOOLEAN, perShare: STRING, previousPerShare: STRING, action: STRING, frequency: STRING, exDate: STRING, recordDate: STRING, payDate: STRING },
+} as const;
+const BUYBACK_SCHEMA = {
+  type: 'object',
+  properties: { mentioned: BOOLEAN, action: STRING, authorization: STRING, repurchased: STRING, repurchasedShares: STRING, remaining: STRING },
+} as const;
 
 /** The JSON schema of `response_format` (Workers AI JSON mode): the same shape as `extractionSchema`, with the template's KPI keys. */
 export function extractionJsonSchema(template: KpiTemplateId): Record<string, unknown> {
@@ -123,8 +166,15 @@ export function extractionJsonSchema(template: KpiTemplateId): Record<string, un
       segments: { type: 'array', items: { type: 'object', properties: { name: STRING, value: STRING, yearAgo: STRING }, required: ['name', 'value'] } },
       keyUpdates: { type: 'array', items: STRING },
       quote: { type: 'object', properties: { text: STRING, speaker: STRING }, required: ['text'] },
+      dividend: DIVIDEND_SCHEMA,
+      buyback: BUYBACK_SCHEMA,
     },
   };
+}
+
+/** The same two blocks alone: what the pass that reads stored summaries again asks for. */
+export function capitalReturnJsonSchema(): Record<string, unknown> {
+  return { type: 'object', properties: { dividend: DIVIDEND_SCHEMA, buyback: BUYBACK_SCHEMA } };
 }
 
 /** Every KPI key any template defines (the verification drops keys the template of the symbol does not have). */

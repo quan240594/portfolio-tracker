@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MemoryItemStore, MemoryJobQueue } from '@portfolio/platform';
 import { EARNINGS_REFRESH_INTERVAL_MS, sampleSummary } from '@portfolio/shared';
 import { parseEarningsConfig } from './config.js';
+import { armedMarker } from './backfill.js';
 import { EarningsRepository } from './repository.js';
 import { EarningsService } from './service.js';
 
@@ -73,6 +74,18 @@ describe('EarningsService.status', () => {
     const { svc, repo } = service({ contact: CONTACT });
     await repo.putSecBlock({ blockedUntil: '2026-10-21T09:00:00.000Z', failures: 1, updatedAt: NOW.toISOString() });
     expect((await svc.status([])).secBlockedUntil).toBeUndefined();
+  });
+
+  it('reports the pass that reads stored summaries again, and counts those releases as stored', async () => {
+    const { svc, repo } = service({ contact: CONTACT });
+    const item = (accession: string, status: 'todo' | 'stored' | 'skipped', upgrade?: number) => ({ accession, form: '8-K' as const, filingDate: '2026-10-21', reportDate: '2026-10-21', primaryDocument: 'p.htm', status, tries: 0, ...(upgrade === undefined ? {} : { upgrade }) });
+    await repo.patchState('LMFG', { plan: [item('a', 'todo'), item('b', 'stored'), item('c', 'todo', 2), item('d', 'stored', 2), item('e', 'skipped', 2)] }, NOW);
+    await repo.putBackfill({ ...armedMarker(4, 'auto', NOW), upgrade: { total: 2, done: 1 } });
+    const status = await svc.status([{ symbol: 'LMFG', eligible: true }]);
+    expect(status.backfill).toMatchObject({ status: 'running', upgrade: { total: 2, done: 1 } });
+    expect(status.symbols[0]!.releases).toEqual({ planned: 4, stored: 3, failed: 0 });
+    await repo.putBackfill(armedMarker(4, 'auto', NOW));
+    expect((await svc.status([])).backfill?.upgrade).toBeUndefined();
   });
 });
 
