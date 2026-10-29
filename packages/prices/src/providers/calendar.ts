@@ -45,7 +45,8 @@ function raiseForJsonBody(body: string): void {
   const notice = noticeOf(json);
   if (notice !== undefined) throw limitError(notice);
   const message = errorMessageOf(json);
-  throw new ProviderError(`alphavantage: unexpected JSON response for EARNINGS_CALENDAR${message === undefined ? '' : `: ${message}`}`, { provider: 'alphavantage' });
+  const detail = message === undefined ? '' : `: ${message}`;
+  throw new ProviderError(`alphavantage: unexpected JSON response for EARNINGS_CALENDAR${detail}`, { provider: 'alphavantage' });
 }
 
 const estimate = (value: string | undefined): number | undefined => asFloat((value ?? '').trim() || null) ?? undefined;

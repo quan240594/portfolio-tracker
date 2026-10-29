@@ -97,7 +97,7 @@ export function createAlphaVantageProbeApi({ items, config, now, fetch, pacer }:
   }
 
   /** Why the test may not run now (null when it may), with when it may next. */
-  async function refusalOf(budget: ProviderBudgetReport, asked: string | undefined): Promise<Blocked | null> {
+  function refusalOf(budget: ProviderBudgetReport, asked: string | undefined): Blocked | null {
     const at = now();
     if (apiKey === undefined) {
       return { refusal: { accepted: false, reason: 'not-configured', message: 'No Alpha Vantage key is set on this deployment (the ALPHAVANTAGE_API_KEY secret), so there is nothing to test.' }, nextAllowedAt: null };
@@ -118,7 +118,7 @@ export function createAlphaVantageProbeApi({ items, config, now, fetch, pacer }:
 
   async function state(): Promise<ProbeState> {
     const [budget, last] = await Promise.all([budgetOf(utcDay(now())), lastProbe()]);
-    return { budget, last, blocked: await refusalOf(budget, last?.at) };
+    return { budget, last, blocked: refusalOf(budget, last?.at) };
   }
 
   return {
