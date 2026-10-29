@@ -1,6 +1,6 @@
 import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { sampleDemoSummaries, sampleSummary, type EarningsSummary } from '@portfolio/shared';
+import { sampleDemoSummaries, sampleDemoSummariesEpsOnly, sampleSummary, type EarningsSummary } from '@portfolio/shared';
 import { renderWithProviders, sp } from '../../test/utils';
 import { EarningsCard } from './EarningsCard';
 
@@ -109,6 +109,28 @@ describe('the scorecard', () => {
     renderCard(premium);
     expect(screen.getAllByText('The free Alpha Vantage plan does not include estimates')).toHaveLength(1);
     expect(within(screen.getByRole('table')).getAllByText('n/a')).toHaveLength(4);
+  });
+
+  it('shows the EPS estimate of a free key with the EPS-only source, beat or miss, and revenue n/a with the one free-plan reason', () => {
+    const [epsBank] = sampleDemoSummariesEpsOnly() as [EarningsSummary];
+    renderCard(epsBank);
+    const table = screen.getByRole('table');
+    const expected = within(table).getAllByText('Consensus: Alpha Vantage (EPS only, no analyst count)');
+    expect(expected).toHaveLength(1);
+    expect(within(table).getByText('In line')).toBeInTheDocument();
+    expect(within(table).queryByText(/analysts?\)/)).not.toBeInTheDocument();
+    expect(within(table).queryByText(/^Range /)).not.toBeInTheDocument();
+    expect(within(table).getAllByText('n/a')).toHaveLength(2);
+    expect(screen.getAllByText('Revenue consensus is not available on the free data plan')).toHaveLength(1);
+    expect(screen.queryByText(/retries automatically|limiting requests/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Provider EPS basis may differ')).not.toBeInTheDocument();
+  });
+
+  it('adds the basis note when the provider\u2019s EPS is on another basis than the card\u2019s', () => {
+    const [, epsSaas] = sampleDemoSummariesEpsOnly() as [EarningsSummary, EarningsSummary];
+    renderCard(epsSaas);
+    expect(screen.getByText('Provider EPS basis may differ')).toBeInTheDocument();
+    expect(screen.getAllByText('adjusted').length).toBeGreaterThan(0);
   });
 
   it('says not disclosed for a figure the release did not state', () => {

@@ -1,4 +1,4 @@
-import type { AlphaVantageProbeResult, ProbeOutcome } from '@portfolio/shared';
+import type { AlphaVantageProbeResult, ProbeConclusionKind, ProbeOutcome } from '@portfolio/shared';
 import { formatDateTime } from '../../lib/format';
 import type { AlphaVantageProbeHook } from './useAlphaVantageProbe';
 
@@ -14,6 +14,13 @@ const TONE: Readonly<Record<ProbeOutcome, 'good' | 'limit' | 'bad'>> = {
   error: 'bad',
 };
 
+const CONCLUSION_TONE: Readonly<Record<ProbeConclusionKind, 'good' | 'limit' | 'bad'>> = {
+  'both-ok': 'good',
+  'estimates-unavailable': 'limit',
+  throttled: 'limit',
+  inconclusive: 'limit',
+};
+
 const TONE_CLASS = {
   good: 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200',
   limit: 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200',
@@ -23,24 +30,37 @@ const TONE_CLASS = {
 function ResultBlock({ result, sample }: Readonly<{ result: AlphaVantageProbeResult; sample: boolean }>) {
   return (
     <div className="space-y-1 text-sm">
-      <p className={`rounded border px-3 py-2 font-medium break-words ${TONE_CLASS[TONE[result.outcome]]}`}>{result.summary}</p>
+      {result.conclusion !== undefined && <p className={`rounded border px-3 py-2 font-medium break-words ${TONE_CLASS[CONCLUSION_TONE[result.conclusion.kind]]}`}>{result.conclusion.text}</p>}
+      {result.comparison === undefined ? (
+        <p className={`rounded border px-3 py-2 font-medium break-words ${TONE_CLASS[TONE[result.outcome]]}`}>{result.summary}</p>
+      ) : (
+        <p className="break-words">{result.comparison}</p>
+      )}
       {result.message !== undefined && (
         <p className="break-words">
           <span className="muted">Alpha Vantage says: </span>
           <q>{result.message}</q>
         </p>
       )}
+      {result.control?.message !== undefined && (
+        <p className="break-words">
+          <span className="muted">Alpha Vantage says (EARNINGS): </span>
+          <q>{result.control.message}</q>
+        </p>
+      )}
       <p className="muted text-xs">
         {sample ? 'Sample, no call was made. ' : ''}
-        {result.call} for {result.symbol}, {formatDateTime(result.at)}.
+        {result.call}
+        {result.control === undefined ? '' : ' and EARNINGS'} for {result.symbol}, {formatDateTime(result.at)}.
       </p>
     </div>
   );
 }
 
 /**
- * Settings > Diagnostics > "Alpha Vantage": one button that makes one real call with the real key (the app's shared allowance pays for it) and shows what
- * the provider answered, so a failing consensus can be traced to a limit, a premium endpoint or a bad key. Nothing where the backend has no such test.
+ * Settings > Diagnostics > "Alpha Vantage": one button that makes two real calls with the real key (the app's shared allowance pays for them: the estimates and a
+ * control call of the free EARNINGS function) and shows what the provider answered to each side by side, with a plain conclusion, so a failing consensus can be traced
+ * to a throttle, a key that cannot read the estimates or a bad key. Nothing where the backend has no such test.
  */
 export function AlphaVantageProbeCard({ probe }: Readonly<{ probe: AlphaVantageProbeHook }>) {
   const { status, outcome } = probe;
@@ -53,7 +73,9 @@ export function AlphaVantageProbeCard({ probe }: Readonly<{ probe: AlphaVantageP
         <h2 id="alphavantage-probe-title" className="text-base font-semibold">
           Alpha Vantage
         </h2>
-        <p className="muted text-sm">Makes one real request for a test company (IBM) with your key and shows exactly what Alpha Vantage answers. It uses one of the 25 free requests of the day.</p>
+        <p className="muted text-sm">
+          Makes two real requests for a test company (IBM) with your key, a second apart: the estimates and a control request for the free earnings history. It shows exactly what Alpha Vantage answers to each. It uses two of the 25 free requests of the day.
+        </p>
         {budget && (
           <p className="muted text-xs">
             Today (UTC): {budget.used} of {budget.limit} requests used by this app.

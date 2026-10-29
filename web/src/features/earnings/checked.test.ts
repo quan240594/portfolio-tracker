@@ -115,6 +115,12 @@ describe('consensus estimates', () => {
     expect(limited).toContain('Alpha Vantage is limiting requests right now; not asked again before');
   });
 
+  it('says EPS estimates when the key cannot read the estimates endpoint, with the revenue note, and keeps the other sentences', () => {
+    const endpoint = { state: 'unavailable-on-key' as const, at: '2026-10-29T06:30:00.000Z', retryAt: '2026-11-05T06:30:00.000Z' };
+    expect(consensusText(status({ estimatesConfigured: true, consensus: { covered: 18, companies: 26, endpoint } }))).toBe('EPS estimates: 18 of 26 companies (revenue estimates need a paid plan).');
+    expect(consensusText(status({ estimatesConfigured: true, consensus: { covered: 1, companies: 3, waiting: 1, endpoint } }))).toBe('EPS estimates: 1 of 3 companies (revenue estimates need a paid plan). 1 company is waiting because Alpha Vantage is limiting requests. The app retries automatically.');
+  });
+
   it('says how many companies wait because of the limit, and that the app retries by itself', () => {
     expect(consensusText(status({ estimatesConfigured: true, consensus: { covered: 1, companies: 3, waiting: 2 } }))).toBe('Consensus estimates: 1 of 3 companies. 2 companies are waiting because Alpha Vantage is limiting requests. The app retries automatically.');
     expect(consensusText(status({ estimatesConfigured: true, consensus: { covered: 0, companies: 3, waiting: 1 } }))).toBe('Consensus estimates: 0 of 3 companies. 1 company is waiting because Alpha Vantage is limiting requests. The app retries automatically.');

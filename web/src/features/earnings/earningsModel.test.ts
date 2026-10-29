@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { sampleDemoSummaries, sampleSummary } from '@portfolio/shared';
 import { sp } from '../../test/utils';
-import { FIRST_QUARTER_NOTE, NOT_AVAILABLE, NOT_DISCLOSED, NO_ESTIMATE, REASON_TEXT, beatText, changeParts, estimateOf, compactCount, formatGrowth, formatMetric, formatPoints, growthLines, guidanceText, hasQuarterComparison, labelOf, metricOf, reasonText, scorecardNote, scorecardRows } from './earningsModel';
-import { CONSENSUS_REASONS, attachConsensus } from '@portfolio/shared';
+import { BASIS_MISMATCH_NOTE, EPS_ONLY_SOURCE_TEXT, FIRST_QUARTER_NOTE, NOT_AVAILABLE, NOT_DISCLOSED, NO_ESTIMATE, REASON_TEXT, beatText, changeParts, estimateOf, compactCount, formatGrowth, formatMetric, formatPoints, growthLines, guidanceText, hasQuarterComparison, labelOf, metricOf, reasonText, scorecardNote, scorecardRows } from './earningsModel';
+import { CONSENSUS_REASONS, attachConsensus, sampleDemoSummariesEpsOnly } from '@portfolio/shared';
 
 const [bank, saas] = sampleDemoSummaries();
 const NOW = new Date(2026, 9, 29, 9, 0);
@@ -195,5 +195,44 @@ describe('lookups', () => {
       { text: '-0,2 pt', period: 'qoq', negative: true },
     ]);
     expect(guidanceText(sampleSummary().guidance[0]!)).toBe('$80.0 billion to $81.5 billion');
+  });
+});
+
+describe('scorecardRows with an EPS-only consensus (the free Alpha Vantage plan)', () => {
+  const epsOnly = { ...quarter, eps: { average: 6.45 }, source: 'eps-only' as const, reportedEps: 6.9 };
+
+  it('shows the EPS estimate with the EPS-only source line and the beat, without range or analysts', () => {
+    const [eps] = scorecardRows(attachConsensus(sampleSummary(), { quarters: [epsOnly] }));
+    expect(sp(eps!.expected)).toBe('US$ 6,45');
+    expect([eps!.source, eps!.range, eps!.analysts, eps!.verdict, eps!.basisNote]).toEqual(['Consensus: Alpha Vantage (EPS only, no analyst count)', undefined, undefined, 'beat', undefined]);
+    expect(EPS_ONLY_SOURCE_TEXT).toBe('Consensus: Alpha Vantage (EPS only, no analyst count)');
+  });
+
+  it('shows n/a for the revenue with the one reason line, not a retry message', () => {
+    const summary = attachConsensus(sampleSummary({ headline: { eps: { value: 6.92, unit: 'perShare', basis: 'adjusted' }, revenue: { value: 20_710_000_000, unit: 'money' } } }), { quarters: [epsOnly] });
+    const [, revenue] = scorecardRows(summary);
+    expect(revenue).toMatchObject({ expected: NOT_AVAILABLE, hasEstimate: false });
+    expect(scorecardNote(summary, NOW)).toBe('Revenue consensus is not available on the free data plan');
+    expect(REASON_TEXT['free-plan']).toBe('Revenue consensus is not available on the free data plan');
+    expect(scorecardNote(summary, NOW)).not.toMatch(/retries|limiting/);
+  });
+
+  it('adds the basis note when the provider\u2019s EPS differs from the actual by more than 5 %', () => {
+    const [eps] = scorecardRows(attachConsensus(sampleSummary(), { quarters: [{ ...epsOnly, reportedEps: 5.1 }] }));
+    expect(eps!.basisNote).toBe(BASIS_MISMATCH_NOTE);
+    expect(BASIS_MISMATCH_NOTE).toBe('Provider EPS basis may differ');
+  });
+
+  it('says the reason of each figure when EPS has its own reason next to the free-plan revenue', () => {
+    const noQuarter = attachConsensus(sampleSummary({ headline: { eps: { value: 1, unit: 'perShare' }, revenue: { value: 1, unit: 'money' } } }), { quarters: [], state: null, endpoint: { state: 'unavailable-on-key', at: '2026-10-25T06:30:00.000Z', retryAt: '2026-11-01T06:30:00.000Z' } });
+    expect(scorecardNote(noQuarter, NOW)).toBe('EPS: Fetched on the next free run. Revenue consensus is not available on the free data plan');
+  });
+
+  it('is what the EPS-only demo shows: the bank on the same basis, the software company on another', () => {
+    const [demoBank, demoSaas] = sampleDemoSummariesEpsOnly();
+    expect(scorecardRows(demoBank!)[0]).toMatchObject({ source: EPS_ONLY_SOURCE_TEXT, verdict: 'inline' });
+    expect(scorecardRows(demoBank!)[0]!.basisNote).toBeUndefined();
+    expect(scorecardRows(demoSaas!)[0]).toMatchObject({ source: EPS_ONLY_SOURCE_TEXT, basisNote: BASIS_MISMATCH_NOTE });
+    expect(scorecardNote(demoSaas!, NOW)).toBe('Revenue consensus is not available on the free data plan');
   });
 });

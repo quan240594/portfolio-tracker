@@ -3,7 +3,7 @@
  * numbers): they exist so the page can be shown without the personal deployment behind it.
  */
 import { http, HttpResponse, type HttpHandler } from 'msw';
-import { sampleDemoSummaries, sampleTemplateSummaries, type EarningsListResponse, type EarningsStatusResponse, type EarningsSummary } from '@portfolio/shared';
+import { SAMPLE_EPS_ONLY_ENDPOINT, sampleDemoSummaries, sampleDemoSummariesEpsOnly, sampleTemplateSummaries, type EarningsListResponse, type EarningsStatusResponse, type EarningsSummary } from '@portfolio/shared';
 import { api, errorResponse, latency } from './utils';
 
 /** The Playwright run sets this session flag to see one summary per KPI template instead of the two demo companies. */
@@ -12,6 +12,8 @@ const TEMPLATES_FLAG = 'earnings-demo-templates';
 const EMPTY_FLAG = 'earnings-demo-empty';
 /** ... and this one to see summaries stored before the dividend and buyback blocks existed (read again in the background). */
 const UNREAD_FLAG = 'earnings-demo-unread';
+/** ... and this one to see a free Alpha Vantage key: EPS-only estimates (no revenue consensus, no analyst count), as the personal deployment shows them. */
+const EPS_ONLY_FLAG = 'earnings-demo-eps-only';
 const flagged = (flag: string): boolean => globalThis.sessionStorage?.getItem(flag) === 'on';
 
 /** A demo summary as an older version stored it: no dividend and no buyback block. */
@@ -23,6 +25,7 @@ const unread = (summary: EarningsSummary): EarningsSummary => {
 const summaries = () => {
   if (flagged(EMPTY_FLAG)) return [];
   if (flagged(UNREAD_FLAG)) return sampleDemoSummaries().map((summary) => unread(summary));
+  if (flagged(EPS_ONLY_FLAG)) return sampleDemoSummariesEpsOnly();
   return flagged(TEMPLATES_FLAG) ? sampleTemplateSummaries() : sampleDemoSummaries();
 };
 
@@ -59,7 +62,11 @@ function demoStatus(): EarningsStatusResponse {
     neurons: { used: 420, dailyCap: 6000, allowance: 10_000, state: 'ok', resetsAt: '2026-10-24T00:00:00.000Z' },
     backfill: { status: 'complete', quarters: 4, total: 8, done: 8, stored: 8, failed: 0, planned: 2, companies: 2, completedAt: '2026-10-24T08:00:00.000Z', ...(flagged(UNREAD_FLAG) ? { status: 'running' as const, upgrade: { total: 8, done: 3 } } : {}) },
     lastFullPassAt: '2026-10-24T08:00:00.000Z',
-    consensus: { covered: shown.filter((summary) => summary.consensus?.quarterEnd !== undefined).length, companies: shown.length },
+    consensus: {
+      covered: shown.filter((summary) => summary.consensus?.quarterEnd !== undefined).length,
+      companies: shown.length,
+      ...(flagged(EPS_ONLY_FLAG) ? { endpoint: { state: SAMPLE_EPS_ONLY_ENDPOINT.state, at: SAMPLE_EPS_ONLY_ENDPOINT.at, retryAt: SAMPLE_EPS_ONLY_ENDPOINT.retryAt } } : {}),
+    },
     symbols: shown.map((summary) => ({
       symbol: summary.symbol,
       eligible: true,
