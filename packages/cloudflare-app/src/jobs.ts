@@ -142,7 +142,7 @@ export const EARNINGS_JOB_FACTORIES: JobFactories = {
   watchEarnings: (context) => createWatchEarningsJob(() => earningsJobDeps(context)),
   fetchEarningsSummary: (context) => createFetchEarningsSummaryJob(() => earningsJobDeps(context)),
   backfillEarnings: (context) => createBackfillEarningsJob(() => earningsJobDeps(context)),
-  // The analyst consensus: one Alpha Vantage request per step, at most 8 a day and never when fewer than 5 of the provider's 25 are left.
+  // The analyst consensus (EPS-only from the free `EARNINGS` function when the key cannot read the estimates): one Alpha Vantage request per step, at most 8 a day and never when fewer than 5 of the provider's 25 are left.
   earningsEstimates: (context) => createEarningsEstimatesJob(() => estimatesJobDeps(context)),
 };
 
@@ -191,7 +191,7 @@ export const JOB_SUBREQUEST_RESERVE: Readonly<Partial<Record<JobName, number>>> 
   fetchEarningsSummary: 8,
   // A backfill step: the ticker table and four submissions lists, or one release (its index, up to four documents, the estimate).
   backfillEarnings: BACKFILL_STEP_SUBREQUESTS,
-  // One Alpha Vantage request per step (a step writes rows, not subrequests).
+  // One Alpha Vantage request per step, two when a refusal is followed by the `EARNINGS` control call (a step writes rows, not subrequests).
   earningsEstimates: 2,
 };
 

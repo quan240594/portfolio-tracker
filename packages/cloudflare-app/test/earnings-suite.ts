@@ -303,27 +303,75 @@ export function defineEarningsSuite(label: string, start: StartStack): void {
       expect(await stack.failedJobs()).toEqual([]);
     });
 
-    it('records a premium notice as its own outcome, says so on the summary and stops asking', async () => {
+    /** The shape of a real Alpha Vantage `EARNINGS` answer (strings, "None" for what is missing, many quarters), invented figures: the quarter that ended 31 Dec 2025 is the one of the release. */
+    const earningsAnswer = (symbol: string, reportedEps = '1.98') => ({
+      symbol,
+      annualEarnings: [{ fiscalDateEnding: '2025-12-31', reportedEPS: '7.9' }],
+      quarterlyEarnings: [
+        { fiscalDateEnding: '2025-12-31', reportedDate: '2026-01-28', reportedEPS: reportedEps, estimatedEPS: '1.9', surprise: '0.08', surprisePercentage: '4.2105', reportTime: 'post-market' },
+        { fiscalDateEnding: '2025-09-30', reportedDate: '2025-10-22', reportedEPS: '1.7', estimatedEPS: '1.65', surprise: '0.05', surprisePercentage: '3.0303', reportTime: 'post-market' },
+        { fiscalDateEnding: '2025-06-30', reportedDate: '2025-07-23', reportedEPS: '1.6', estimatedEPS: 'None', surprise: 'None', surprisePercentage: 'None', reportTime: 'post-market' },
+      ],
+    });
+
+    const PREMIUM_TEXT = 'Thank you for using Alpha Vantage! This is a premium endpoint. You may subscribe to any of the premium plans (https://www.alphavantage.co/premium/) to instantly unlock all premium endpoints';
+    const VOLUME_TEXT = 'Thank you for using Alpha Vantage! Please contact premium@alphavantage.co if you are targeting a higher API call volume.';
+
+    it('notes a premium notice as an endpoint this key cannot read, falls back to the free EARNINGS function and joins EPS only, with revenue said to need a paid plan', async () => {
       const release = dated(GENERIC_RELEASE);
       const { stack, call } = await ownerOf({ releases: [release], contact: CONTACT, ai: true }, { prices: { ALPHAVANTAGE_API_KEY: AV_KEY } });
       await hold(stack, call, release);
-      stack.sec.consensus.set('LMFG', { Information: 'Thank you for using Alpha Vantage! This is a premium endpoint. You may subscribe to any of the premium plans (https://www.alphavantage.co/premium/) to instantly unlock all premium endpoints' });
+      stack.sec.consensus.set('LMFG', { Information: PREMIUM_TEXT });
       await stack.enqueue('watchEarnings', { trigger: 'scheduled' });
       await stack.drain(settle);
+      stack.sec.estimates.set('LMFG', earningsAnswer('LMFG'));
+      const earningsBefore = stack.sec.estimateRequests.length;
 
       await stack.enqueue('earningsEstimates', { trigger: 'scheduled' });
       await stack.drain(settle);
       await stack.enqueue('earningsEstimates', { trigger: 'scheduled' });
       await stack.drain(settle);
       expect(stack.sec.consensusRequests).toEqual(['LMFG']);
+      expect(stack.sec.estimateRequests.length - earningsBefore).toBe(1);
       expect(await stack.failedJobs()).toEqual([]);
 
       const { consensus } = (await call('GET', '/earnings')).body.summaries[0] as EarningsSummary;
-      expect(consensus?.reason).toBe('premium');
+      expect(consensus).toMatchObject({ provider: 'Alpha Vantage', quarterEnd: '2025-12-31', revenueReason: 'free-plan' });
+      expect(consensus?.reason).toBeUndefined();
       expect(consensus?.revenue).toBeUndefined();
+      expect(consensus?.eps).toEqual({ average: 1.9, source: 'consensus', epsOnly: true, surprise: { amount: 0.08, pct: 4.2, verdict: 'beat' } });
       const status = (await call('GET', '/earnings/status')).body as EarningsStatusResponse;
-      expect(status.consensus).toMatchObject({ covered: 0, companies: 1, blockedReason: 'premium' });
-      expect(status.symbols[0]?.consensus).toMatchObject({ outcome: 'premium' });
+      expect(status.consensus).toMatchObject({ covered: 1, companies: 1, endpoint: { state: 'unavailable-on-key' } });
+      expect(status.consensus?.blockedReason).toBeUndefined();
+      expect(status.symbols[0]?.consensus).toMatchObject({ outcome: 'ok', source: 'eps-only' });
+    });
+
+    it('tells a key that cannot read the estimates from a throttle with a control call, and uses EARNINGS for the EPS consensus (generic limit text)', async () => {
+      const release = dated(GENERIC_RELEASE);
+      const { stack, call } = await ownerOf({ releases: [release], contact: CONTACT, ai: true }, { prices: { ALPHAVANTAGE_API_KEY: AV_KEY } });
+      await hold(stack, call, release);
+      stack.sec.consensus.set('LMFG', { Information: VOLUME_TEXT });
+      await stack.enqueue('watchEarnings', { trigger: 'scheduled' });
+      await stack.drain(settle);
+      // The provider's EPS (GAAP) is far from the actual of the card (adjusted): the card says the basis may differ.
+      stack.sec.estimates.set('LMFG', earningsAnswer('LMFG', '1.2'));
+
+      await stack.enqueue('earningsEstimates', { trigger: 'scheduled' });
+      await stack.drain(settle);
+      expect(await stack.failedJobs()).toEqual([]);
+      expect(stack.sec.consensusRequests).toEqual(['LMFG']);
+
+      const { consensus } = (await call('GET', '/earnings')).body.summaries[0] as EarningsSummary;
+      expect(consensus?.eps).toMatchObject({ average: 1.9, epsOnly: true, basisMismatch: true, surprise: { verdict: 'beat' } });
+      expect(consensus).toMatchObject({ revenueReason: 'free-plan' });
+      const status = (await call('GET', '/earnings/status')).body as EarningsStatusResponse;
+      expect(status.consensus).toMatchObject({ covered: 1, companies: 1, endpoint: { state: 'unavailable-on-key' } });
+      expect(status.consensus?.waiting).toBeUndefined();
+
+      // Fetched just now, and the endpoint is not asked again for a week: the next run asks nobody.
+      await stack.enqueue('earningsEstimates', { trigger: 'scheduled' });
+      await stack.drain(settle);
+      expect(stack.sec.consensusRequests).toEqual(['LMFG']);
     });
 
     it('records "contact premium@... higher API call volume" as a rate limit with a short pause and says so on the summary and the status', async () => {
@@ -350,24 +398,35 @@ export function defineEarningsSuite(label: string, start: StartStack): void {
       expect(Date.parse(status.consensus!.blockedUntil!) - Date.parse(status.symbols[0]!.consensus!.at)).toBe(15 * 60_000);
     });
 
-    it('tests Alpha Vantage on request: one paced call for IBM, the provider\u2019s words on screen, once per ten minutes', async () => {
+    it('tests Alpha Vantage on request: two paced calls for IBM (estimates and an EARNINGS control), the provider\u2019s words and a plain conclusion on screen, once per ten minutes', async () => {
       const { stack, call } = await ownerOf({ releases: [], contact: CONTACT, ai: true }, { prices: { ALPHAVANTAGE_API_KEY: AV_KEY } });
-      const volume = 'Thank you for using Alpha Vantage! Please contact premium@alphavantage.co if you are targeting a higher API call volume.';
+      const volume = VOLUME_TEXT;
       stack.sec.consensus.set('IBM', { Information: volume });
+      stack.sec.estimates.set('IBM', earningsAnswer('IBM'));
       const before = await call('GET', '/diagnostics/alphavantage-probe');
       expect(before.body).toMatchObject({ available: true, last: null, budget: { used: 0, limit: 25 } });
 
       const ran = await call('POST', '/diagnostics/alphavantage-probe');
       expect(ran.status).toBe(200);
-      expect(ran.body).toMatchObject({ symbol: 'IBM', call: 'EARNINGS_ESTIMATES', outcome: 'rate-limited', message: volume, budget: { used: 1 } });
+      expect(ran.body).toMatchObject({
+        symbol: 'IBM',
+        call: 'EARNINGS_ESTIMATES',
+        outcome: 'rate-limited',
+        message: volume,
+        control: { call: 'EARNINGS', outcome: 'ok', quarters: 3 },
+        comparison: 'EARNINGS_ESTIMATES: refused (generic limit text) / EARNINGS: ok, 3 quarters',
+        conclusion: { kind: 'estimates-unavailable', text: expect.stringContaining('need a paid Alpha Vantage plan') },
+        budget: { used: 2 },
+      });
       expect(JSON.stringify(ran.body)).not.toContain(AV_KEY);
       expect(stack.sec.consensusRequests).toEqual(['IBM']);
+      expect(stack.sec.estimateRequests).toEqual(['IBM']);
 
       const again = await call('POST', '/diagnostics/alphavantage-probe');
       expect(again.status).toBe(429);
       expect(again.body.error).toMatchObject({ code: 'RATE_LIMITED', details: { reason: 'rate-limited' } });
       expect(stack.sec.consensusRequests).toEqual(['IBM']);
-      expect((await call('GET', '/diagnostics/alphavantage-probe')).body).toMatchObject({ available: false, last: { outcome: 'rate-limited', message: volume } });
+      expect((await call('GET', '/diagnostics/alphavantage-probe')).body).toMatchObject({ available: false, last: { outcome: 'rate-limited', message: volume, conclusion: { kind: 'estimates-unavailable' } } });
     });
 
     it('does not ask the provider without an Alpha Vantage key', async () => {

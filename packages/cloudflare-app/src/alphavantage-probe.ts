@@ -1,10 +1,11 @@
 /**
  * The Cloudflare side of Diagnostics > "Test Alpha Vantage now" (`Deps.alphaVantageProbe`): one real `EARNINGS_ESTIMATES` call for a fixed US ticker with the
- * real key, and what Alpha Vantage said, sanitised, so the owner sees which limit the key hits. No business logic beyond mapping the client's answer to
- * the words of the screen: the classification lives in `@portfolio/prices` (`parseEarningsEstimates`).
+ * real key and, at least 1.5 s later (the pacer), a control call of the free `EARNINGS` function with the same key, and what Alpha Vantage said to each,
+ * sanitised, so the owner sees whether the key is throttled or just cannot read the estimates. No business logic beyond mapping the client's answers to
+ * the words of the screen: the classification lives in `@portfolio/prices` (`parseEarningsEstimates`, `parseEarnings`) and the conclusion in `@portfolio/shared`.
  *
- * It costs one of the provider's calls of the UTC day (the shared `USAGE/alphavantage` counter), runs at most once per 10 minutes and is refused when
- * fewer than 3 calls are left by that counter.
+ * It costs two of the provider's calls of the UTC day (the shared `USAGE/alphavantage` counter; one when the first answer is a daily quota or a refused
+ * key, which make the control pointless), runs at most once per 10 minutes and is refused when fewer than 4 calls are left by that counter.
  */
 import { nextUtcMidnight, utcDay, type ItemStore } from '@portfolio/platform';
 import type { AlphaVantageProbeDeps } from '@portfolio/api';
@@ -13,7 +14,10 @@ import {
   PROBE_INTERVAL_SECONDS,
   PROBE_MIN_CALLS,
   PROBE_SYMBOL,
+  probeComparison,
+  probeConclusion,
   probeSummary,
+  type AlphaVantageProbeControl,
   type AlphaVantageProbeResult,
   type AlphaVantageProbeStatus,
   type ProbeOutcome,
@@ -54,11 +58,16 @@ const clock = (iso: string): string => iso.slice(11, 16);
 
 const LIMIT_OUTCOME: Readonly<Record<EstimateLimit, ProbeOutcome>> = { daily: 'daily-limit', burst: 'burst-limit', other: 'rate-limited' };
 
-/** The words of an answer: the outcome of the screen, the provider's sanitised text and the number of quarters. */
-export function resultOf(answer: EstimatesAnswer, at: string): AlphaVantageProbeResult {
-  const base = { at, symbol: PROBE_SYMBOL, call: 'EARNINGS_ESTIMATES' } as const;
-  const make = (outcome: ProbeOutcome, message?: string, quarters?: number): AlphaVantageProbeResult => ({
-    ...base,
+interface Said {
+  outcome: ProbeOutcome;
+  summary: string;
+  message?: string;
+  quarters?: number;
+}
+
+/** The words of an answer: the outcome of the screen, the provider's sanitised text and the number of quarters (all of `EARNINGS`, whether or not they carry an estimate). */
+function said(answer: EstimatesAnswer): Said {
+  const make = (outcome: ProbeOutcome, message?: string, quarters?: number): Said => ({
     outcome,
     summary: probeSummary(outcome, quarters),
     ...(message === undefined ? {} : { message }),
@@ -66,7 +75,7 @@ export function resultOf(answer: EstimatesAnswer, at: string): AlphaVantageProbe
   });
   switch (answer.status) {
     case 'ok':
-      return make('ok', undefined, answer.quarters.length);
+      return make('ok', undefined, answer.available ?? answer.quarters.length);
     case 'premium':
       return make('premium', answer.detail);
     case 'rate-limited':
@@ -76,6 +85,26 @@ export function resultOf(answer: EstimatesAnswer, at: string): AlphaVantageProbe
     default:
       return make(answer.invalidKey === true ? 'invalid-key' : 'error', answer.reason);
   }
+}
+
+/** The answers that make a control call pointless: the day's quota is used, or the key is refused. */
+const NO_CONTROL: readonly ProbeOutcome[] = ['daily-limit', 'invalid-key'];
+
+/** The result of the test: the estimates answer, the control's (absent when it was not made), the two side by side and what they mean. */
+export function resultOf(answer: EstimatesAnswer, at: string, controlAnswer?: EstimatesAnswer): AlphaVantageProbeResult {
+  const first = said(answer);
+  const second = controlAnswer === undefined ? undefined : said(controlAnswer);
+  const control: AlphaVantageProbeControl | undefined = second === undefined ? undefined : { call: 'EARNINGS', ...second };
+  const conclusion = probeConclusion(first.outcome, second?.outcome);
+  return {
+    at,
+    symbol: PROBE_SYMBOL,
+    call: 'EARNINGS_ESTIMATES',
+    ...first,
+    ...(control === undefined ? {} : { control }),
+    comparison: probeComparison(first, second),
+    ...(conclusion === undefined ? {} : { conclusion }),
+  };
 }
 
 /** The Cloudflare adapter of the Alpha Vantage test. */
@@ -116,6 +145,13 @@ export function createAlphaVantageProbeApi({ items, config, now, fetch, pacer }:
     return null;
   }
 
+  /** The control call (counted like the first): not made when the first answer makes it pointless or the allowance is gone. */
+  async function controlOf(client: AlphaVantageEstimatesClient, first: ProbeOutcome, day: string): Promise<EstimatesAnswer | undefined> {
+    if (NO_CONTROL.includes(first)) return undefined;
+    if (!(await ledger.consume(USAGE_KEY, USAGE_ENTITY, day, 1, config.dailyLimits.alphavantage))) return undefined;
+    return client.fetchEarnings(PROBE_SYMBOL);
+  }
+
   async function state(): Promise<ProbeState> {
     const [budget, last] = await Promise.all([budgetOf(utcDay(now())), lastProbe()]);
     return { budget, last, blocked: refusalOf(budget, last?.at) };
@@ -137,7 +173,9 @@ export function createAlphaVantageProbeApi({ items, config, now, fetch, pacer }:
       }
       await items.put({ ...PROBE_KEY, entityType: PROBE_ENTITY, askedAt: at.toISOString(), ...(last?.result ? { result: last.result } : {}) });
       const client = new AlphaVantageEstimatesClient({ apiKey: apiKey!, fetch, pace: () => pacer.wait('alphavantage') });
-      const result = resultOf(await client.fetchEstimates(PROBE_SYMBOL), at.toISOString());
+      const estimates = await client.fetchEstimates(PROBE_SYMBOL);
+      const control = await controlOf(client, said(estimates).outcome, day);
+      const result = resultOf(estimates, at.toISOString(), control);
       await items.put({ ...PROBE_KEY, entityType: PROBE_ENTITY, askedAt: result.at, result });
       return { accepted: true, result: { ...result, budget: await budgetOf(day) } };
     },
