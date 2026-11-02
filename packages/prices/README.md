@@ -18,6 +18,7 @@ const jobs = createPriceJobs({
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   config: parsePricesConfig(env), // TWELVEDATA_API_KEY, EODHD_API_KEY, COINGECKO_API_KEY, ALPHAVANTAGE_API_KEY, FINNHUB_API_KEY (optional), ...
   stepSubrequests: 40, // fetches (retries included) per step; the free Worker/DO cap is 50
+  heldCompanies: async () => ['AMZN', 'KMB'], // optional: the companies Finnhub is asked about (one call each, 2.1 s apart); default: every tracked non-crypto symbol
 });
 // jobs.refreshPrices / jobs.enrichTransactions / jobs.refreshCalendar are JobHandlers: call them with `{ payload, cursor }`,
 // persist `next` and call again after `delayMs` while a step answers `{ done: false }`.

@@ -1,4 +1,4 @@
-import { SOURCE_LABELS as DATE_SOURCE_NAMES, type EarningsConflict, type EarningsDatesConclusion, type EarningsRunReport, type EarningsRunStatus, type EarningsSourceRun, type EarningsSourceStatus, type GetEarningsDatesResponse, type HeldEarningsDate } from '@portfolio/shared';
+import { SOURCE_LABELS as DATE_SOURCE_NAMES, companiesSummary, type EarningsCompanyCheck, type EarningsConflict, type EarningsDatesConclusion, type EarningsRunReport, type EarningsRunStatus, type EarningsSourceRun, type EarningsSourceStatus, type GetEarningsDatesResponse, type HeldEarningsDate } from '@portfolio/shared';
 import { CompanyLogo } from '../../components/CompanyLogo';
 import { formatDate, formatDateTime } from '../../lib/format';
 import type { EarningsDatesResult } from './useEarningsDates';
@@ -20,6 +20,7 @@ const SOURCE_STATUS_LABELS: Readonly<Record<EarningsSourceStatus, string>> = {
   'no-key': 'not configured',
   'budget-exhausted': 'daily call already used',
   'rate-limited': 'rate-limited',
+  refused: 'refused the key',
   failed: 'failed',
 };
 const TIME_LABELS: Readonly<Record<NonNullable<HeldEarningsDate['next']>['timeOfDay'], string>> = { BMO: 'before the open', AMC: 'after the close', DMH: 'during market hours', unknown: '' };
@@ -60,7 +61,40 @@ function fundsText(funds: number): string {
   return `${funds} ${plural(funds, 'fund or crypto position has', 'fund or crypto positions have')} no earnings and ${plural(funds, 'is', 'are')} not counted.`;
 }
 
-const rowsOf = (entry: EarningsSourceRun): string => (entry.rows === undefined ? '' : `, ${entry.rows} ${plural(entry.rows, 'row', 'rows')}`);
+const rowsOf = (entry: EarningsSourceRun): string => (entry.companies !== undefined || entry.rows === undefined ? '' : `, ${entry.rows} ${plural(entry.rows, 'row', 'rows')}`);
+
+const CHECK_LABELS: Readonly<Record<Exclude<EarningsCompanyCheck['result'], 'date'>, string>> = {
+  none: 'no date yet',
+  pending: 'not asked in this run',
+  failed: 'failed',
+  'rate-limited': 'rate-limited',
+  refused: 'refused the key',
+};
+
+/** What a lookup of one company came to, in a few words. */
+function checkText(check: EarningsCompanyCheck): string {
+  if (check.result === 'date') return `date ${formatDate(check.date ?? '')}`;
+  const reason = check.reason === undefined ? '' : ` (${check.reason})`;
+  return CHECK_LABELS[check.result] + reason;
+}
+
+/** The companies a source is asked about one by one: how many have a date and the outcome of each. */
+function CompanyChecks({ entry }: Readonly<{ entry: EarningsSourceRun }>) {
+  const summary = companiesSummary(entry);
+  if (summary === null) return null;
+  return (
+    <details>
+      <summary>{summary}</summary>
+      <ul className="list-inside list-disc">
+        {(entry.checks ?? []).map((check) => (
+          <li key={check.symbol} className="break-words">
+            {check.symbol}: {checkText(check)}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
 
 function SourceLines({ sources }: Readonly<{ sources: readonly EarningsSourceRun[] }>) {
   return (
@@ -69,7 +103,9 @@ function SourceLines({ sources }: Readonly<{ sources: readonly EarningsSourceRun
         <li key={entry.source} className="break-words">
           {DATE_SOURCE_NAMES[entry.source]}: {SOURCE_STATUS_LABELS[entry.status]}
           {rowsOf(entry)}
-          {entry.reason !== '' && ` (${entry.reason})`}
+          {entry.reason !== '' && entry.status === 'ok' && `; last error: ${entry.reason}`}
+          {entry.reason !== '' && entry.status !== 'ok' && ` (${entry.reason})`}
+          <CompanyChecks entry={entry} />
         </li>
       ))}
     </ul>
@@ -151,7 +187,7 @@ function RefreshControl({ report, earnings }: Readonly<{ report: GetEarningsDate
         {earnings.isRefreshing ? 'Queuing…' : 'Refresh earnings dates now'}
       </button>
       {!refresh.available && refresh.reason !== null && <p className="text-sm break-words">{refresh.reason}</p>}
-      {outcome?.accepted === true && <output className="block text-sm">Queued. The job runs within a minute; press Refresh above to see the result.</output>}
+      {outcome?.accepted === true && <output className="block text-sm">Queued. The job starts within a minute and then asks Finnhub about one held company every couple of seconds (about a minute for 20 companies); press Refresh above to see the result.</output>}
       {outcome?.accepted === false && <output className="block text-sm break-words">{outcome.message}</output>}
       {earnings.refreshError !== undefined && <p role="alert" className="text-sm">The refresh could not be queued. Try again later.</p>}
     </div>

@@ -45,7 +45,7 @@ export interface HubEnv {
   EODHD_API_KEY?: string;
   COINGECKO_API_KEY?: string;
   ALPHAVANTAGE_API_KEY?: string;
-  /** Optional: the free Finnhub key (earnings dates for the next 21 days with before/after-the-market timing); without it that source is off. */
+  /** Optional: the free Finnhub key (earnings dates of the companies you hold, one call each, with before/after-the-market timing); without it that source is off. */
   FINNHUB_API_KEY?: string;
   /**
    * Web Push (dividend notifications): `VAPID_PUBLIC_KEY` is a plain variable (65-byte uncompressed P-256 key, base64url),

@@ -36,7 +36,7 @@ export type EarningsRunStatus = (typeof EARNINGS_RUN_STATUSES)[number];
 /** The sources of earnings dates, and how the attempt on one of them ended (`no-key`: its secret is not set). */
 export const EARNINGS_SOURCES = ['alphavantage', 'finnhub'] as const;
 export type EarningsSourceName = (typeof EARNINGS_SOURCES)[number];
-export const EARNINGS_SOURCE_STATUSES = ['ok', 'provider-limited', 'no-key', 'budget-exhausted', 'rate-limited', 'failed'] as const;
+export const EARNINGS_SOURCE_STATUSES = ['ok', 'provider-limited', 'no-key', 'budget-exhausted', 'rate-limited', 'refused', 'failed'] as const;
 export type EarningsSourceStatus = (typeof EARNINGS_SOURCE_STATUSES)[number];
 
 /** A calendar with fewer rows than this for the 12-month horizon is not the real one (the real one lists thousands of companies). */
@@ -44,15 +44,37 @@ export const MIN_CALENDAR_ROWS = 100;
 
 export const SOURCE_LABELS: Readonly<Record<EarningsSourceName, string>> = { alphavantage: 'Alpha Vantage', finnhub: 'Finnhub' };
 
+/**
+ * How one company's lookup ended (sources that are asked per company, Finnhub): `date` (an upcoming date), `none` (the source answered and
+ * knows no date), `failed`, `rate-limited` or `refused` (the call was made and ended so) and `pending` (not asked in this run).
+ */
+export const EARNINGS_LOOKUP_RESULTS = ['date', 'none', 'failed', 'rate-limited', 'refused', 'pending'] as const;
+export type EarningsLookupResult = (typeof EARNINGS_LOOKUP_RESULTS)[number];
+
+/** The lookup of one held company at a source that is asked company by company. */
+export interface EarningsCompanyCheck {
+  symbol: string;
+  result: EarningsLookupResult;
+  /** The upcoming date the source gave (`date`). */
+  date?: string;
+  /** Sanitized one-line cause (`failed`, `rate-limited`, `refused`). */
+  reason?: string;
+}
+
 /** What one source did in a run. */
 export interface EarningsSourceRun {
   source: EarningsSourceName;
   status: EarningsSourceStatus;
-  /** Sanitized one-line cause when the status is not `ok`. */
+  /** Sanitized one-line cause when the status is not `ok`; for a source asked company by company, the last error. */
   reason: string;
   rows?: number;
   events?: number;
   matchedSymbols?: string[];
+  /** Held companies the source was to be asked about, and how many of them it gave an upcoming date for (sources asked company by company). */
+  companies?: number;
+  withDate?: number;
+  /** One entry per company (most urgent first). */
+  checks?: EarningsCompanyCheck[];
 }
 
 /** Two sources listed different dates for one company in the same run; `kept` was stored, `dropped` was not. */
@@ -108,6 +130,12 @@ function lenient<T extends z.ZodTypeAny, F extends z.infer<T> | undefined>(schem
 const symbolList = lenient(z.array(z.string()).max(MAX_RUN_SYMBOLS), undefined);
 const count = z.number().int().nonnegative();
 
+const checkSchema = z.object({
+  symbol: z.string(),
+  result: z.enum(EARNINGS_LOOKUP_RESULTS),
+  date: lenient(z.string(), undefined),
+  reason: lenient(z.string(), undefined),
+});
 const sourceRunSchema = z.object({
   source: z.enum(EARNINGS_SOURCES),
   status: z.enum(EARNINGS_SOURCE_STATUSES),
@@ -115,6 +143,9 @@ const sourceRunSchema = z.object({
   rows: lenient(count, undefined),
   events: lenient(count, undefined),
   matchedSymbols: symbolList,
+  companies: lenient(count, undefined),
+  withDate: lenient(count, undefined),
+  checks: lenient(z.array(checkSchema).max(MAX_RUN_SYMBOLS), undefined),
 });
 const conflictSide = z.object({ source: z.enum(EARNINGS_SOURCES), date: z.string() });
 const conflictSchema = z.object({ symbol: z.string(), kept: conflictSide, dropped: conflictSide });
@@ -134,6 +165,13 @@ export const earningsRunSchema = z.object({
   conflicts: lenient(z.array(conflictSchema).max(MAX_RUN_CONFLICTS), undefined),
 });
 
+const definedCheck = (check: z.infer<typeof checkSchema>): EarningsCompanyCheck => ({
+  symbol: check.symbol,
+  result: check.result,
+  ...(check.date === undefined ? {} : { date: check.date }),
+  ...(check.reason === undefined ? {} : { reason: check.reason }),
+});
+
 const definedSourceRun = (source: z.infer<typeof sourceRunSchema>): EarningsSourceRun => ({
   source: source.source,
   status: source.status,
@@ -141,6 +179,9 @@ const definedSourceRun = (source: z.infer<typeof sourceRunSchema>): EarningsSour
   ...(source.rows === undefined ? {} : { rows: source.rows }),
   ...(source.events === undefined ? {} : { events: source.events }),
   ...(source.matchedSymbols ? { matchedSymbols: source.matchedSymbols } : {}),
+  ...(source.companies === undefined ? {} : { companies: source.companies }),
+  ...(source.withDate === undefined ? {} : { withDate: source.withDate }),
+  ...(source.checks ? { checks: source.checks.map((check) => definedCheck(check)) } : {}),
 });
 
 /** The run a stored item describes; null when there is none or it is not a record of this version. */
@@ -300,18 +341,43 @@ function failureWhy(run: EarningsRunRecord): Why {
   }
 }
 
-/** `Alpha Vantage: 4203 rows; Finnhub: 1250 rows (next 21 days only)` of the sources that answered. */
+/** `Finnhub: 14 of 17 companies have a date` of a source that is asked company by company; null for a source that lists every company at once. */
+export function companiesSummary(source: EarningsSourceRun): string | null {
+  if (source.companies === undefined) return null;
+  return `${SOURCE_LABELS[source.source]}: ${source.withDate ?? 0} of ${source.companies} ${source.companies === 1 ? 'company has' : 'companies have'} a date`;
+}
+
+/** `Alpha Vantage: 4203 rows; Finnhub: 14 of 17 companies have a date` of the sources that answered. */
 function sourcesSummary(sources: readonly EarningsSourceRun[]): string {
   return sources
     .filter((source) => source.status === 'ok' || source.status === 'provider-limited')
-    .map((source) => `${SOURCE_LABELS[source.source]}: ${source.rows ?? 0} rows${source.source === 'finnhub' ? ' (next 21 days only)' : ''}`)
+    .map((source) => companiesSummary(source) ?? `${SOURCE_LABELS[source.source]}: ${source.rows ?? 0} rows`)
     .join('; ');
+}
+
+/** Why Finnhub, asked about this company, gave no date. */
+function checkWhy(check: EarningsCompanyCheck, when: string): Why {
+  const cause = check.reason === undefined || check.reason === '' ? '' : `: ${check.reason}`;
+  switch (check.result) {
+    case 'pending':
+      return { code: 'budget', text: `Finnhub was not asked about it in the run of ${when}: the daily allowance or the run ended first. It is next in line.` };
+    case 'rate-limited':
+      return { code: 'rate-limited', text: `Finnhub's rate limit was reached before it was looked up on ${when}${cause}.` };
+    case 'refused':
+      return { code: 'failed', text: `Finnhub refused the request on ${when}${cause}.` };
+    case 'failed':
+      return { code: 'failed', text: `Finnhub could not look it up on ${when}${cause}.` };
+    default:
+      return { code: 'no-upcoming-date', text: `Finnhub was asked about it on ${when} and has no upcoming date for it yet.` };
+  }
 }
 
 /** The provider answered (`run`): why it has no upcoming date for the symbol. */
 function answerWhy({ symbol, name }: WhyInput, run: EarningsRunRecord): Why {
   const when = day(run.at);
   if (run.unvouched?.includes(symbol)) return { code: 'name-mismatch', text: `The provider lists the ticker, but for a company whose name does not match "${name}", so its date was not taken (${when}).` };
+  const check = run.sources?.find((source) => source.source === 'finnhub')?.checks?.find((entry) => entry.symbol === symbol);
+  if (check !== undefined && check.result !== 'date') return checkWhy(check, when);
   if (run.listed?.includes(symbol)) return { code: 'no-upcoming-date', text: `The provider lists it, but with no upcoming date (${when}).` };
   if (run.sources !== undefined) return { code: 'not-listed', text: `Not listed by the sources that answered on ${when}: ${sourcesSummary(run.sources)}.` };
   const rows = run.rows === undefined ? 'its calendar' : `its calendar of ${run.rows} rows`;
@@ -392,6 +458,8 @@ function sourceProblem(entry: EarningsSourceRun): string {
       return `${label}: the daily allowance for the calendar was already used.`;
     case 'rate-limited':
       return `${label}: rate limit reached${inBrackets(entry.reason)}.`;
+    case 'refused':
+      return `${label} refused the request${inBrackets(entry.reason)}: check the ${entry.source === 'finnhub' ? 'FINNHUB_API_KEY' : 'ALPHAVANTAGE_API_KEY'} secret (it must be a valid key).`;
     default:
       return `${label} failed${afterColon(entry.reason)}.`;
   }
@@ -404,7 +472,8 @@ export function earningsDatesConclusion(last: EarningsRunRecord | null, configur
   if (run === null || run.status === 'skipped') return null;
   const entries = sourceRuns(run, configured);
   const working = entries.filter((entry) => entry.status === 'ok');
-  const problems = entries.filter((entry) => entry.status !== 'ok').map((entry) => sourceProblem(entry));
+  // A source that found its allowance of the day already spent (a second run the same day) is no problem while another source delivers: it reads again tomorrow.
+  const problems = entries.filter((entry) => entry.status !== 'ok' && !(entry.status === 'budget-exhausted' && working.length > 0)).map((entry) => sourceProblem(entry));
   if (working.length === 0) return { kind: 'broken', text: `No provider date source is working. ${problems.join(' ')} ${PROJECTION_ONLY}` };
   const names = working.map((entry) => SOURCE_LABELS[entry.source]).join(' and ');
   if (problems.length === 0) return { kind: 'ok', text: `Dates come from ${names}.` };
@@ -453,6 +522,9 @@ const sourceRunReport = z.object({
   rows: count.optional(),
   events: count.optional(),
   matchedSymbols: z.array(z.string()).optional(),
+  companies: count.optional(),
+  withDate: count.optional(),
+  checks: z.array(z.object({ symbol: z.string(), result: z.enum(EARNINGS_LOOKUP_RESULTS), date: z.string().optional(), reason: z.string().optional() })).optional(),
 });
 const conflictSideReport = z.object({ source: z.enum(EARNINGS_SOURCES), date: z.string() });
 const runReport = z.object({

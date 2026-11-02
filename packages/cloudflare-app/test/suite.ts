@@ -459,16 +459,32 @@ export function defineAppSuite(label: string, start: StartStack): void {
       }
     });
 
-    it('with a Finnhub key: three weekly calls, a second daily read confirms the date, and the calendar and the diagnostics say when and why', async () => {
+    it('with a Finnhub key: one paced call per held US company, a second daily read confirms the date, and the calendar and the diagnostics say when and why', async () => {
       const { stack, call, portfolio } = await signedIn({ prices: { ...keys, FINNHUB_API_KEY: FINNHUB_KEY } });
       try {
         expect((await call('POST', '/transactions', { portfolioId: portfolio, ...buy })).status).toBe(201);
+        // A Xetra listing of a company with a curated US ticker (asked under that ticker), and a Euronext listing without one (not asked).
+        const listed = [
+          { symbol: 'FOO.DE', name: 'Salesforce' },
+          { symbol: 'ASML.AS', name: 'ASML Holding' },
+        ];
+        await Promise.all(listed.map(({ symbol }) => call('POST', '/transactions', { portfolioId: portfolio, ...buy, symbol, currency: 'EUR' })));
         await stack.drain();
+        await stack.seed(
+          listed.flatMap(({ symbol, name }) => [
+            { PK: 'TRACKED', SK: `TICKER#${symbol}`, entityType: 'TRACKED_TICKER', symbol },
+            { PK: `TICKER#${symbol}`, SK: 'PROFILE', entityType: 'PROFILE', symbol, name, assetClass: 'STOCK', currency: 'EUR' },
+          ]),
+        );
         await stack.enqueue('refreshPrices', { trigger: 'scheduled' });
         await stack.enqueue('refreshCalendar', { trigger: 'scheduled' });
         await stack.drain();
         expect(await stack.failedJobs()).toEqual([]);
-        expect(stack.prices.finnhubRequests).toHaveLength(3);
+        const asked = stack.prices.finnhubRequests.map((request) => request.split(' '));
+        expect(asked.map(([symbol]) => symbol).toSorted((a, b) => a!.localeCompare(b!))).toEqual(['AAPL', 'CRM']);
+        // From three days back to ninety days ahead.
+        const window = asked[0]![1]!.split('..').map((day) => Date.parse(day));
+        expect((window[1]! - window[0]!) / 86_400_000).toBe(93);
         const first = await call('GET', `/calendar?portfolioId=${portfolio}&types=EARNINGS`);
         expect(first.status, JSON.stringify(first.body)).toBe(200);
         const aapl = (first.body.events as EarningsRow[]).filter((event) => event.symbol === 'AAPL');
@@ -493,8 +509,11 @@ export function defineAppSuite(label: string, start: StartStack): void {
         }
 
         const diagnostics = await call('GET', `/diagnostics/earnings-dates?portfolioId=${portfolio}`);
-        expect(diagnostics.body.conclusion).toEqual({ kind: 'ok', text: 'Dates come from Alpha Vantage and Finnhub.' });
-        expect(diagnostics.body.lastSuccess.sources.map((entry: { source: string; status: string }) => `${entry.source} ${entry.status}`)).toEqual(['alphavantage ok', 'finnhub ok']);
+        // A second run the same day (the workerd Hub cannot move its clock) finds the one Alpha Vantage call of the day spent: no problem while Finnhub delivers.
+        expect(diagnostics.body.conclusion).toEqual({ kind: 'ok', text: nextDay ? 'Dates come from Alpha Vantage and Finnhub.' : 'Dates come from Finnhub.' });
+        expect(diagnostics.body.lastSuccess.sources.map((entry: { source: string; status: string }) => `${entry.source} ${entry.status}`)).toEqual([nextDay ? 'alphavantage ok' : 'alphavantage budget-exhausted', 'finnhub ok']);
+        expect(diagnostics.body.lastSuccess.sources[1]).toMatchObject({ companies: 2, withDate: 1 });
+        expect(diagnostics.body.lastSuccess.sources[1].checks).toEqual(expect.arrayContaining([{ symbol: 'FOO.DE', result: 'none' }]));
         expect(diagnostics.body.symbols.find((entry: { symbol: string }) => entry.symbol === 'AAPL').next).toMatchObject({ timeOfDay: 'AMC', releaseText: expect.stringContaining('After the close') });
       } finally {
         await stack.dispose();

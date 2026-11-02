@@ -5,7 +5,7 @@ import { BlockBook, DailyQuota, MinuteQuota, ProviderGate, StorePlanMemory, Stor
 import { AlphaVantageProvider } from './providers/alphavantage.js';
 import { pacedFetch, type ProviderPacer } from './pacer.js';
 import { AlphaVantageEarnings, EodhdCorporateActions } from './providers/calendar.js';
-import { FinnhubEarnings } from './providers/finnhub.js';
+import { FINNHUB_CALLS_PER_MINUTE, FinnhubEarnings } from './providers/finnhub.js';
 import { CoinGeckoProvider } from './providers/coingecko.js';
 import { EodhdProvider } from './providers/eodhd.js';
 import { FrankfurterFx } from './providers/frankfurter.js';
@@ -41,7 +41,7 @@ export interface MarketData {
   /** Absent without an Alpha Vantage key. */
   earnings?: EarningsSource;
   /** Absent without a Finnhub key. */
-  finnhubEarnings?: EarningsSource;
+  finnhubEarnings?: FinnhubEarnings;
   /** Absent without an EODHD key. */
   actions?: CorporateActionsSource;
 }
@@ -57,7 +57,7 @@ export function createMarketData(deps: MarketDataDeps, fetch: FetchLike = deps.f
   const { config, clock, sleep } = deps;
   const logger = deps.logger ?? silentLogger;
   const nowMs = (): number => clock().getTime();
-  const http = (provider: string): HttpClient => new HttpClient({ provider, fetch: provider === 'alphavantage' && deps.pacer ? pacedFetch(fetch, deps.pacer, provider) : fetch, sleep, timeoutMs: deps.timeoutMs, random: deps.random, timeoutSignal: deps.timeoutSignal, logger });
+  const http = (provider: string, maxRetries?: number): HttpClient => new HttpClient({ provider, fetch: provider === 'alphavantage' && deps.pacer ? pacedFetch(fetch, deps.pacer, provider) : fetch, sleep, timeoutMs: deps.timeoutMs, maxRetries, random: deps.random, timeoutSignal: deps.timeoutSignal, logger });
   const ledger = new StoreQuotaLedger(deps.store, sleep);
   const quota = (provider: string, limit: number): DailyQuota => new DailyQuota(ledger, provider, limit, () => utcDay(clock()));
   const bucket = (capacity: number, perSecond: number): TokenBucket => new TokenBucket(capacity, perSecond, nowMs, sleep, MAX_INLINE_WAIT_MS);
@@ -91,7 +91,8 @@ export function createMarketData(deps: MarketDataDeps, fetch: FetchLike = deps.f
     earnings: keys.alphavantage
       ? new AlphaVantageEarnings({ apiKey: keys.alphavantage, http: http('alphavantage'), bucket: bucket(1, 5 / 60), quota: quota('alphavantage', config.dailyLimits.alphavantage), horizon: config.calendar.earningsHorizon })
       : undefined,
-    finnhubEarnings: keys.finnhub ? new FinnhubEarnings({ apiKey: keys.finnhub, http: http('finnhub'), bucket: bucket(3, 1) }) : undefined,
+    // No retries: a retried call would count against the minute's limit unseen, and the next run asks again.
+    finnhubEarnings: keys.finnhub ? new FinnhubEarnings({ apiKey: keys.finnhub, http: http('finnhub', 0), minute: new MinuteQuota(ledger, 'finnhub', FINNHUB_CALLS_PER_MINUTE, nowMs), gate: gate('finnhub'), now: nowMs }) : undefined,
     actions: keys.eodhd && eodhd ? new EodhdCorporateActions({ apiKey: keys.eodhd, http: http('eodhd'), bucket: bucket(5, 1), quota: quota('eodhd', config.dailyLimits.eodhd), dividends: eodhd }) : undefined,
   };
 }

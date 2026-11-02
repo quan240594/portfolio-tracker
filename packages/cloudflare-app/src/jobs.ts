@@ -28,7 +28,7 @@ import { ItemIngestStore, importUploadedJob } from '@portfolio/ingest';
 import { DEFAULT_STEP_SUBREQUESTS, PRICE_SCHEDULES, PriceRepository, createPriceJobs, type PriceJobDeps, type ProviderPacer } from '@portfolio/prices';
 import { BACKFILL_STEP_SUBREQUESTS, CHECKS_PER_STEP, createBackfillEarningsJob, createEarningsEstimatesJob, createFetchEarningsSummaryJob, createWatchEarningsJob, type AiLike, type NeuronMeter } from '@portfolio/earnings';
 import type { HubConfig } from './config.js';
-import { earningsJobDeps, estimatesJobDeps } from './earnings.js';
+import { earningsJobDeps, estimatesJobDeps, heldCompanies } from './earnings.js';
 import { pushConfig } from './push.js';
 import { SubrequestBudget } from './subrequests.js';
 
@@ -159,6 +159,8 @@ export function priceJobDeps({ items, fetch, now, sleep, config, queue, pacer }:
     ...(pacer === undefined ? {} : { pacer }),
     // The scheduled refresh starts the enrichment of tracked symbols that never had one (once a day).
     enqueueEnrichment: (symbols) => queue.enqueue({ job: JOBS.enrichTransactions, payload: { userId: '', portfolioId: '', reason: 'IMPORTED', symbols: [...symbols] } }),
+    // The earnings dates of Finnhub are asked for the companies held today (no funds, ETFs or crypto), one call each.
+    heldCompanies: async () => (await heldCompanies(items, now().toISOString().slice(0, 10))).holdings.map((holding) => holding.symbol),
   };
 }
 

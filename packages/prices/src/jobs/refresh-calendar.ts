@@ -1,8 +1,8 @@
 import { MAX_RUN_CONFLICTS, MAX_RUN_SYMBOLS, sanitizeAttemptError, type EarningsRunRecord, type EarningsRunStatus, type EarningsSourceName, type EarningsSourceRun, type StoredEarningsEvent } from '@portfolio/shared';
-import type { CalendarRefreshSummary, EarningsFetchReport, EarningsSource, JobHandler, JobPayloads } from '@portfolio/platform';
+import type { CalendarRefreshSummary, EarningsSource, JobHandler, JobPayloads } from '@portfolio/platform';
 import { z } from 'zod';
 import { errorMessage, errorName, RateLimitError } from '../errors.js';
-import { byText, definedOnly } from '../parse.js';
+import { byText, definedOnly, isRecord } from '../parse.js';
 import { earningsTargets } from '../providers/calendar.js';
 import { FINNHUB_WINDOW_DAYS } from '../providers/finnhub.js';
 import type { CalendarState } from '../repository.js';
@@ -10,6 +10,7 @@ import { isCrypto } from '../symbols.js';
 import { addDays, utcDay } from '../time.js';
 import { DIVIDEND_LOOKAHEAD_DAYS, DIVIDEND_LOOKBACK_DAYS } from './enrich.js';
 import { mergeEarningsSources, trackSeen, type StoredAhead } from './earnings-merge.js';
+import { datedSymbols, finnhubOutcome, finnhubRunSchema, planFinnhub, readNextFinnhub, type Calendar, type SourceOutcome } from './finnhub-run.js';
 import { createStepContext, decodeState, pendingStep, runStep, rethrowBudget, runUnits, whileAffordable, type PriceJobDeps, type StepContext } from './common.js';
 
 /** A symbol check is the splits call and (when enabled) the dividends call. */
@@ -24,6 +25,13 @@ const stateSchema = z.object({
   symbols: z.array(z.string()),
   phase: z.enum(['earnings', 'actions', 'done']),
   earnings: earningsSchema.nullable(),
+  /** The earnings phase between its steps: what Alpha Vantage gave, and the Finnhub companies read so far and still to read. */
+  progress: z
+    .object({
+      alpha: z.custom<SourceOutcome>((value) => isRecord(value) && isRecord(value.run)),
+      finnhub: finnhubRunSchema.optional(),
+    })
+    .optional(),
   actions: z.object({
     planned: z.boolean(),
     status: z.enum(['ok', 'no-provider', 'budget-exhausted', 'rate-limited']),
@@ -65,16 +73,6 @@ type RunDetail = Omit<EarningsRunRecord, 'at' | 'trigger' | 'tracked'>;
 interface Attempt {
   summary: Earnings;
   detail: RunDetail;
-}
-
-type Calendar = Partial<EarningsFetchReport> & Pick<EarningsFetchReport, 'events'>;
-
-/** What one source did: its entry in the run record and what it listed. */
-interface SourceOutcome {
-  run: EarningsSourceRun;
-  report?: Calendar;
-  /** Class of the error that ended the attempt. */
-  failure?: string;
 }
 
 /** The Alpha Vantage token keeps the spelling the Python service uses. */
@@ -130,7 +128,7 @@ export function overallStatus(runs: readonly EarningsSourceRun[]): Exclude<Earni
   const has = (status: EarningsSourceRun['status']): boolean => runs.some((run) => run.status === status);
   if (has('ok')) return 'ok';
   if (has('provider-limited')) return 'provider-limited';
-  if (has('failed')) return 'failed';
+  if (has('failed') || has('refused')) return 'failed';
   if (has('rate-limited')) return 'rate-limited';
   return has('budget-exhausted') ? 'budget-exhausted' : 'no-provider';
 }
@@ -143,15 +141,17 @@ async function storedAhead(ctx: StepContext, events: readonly StoredEarningsEven
   return ctx.repo.upcomingEarnings(symbols, today);
 }
 
-/** A stored date the run may remove: the symbol was listed again, not under this date, by a source that covers it (Finnhub sees the next 21 days only). */
-function staleDates(ahead: StoredAhead, kept: readonly StoredEarningsEvent[], runs: readonly EarningsSourceRun[], today: string): Map<string, string[]> {
+/**
+ * A stored date the run may remove: the symbol was listed again, not under this date, by a source that covers it (Alpha Vantage: any date;
+ * Finnhub: the next 21 days of a company it gave a date for).
+ */
+function staleDates(ahead: StoredAhead, kept: readonly StoredEarningsEvent[], runs: readonly EarningsSourceRun[], finnhubDated: ReadonlySet<string>, today: string): Map<string, string[]> {
   const alphaCovers = runs.some((run) => run.source === 'alphavantage' && run.status === 'ok');
-  const finnhubCovers = runs.some((run) => run.source === 'finnhub' && run.status === 'ok');
   const windowEnd = addDays(today, FINNHUB_WINDOW_DAYS);
   const keep = new Set(kept.map((event) => `${event.symbol}\u0000${event.date}`));
   const stale = new Map<string, string[]>();
   for (const [symbol, stored] of ahead) {
-    const gone = stored.filter((event) => !keep.has(`${symbol}\u0000${event.date}`) && (alphaCovers || (finnhubCovers && event.date <= windowEnd))).map((event) => event.date);
+    const gone = stored.filter((event) => !keep.has(`${symbol}\u0000${event.date}`) && (alphaCovers || (finnhubDated.has(symbol) && event.date <= windowEnd))).map((event) => event.date);
     if (gone.length > 0) stale.set(symbol, gone);
   }
   return stale;
@@ -180,21 +180,38 @@ function listedOf(reports: readonly (Calendar | undefined)[]): string[] | undefi
 
 const sum = (values: readonly (number | undefined)[]): number | undefined => (values.every((value) => value === undefined) ? undefined : values.reduce<number>((total, value) => total + (value ?? 0), 0));
 
-async function attemptEarnings(ctx: StepContext, state: State, today: string, stamp: string): Promise<Attempt> {
-  const { earnings: alphaSource, finnhubEarnings: finnhubSource } = ctx.md;
-  if (alphaSource === undefined && finnhubSource === undefined) return { summary: { status: 'no-provider' }, detail: { status: 'no-provider', reason: '', sources: [NO_KEY.alphavantage, NO_KEY.finnhub] } };
+/** What the earnings phase has after its first step: the Alpha Vantage outcome and the Finnhub companies to read (the queue). */
+type Progress = NonNullable<State['progress']>;
+
+/** The symbols Finnhub is asked about: the held companies (the deployment says which), else every tracked one. */
+async function finnhubSymbols(ctx: StepContext, tracked: readonly string[]): Promise<string[]> {
+  const { heldCompanies } = ctx.deps;
+  return heldCompanies === undefined ? [...tracked] : (await heldCompanies()).filter((symbol) => !isCrypto(symbol));
+}
+
+/** First step: nothing to look up (the attempt is final), or Alpha Vantage read and the Finnhub queue planned. */
+async function startEarnings(ctx: StepContext, state: State, today: string, stamp: string): Promise<Attempt | Progress> {
+  const { earnings: alphaSource, finnhubEarnings } = ctx.md;
+  if (alphaSource === undefined && finnhubEarnings === undefined) return { summary: { status: 'no-provider' }, detail: { status: 'no-provider', reason: '', sources: [NO_KEY.alphavantage, NO_KEY.finnhub] } };
   const eligible = state.symbols.filter((symbol) => !isCrypto(symbol));
   if (earningsTargets(eligible).size === 0) return { summary: { status: 'no-symbols' }, detail: { status: 'no-symbols', reason: '' } };
   const { calendar } = ctx.deps.config;
   const alpha = await readSource(ctx, { name: 'alphavantage', source: alphaSource, limit: calendar.alphavantageDailyCalls }, eligible, state.trigger, today, stamp);
-  const finnhub = await readSource(ctx, { name: 'finnhub', source: finnhubSource, limit: calendar.finnhubDailyCalls }, eligible, state.trigger, today, stamp);
+  if (finnhubEarnings === undefined) return { alpha };
+  return { alpha, finnhub: await planFinnhub(ctx, await finnhubSymbols(ctx, eligible), today, calendar.finnhubDailyCalls) };
+}
+
+/** Last step: merges the dates of both sources with what the store has, stores them and describes the run. */
+async function finishEarnings(ctx: StepContext, progress: Progress, today: string, stamp: string): Promise<Attempt> {
+  const alpha = progress.alpha;
+  const finnhub: SourceOutcome = progress.finnhub === undefined ? { run: NO_KEY.finnhub } : finnhubOutcome(progress.finnhub);
   const runs = [alpha.run, finnhub.run];
   const listed = [...(alpha.report?.events ?? []), ...(finnhub.report?.events ?? [])];
   const ahead = await storedAhead(ctx, listed, today);
   const merged = mergeEarningsSources(alpha.report?.events ?? [], finnhub.report?.events ?? [], ahead, today);
   const events = trackSeen(merged.events, ahead, today);
   const written = events.length > 0 ? await ctx.repo.putEarnings(events, stamp) : 0;
-  const stale = await dropMovedReports(ctx, staleDates(ahead, events, runs, today));
+  const stale = await dropMovedReports(ctx, staleDates(ahead, events, runs, progress.finnhub === undefined ? new Set() : datedSymbols(progress.finnhub), today));
   const matched = [...new Set(events.map((event) => event.symbol))];
   const status = overallStatus(runs);
   const detail = definedOnly<RunDetail>({
@@ -211,15 +228,39 @@ async function attemptEarnings(ctx: StepContext, state: State, today: string, st
   return { summary: summaryOf(status, { symbols: matched.length, events: written, staleDeleted: stale }, [alpha, finnhub]), detail };
 }
 
-/** One call lists the upcoming earnings of every company; only tracked tickers are stored. The outcome is recorded for the Diagnostics page. */
-async function refreshEarnings(ctx: StepContext, state: State, today: string, stamp: string): Promise<Earnings> {
-  const { summary, detail } = await attemptEarnings(ctx, state, today, stamp);
+/** The outcome of the attempt is recorded for the Diagnostics page. */
+async function recordEarnings(ctx: StepContext, state: State, attempt: Attempt, stamp: string): Promise<Earnings> {
   try {
-    await ctx.repo.putEarningsRun({ at: stamp, trigger: state.trigger ?? 'scheduled', tracked: state.symbols.length, ...detail });
+    await ctx.repo.putEarningsRun({ at: stamp, trigger: state.trigger ?? 'scheduled', tracked: state.symbols.length, ...attempt.detail });
   } catch (error) {
     ctx.logger.warn('could not record the earnings run', { error: errorMessage(error) });
   }
-  return summary;
+  return attempt.summary;
+}
+
+/**
+ * The earnings phase, one step at a time: the first step reads Alpha Vantage (one call lists every company) and makes the first Finnhub call;
+ * each later step makes one Finnhub call for one held company. Returns the milliseconds to wait before the next step, or null when the phase
+ * is finished (its summary is in `state.earnings` and the run is recorded).
+ */
+async function advanceEarnings(ctx: StepContext, state: State, today: string, stamp: string): Promise<number | null> {
+  if (state.progress === undefined) {
+    const started = await startEarnings(ctx, state, today, stamp);
+    if (!('alpha' in started)) {
+      state.earnings = await recordEarnings(ctx, state, started, stamp);
+      return null;
+    }
+    state.progress = started;
+  }
+  const { progress } = state;
+  const source = ctx.md.finnhubEarnings;
+  if (source !== undefined && progress.finnhub !== undefined && progress.finnhub.queue.length > 0) {
+    const wait = await readNextFinnhub(ctx, progress.finnhub, source, { today, stamp, limit: ctx.deps.config.calendar.finnhubDailyCalls });
+    if (progress.finnhub.queue.length > 0) return wait;
+  }
+  state.earnings = await recordEarnings(ctx, state, await finishEarnings(ctx, progress, today, stamp), stamp);
+  state.progress = undefined;
+  return null;
 }
 
 // --- splits and dividends ---
@@ -323,8 +364,8 @@ function summarize(state: State): CalendarJobResult {
 export type RefreshCalendarJob = JobHandler<JobPayloads['refreshCalendar'], CalendarJobResult>;
 
 /**
- * `refreshCalendar`: upcoming earnings of every tracked ticker (one Alpha Vantage call), then splits (and refreshed
- * dividends) for the rotating, budgeted subset of tracked tickers that is due (EODHD). Daily budgets are spent through
+ * `refreshCalendar`: upcoming earnings (one Alpha Vantage call for every tracked ticker; one paced Finnhub call per step for each held
+ * US company), then splits (and refreshed dividends) for the rotating, budgeted subset of tracked tickers that is due (EODHD). Daily budgets are spent through
  * the item store (`CALENDAR/BUDGET#{provider}`), so retries and manual runs cannot overspend a free tier. Failures are
  * per symbol/provider: counted in the result, never thrown.
  */
@@ -337,7 +378,8 @@ export function createRefreshCalendarJob(deps: PriceJobDeps): RefreshCalendarJob
     const stamp = now.toISOString();
     return runStep(ctx, state, async () => {
       if (state.phase === 'earnings') {
-        state.earnings = await refreshEarnings(ctx, state, today, stamp);
+        const wait = await advanceEarnings(ctx, state, today, stamp);
+        if (wait !== null) return pendingStep(state, wait);
         state.phase = 'actions';
       }
       if (state.phase === 'actions') await refreshActions(ctx, state, now, today, stamp);

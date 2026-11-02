@@ -93,6 +93,8 @@ export interface CalendarState {
   splitsCheckedAt?: string;
   dividendsCheckedAt?: string;
   splitsFailedAt?: string;
+  /** When Finnhub last answered for the company's earnings date (the rotation of the per-company calls). */
+  finnhubCheckedAt?: string;
 }
 
 export const quoteItem = (quote: Quote): Item => ({ ...keys.quote(quote.symbol), entityType: ENTITY.quote, ...definedOnly(quote) });
@@ -458,6 +460,7 @@ export class PriceRepository {
           splitsCheckedAt: typeof item.splitsCheckedAt === 'string' ? item.splitsCheckedAt : undefined,
           dividendsCheckedAt: typeof item.dividendsCheckedAt === 'string' ? item.dividendsCheckedAt : undefined,
           splitsFailedAt: typeof item.splitsFailedAt === 'string' ? item.splitsFailedAt : undefined,
+          finnhubCheckedAt: typeof item.finnhubCheckedAt === 'string' ? item.finnhubCheckedAt : undefined,
         }),
       ]),
     );

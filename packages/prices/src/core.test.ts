@@ -333,7 +333,7 @@ describe('configuration', () => {
   });
 
   it('reads the calendar settings and ignores invalid values', () => {
-    expect(parseCalendarSettings({ CALENDAR_EARNINGS_HORIZON: ' 3Month ', CALENDAR_ALPHAVANTAGE_DAILY_CALLS: '2', CALENDAR_EODHD_DAILY_CALLS: '0', CALENDAR_RECHECK_DAYS: '0', CALENDAR_REFRESH_DIVIDENDS: 'No', CALENDAR_SPLIT_LOOKBACK_DAYS: '30' })).toEqual({ earningsHorizon: '3month', alphavantageDailyCalls: 2, finnhubDailyCalls: 3, eodhdDailyCalls: 0, recheckDays: 1, refreshDividends: false, splitLookbackDays: 30 });
+    expect(parseCalendarSettings({ CALENDAR_EARNINGS_HORIZON: ' 3Month ', CALENDAR_ALPHAVANTAGE_DAILY_CALLS: '2', CALENDAR_EODHD_DAILY_CALLS: '0', CALENDAR_RECHECK_DAYS: '0', CALENDAR_REFRESH_DIVIDENDS: 'No', CALENDAR_SPLIT_LOOKBACK_DAYS: '30' })).toEqual({ earningsHorizon: '3month', alphavantageDailyCalls: 2, finnhubDailyCalls: 30, eodhdDailyCalls: 0, recheckDays: 1, refreshDividends: false, splitLookbackDays: 30 });
     expect(parseCalendarSettings({ CALENDAR_EARNINGS_HORIZON: 'forever', CALENDAR_EODHD_DAILY_CALLS: 'lots', CALENDAR_REFRESH_DIVIDENDS: 'yes' })).toEqual({ ...DEFAULT_CALENDAR_SETTINGS });
     expect(parseCalendarSettings({ CALENDAR_REFRESH_DIVIDENDS: 'on' }).refreshDividends).toBe(true);
   });

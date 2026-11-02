@@ -52,7 +52,7 @@ const SOURCES = [
 ] as const;
 
 /** Optional sources: shown in the list, never part of `missingSecrets` or the state. */
-const OPTIONAL_SOURCES = [{ name: 'finnhub', secret: 'FINNHUB_API_KEY', key: 'finnhub', covers: 'earnings dates and before/after-the-market timing for the next 21 days (free key)' }] as const;
+const OPTIONAL_SOURCES = [{ name: 'finnhub', secret: 'FINNHUB_API_KEY', key: 'finnhub', covers: 'earnings dates and before/after-the-market timing of the companies you hold (free key)' }] as const;
 
 const T212_COVERS = 'live prices of the positions held at Trading 212 (no key needed; refreshed every 15 minutes on weekdays while the account is connected)';
 

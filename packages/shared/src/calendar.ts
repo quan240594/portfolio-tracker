@@ -53,7 +53,7 @@ export const CALENDAR_CHART_LOOKBACK_MONTHS = 3;
 
 export const CALENDAR_COVERAGE = {
   earnings:
-    'Upcoming earnings dates come from the free Finnhub earnings calendar (the next 21 days, with the before/after-the-market category; needs a free API key) and the free Alpha Vantage earnings calendar (the next 12 months); European listings are matched to their US ticker where one exists. ' +
+    'Upcoming earnings dates come from the free Finnhub earnings calendar (asked for each company you hold, about the next 90 days, with the before/after-the-market category; needs a free API key) and the free Alpha Vantage earnings calendar (the next 12 months); European listings are matched to their US ticker where one exists. ' +
     'Reported results come from the earnings summaries and link to them. Where no date is listed, the next date is projected from the previous report (about 91 days later) and marked Projected; a projected date that has just passed (up to 14 days) without a stored release shows as due today. ' +
     'No free source marks a date as confirmed, so a listed date is Scheduled until it is at most 21 days away and the provider has listed the same date on two separate days; then it shows as Confirmed, with that basis in its description. ' +
     'The release time is given in the exchange\'s time and in Amsterdam time: an exact time when a source gives one, otherwise the usual time for the category (before the open, after the close), marked with a tilde and the word "typically".',

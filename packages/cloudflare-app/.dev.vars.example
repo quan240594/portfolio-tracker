@@ -13,7 +13,7 @@ TWELVEDATA_API_KEY=
 EODHD_API_KEY=
 COINGECKO_API_KEY=
 ALPHAVANTAGE_API_KEY=
-# Optional, free: earnings dates and before/after-the-market timing for the next 21 days (finnhub.io, free API key).
+# Optional, free: earnings dates and before/after-the-market timing of the companies you hold (finnhub.io, free API key; one call per held company a day).
 FINNHUB_API_KEY=
 # Optional dividend push notifications (from `pnpm run vapid:generate`): both keys, or none. Dev keys only.
 VAPID_PUBLIC_KEY=
