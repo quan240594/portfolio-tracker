@@ -33,6 +33,7 @@ describe('createCalendarDatesApi', () => {
     expect(await api.status()).toEqual({
       budget: { provider: 'Alpha Vantage', day: '2026-10-28', used: 4, limit: 25, remaining: 21, calendarUsed: 1, calendarLimit: 1 },
       refresh: { available: true, reason: null, nextAllowedAt: null },
+      configured: { alphavantage: true, finnhub: false },
     });
   });
 
@@ -75,6 +76,20 @@ describe('createCalendarDatesApi', () => {
     expect(await api.refresh()).toMatchObject({ accepted: false, reason: 'not-configured', message: expect.stringContaining('ALPHAVANTAGE_API_KEY') });
     expect(queue.messages).toEqual([]);
     expect((await api.status()).refresh.available).toBe(false);
+  });
+
+  it('refuses without any key, and tells which sources are configured', async () => {
+    const none = setup({ env: { ALPHAVANTAGE_API_KEY: '' } });
+    expect(await none.api.refresh()).toMatchObject({ accepted: false, reason: 'not-configured', message: expect.stringContaining('FINNHUB_API_KEY') });
+    expect((await none.api.status()).configured).toEqual({ alphavantage: false, finnhub: false });
+    expect((await setup().api.status()).configured).toEqual({ alphavantage: true, finnhub: false });
+  });
+
+  it('a Finnhub key alone allows a refresh, and its calls do not depend on the Alpha Vantage allowance', async () => {
+    const { api, queue } = setup({ env: { ALPHAVANTAGE_API_KEY: '', FINNHUB_API_KEY: 'fh-key' }, used: 25 });
+    expect((await api.status()).configured).toEqual({ alphavantage: false, finnhub: true });
+    expect(await api.refresh()).toEqual({ accepted: true });
+    expect(queue.messages).toHaveLength(1);
   });
 
   it('ignores a damaged ask record', async () => {

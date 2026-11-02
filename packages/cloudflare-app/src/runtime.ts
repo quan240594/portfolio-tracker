@@ -45,6 +45,8 @@ export interface HubEnv {
   EODHD_API_KEY?: string;
   COINGECKO_API_KEY?: string;
   ALPHAVANTAGE_API_KEY?: string;
+  /** Optional: the free Finnhub key (earnings dates for the next 21 days with before/after-the-market timing); without it that source is off. */
+  FINNHUB_API_KEY?: string;
   /**
    * Web Push (dividend notifications): `VAPID_PUBLIC_KEY` is a plain variable (65-byte uncompressed P-256 key, base64url),
    * `VAPID_PRIVATE_KEY` a Worker secret (PKCS #8, base64url; `pnpm --filter @portfolio/cloudflare-app run vapid:generate`). Both missing
@@ -73,6 +75,7 @@ export interface HubEnv {
   FX_HISTORY_START?: string;
   CALENDAR_EARNINGS_HORIZON?: string;
   CALENDAR_ALPHAVANTAGE_DAILY_CALLS?: string;
+  CALENDAR_FINNHUB_DAILY_CALLS?: string;
   CALENDAR_EODHD_DAILY_CALLS?: string;
   CALENDAR_RECHECK_DAYS?: string;
   CALENDAR_REFRESH_DIVIDENDS?: string;

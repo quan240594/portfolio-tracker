@@ -7,7 +7,7 @@ import {
   type GetEarningsDatesResponse,
   type RefreshReport,
 } from '@portfolio/shared';
-import type { RouteContext } from '../deps.js';
+import type { CalendarDatesStatus, RouteContext } from '../deps.js';
 import { HttpError, ok, type RouteResult } from '../lib/http.js';
 import { loadProfiles } from '../lib/profiles.js';
 import type { RouteHandler } from '../router.js';
@@ -21,6 +21,8 @@ const NO_REFRESH: RefreshReport = {
   reason: 'This deployment refreshes the earnings dates with its scheduled job only (daily at 05:30 Amsterdam time).',
   nextAllowedAt: null,
 };
+
+const NO_STATUS: CalendarDatesStatus = { budget: null, refresh: NO_REFRESH };
 
 /**
  * `GET /diagnostics/earnings-dates`: the open positions of the read scope and, for each, the next earnings date as the calendar shows it,
@@ -38,7 +40,7 @@ export async function getEarningsDates(ctx: RouteContext): Promise<RouteResult> 
     repo.getEarningsDatesData(held, today),
     loadProfiles(ctx, held),
     loadReports(ctx, held),
-    calendarDates?.status() ?? { budget: null, refresh: NO_REFRESH },
+    calendarDates?.status() ?? NO_STATUS,
   ]);
   const next = nextEarningsEvents({ today, transactions, watchlist: [], profiles, earnings: data.upcoming, reportedEarnings });
   const report = buildEarningsDatesReport({
@@ -50,6 +52,7 @@ export async function getEarningsDates(ctx: RouteContext): Promise<RouteResult> 
     lastOk: data.lastOk,
     budget: status.budget,
     refresh: status.refresh,
+    ...(status.configured === undefined ? {} : { configured: status.configured }),
   });
   return ok(report satisfies GetEarningsDatesResponse);
 }

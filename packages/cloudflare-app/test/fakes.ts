@@ -168,6 +168,7 @@ export function route(services: readonly FakeService[], request: FakeRequest): F
 
 export const TD_KEY = 'test-twelvedata-key';
 export const AV_KEY = 'test-alphavantage-key';
+export const FINNHUB_KEY = 'test-finnhub-key';
 export const AAPL_CLOSE = 230.12;
 const CALENDAR_AHEAD_DAYS = 21;
 export const EODHD_KEY = 'test-eodhd-key';
@@ -190,6 +191,9 @@ export class FakePrices {
   readonly calls: string[] = [];
   /** The `horizon` of every Alpha Vantage `EARNINGS_CALENDAR` call. */
   readonly calendarRequests: string[] = [];
+  /** `from..to` of every Finnhub `/calendar/earnings` call. */
+  readonly finnhubRequests: string[] = [];
+  private finnhubDate: string | undefined;
 
   constructor(private readonly clock: () => number) {}
 
@@ -231,6 +235,18 @@ export class FakePrices {
       this.calendarRequests.push(url.searchParams.get('horizon') ?? '');
       return { status: 200, bytes: new TextEncoder().encode(this.earningsCsv()), headers: { 'content-type': 'text/csv' } };
     },
+    'finnhub.io': (url, request) => {
+      if (request.header('x-finnhub-token') !== FINNHUB_KEY || url.search.includes(FINNHUB_KEY)) return { status: 401, json: { error: 'Invalid API key.' } };
+      if (url.pathname !== '/api/v1/calendar/earnings') return { status: 404, json: { error: 'not available' } };
+      const from = url.searchParams.get('from') ?? '';
+      const to = url.searchParams.get('to') ?? '';
+      this.finnhubRequests.push(`${from}..${to}`);
+      // The announced date does not move with the clock: a later read lists the same date.
+      this.finnhubDate ??= this.earningsDate();
+      const date = this.finnhubDate;
+      const row = (symbol: string, hour: string) => ({ date, epsActual: null, epsEstimate: 2.2, hour, quarter: 1, revenueActual: null, revenueEstimate: 90_000_000_000, symbol, year: 2026 });
+      return { status: 200, json: { earningsCalendar: date >= from && date <= to ? [row('AAPL', 'amc'), row('NOHOLD', 'bmo')] : [] } };
+    },
     'api.frankfurter.dev': (url) => {
       const range = /\/v1\/(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})$/.exec(url.pathname);
       if (url.pathname === '/v1/latest') return { status: 200, json: { base: 'EUR', date: new Date(this.clock()).toISOString().slice(0, 10), rates: { USD: 1.16, GBP: 0.87 } } };
@@ -249,7 +265,9 @@ export class FakePrices {
 
   private earningsCsv(): string {
     const date = this.earningsDate();
-    return ['symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay', `AAPL,APPLE INC,${date},2025-12-31,2.1,USD,post-market`, `CRM,SALESFORCE INC,${date},2025-10-31,2.4,USD,post-market`, `ASML,ASML HOLDING NV,${date},2025-12-31,6.9,EUR,pre-market`, `NOHOLD,INVENTED CORP,${date},2025-12-31,0.5,USD,pre-market`, ''].join('\n');
+    // Padded to the size of a real calendar: a handful of rows is read as a key without access.
+    const filler = Array.from({ length: 100 }, (_, index) => `ZZ${index},FILLER ${index} INC,${date},2025-12-31,1.0,USD,`);
+    return ['symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay', `AAPL,APPLE INC,${date},2025-12-31,2.1,USD,post-market`, `CRM,SALESFORCE INC,${date},2025-10-31,2.4,USD,post-market`, `ASML,ASML HOLDING NV,${date},2025-12-31,6.9,EUR,pre-market`, `NOHOLD,INVENTED CORP,${date},2025-12-31,0.5,USD,pre-market`, ...filler, ''].join('\n');
   }
 
   private history(): { datetime: string; close: string }[] {
