@@ -2,15 +2,22 @@
  * Which held symbols the watcher looks at on a run. Pure: the job loads the holdings, the states and the calendar and this decides.
  *
  * - `calendar`: the calendar expects results within [today - 3, today] and no summary is stored for that report yet: look every run.
- * - `discovery`: no calendar date is known (the calendar covers US names only, so foreign issuers have none) or the date passed without a
- *   release: look once a day.
+ * - `projected`: no provider date is known and the date projected from the newest stored release (+ about 91 days) is due or at most
+ *   {@link PROJECTED_LEAD_DAYS} days away: look every run, like a calendar date. Without any provider key every date is a projection, and an
+ *   after-the-close release must be found the evening it is filed.
+ * - `discovery`: no calendar date is known (the calendar covers US names only, so foreign issuers have none), the date passed without a
+ *   release, or the provider's next date is far off while the newest stored release is old (providers list estimates that are often wrong):
+ *   look once a day.
+ *
+ * A symbol with a release that was found but whose summary job was dropped or lost (`pendingAccession` still set after {@link PENDING_HOURS})
+ * is looked at again on every run, whatever its mode: the summary is the only thing that ends the search.
  * - `manual`: the owner asked for this symbol.
  */
 import type { EarningsHolding, EarningsSymbolState } from '@portfolio/shared';
-import { daysBetween } from '@portfolio/shared';
+import { daysBetween, projectEarnings } from '@portfolio/shared';
 import { addDays, utcDayOf } from './util.js';
 
-export type CandidateMode = 'calendar' | 'discovery' | 'manual';
+export type CandidateMode = 'calendar' | 'projected' | 'discovery' | 'manual';
 
 export interface Candidate {
   symbol: string;
@@ -29,6 +36,8 @@ export const WINDOW_DAYS_BEFORE = 3;
 export const NEW_QUARTER_GAP_DAYS = 5;
 /** Discovery starts this many days after the newest stored release: quarterly results are about 91 days apart, so it never looks right after one. */
 export const DISCOVERY_AFTER_DAYS = 60;
+/** A projected report date this close (days) makes the symbol a candidate on every run: companies report a few days off the projection. */
+export const PROJECTED_LEAD_DAYS = 5;
 /** Backfill and discovery only consider filings up to this many days old (a quarter and a half). */
 export const MAX_FILING_AGE_DAYS = 135;
 
@@ -65,14 +74,23 @@ function calendarCandidate(dates: readonly string[], today: string, latest: stri
   return dates.some((date) => date >= addDays(today, -WINDOW_DAYS_BEFORE) && date <= today && (latest === undefined || latest < addDays(date, -NEW_QUARTER_GAP_DAYS)));
 }
 
+/** The report date projected from the newest stored release is due or close, and no provider date says otherwise. */
+function projectedCandidate(latest: string | undefined, today: string): boolean {
+  if (latest === undefined) return false;
+  const projection = projectEarnings(latest, today);
+  return projection !== null && projection.date <= addDays(today, PROJECTED_LEAD_DAYS);
+}
+
 function modeOf(input: SelectInput, holding: EarningsHolding, utcDay: string): CandidateMode | undefined {
   const { states, latestReport, calendar, today } = input;
   const state = states.get(holding.symbol);
   const latest = latestReport.get(holding.symbol);
   const dates = calendar[holding.symbol] ?? [];
-  if (calendarCandidate(dates, today, latest)) return 'calendar';
-  if (dates.some((date) => date > today)) return undefined;
-  if (latest !== undefined && daysBetween(latest, today) < DISCOVERY_AFTER_DAYS) return undefined;
+  if (state?.pendingAccession !== undefined || calendarCandidate(dates, today, latest)) return 'calendar';
+  const old = latest === undefined || daysBetween(latest, today) >= DISCOVERY_AFTER_DAYS;
+  const ahead = dates.some((date) => date > today);
+  if (!ahead && projectedCandidate(latest, today)) return 'projected';
+  if (!old || (ahead && latest === undefined)) return undefined;
   return state?.lastCheckedAt?.slice(0, 10) === utcDay ? undefined : 'discovery';
 }
 
@@ -90,6 +108,6 @@ export function selectCandidates(input: SelectInput): Candidate[] {
     const mode = modeOf(input, holding, utcDay);
     if (mode !== undefined) picked.push({ symbol: holding.symbol, mode });
   }
-  const rank: Record<CandidateMode, number> = { manual: 0, calendar: 1, discovery: 2 };
+  const rank: Record<CandidateMode, number> = { manual: 0, calendar: 1, projected: 1, discovery: 2 };
   return picked.toSorted((a, b) => rank[a.mode] - rank[b.mode] || a.symbol.localeCompare(b.symbol));
 }

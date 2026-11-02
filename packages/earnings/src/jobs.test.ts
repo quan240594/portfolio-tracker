@@ -121,7 +121,8 @@ describe('discovery without a calendar date', () => {
 
   it('looks once a day when no release has appeared', async () => {
     const h = earningsHarness({ filings: [{ release: { ...GENERIC_RELEASE, accession: '0001000101-26-000001', filingDate: '2026-06-01' }, items: '5.02' }], tickers: tickersOf(GENERIC_RELEASE), holdings: [holding(GENERIC_RELEASE)] });
-    await h.repo.putSummary(sampleSummary({ symbol: 'LMFG', reportDate: '2026-07-22' }));
+    // 2026-07-01 + 91 days is long past and the next projection (2026-12-30) is far off: only the daily discovery looks.
+    await h.repo.putSummary(sampleSummary({ symbol: 'LMFG', reportDate: '2026-07-01' }));
     await watch(h);
     expect(resultsOf(h, 'watchEarnings')).toEqual([{ checked: 1, queued: 0 }]);
     h.clock.advance(2 * 3_600_000);
@@ -130,6 +131,30 @@ describe('discovery without a calendar date', () => {
     h.clock.advance(24 * 3_600_000);
     await watch(h);
     expect(resultsOf(h, 'watchEarnings').at(-1)).toEqual({ checked: 1, queued: 0 });
+  });
+
+  it('without any provider date, a company whose projected date is due is looked at on every run, and found the evening it files', async () => {
+    const h = earningsHarness({ filings: [{ release: { ...GENERIC_RELEASE, accession: '0001000101-26-000001', filingDate: '2026-06-01' }, items: '5.02' }], tickers: tickersOf(GENERIC_RELEASE), holdings: [holding(GENERIC_RELEASE)] });
+    // 2026-07-22 + 91 days is today: no calendar, so the projection is the only anchor.
+    await h.repo.putSummary(sampleSummary({ symbol: 'LMFG', reportDate: '2026-07-22' }));
+    await watch(h);
+    h.clock.advance(31 * 60_000);
+    await watch(h);
+    expect(resultsOf(h, 'watchEarnings')).toEqual([{ checked: 1, queued: 0 }, { checked: 1, queued: 0 }]);
+  });
+
+  it('a release whose summary job never ran is found again on the next watch of the same day, not only the day after', async () => {
+    const h = setup([GENERIC_RELEASE], { calendar: { LMFG: ['2026-10-21'] } });
+    // The summary job was dropped (budget above 60 %): the release stays pending, with nothing stored.
+    const fetchJob = h.registry.fetchEarningsSummary!;
+    h.registry.fetchEarningsSummary = () => Promise.resolve({ done: true, result: { skipped: 'deferred-by-priority' } });
+    await watch(h);
+    expect(await h.repo.getSummary('LMFG', '2026-10-21')).toBeNull();
+    expect((await h.repo.getState('LMFG'))?.pendingAccession).toBe(GENERIC_RELEASE.accession);
+    h.registry.fetchEarningsSummary = fetchJob;
+    h.clock.advance(61 * 60_000);
+    await watch(h);
+    expect((await h.repo.getSummary('LMFG', '2026-10-21'))?.accession).toBe(GENERIC_RELEASE.accession);
   });
 
   it('a 6-K that is not a results release costs no AI and is not looked at again', async () => {
