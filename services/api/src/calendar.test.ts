@@ -224,7 +224,7 @@ describe('earnings of the holdings', () => {
     ]);
     const reported = body.events.find((e: { id: string }) => e.id === 'earn:FOO.DE:2026-05-28');
     expect(reported).toMatchObject({ description: 'Reported results for Q1 FY27', period: 'Q1 FY27', name: 'Salesforce' });
-    expect(body.events.at(-1).description).toContain('Estimated next report');
+    expect(body.events.at(-1).description).toContain('Projected next report');
   });
 
   it('shows a report that is a few days overdue as estimated and due today, instead of nothing', async () => {

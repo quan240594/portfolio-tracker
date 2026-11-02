@@ -7,6 +7,7 @@ import {
   calendarAddMonths,
   calendarLastDay,
   calendarMonthOf,
+  zonedInstant,
   type DividendEvent,
   type StoredEarningsEvent,
   type StoredSplitEvent,
@@ -33,18 +34,23 @@ interface EarningsPlan {
   daysAhead: number;
   eps: number;
   timeOfDay: 'BMO' | 'AMC';
+  /** Who lists the date, and on how many separate days: two reads within 21 days make it Confirmed. */
+  source: 'alphavantage' | 'finnhub';
+  reads: number;
+  /** An exact release time (minutes after midnight, New York time) a source gave; the others only have the category. */
+  exactAt?: number;
 }
 
 /** Days ahead of the cluster of events shared by several symbols. */
 const BUSY_DAY = 15;
 
 const PLANS: EarningsPlan[] = [
-  { symbol: 'KO', name: 'COCA COLA CO', daysAhead: 7, eps: 0.77, timeOfDay: 'BMO' },
-  { symbol: 'AAPL', name: 'APPLE INC', daysAhead: 13, eps: 1.64, timeOfDay: 'AMC' },
-  { symbol: 'MSFT', name: 'MICROSOFT CORP', daysAhead: 20, eps: 3.12, timeOfDay: 'AMC' },
-  { symbol: 'JNJ', name: 'JOHNSON & JOHNSON', daysAhead: 26, eps: 2.58, timeOfDay: 'BMO' },
+  { symbol: 'KO', name: 'COCA COLA CO', daysAhead: 7, eps: 0.77, timeOfDay: 'BMO', source: 'finnhub', reads: 3 },
+  { symbol: 'AAPL', name: 'APPLE INC', daysAhead: 13, eps: 1.64, timeOfDay: 'AMC', source: 'finnhub', reads: 1 },
+  { symbol: 'MSFT', name: 'MICROSOFT CORP', daysAhead: 20, eps: 3.12, timeOfDay: 'AMC', source: 'finnhub', reads: 2 },
+  { symbol: 'JNJ', name: 'JOHNSON & JOHNSON', daysAhead: 26, eps: 2.58, timeOfDay: 'BMO', source: 'alphavantage', reads: 1 },
   // The same day as KO's and NVDA's ex-dividend dates: a busy day that shows the "+N more" overflow.
-  { symbol: 'NVDA', name: 'NVIDIA CORP', daysAhead: BUSY_DAY, eps: 0.74, timeOfDay: 'AMC' },
+  { symbol: 'NVDA', name: 'NVIDIA CORP', daysAhead: BUSY_DAY, eps: 0.74, timeOfDay: 'AMC', source: 'finnhub', reads: 2, exactAt: 16 * 60 + 20 },
 ];
 
 /** The quarter that ended before the report. */
@@ -59,7 +65,8 @@ export function createCalendarSeed(today: string): CalendarSeed {
   };
   const upcoming = PLANS.map<StoredEarningsEvent>((p) => {
     const date = p.daysAhead === BUSY_DAY ? busyDate : reportDate(p.daysAhead);
-    return { symbol: p.symbol, name: p.name, date, fiscalPeriodEnd: fiscalPeriodEnd(date), epsEstimate: p.eps, currency: 'USD', timeOfDay: p.timeOfDay, source: 'alphavantage' };
+    const exact = p.exactAt === undefined ? {} : { releaseAt: zonedInstant(date, p.exactAt, 'America/New_York').toISOString(), timeSource: 'company' };
+    return { symbol: p.symbol, name: p.name, date, fiscalPeriodEnd: fiscalPeriodEnd(date), epsEstimate: p.eps, currency: 'USD', timeOfDay: p.timeOfDay, ...exact, reads: p.reads, firstSeenOn: addDays(today, 1 - p.reads), lastSeenOn: today, source: p.source };
   });
   // Last quarter's reports, to browse back in time.
   const previous = PLANS.filter((p) => ['AAPL', 'MSFT', 'KO'].includes(p.symbol)).map<StoredEarningsEvent>((p) => {

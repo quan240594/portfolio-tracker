@@ -1,5 +1,5 @@
 import type { EventPublisher, FileStore, ItemStore } from '@portfolio/platform';
-import type { AlphaVantageProbeStatus, EarningsBackfillResponse, EarningsRefreshResponse, EarningsStatusResponse, ProbeRefusal, ProviderBudgetReport, RefreshEarningsDatesResponse, RefreshRefusal, RefreshReport, RunAlphaVantageProbeResponse } from '@portfolio/shared';
+import type { AlphaVantageProbeStatus, EarningsBackfillResponse, EarningsRefreshResponse, EarningsSourceName, EarningsStatusResponse, ProbeRefusal, ProviderBudgetReport, RefreshEarningsDatesResponse, RefreshRefusal, RefreshReport, RunAlphaVantageProbeResponse } from '@portfolio/shared';
 import type { BrokerDeps } from './broker-deps.js';
 import type { Config } from './config.js';
 import type { InflationFetch } from './inflation/source.js';
@@ -20,9 +20,16 @@ export interface EarningsDeps {
 }
 
 /** What the Diagnostics "Earnings dates" section needs of the deployment: the provider's allowance and the manual refresh (the Cloudflare app); the AWS stack has neither and its report says so. */
+export interface CalendarDatesStatus {
+  budget: ProviderBudgetReport | null;
+  refresh: RefreshReport;
+  /** Which date sources have a key on this deployment. */
+  configured?: Readonly<Record<EarningsSourceName, boolean>>;
+}
+
 export interface CalendarDatesDeps {
   /** The Alpha Vantage allowance of the day (null when it cannot be read) and whether a manual refresh would be queued now. */
-  status(): Promise<{ budget: ProviderBudgetReport | null; refresh: RefreshReport }>;
+  status(): Promise<CalendarDatesStatus>;
   /** Queues the calendar job once; refuses (without queuing) when it was asked for less than an hour ago or the allowance of the day is nearly used. */
   refresh(): Promise<RefreshEarningsDatesResponse | { accepted: false; reason: RefreshRefusal; message: string; retryAfterSeconds?: number }>;
 }

@@ -41,8 +41,8 @@ export function createCalendarDatesApi({ items, config, queue, now }: Readonly<C
     const { used, calendarUsed } = await prices.callsUsedOn('alphavantage', day);
     const budget: ProviderBudgetReport = { provider: 'Alpha Vantage', day, used, limit, remaining: Math.max(0, limit - used), calendarUsed, calendarLimit: config.calendar.alphavantageDailyCalls };
     const unavailable = (refusal: Refusal, nextAllowedAt: string | null): State => ({ budget, refresh: { available: false, reason: refusal.message, nextAllowedAt }, refusal });
-    if (config.keys.alphavantage === undefined) {
-      return unavailable({ accepted: false, reason: 'not-configured', message: 'No Alpha Vantage key is set on this deployment (the ALPHAVANTAGE_API_KEY secret), so there is nothing to refresh.' }, null);
+    if (config.keys.alphavantage === undefined && config.keys.finnhub === undefined) {
+      return unavailable({ accepted: false, reason: 'not-configured', message: 'No Alpha Vantage or Finnhub key is set on this deployment (the ALPHAVANTAGE_API_KEY and FINNHUB_API_KEY secrets), so there is nothing to refresh.' }, null);
     }
     const asked = (await items.get(REFRESH_ASK_KEY))?.askedAt;
     const waitMs = typeof asked === 'string' ? Date.parse(asked) + REFRESH_INTERVAL_SECONDS * 1000 - at.getTime() : 0;
@@ -50,7 +50,7 @@ export function createCalendarDatesApi({ items, config, queue, now }: Readonly<C
       const retryAt = new Date(at.getTime() + waitMs).toISOString();
       return unavailable({ accepted: false, reason: 'rate-limited', message: `Earnings dates were refreshed on request at ${clock(String(asked))} UTC; you can ask again after ${clock(retryAt)} UTC (once an hour).`, retryAfterSeconds: Math.ceil(waitMs / 1000) }, retryAt);
     }
-    if (budget.remaining < MIN_CALLS_FOR_REFRESH) {
+    if (config.keys.finnhub === undefined && budget.remaining < MIN_CALLS_FOR_REFRESH) {
       const resets = nextUtcMidnight(at);
       const message = `Alpha Vantage allowance nearly used: ${used} of ${limit} calls today (UTC). It resets at 00:00 UTC; the next daily run is at 05:30 Amsterdam time.`;
       return unavailable({ accepted: false, reason: 'budget-low', message, retryAfterSeconds: Math.ceil((resets.getTime() - at.getTime()) / 1000) }, resets.toISOString());
@@ -61,7 +61,7 @@ export function createCalendarDatesApi({ items, config, queue, now }: Readonly<C
   return {
     async status() {
       const { budget, refresh } = await state();
-      return { budget, refresh };
+      return { budget, refresh, configured: { alphavantage: config.keys.alphavantage !== undefined, finnhub: config.keys.finnhub !== undefined } };
     },
     async refresh() {
       const current = await state();

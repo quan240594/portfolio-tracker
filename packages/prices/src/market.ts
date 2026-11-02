@@ -5,6 +5,7 @@ import { BlockBook, DailyQuota, MinuteQuota, ProviderGate, StorePlanMemory, Stor
 import { AlphaVantageProvider } from './providers/alphavantage.js';
 import { pacedFetch, type ProviderPacer } from './pacer.js';
 import { AlphaVantageEarnings, EodhdCorporateActions } from './providers/calendar.js';
+import { FinnhubEarnings } from './providers/finnhub.js';
 import { CoinGeckoProvider } from './providers/coingecko.js';
 import { EodhdProvider } from './providers/eodhd.js';
 import { FrankfurterFx } from './providers/frankfurter.js';
@@ -39,6 +40,8 @@ export interface MarketData {
   fx: FxSource;
   /** Absent without an Alpha Vantage key. */
   earnings?: EarningsSource;
+  /** Absent without a Finnhub key. */
+  finnhubEarnings?: EarningsSource;
   /** Absent without an EODHD key. */
   actions?: CorporateActionsSource;
 }
@@ -88,6 +91,7 @@ export function createMarketData(deps: MarketDataDeps, fetch: FetchLike = deps.f
     earnings: keys.alphavantage
       ? new AlphaVantageEarnings({ apiKey: keys.alphavantage, http: http('alphavantage'), bucket: bucket(1, 5 / 60), quota: quota('alphavantage', config.dailyLimits.alphavantage), horizon: config.calendar.earningsHorizon })
       : undefined,
+    finnhubEarnings: keys.finnhub ? new FinnhubEarnings({ apiKey: keys.finnhub, http: http('finnhub'), bucket: bucket(3, 1) }) : undefined,
     actions: keys.eodhd && eodhd ? new EodhdCorporateActions({ apiKey: keys.eodhd, http: http('eodhd'), bucket: bucket(5, 1), quota: quota('eodhd', config.dailyLimits.eodhd), dividends: eodhd }) : undefined,
   };
 }

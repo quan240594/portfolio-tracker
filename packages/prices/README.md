@@ -16,7 +16,7 @@ const jobs = createPriceJobs({
   fetch, // the platform's fetch
   clock: () => new Date(),
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-  config: parsePricesConfig(env), // TWELVEDATA_API_KEY, EODHD_API_KEY, COINGECKO_API_KEY, ALPHAVANTAGE_API_KEY, ...
+  config: parsePricesConfig(env), // TWELVEDATA_API_KEY, EODHD_API_KEY, COINGECKO_API_KEY, ALPHAVANTAGE_API_KEY, FINNHUB_API_KEY (optional), ...
   stepSubrequests: 40, // fetches (retries included) per step; the free Worker/DO cap is 50
 });
 // jobs.refreshPrices / jobs.enrichTransactions / jobs.refreshCalendar are JobHandlers: call them with `{ payload, cursor }`,

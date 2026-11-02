@@ -87,7 +87,7 @@ const KEY_ITEMS: readonly { id: string; label: string; swatch: string; marker?: 
   { id: 'ex-dividend', label: 'Ex-dividend: violet', swatch: KEY_SWATCH.exDividend, marker: 'EX_DIVIDEND' },
   { id: 'paid', label: 'Received: green', swatch: KEY_SWATCH.PAID },
   { id: 'confirmed', label: 'Confirmed or reported: blue', swatch: KEY_SWATCH.CONFIRMED },
-  { id: 'estimated', label: 'Estimated: yellow, dashed', swatch: KEY_SWATCH.ESTIMATED },
+  { id: 'estimated', label: 'Estimated, scheduled or projected: yellow, dashed', swatch: KEY_SWATCH.ESTIMATED },
 ];
 
 /** What the colours of the rows mean: the ex-dividend has its own hue, every other event shows its status. The words repeat what the swatches show. */

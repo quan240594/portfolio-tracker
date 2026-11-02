@@ -6,7 +6,17 @@ import { alarmDiagnosticsSchema, usageSnapshotSchema, type AlarmDiagnosticsRepor
 import { defineApiScenarios } from '@portfolio/api/testing';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { Browser, type Stack } from './browser.js';
-import { AAPL_CLOSE, AAPL_T212_PRICE, AV_KEY, EODHD_KEY, SAP_PRICE, T212_KEY, T212_SECRET, TD_KEY, OTHER_ID, OWNER_ID, OWNER_LOGIN, TEST_VAPID, XETRA_CLOSES } from './fakes.js';
+import { AAPL_CLOSE, AAPL_T212_PRICE, AV_KEY, EODHD_KEY, FINNHUB_KEY, SAP_PRICE, T212_KEY, T212_SECRET, TD_KEY, OTHER_ID, OWNER_ID, OWNER_LOGIN, TEST_VAPID, XETRA_CLOSES } from './fakes.js';
+
+/** An earnings row of `GET /calendar` as the tests below read it. */
+interface EarningsRow {
+  symbol: string;
+  status: string;
+  source: string;
+  timeOfDay: string;
+  basis?: string;
+  release: { kind: string; category: string; source: string; text: string };
+}
 
 export interface SuiteStartOptions {
   /** Caps the budget guard measures against (the Hub's clock is pinned at `PINNED_NOW` whenever limits are given). */
@@ -444,6 +454,66 @@ export function defineAppSuite(label: string, start: StartStack): void {
           ['AAPL', 'ASML.AS', 'FOO.DE'].map((symbol) => [symbol, stack.prices.earningsDate(), 'ESTIMATED', 'alphavantage', 'scheduled']),
         );
         expect(earnings.find((event) => event.symbol === 'AAPL')?.timeOfDay).toBe('AMC');
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('with a Finnhub key: three weekly calls, a second daily read confirms the date, and the calendar and the diagnostics say when and why', async () => {
+      const { stack, call, portfolio } = await signedIn({ prices: { ...keys, FINNHUB_API_KEY: FINNHUB_KEY } });
+      try {
+        expect((await call('POST', '/transactions', { portfolioId: portfolio, ...buy })).status).toBe(201);
+        await stack.drain();
+        await stack.enqueue('refreshPrices', { trigger: 'scheduled' });
+        await stack.enqueue('refreshCalendar', { trigger: 'scheduled' });
+        await stack.drain();
+        expect(await stack.failedJobs()).toEqual([]);
+        expect(stack.prices.finnhubRequests).toHaveLength(3);
+        const first = await call('GET', `/calendar?portfolioId=${portfolio}&types=EARNINGS`);
+        expect(first.status, JSON.stringify(first.body)).toBe(200);
+        const aapl = (first.body.events as EarningsRow[]).filter((event) => event.symbol === 'AAPL');
+        expect(aapl).toHaveLength(1);
+        // One read: listed, not yet confirmed. The date is 21 days ahead, after the close; Finnhub's category and the Amsterdam time are in the answer.
+        expect(aapl[0]).toMatchObject({ source: 'finnhub', status: 'ESTIMATED', earningsPhase: 'scheduled', timeOfDay: 'AMC', release: { kind: 'typical', category: 'AMC', source: 'finnhub' } });
+        expect(aapl[0]!.release.text).toMatch(/^After the close, typically ~16:05 ET = ~2[12]:05 Amsterdam$/);
+
+        // The next day the same date is listed again: confirmed, with that basis. (The workerd Hub runs on the real clock and cannot be moved: there a second read the same day must not count.)
+        const nextDay = stack.advance !== undefined;
+        stack.advance?.(86_400_000);
+        await stack.enqueue('refreshCalendar', { trigger: 'scheduled' });
+        await stack.drain();
+        const second = await call('GET', `/calendar?portfolioId=${portfolio}&types=EARNINGS`);
+        const again = (second.body.events as EarningsRow[]).filter((event) => event.symbol === 'AAPL');
+        expect(again).toHaveLength(1);
+        if (nextDay) {
+          expect(again[0]).toMatchObject({ status: 'CONFIRMED', source: 'finnhub' });
+          expect(again[0]!.basis).toContain('listed this date on 2 separate days');
+        } else {
+          expect(again[0]).toMatchObject({ source: 'finnhub' });
+        }
+
+        const diagnostics = await call('GET', `/diagnostics/earnings-dates?portfolioId=${portfolio}`);
+        expect(diagnostics.body.conclusion).toEqual({ kind: 'ok', text: 'Dates come from Alpha Vantage and Finnhub.' });
+        expect(diagnostics.body.lastSuccess.sources.map((entry: { source: string; status: string }) => `${entry.source} ${entry.status}`)).toEqual(['alphavantage ok', 'finnhub ok']);
+        expect(diagnostics.body.symbols.find((entry: { symbol: string }) => entry.symbol === 'AAPL').next).toMatchObject({ timeOfDay: 'AMC', releaseText: expect.stringContaining('After the close') });
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('without a Finnhub key it is off: no call, and the diagnostics say what to add', async () => {
+      const { stack, call, portfolio } = await signedIn({ prices: keys });
+      try {
+        expect((await call('POST', '/transactions', { portfolioId: portfolio, ...buy })).status).toBe(201);
+        await stack.drain();
+        await stack.enqueue('refreshCalendar', { trigger: 'scheduled' });
+        await stack.drain();
+        expect(stack.prices.finnhubRequests).toEqual([]);
+        const diagnostics = await call('GET', `/diagnostics/earnings-dates?portfolioId=${portfolio}`);
+        expect(diagnostics.body.conclusion).toMatchObject({ kind: 'partial', text: expect.stringContaining('Finnhub is not configured: add a free key (the FINNHUB_API_KEY secret)') });
+        const status = await call('GET', '/prices/status');
+        expect(status.body.sources.find((source: { name: string }) => source.name === 'finnhub')).toMatchObject({ configured: false, optional: true, secret: 'FINNHUB_API_KEY' });
+        expect(status.body.missingSecrets).not.toContain('FINNHUB_API_KEY');
       } finally {
         await stack.dispose();
       }

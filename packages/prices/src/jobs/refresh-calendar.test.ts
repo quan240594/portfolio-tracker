@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProviderError, RateLimitError, RetryableProviderError, SymbolNotFoundError } from '../errors.js';
 import { createMarketData } from '../market.js';
 import { FakeFetch } from '../testing/fake-fetch.js';
-import { collect, drive, driveTwice, harness, type Harness } from '../testing/harness.js';
+import { collect, drive, driveTwice, harness, padCalendar, type Harness } from '../testing/harness.js';
 import { createRefreshCalendarJob, dueSymbols } from './refresh-calendar.js';
 
 afterEach(() => vi.restoreAllMocks());
@@ -17,10 +17,10 @@ const run = (h: Harness) => drive(h, createRefreshCalendarJob(h.deps), { trigger
 const stored = (h: Harness, pk: string, sk: string): Item | undefined => h.store.snapshot().find((item) => item.PK === pk && item.SK === sk);
 const keysWith = (h: Harness, prefix: string): string[] => h.store.snapshot().filter((item) => item.SK.startsWith(prefix)).map((item) => `${item.PK}|${item.SK}`);
 
-const CSV = `symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay
+const CSV = padCalendar(`symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay
 AAPL,APPLE INC,2026-10-29,2026-09-30,1.85,USD,post-market
 MSFT,MICROSOFT CORP,2026-10-28,2026-09-30,,USD,pre-market
-`;
+`);
 
 class FakeEarnings implements EarningsSource {
   readonly name = 'alphavantage';
@@ -98,7 +98,7 @@ describe('refreshCalendar', () => {
       earnings: { status: 'ok', symbols: 1, events: 1, staleDeleted: 0 },
       corporateActions: { status: 'ok', checked: 2, splits: 1, dividends: 2, failed: 0, eligible: 2, due: 2, failedSymbols: [], checkedSymbols: ['AAPL', 'ASML.AS'] },
     });
-    expect(stored(h, 'TICKER#AAPL', 'EARN#2026-10-29')).toEqual({ PK: 'TICKER#AAPL', SK: 'EARN#2026-10-29', entityType: 'EARNINGS_EVENT', symbol: 'AAPL', date: '2026-10-29', name: 'APPLE INC', fiscalPeriodEnd: '2026-09-30', epsEstimate: 1.85, currency: 'USD', timeOfDay: 'AMC', source: 'alphavantage', updatedAt: STAMP });
+    expect(stored(h, 'TICKER#AAPL', 'EARN#2026-10-29')).toEqual({ PK: 'TICKER#AAPL', SK: 'EARN#2026-10-29', entityType: 'EARNINGS_EVENT', symbol: 'AAPL', date: '2026-10-29', name: 'APPLE INC', fiscalPeriodEnd: '2026-09-30', epsEstimate: 1.85, currency: 'USD', timeOfDay: 'AMC', source: 'alphavantage', updatedAt: STAMP, firstSeenOn: '2026-10-15', lastSeenOn: '2026-10-15', reads: 1 });
     expect(keysWith(h, 'EARN#')).toEqual(['TICKER#AAPL|EARN#2026-10-29']);
     expect(stored(h, 'TICKER#AAPL', 'SPLIT#2026-11-02')).toMatchObject({ entityType: 'SPLIT_EVENT', fromFactor: 1, toFactor: 4, source: 'eodhd', updatedAt: STAMP });
     expect(keysWith(h, 'DIV#')).toEqual(['TICKER#AAPL|DIV#2026-11-09', 'TICKER#ASML.AS|DIV#2026-11-04']);
@@ -188,12 +188,12 @@ describe('refreshCalendar', () => {
   });
 
   describe('earnings of suffixed listings and failures (live Alpha Vantage source, no scripted source)', () => {
-    const XETRA_CSV = `symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay
+    const XETRA_CSV = padCalendar(`symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay
 CRM,SALESFORCE INC,2026-12-03,2026-10-31,2.41,USD,post-market
 MA,MASTERCARD INC,2026-10-29,2026-09-30,3.6,USD,pre-market
 ASML,ASML HOLDING NV,2027-01-28,2026-12-31,6.9,EUR,pre-market
 AMZN,AMAZON COM INC,2026-10-30,2026-09-30,1.5,USD,post-market
-`;
+`);
     const profile = (symbol: string, name: string): Item => ({ PK: `TICKER#${symbol}`, SK: 'PROFILE', entityType: 'PROFILE', symbol, name });
     const liveHarness = (fake: FakeFetch): Harness => harness({ fake, start: NOW, env: { ALPHAVANTAGE_API_KEY: 'av-key' } });
 

@@ -760,12 +760,12 @@ flowchart LR
 |---|---|---|
 | `EX_DIVIDEND` | ex-date | stored `DIV#` item (estimated ones: pay date minus the usual ex-to-pay lag) |
 | `DIVIDEND_PAY` | pay date (the ex-date when no pay date is known) | stored `DIV#` item, your own `DIVIDEND` transaction (`PAID`), or a projection (`ESTIMATED`) |
-| `EARNINGS` | report date; fiscal period end, EPS estimate, time of day `BMO`/`AMC`/`unknown` when the source has them; `earningsPhase` `scheduled` (a provider date), `reported` (a stored earnings summary, `source: earnings-summary`) or `projected` (previous report + 91 days, `source: estimate`) | stored `EARN#` item, stored `EARNSUM` summaries, a projection |
+| `EARNINGS` | report date; fiscal period end, EPS estimate, time of day `BMO`/`AMC`/`DMH`/`unknown` when the source has them and `release` (when, in the company's and in Amsterdam time); `earningsPhase` `scheduled` (a provider date: `CONFIRMED` or `ESTIMATED` by the rules of "Confirmed earnings dates and release times"), `reported` (a stored earnings summary, `source: earnings-summary`) or `projected` (previous report + 91 days, `source: estimate`) | stored `EARN#` item, stored `EARNSUM` summaries, a projection |
 | `SPLIT` | ex-split date, ratio `toFactor`-for-`fromFactor` (forward and reverse) | stored `SPLIT#` item, or your own `SPLIT` transaction |
 | `CORPORATE_ACTION` | the date of an irregular share adjustment | a `SPLIT#` item whose ratio is not a plain split |
 
-`status`: `CONFIRMED` (announced by a provider, or recorded by you; earnings dates are the provider's *expected* dates and
-count as `ESTIMATED` until the day has passed), `ESTIMATED` (a projection) and `PAID` (a dividend you received). Every event
+`status`: `CONFIRMED` (announced by a provider, or recorded by you; an earnings date is `CONFIRMED` only by the conservative rules of
+"Confirmed earnings dates and release times", else `ESTIMATED` until the day has passed), `ESTIMATED` (a projection) and `PAID` (a dividend you received). Every event
 has `origin` `HOLDING` (the symbol is in your transactions) or `WATCHLIST`, a stable `id` (also the `.ics` UID) and a `source`.
 
 **What is and is not covered.** Splits and reverse splits with whole-number ratios (`calendarSplitKind`: both factors whole and
@@ -784,7 +784,7 @@ why" below. The same notes ship in every response as `coverage` and in the page'
 | **EODHD `/splits/{symbol}`** (used) and `/div/{symbol}` (re-used) | Both are in the Free plan (history limited to 1 year), 1 API call each. Free plan: **20 calls/day and 20/min** (pricing page); the same key also serves the quote refresh and enrichment. Split ratio is `"new/old"` (`"4.000000/1.000000"`). Unverified: whether the free plan returns future-dated splits for every exchange; the stored ones are whatever the feed lists. |
 | EODHD calendar API (`/calendar/earnings`, `/calendar/splits`, …) | **Not free**: "Corporate calendar" is included from the Fundamentals plan up (pricing page). |
 | Twelve Data `/earnings_calendar`, `/splits`, `/splits_calendar`, `/dividends_calendar` | Splits and dividend calendars need the **Grow plan** (docs); `earnings_calendar` costs 40 credits per request against the Basic plan's 8 credits/minute, and Basic data may not be displayed to users. Not used. |
-| Finnhub `/calendar/earnings` | Free, but US-only (`international` is not free), a one-month window on the free tier, and needs a fourth API key. `/stock/split` and `/stock/dividend` are **premium**. Not used. |
+| Finnhub `/calendar/earnings` | Free, but US-only (`international` is not free), a one-month window on the free tier, and needs a fourth API key. `/stock/split` and `/stock/dividend` are **premium**. Not used in October 2026; **used since 2 Nov 2026** as an optional source, see "Confirmed earnings dates and release times". |
 
 ### Quota design
 
@@ -843,11 +843,12 @@ at all. Traced end to end with fakes (provider call, CSV parsing, mapping to the
   earnings-summary`, labelled **Reported** (chip, accessible name, "Reported Q3 2026" in the row) and linked to `/earnings` through
   the dialog's "View summary". It replaces a provider date within 4 days and keeps that date's fiscal period end, EPS estimate
   and time of day. The route reads the latest 6 summaries of each held symbol.
-* *Scheduled* (`scheduled`): the provider's date, `ESTIMATED` until the day has passed, `source: alphavantage`, with "Before market
-  open" / "After market close" when the provider says so.
+* *Scheduled* (`scheduled`): the provider's date, `source: finnhub` or `alphavantage`: `CONFIRMED` (chip **Confirmed**) when the date is at
+  most 21 days ahead and was listed on two separate days (or the source flags it, or it has passed), otherwise `ESTIMATED` (chip
+  **Scheduled**, "Scheduled (provider date)"); the event description ends with that basis. Its release time is in the description too.
 * *Projected* (`projected`): when a company has a reported summary but no provider date ahead, the next date is the latest report
   plus 91 days (`projectEarnings` / `projectedEarningsDate`; a quarter further while the date is long past, nothing when the report
-  is older than a year), `ESTIMATED`, `source: estimate`, drawn dashed, labelled "Projected date" and described as "A projection, not an
+  is older than a year), `ESTIMATED`, `source: estimate`, drawn dashed, chip **Projected**, labelled "Projected date" and described as "A projection, not an
   announced date". A projected date that has **just passed** (up to 14 days, `OVERDUE_GRACE_DAYS`) with no newer report and no provider
   date ahead is a release that is *due*: the event is dated **today** (so it shows in today's cell, the lists and the Dashboard card) and
   reads "Report due: the projected date (22-10-2026, previous report + about 91 days) has passed and no release is stored yet. A
@@ -4209,3 +4210,79 @@ classification, throttle, 7-day retry, ordering, budget, full rows kept; `estima
 
 What only the live deployment can show: whether the owner's key really reads `EARNINGS` (press "Test Alpha Vantage now": both outcomes side by side), the real shape of IBM's `EARNINGS` answer, and
 whether `reportedEPS` of the provider is GAAP or adjusted for each held company (the basis note appears on the cards where it differs from the card's actual by more than 5 %).
+
+## Confirmed earnings dates and release times (2 Nov 2026)
+
+**Why every date was "Projected".** Diagnostics showed `The provider returned 1 rows, 0 of your 26 held symbols matched; 0 dates stored`: the free
+Alpha Vantage key does not get the real `EARNINGS_CALENDAR` (thousands of rows) but an almost empty answer, so the app never stored a
+provider date and every entry was previous report + 91 days (`projectEarnings`), shown *Projected* / *Estimated*. The run was recorded as
+`ok`, which hid it. Now an Alpha Vantage calendar with fewer than `MIN_CALENDAR_ROWS` (100) rows is `provider-limited` (the source's own
+entry in the run record, the run's status when nothing else delivered), and the Diagnostics card opens with a verdict line
+(`earningsDatesConclusion`): "No provider date source is working. Alpha Vantage returned only 1 rows: its free plan does not provide the
+earnings calendar for this key. Finnhub is not configured: add a free key (the FINNHUB_API_KEY secret). Until then every date in the calendar
+is a projection (previous report + about 91 days)."
+
+**Sources researched (official documentation, 2 Nov 2026).**
+
+| Source | Result |
+|---|---|
+| **Finnhub `GET /calendar/earnings`** ([docs](https://finnhub.io/docs/api/earnings-calendar)) | **Used.** The endpoint is not marked premium; the documented free tier is "1 month of historical earnings and new updates". Fields per row: `symbol`, `date`, `hour` (`bmo` before the open, `amc` after the close, `dmh` during market hours), `epsEstimate`, `epsActual`, `revenueEstimate`, `revenueActual`, `quarter`, `year`; parameters `from`, `to`, `symbol`, `international` (not used: US companies). Auth with the `X-Finnhub-Token` header (the code never puts the key in a URL). Limits ("Rate Limits" in the [API documentation](https://finnhub.io/docs/api)): status 429 when the plan's limit is exceeded and 30 calls a second on every plan; the documentation page does not state the free plan's per-minute figure, and the app makes three calls a day, paced. **No field says a date is confirmed by the company, and none gives a clock time.** The `demo` token is refused (`Invalid API key`), so the answer shape could only be taken from the documentation. |
+| **Twelve Data `/earnings_calendar`** ([docs](https://twelvedata.com/docs/fundamentals/earnings-calendar)) | **Not used.** `time` is `Pre Market`, `After Hours` or `Time Not Supplied`; no confirmation flag; it costs **40 API credits per request** against the Basic plan's 8 credits a minute (800 a day) ([pricing](https://twelvedata.com/pricing): "Core API requests: 8 (800 a day)"), so a single request cannot fit the minute window, and the Basic plan is "internal non-display usage" only. The `demo` key answers 403 for this endpoint. |
+| **Alpha Vantage `EARNINGS_CALENDAR`** | Kept, optional. One call, 12 months, `timeOfTheDay` `pre-market`/`post-market`; no confirmation flag; the free key of the owner returns almost nothing (see above). |
+
+No free official source flags a date as confirmed, which is why the app derives it (below). Unofficial endpoints (Nasdaq, Yahoo) are not used.
+
+**Finnhub in the job.** `FinnhubEarnings` (`packages/prices/src/providers/finnhub.ts`, an `EarningsSource`) asks for today..today+21 days in
+**three weekly calls** (`finnhubChunks`), paced by a token bucket, only for tracked US tickers and curated aliases (`FOO.DE` is `CRM`); a bare
+ticker of another exchange is not matched because Finnhub has no company names to vouch with. `refreshCalendar` reads Alpha Vantage and
+Finnhub one after the other, each its own outcome (`EarningsSourceRun`: `ok`, `provider-limited`, `no-key`, `budget-exhausted`,
+`rate-limited`, `failed`); the budget is `CALENDAR_FINNHUB_DAILY_CALLS` (default 3, the calls of one run; a manual run does not ask the
+budget), the key `FINNHUB_API_KEY` is an **optional secret**: without it the source is `no-key`, nothing is called and nothing fails. The Worker
+makes about 6 subrequests more per daily run (limit 50 per invocation).
+
+**Merging and conflicts** (`jobs/earnings-merge.ts`). The same date from both sources is one event (Alpha Vantage's fiscal period and currency,
+Finnhub's time of day and EPS estimate where Alpha Vantage has none, `source: finnhub`). A different date of the same quarter (less than 45 days
+apart) is a conflict: the date already confirmed in the store wins, otherwise Finnhub's (the near-term calendar; Alpha Vantage lists up to a
+year ahead, much of it an estimate). The loser is not stored; the run record lists it (`conflicts`, shown on the Diagnostics card). A stored
+date is removed only when a source that covers it no longer lists it (Alpha Vantage: any date; Finnhub: the next 21 days).
+
+**Confirmation rules** (`earningsConfirmation`, pure, in `@portfolio/shared`; the basis is the event's `basis` text and ends its description):
+
+1. *(i) flagged*: the source says confirmed (`StoredEarningsEvent.confirmed`, `confirmedBy`): `CONFIRMED`. None of the free sources does.
+2. *(ii) stable and close*: the date is **at most 21 days ahead** (`EARNINGS_CONFIRM_WINDOW_DAYS`) **and** a provider listed this very date on
+   **at least 2 separate UTC days** (`EARNINGS_CONFIRM_MIN_READS`). Each stored `EARN#` item carries `firstSeenOn`, `lastSeenOn` and `reads`
+   (`trackSeen`: a second read the same day does not count; a changed date is a new item, so it starts again at 1; the old item is removed).
+3. *(iii) passed*: the date has passed (a stored summary also replaces it as *Reported*): `CONFIRMED`.
+4. Everything else is `ESTIMATED` and says what is missing: a provider date is **Scheduled (provider date)** (chip *Scheduled*), a computed one **Projected**.
+
+A provider date that lingers after the company released (less than 45 days after a stored report) is dropped, so a stale listing no longer hides the projection of the
+next quarter. Rule (ii) is a heuristic and is labelled as such in the event; it is not the company's word.
+
+**Release time** (`earnings-time.ts`, `earningsReleaseTime`, Intl with explicit IANA zones, so each date uses its own daylight saving: the gap
+between a US listing and Amsterdam is **6 h normally and 5 h** between the end of European summer time (25-10-2026) and that of US daylight saving (01-11-2026), and
+again between 08-03 and 29-03). The exchange zone comes from the symbol suffix (`AS`, `DE`, `L`, `T`, ... ; no suffix is a US listing, `America/New_York`). Sources in order: an exact `releaseAt` (shown as
+exact: "Released at 16:20 ET = 22:20 Amsterdam"; no free source gives one, the demo data has one), else the category: before the open maps to ~07:00 market time ("usually 06:00-08:30 ET" for the US),
+after the close to the exchange's close + 5 minutes (US 16:05 ET), each with a tilde and "typically": "After the close, typically ~16:05 ET = ~22:05 Amsterdam"; `DMH` and unknown have no clock time
+("During market hours", "Time not announced"). A typical time is never presented as exact. It is in `CalendarEvent.release` (additive), the list rows, the dialog ("Release time", "Date basis"),
+the tooltips of the month grids (Calendar page and Dashboard card), the Diagnostics rows, and the `.ics` export: all-day stays all-day with the time and the basis in `DESCRIPTION`; an exact `releaseAt` makes a one-hour UTC event.
+
+**Watcher (why a company that already reported can stay "Projected").** Summaries are stored by `watchEarnings` (every 30 minutes 13:00-23:30 Amsterdam on weekdays, 07:30 daily) -> `fetchEarningsSummary`. Until now it looked at a
+symbol on every run only when a provider date lay in [today - 3, today]; with no provider date (the case here) only once a day (discovery, UTC day) and only after the newest stored release was 60 days old;
+and a provider date ahead stopped every look until that date, although such dates are often estimates; and a release found whose summary job was dropped by the budget guard (above 60 %) or lost was retried the next day in discovery mode. A company that
+reported after the close therefore waited for the next morning's look, a day more when the summary job was dropped, and a wrong provider date hid the release altogether. `selectCandidates` now adds (all within the existing caps of 30 looks per symbol and
+UTC day and 3 reads with the model): `projected` mode (no provider date and the projection from the newest stored release, + 91 days, is due or at most 5 days away: look on every run), a daily `discovery` also while a provider date is ahead and the
+newest release is older than 60 days, and a symbol whose release was found but whose summary is not stored (`pendingAccession` older than the hour) is looked at on every run until it is. Dropped or failed jobs therefore retry within the hour.
+
+**Web.** Chips (`statusLabel`): Reported, Confirmed (blue), Scheduled and Projected (both yellow, dashed, the `ESTIMATED` colour), the key says "Estimated, scheduled or projected: yellow, dashed". The coverage note
+(`CALENDAR_COVERAGE.earnings`) states the sources, the rules and the time convention. Diagnostics: the verdict line (`conclusion`, `ok`/`partial`/`broken`), one line per source with its outcome, the conflicts, and per company the date kind and release time.
+`GET /diagnostics/earnings-dates` adds `conclusion`, `lastRun.sources`, `lastRun.conflicts` and `symbols[].next.status|releaseText`; `GET /prices/status` lists `finnhub` as an optional source (never in `missingSecrets`). Mock mode: the demo
+earnings come from Finnhub with different read counts (Confirmed and Scheduled samples) and one exact release time.
+
+**Owner steps.** Create a free key at finnhub.io (Dashboard -> API key), then `pnpm exec wrangler secret put FINNHUB_API_KEY` in `packages/cloudflare-app`, paste it, and press "Refresh earnings dates now" on Settings -> Diagnostics ->
+Earnings dates. The first run lists dates for the next 21 days with their category; the second day's read confirms those within 21 days. Dates further out stay *Scheduled* or *Projected*.
+
+**Tests.** `pnpm --filter @portfolio/shared test` (`earnings-time.test.ts`: both zones across the 25-10/01-11 and 08-03/29-03 gaps, categories, exact times; `earnings-confirm.test.ts`: the rules, stale dates, `.ics`, the conclusion),
+`@portfolio/prices` (`earnings-finnhub.test.ts`: the documented response shape, window, merge, conflicts, reads, budget, `provider-limited`; `refresh-calendar.test.ts`), `@portfolio/earnings` (`select.test.ts`, `jobs.test.ts`: projected mode, dropped summary job),
+`@portfolio/cloudflare-app` (`calendar-dates.test.ts`, `prices-status.test.ts`; Node and workerd in `test/suite.ts`: Finnhub on and off), `@portfolio/web` (`calendarViews.test.tsx`, `EarningsDatesCard.test.tsx`), Playwright `e2e/calendar.spec.ts`.
+Only the live deployment can show: the real size and shape of Finnhub's answer for the owner's key (the code treats a non-calendar answer as a failure), whether Alpha Vantage ever returns the full calendar for that key, and the real
+times at which companies release.

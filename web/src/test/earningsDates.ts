@@ -29,6 +29,7 @@ export const earningsDates = (over: Partial<GetEarningsDatesResponse> = {}): Get
   lastSuccess: earningsRun(),
   budget: { provider: 'Alpha Vantage', day: '2026-10-28', used: 4, limit: 25, remaining: 21, calendarUsed: 1, calendarLimit: 1 },
   refresh: { available: true, reason: null, nextAllowedAt: null },
+  conclusion: null,
   held: 3,
   withDate: 2,
   funds: 0,

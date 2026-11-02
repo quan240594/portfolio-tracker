@@ -108,6 +108,7 @@ You need a Cloudflare account on the Free plan and a GitHub account. Every comma
    pnpm exec wrangler secret put EODHD_API_KEY          # exchange-suffixed symbols (.AS, .DE, ...), dividends, splits
    pnpm exec wrangler secret put COINGECKO_API_KEY      # crypto (demo key)
    pnpm exec wrangler secret put ALPHAVANTAGE_API_KEY   # US company profiles, earnings calendar, analyst consensus
+   pnpm exec wrangler secret put FINNHUB_API_KEY        # earnings dates + before/after-the-market timing (free key from finnhub.io)
    ```
    Free-tier limits and tuning variables (`EODHD_DAILY_LIMIT`, `EU_REFRESH_HOURS`, `FX_HISTORY_START`, `CALENDAR_*`, ...) are those of
    `@portfolio/prices` (`parsePricesConfig`); put one in `vars` of `wrangler.jsonc` only to change its default. The refreshes run

@@ -344,13 +344,16 @@ describe('earnings and splits', () => {
       currency: 'USD',
       timeOfDay: 'AMC',
     });
-    expect(byId(events, 'earn:AAPL:2026-07-30')!.description).toBe('Earnings report for the period ending 2026-06-30 · EPS estimate 1.23 USD · after market close');
+    expect(byId(events, 'earn:AAPL:2026-07-30')!.description).toBe(
+      'Earnings report for the period ending 2026-06-30 · EPS estimate 1.23 USD · After the close, typically ~16:05 ET = ~22:05 Amsterdam. Provider date, 45 days ahead: it can be confirmed from 21 days ahead, once the provider has listed the same date on 2 separate days.',
+    );
+    expect(byId(events, 'earn:AAPL:2026-07-30')!.release).toMatchObject({ kind: 'typical', category: 'AMC', source: 'alphavantage' });
     // Without a profile the provider's company name is used.
     expect(eventsOf({}, { profiles: {} }).find((e) => e.id === 'earn:AAPL:2026-07-30')!.name).toBe('APPLE INC');
     const msft = byId(events, 'earn:MSFT:2026-07-21')!;
     expect(msft).toMatchObject({ origin: 'WATCHLIST', name: 'Microsoft', timeOfDay: 'BMO' });
-    expect(msft.description).toBe('Earnings report · before market open');
-    expect(byId(events, 'earn:KO:2026-07-22')).toMatchObject({ status: 'CONFIRMED', name: 'KO', timeOfDay: 'unknown', description: 'Earnings report' });
+    expect(msft.description).toMatch(/^Earnings report · Before the open, typically ~07:00 ET = ~13:00 Amsterdam \(usually 06:00-08:30 ET\)\. /);
+    expect(byId(events, 'earn:KO:2026-07-22')).toMatchObject({ status: 'CONFIRMED', name: 'KO', timeOfDay: 'unknown', description: 'Earnings report · Time not announced. Flagged as confirmed by test.' });
     expect(byId(events, 'earn:AAPL:2026-05-01')).toMatchObject({ status: 'CONFIRMED', timeOfDay: 'unknown' });
     expect(events.some((e) => e.symbol === 'NOPE')).toBe(false);
   });
@@ -391,6 +394,7 @@ describe('reported and projected earnings', () => {
       description: 'Reported results for Q2 2026',
       period: 'Q2 2026',
       timeOfDay: 'unknown',
+      release: { kind: 'unknown', category: 'unknown', text: 'Time not announced', short: 'Time not announced' },
       earningsPhase: 'reported',
     });
     // The provider still lists the next date: nothing is projected.
@@ -405,9 +409,9 @@ describe('reported and projected earnings', () => {
   });
 
   it('keeps a provider date that is more than four days from the released report', () => {
-    const provider: StoredEarningsEvent = { symbol: 'AAPL', date: '2026-05-06', source: 'alphavantage' };
+    const provider: StoredEarningsEvent = { symbol: 'AAPL', date: '2026-06-20', source: 'alphavantage' };
     const events = earningsOnly({ earnings: [provider], reportedEarnings: [{ symbol: 'AAPL', reportDate: '2026-04-30' }] });
-    expect(events.map((e) => e.id).filter((id) => id.startsWith('earn:'))).toEqual(['earn:AAPL:2026-04-30', 'earn:AAPL:2026-05-06']);
+    expect(events.map((e) => e.id).filter((id) => id.startsWith('earn:'))).toEqual(['earn:AAPL:2026-04-30', 'earn:AAPL:2026-06-20']);
   });
 
   it('projects the next date a quarter (91 days) after the previous report when the provider has none, labelled as an estimate', () => {
@@ -421,8 +425,9 @@ describe('reported and projected earnings', () => {
       name: 'Apple Inc.',
       origin: 'HOLDING',
       source: 'estimate',
-      description: 'Estimated next report, about 91 days after the previous one (2026-05-14). A projection, not an announced date.',
+      description: 'Projected next report, about 91 days after the previous one (2026-05-14). A projection, not an announced date.',
       timeOfDay: 'unknown',
+      release: { kind: 'unknown', category: 'unknown', text: 'Time not announced', short: 'Time not announced' },
       earningsPhase: 'projected',
     });
   });
@@ -471,6 +476,7 @@ describe('reported and projected earnings', () => {
           source: 'estimate',
           description: 'Report due: the projected date (22-10-2026, previous report + about 91 days) has passed and no release is stored yet. A projection, not an announced date.',
           timeOfDay: 'unknown',
+          release: { kind: 'unknown', category: 'unknown', text: 'Time not announced', short: 'Time not announced' },
           earningsPhase: 'projected',
         },
       ]);

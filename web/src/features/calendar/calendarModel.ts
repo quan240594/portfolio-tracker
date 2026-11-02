@@ -6,6 +6,7 @@ import {
   calendarAddMonths,
   calendarLastDay,
   calendarMonthOf,
+  earningsReleaseTime,
   matchesCalendarFilter,
   roundTo,
   type CalendarEvent,
@@ -80,11 +81,25 @@ export const EVENT_META: Readonly<Record<CalendarEventType, EventMeta>> = {
 export const STATUS_LABELS: Readonly<Record<CalendarStatus, string>> = { CONFIRMED: 'Confirmed', ESTIMATED: 'Estimated', PAID: 'Received' };
 export const SCOPE_LABELS: Readonly<Record<CalendarScope, string>> = { holdings: 'My holdings', watchlist: 'Watchlist', all: 'Holdings and watchlist' };
 
-/** What the status chip and the accessible name say: released results are "Reported" (CONFIRMED underneath; there is no separate status). */
-export const statusLabel = (e: Pick<CalendarEvent, 'status' | 'earningsPhase'>): string => (e.earningsPhase === 'reported' ? 'Reported' : STATUS_LABELS[e.status]);
+/** When the company releases, in its market time and in Amsterdam time ("After the close, typically ~16:05 ET = ~22:05 Amsterdam"); computed here when an older answer has no `release`. */
+export function releaseText(e: Pick<CalendarEvent, 'symbol' | 'date' | 'timeOfDay' | 'release'>): string {
+  return (e.release ?? earningsReleaseTime({ symbol: e.symbol, date: e.date, timeOfDay: e.timeOfDay })).text;
+}
+
+const EARNINGS_ESTIMATE_CHIPS: Readonly<Partial<Record<NonNullable<CalendarEvent['earningsPhase']>, string>>> = { projected: 'Projected', scheduled: 'Scheduled' };
+
+/**
+ * What the status chip and the accessible name say: released results are "Reported" (CONFIRMED underneath; there is no separate status), an
+ * earnings date that is only estimated is "Scheduled" (a provider date not yet confirmed) or "Projected" (computed from the previous report).
+ */
+export function statusLabel(e: Pick<CalendarEvent, 'status' | 'earningsPhase'>): string {
+  if (e.earningsPhase === 'reported') return 'Reported';
+  return (e.status === 'ESTIMATED' && e.earningsPhase !== undefined ? EARNINGS_ESTIMATE_CHIPS[e.earningsPhase] : undefined) ?? STATUS_LABELS[e.status];
+}
 
 const SOURCE_LABELS: Readonly<Record<string, string>> = {
   alphavantage: 'Alpha Vantage',
+  finnhub: 'Finnhub',
   eodhd: 'EODHD',
   'market-data': 'Market data provider',
   transactions: 'Your transactions',
@@ -215,6 +230,7 @@ export const isEstimated = (e: Pick<CalendarEvent, 'status'>): boolean => e.stat
 /** `AAPL · Ex-dividend · Confirmed` — the accessible name of a chip or row. */
 export function eventAriaLabel(e: CalendarEvent, amount: string | undefined): string {
   const parts = [e.symbol, EVENT_META[e.type].label, statusLabel(e).toLowerCase()];
+  if (e.type === 'EARNINGS') parts.push(releaseText(e));
   if (amount) parts.push(amount);
   return parts.join(', ');
 }

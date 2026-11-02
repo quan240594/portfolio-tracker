@@ -8,6 +8,7 @@ import { server } from '../../mocks/server';
 import { api } from '../../mocks/utils';
 import { LogosEnabledProvider, resetLogoSession } from '../../components/CompanyLogo';
 import { renderWithProviders, sp } from '../../test/utils';
+import { CompactMonthGrid } from './CompactMonthGrid';
 import { EventMarker } from './EventMarker';
 import { EventList, EventRow } from './EventList';
 import { MAX_CHIPS_PER_DAY, MonthGrid } from './MonthGrid';
@@ -68,14 +69,16 @@ describe('event text', () => {
   it('describes each kind of event on one line', () => {
     expect(sp(eventDetailLine(event()))).toBe(sp('Ex-dividend · US$ 0,55 per share · 10 shares'));
     expect(eventDetailLine(event({ amountPerShare: undefined, quantity: undefined }))).toBe('Ex-dividend');
-    expect(eventDetailLine(event({ type: 'EARNINGS', timeOfDay: 'AMC' }))).toBe('Earnings · After market close');
-    expect(eventDetailLine(event({ type: 'EARNINGS', timeOfDay: 'BMO' }))).toBe('Earnings · Before market open');
-    expect(eventDetailLine(event({ type: 'EARNINGS', timeOfDay: 'unknown' }))).toBe('Earnings');
-    expect(eventDetailLine(event({ type: 'EARNINGS' }))).toBe('Earnings');
-    expect(eventDetailLine(event({ type: 'EARNINGS', earningsPhase: 'reported', period: 'Q3 2026', timeOfDay: 'AMC' }))).toBe('Earnings · Reported Q3 2026 · After market close');
-    expect(eventDetailLine(event({ type: 'EARNINGS', earningsPhase: 'reported' }))).toBe('Earnings · Reported');
-    expect(eventDetailLine(event({ type: 'EARNINGS', earningsPhase: 'projected' }))).toBe('Earnings · Projected date');
-    expect(eventDetailLine(event({ type: 'EARNINGS', earningsPhase: 'scheduled', timeOfDay: 'BMO' }))).toBe('Earnings · Before market open');
+    expect(eventDetailLine(event({ type: 'EARNINGS', timeOfDay: 'AMC' }))).toBe('Earnings · After the close, typically ~16:05 ET = ~22:05 Amsterdam');
+    expect(eventDetailLine(event({ type: 'EARNINGS', timeOfDay: 'BMO' }))).toBe('Earnings · Before the open, typically ~07:00 ET = ~13:00 Amsterdam (usually 06:00-08:30 ET)');
+    expect(eventDetailLine(event({ type: 'EARNINGS', timeOfDay: 'unknown' }))).toBe('Earnings · Time not announced');
+    expect(eventDetailLine(event({ type: 'EARNINGS' }))).toBe('Earnings · Time not announced');
+    expect(eventDetailLine(event({ type: 'EARNINGS', earningsPhase: 'reported', period: 'Q3 2026', timeOfDay: 'AMC' }))).toBe('Earnings · Reported Q3 2026 · After the close, typically ~16:05 ET = ~22:05 Amsterdam');
+    expect(eventDetailLine(event({ type: 'EARNINGS', earningsPhase: 'reported' }))).toBe('Earnings · Reported · Time not announced');
+    expect(eventDetailLine(event({ type: 'EARNINGS', earningsPhase: 'projected' }))).toBe('Earnings · Projected date · Time not announced');
+    expect(eventDetailLine(event({ type: 'EARNINGS', earningsPhase: 'scheduled', status: 'ESTIMATED', timeOfDay: 'BMO' }))).toBe('Earnings · Scheduled (provider date) · Before the open, typically ~07:00 ET = ~13:00 Amsterdam (usually 06:00-08:30 ET)');
+    expect(eventDetailLine(event({ type: 'EARNINGS', earningsPhase: 'scheduled', status: 'CONFIRMED', timeOfDay: 'DMH' }))).toBe('Earnings · Confirmed date · During market hours');
+    expect(eventDetailLine(event({ type: 'EARNINGS', timeOfDay: 'AMC', release: { kind: 'exact', category: 'AMC', text: 'Released at 16:20 ET = 22:20 Amsterdam', short: '16:20 ET = 22:20 Amsterdam' } }))).toBe('Earnings · Released at 16:20 ET = 22:20 Amsterdam');
     expect(eventDetailLine(event({ type: 'SPLIT', description: '4-for-1 stock split' }))).toBe('4-for-1 stock split');
   });
 });
@@ -86,7 +89,10 @@ describe('reported and projected earnings', () => {
 
   it('says Reported for released results (CONFIRMED underneath) and keeps the status words of every other event', () => {
     expect(statusLabel(reported)).toBe('Reported');
-    expect(statusLabel(projected)).toBe('Estimated');
+    expect(statusLabel(projected)).toBe('Projected');
+    expect(statusLabel(event({ type: 'EARNINGS', status: 'ESTIMATED', earningsPhase: 'scheduled' }))).toBe('Scheduled');
+    expect(statusLabel(event({ type: 'EARNINGS', status: 'CONFIRMED', earningsPhase: 'scheduled' }))).toBe('Confirmed');
+    expect(statusLabel(event({ status: 'ESTIMATED' }))).toBe('Estimated');
     expect(statusLabel(event())).toBe('Confirmed');
     expect(statusLabel(event({ status: 'PAID' }))).toBe('Received');
   });
@@ -99,15 +105,15 @@ describe('reported and projected earnings', () => {
     expect(sourceLabel('something-new')).toBe('something-new');
   });
 
-  it('shows the Reported chip and the period in the row, and Estimated with a dashed border for a projection', () => {
+  it('shows the Reported chip and the period in the row, and Projected with a dashed border for a projection', () => {
     renderWithProviders(<EventList events={[reported, projected]} baseCurrency="EUR" onSelect={vi.fn()} today={TODAY} />);
     const rows = screen.getAllByRole('button');
-    expect(rows[0]).toHaveAccessibleName('AAPL, Earnings, reported');
+    expect(rows[0]).toHaveAccessibleName('AAPL, Earnings, reported, Time not announced');
     expect(rows[0]).toHaveTextContent('Earnings · Reported Q3 2026');
     expect(within(rows[0]!).getByText('Reported')).toBeInTheDocument();
-    expect(rows[1]).toHaveAccessibleName('AAPL, Earnings, estimated');
-    expect(rows[1]).toHaveTextContent('Earnings · Projected date');
-    expect(within(rows[1]!).getByText('Estimated')).toHaveClass('border-dashed');
+    expect(rows[1]).toHaveAccessibleName('AAPL, Earnings, projected, Time not announced');
+    expect(rows[1]).toHaveTextContent('Earnings · Projected date · Time not announced');
+    expect(within(rows[1]!).getByText('Projected')).toHaveClass('border-dashed');
   });
 
   it('explains a projection in the dialog and does not claim it was announced', () => {
@@ -174,7 +180,7 @@ describe('MonthGrid', () => {
     const dividend = screen.getByRole('button', { name: /^AAPL, Ex-dividend, confirmed, €/ });
     expect(dividend).toHaveTextContent('AAPL');
     expect(dividend).toHaveTextContent(sp('€ 3,74'));
-    const earnings = screen.getByRole('button', { name: 'MSFT, Earnings, estimated' });
+    const earnings = screen.getByRole('button', { name: 'MSFT, Earnings, estimated, Time not announced' });
     expect(earnings).toHaveClass('border-dashed', 'italic');
     expect(earnings).not.toHaveTextContent('€');
     await userEvent.click(dividend);
@@ -293,13 +299,16 @@ describe('EventDialog', () => {
   });
 
   it('shows EPS estimate, fiscal period and time of day of an earnings report and warns about estimates', () => {
-    open(event({ type: 'EARNINGS', status: 'ESTIMATED', source: 'alphavantage', fiscalPeriodEnd: '2026-09-30', epsEstimate: 1.85, currency: 'USD', timeOfDay: 'AMC' }));
+    open(event({ type: 'EARNINGS', status: 'ESTIMATED', source: 'alphavantage', fiscalPeriodEnd: '2026-09-30', epsEstimate: 1.85, currency: 'USD', timeOfDay: 'AMC', earningsPhase: 'scheduled', basis: 'Provider date, listed on 1 day so far: it is confirmed once the provider has listed the same date on 2 separate days.' }));
     const dialog = screen.getByRole('dialog', { name: 'AAPL · Earnings' });
     expect(dialog).toHaveTextContent('30-09-2026');
     expect(dialog).toHaveTextContent(sp('US$ 1,85'));
     expect(dialog).toHaveTextContent('After market close');
     expect(dialog).toHaveTextContent('Alpha Vantage');
-    expect(dialog).toHaveTextContent('The date comes from a data provider and may change once the company confirms it.');
+    expect(dialog).toHaveTextContent('Scheduled (provider date)');
+    expect(dialog).toHaveTextContent('After the close, typically ~16:05 ET = ~22:05 Amsterdam');
+    expect(dialog).toHaveTextContent('listed on 1 day so far');
+    expect(dialog).toHaveTextContent('The date comes from a data provider and is not confirmed yet');
   });
 
   it('copes with missing earnings details', () => {
@@ -307,7 +316,8 @@ describe('EventDialog', () => {
     const dialog = screen.getByRole('dialog');
     expect(dialog).toHaveTextContent('Not specified');
     expect(within(dialog).getAllByText('Not available')).toHaveLength(2);
-    expect(dialog).not.toHaveTextContent('may change');
+    expect(dialog).toHaveTextContent('Time not announced');
+    expect(dialog).not.toHaveTextContent('may still change');
   });
 
   it('shows the ratio of a split and of other corporate actions', () => {
@@ -454,6 +464,21 @@ describe('company logos in the calendar', () => {
     expect(row.querySelector('img')).toBeNull();
     expect(row.querySelector('[data-logo="monogram"] [data-monogram]')).toHaveAttribute('data-monogram', 'AA');
     expect(row).toHaveAccessibleName(/^AAPL, Ex-dividend, confirmed/);
+  });
+
+  it('says when an earnings report is released in the tooltip of its month chip and of its compact (Dashboard) chip', () => {
+    const earnings = event({ id: 'earn:AMZN:2026-10-30', date: '2026-10-30', type: 'EARNINGS', symbol: 'AMZN', name: 'Amazon', status: 'CONFIRMED', earningsPhase: 'scheduled', timeOfDay: 'AMC', expectedAmount: undefined });
+    renderWithProviders(
+      <>
+        <MonthGrid month="2026-10" today={TODAY} events={[earnings]} baseCurrency="EUR" onSelectEvent={vi.fn()} onSelectDay={vi.fn()} />
+        <CompactMonthGrid month="2026-10" today={TODAY} events={[earnings]} baseCurrency="EUR" />
+      </>,
+    );
+    const expected = 'After the close, typically ~16:05 ET = ~21:05 Amsterdam';
+    const chip = screen.getByRole('button', { name: `AMZN, Earnings, confirmed, ${expected}` });
+    expect(chip).toHaveAttribute('title', `AMZN · Earnings · ${expected}`);
+    const marker = document.querySelector('span[title^="AMZN, Earnings"]')!;
+    expect(marker).toHaveAttribute('title', `AMZN, Earnings, confirmed, ${expected}`);
   });
 
   it('puts the logo on month chips and in the event dialog, next to the written name', () => {
