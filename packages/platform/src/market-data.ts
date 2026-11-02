@@ -83,6 +83,10 @@ export interface EarningsSource {
   readonly name: string;
   /** Whether the daily call budget applies (false for the offline mock). */
   readonly budgeted: boolean;
+  /** Calls one run makes against the daily budget (default 1). */
+  readonly callsPerRun?: number;
+  /** A calendar with fewer rows than this is not the real one (a key without access): the run is recorded as `provider-limited`. */
+  readonly minRows?: number;
   /** `names` are the profile names of the symbols, used to vouch for a listing that is not the source's own ticker. */
   fetch(symbols: readonly string[], today: string, names?: ReadonlyMap<string, string>): Promise<StoredEarningsEvent[]>;
   /** `fetch` with the counts of the answer; when absent the job records the dates only. */
@@ -127,7 +131,7 @@ export interface FxBackfillSummary {
   lastDay: string | null;
 }
 
-export type CalendarStatus = 'ok' | 'no-provider' | 'no-symbols' | 'budget-exhausted' | 'rate-limited' | 'failed';
+export type CalendarStatus = 'ok' | 'provider-limited' | 'no-provider' | 'no-symbols' | 'budget-exhausted' | 'rate-limited' | 'failed';
 
 export interface CalendarRefreshSummary {
   tracked: number;

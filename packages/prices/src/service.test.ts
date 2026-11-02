@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import * as api from './index.js';
 import { createMarketData } from './market.js';
 import { FakeFetch } from './testing/fake-fetch.js';
-import { NOW, NOW_SECONDS, harness, liveFake, tdQuote, track } from './testing/harness.js';
+import { NOW, NOW_SECONDS, harness, liveFake, padCalendar, tdQuote, track } from './testing/harness.js';
 
 describe('createPriceJobs', () => {
   it('registers the three jobs of the Python service and finds their schedules in SCHEDULED_JOBS', () => {
@@ -34,7 +34,7 @@ describe('createPriceJobs', () => {
 describe('createMarketDataService', () => {
   it('runs refreshScheduled, enrichSymbols and refreshCalendar to completion at the given time', async () => {
     const fake = liveFake()
-      .add('alphavantage.co', { text: 'symbol,name,reportDate\nAAPL,Apple,2026-10-29\n' })
+      .add('alphavantage.co', { text: padCalendar('symbol,name,reportDate\nAAPL,Apple,2026-10-29\n') })
       .add('eodhd.com/api/splits', [])
       .add('eodhd.com/api/div', [])
       .add('twelvedata.com/time_series', { meta: { currency: 'USD' }, values: [{ datetime: '2026-10-12', close: '1' }] });

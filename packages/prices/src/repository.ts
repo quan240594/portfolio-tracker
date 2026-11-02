@@ -118,6 +118,12 @@ export const earningsItem = (event: StoredEarningsEvent, updatedAt: string): Ite
   ...definedOnly({ ...event, timeOfDay: event.timeOfDay ?? 'unknown', updatedAt }),
 });
 
+/** The stored event of an `EARN#` item: the item without its keys. */
+export function earningsEventOf(item: Item): StoredEarningsEvent {
+  const { PK: _partition, SK: _sort, entityType: _entity, ...event } = item;
+  return event as unknown as StoredEarningsEvent;
+}
+
 export const splitItem = (event: StoredSplitEvent, updatedAt: string): Item => ({
   ...calendarKeys.split(event.symbol, event.date),
   entityType: CALENDAR_ENTITY.split,
@@ -420,6 +426,12 @@ export class PriceRepository {
     const ops = putOps(events.map((event) => splitItem(event, updatedAt)));
     await this.store.batchWrite(ops);
     return ops.length;
+  }
+
+  /** The stored earnings events of each symbol dated `today` or later (what a run compares its answer with). */
+  async upcomingEarnings(symbols: readonly string[], today: string): Promise<Map<string, StoredEarningsEvent[]>> {
+    const lists = await Promise.all(symbols.map((symbol) => queryAll(this.store, { pk: calendarKeys.tickerPk(symbol), sk: { between: [`${calendarKeys.earningsPrefix}${today}`, `${calendarKeys.earningsPrefix}${FAR_FUTURE}`] } })));
+    return new Map(symbols.map((symbol, index) => [symbol, lists[index]!.map((item) => earningsEventOf(item))]));
   }
 
   /** Dates of the stored upcoming earnings of `symbol` that are not in `keep` (the company moved its report). */

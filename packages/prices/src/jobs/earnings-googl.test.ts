@@ -1,7 +1,7 @@
 import { buildCalendar, type CalendarData, type CalendarEvent, type StoredEarningsEvent, type Transaction } from '@portfolio/shared';
 import { describe, expect, it } from 'vitest';
 import { FakeFetch } from '../testing/fake-fetch.js';
-import { drive, harness, track, type Harness } from '../testing/harness.js';
+import { drive, harness, padCalendar, track, type Harness } from '../testing/harness.js';
 import { createRefreshCalendarJob } from './refresh-calendar.js';
 
 /** The daily run: 05:30 in Amsterdam on Wednesday 28 Oct 2026 (CET, UTC+1), the day of the Alphabet Q3 call. */
@@ -26,7 +26,7 @@ const CSV = [
 
 const run = (h: Harness) => drive(h, createRefreshCalendarJob(h.deps), { trigger: 'scheduled' });
 const csvHarness = (csv: string | { text: string }, env: Record<string, string> = {}): Harness =>
-  harness({ start: NOW, env, fake: new FakeFetch().add('EARNINGS_CALENDAR', typeof csv === 'string' ? { text: csv } : csv) });
+  harness({ start: NOW, env, fake: new FakeFetch().add('EARNINGS_CALENDAR', typeof csv === 'string' ? { text: padCalendar(csv) } : csv) });
 
 const storedEvents = (h: Harness): StoredEarningsEvent[] => h.store.snapshot().filter((item) => item.SK.startsWith('EARN#')) as unknown as StoredEarningsEvent[];
 

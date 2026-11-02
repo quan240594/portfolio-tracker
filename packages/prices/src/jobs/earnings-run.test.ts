@@ -5,7 +5,7 @@ import { ProviderError } from '../errors.js';
 import { createMarketData } from '../market.js';
 import { PriceRepository } from '../repository.js';
 import { FakeFetch } from '../testing/fake-fetch.js';
-import { drive, harness, track, type Harness } from '../testing/harness.js';
+import { drive, harness, padCalendar, track, type Harness } from '../testing/harness.js';
 import { createRefreshCalendarJob } from './refresh-calendar.js';
 
 afterEach(() => vi.restoreAllMocks());
@@ -14,14 +14,14 @@ const NOW = new Date('2026-10-28T04:30:00.000Z');
 const STAMP = '2026-10-28T04:30:00.000Z';
 const DAY = 86_400_000;
 
-const CSV = [
+const CSV = padCalendar([
   'symbol,name,reportDate,fiscalDateEnding,estimate,currency,timeOfTheDay',
   'GOOG,Alphabet Inc - Class C,2026-10-28,2026-09-30,2.31,USD,post-market',
   'AAPL,Apple Inc,2026-10-29,2026-09-30,1.85,USD,post-market',
   'ASML,ASML HOLDING NV,2027-01-28,2026-12-31,6.9,EUR,pre-market',
   'MSFT,Microsoft Corp,2026-10-20,2026-09-30,3.1,USD,post-market',
   '',
-].join('\n');
+].join('\n'));
 
 const live = (...replies: unknown[]): Harness => harness({ start: NOW, fake: new FakeFetch().add('alphavantage.co', ...replies) });
 const run = (h: Harness, trigger: 'scheduled' | 'manual' = 'scheduled') => drive(h, createRefreshCalendarJob(h.deps), { trigger });
@@ -41,11 +41,15 @@ describe('the calendar job records what it did to the earnings dates', () => {
       status: 'ok',
       reason: '',
       tracked: 5,
-      rows: 4,
+      rows: 104,
       events: 2,
       matchedSymbols: ['AAPL', 'GOOG'],
       listed: ['AAPL', 'ASML.AS', 'GOOG', 'MSFT'],
       unvouched: ['ASML.AS'],
+      sources: [
+        { source: 'alphavantage', status: 'ok', reason: '', rows: 104, events: 2, matchedSymbols: ['AAPL', 'GOOG'] },
+        { source: 'finnhub', status: 'no-key', reason: '' },
+      ],
     });
     expect(lastOk(h)).toEqual(lastRun(h));
     expect(item(h, 'EARNINGS#LASTRUN')).toMatchObject({ entityType: 'EARNINGS_RUN' });
@@ -58,7 +62,7 @@ describe('the calendar job records what it did to the earnings dates', () => {
     h.clock.advance(DAY);
     await run(h);
     expect(lastRun(h)).toMatchObject({ at: expect.stringContaining('2026-10-29T04:30'), status: 'failed', reason: 'alphavantage: unexpected response for EARNINGS_CALENDAR', tracked: 1 });
-    expect(lastOk(h)).toMatchObject({ at: STAMP, status: 'ok', rows: 4 });
+    expect(lastOk(h)).toMatchObject({ at: STAMP, status: 'ok', rows: 104 });
   });
 
   it('records the Alpha Vantage rate limit as its own outcome', async () => {
@@ -124,7 +128,7 @@ describe('the calendar job records what it did to the earnings dates', () => {
     });
     track(h.store, 'GOOGL');
     await run(h);
-    expect(lastRun(h)).toEqual({ at: STAMP, trigger: 'scheduled', status: 'ok', reason: '', tracked: 1, events: 1, matchedSymbols: ['GOOGL'] });
+    expect(lastRun(h)).toEqual({ at: STAMP, trigger: 'scheduled', status: 'ok', reason: '', tracked: 1, events: 1, matchedSymbols: ['GOOGL'], sources: [{ source: 'alphavantage', status: 'ok', reason: '', events: 1, matchedSymbols: ['GOOGL'] }, { source: 'finnhub', status: 'no-key', reason: '' }] });
   });
 
   it('does not fail the job when the record cannot be written', async () => {

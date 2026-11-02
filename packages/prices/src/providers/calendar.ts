@@ -1,4 +1,4 @@
-import { TICKER_ALIASES, significantWords, type DividendEvent, type StoredEarningsEvent, type StoredSplitEvent } from '@portfolio/shared';
+import { MIN_CALENDAR_ROWS, TICKER_ALIASES, significantWords, type DividendEvent, type StoredEarningsEvent, type StoredSplitEvent } from '@portfolio/shared';
 import type { CorporateActionsSource, EarningsFetchReport, EarningsSource } from '@portfolio/platform';
 import { csvRecords, parseCsv } from '../csv.js';
 import { ProviderError, RateLimitError, SymbolNotFoundError } from '../errors.js';
@@ -188,6 +188,7 @@ export interface AlphaVantageEarningsOptions {
 export class AlphaVantageEarnings implements EarningsSource {
   readonly name = 'alphavantage';
   readonly budgeted = true;
+  readonly minRows = MIN_CALENDAR_ROWS;
 
   constructor(private readonly options: AlphaVantageEarningsOptions) {}
 

@@ -12,12 +12,16 @@ export interface ApiKeys {
   eodhd?: string;
   coingecko?: string;
   alphavantage?: string;
+  /** Optional: the free Finnhub key that gives dated, time-of-day earnings for the next 21 days. */
+  finnhub?: string;
 }
 
 export interface CalendarSettings {
   earningsHorizon: EarningsHorizon;
   /** Alpha Vantage calls a day for the earnings calendar (one call serves every tracked ticker). */
   alphavantageDailyCalls: number;
+  /** Finnhub calls a day for the earnings calendar (one run makes three: one per week of the 21-day window). */
+  finnhubDailyCalls: number;
   /** EODHD calls a day for splits and dividends (of the free plan's 20, shared with the quote refresh and enrichment). */
   eodhdDailyCalls: number;
   recheckDays: number;
@@ -42,6 +46,7 @@ export interface PricesConfig {
 export const DEFAULT_CALENDAR_SETTINGS: CalendarSettings = {
   earningsHorizon: '12month',
   alphavantageDailyCalls: 1,
+  finnhubDailyCalls: 3,
   eodhdDailyCalls: 8,
   recheckDays: 7,
   refreshDividends: true,
@@ -83,6 +88,7 @@ export function parseCalendarSettings(env: Env): CalendarSettings {
   return {
     earningsHorizon: EARNINGS_HORIZONS.find((h) => h === horizon) ?? DEFAULT_CALENDAR_SETTINGS.earningsHorizon,
     alphavantageDailyCalls: intFrom(env.CALENDAR_ALPHAVANTAGE_DAILY_CALLS, DEFAULT_CALENDAR_SETTINGS.alphavantageDailyCalls),
+    finnhubDailyCalls: intFrom(env.CALENDAR_FINNHUB_DAILY_CALLS, DEFAULT_CALENDAR_SETTINGS.finnhubDailyCalls),
     eodhdDailyCalls: intFrom(env.CALENDAR_EODHD_DAILY_CALLS, DEFAULT_CALENDAR_SETTINGS.eodhdDailyCalls),
     recheckDays: intFrom(env.CALENDAR_RECHECK_DAYS, DEFAULT_CALENDAR_SETTINGS.recheckDays, 1),
     refreshDividends: boolFrom(env.CALENDAR_REFRESH_DIVIDENDS, DEFAULT_CALENDAR_SETTINGS.refreshDividends),
@@ -107,6 +113,7 @@ export function parsePricesConfig(env: Env): PricesConfig {
       eodhd: keyFrom(env.EODHD_API_KEY),
       coingecko: keyFrom(env.COINGECKO_API_KEY),
       alphavantage: keyFrom(env.ALPHAVANTAGE_API_KEY),
+      finnhub: keyFrom(env.FINNHUB_API_KEY),
     },
     coinGeckoCoinIds: env.COINGECKO_COIN_IDS ?? '',
     dailyLimits: { twelvedata: 800, eodhd: intFrom(env.EODHD_DAILY_LIMIT, 20), alphavantage: intFrom(env.ALPHAVANTAGE_DAILY_LIMIT, 25) },

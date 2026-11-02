@@ -17,6 +17,13 @@ export const ALL_KEYS: Env = {
   FX_HISTORY_START: '2026-10-01',
 };
 
+/** An `EARNINGS_CALENDAR` CSV padded with 100 rows of other companies, so it is as large as the real one is (a tiny answer is read as a key without access). */
+export function padCalendar(csv: string): string {
+  const filler = Array.from({ length: 100 }, (_, index) => `ZZ${String(index).padStart(3, '0')},FILLER ${index} INC,2027-03-01,2026-12-31,1.0,USD,`);
+  const head = csv.endsWith('\n') ? csv : `${csv}\n`;
+  return `${head}${filler.join('\n')}\n`;
+}
+
 /** A pinned clock that only moves when the code under test sleeps (or the test advances it). */
 export class TestClock {
   constructor(public current: Date = NOW) {}
