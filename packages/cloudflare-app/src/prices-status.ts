@@ -77,8 +77,10 @@ function summary(keyed: number, missingSecrets: readonly string[], t212: T212Quo
 /** `t212` is the stored status of the signed-in user's Trading 212 quote refresh, when there is one; `history` the coverage of the held symbols. */
 export function pricesStatus(config: PricesConfig, t212: T212QuoteStatus | null = null, history: PriceHistoryCoverage | null = null): PricesStatus {
   const sources: PriceSourceStatus[] = SOURCES.map(({ name, secret, key, covers }) => ({ name, configured: config.keys[key] !== undefined, secret, covers }));
-  sources.push(...OPTIONAL_SOURCES.map(({ name, secret, key, covers }): PriceSourceStatus => ({ name, configured: config.keys[key] !== undefined, optional: true, secret, covers })));
-  sources.push({ name: 'frankfurter', configured: true, secret: null, covers: 'daily foreign-exchange rates (no key needed)' });
+  sources.push(
+    ...OPTIONAL_SOURCES.map(({ name, secret, key, covers }): PriceSourceStatus => ({ name, configured: config.keys[key] !== undefined, optional: true, secret, covers })),
+    { name: 'frankfurter', configured: true, secret: null, covers: 'daily foreign-exchange rates (no key needed)' },
+  );
   const t212Report = t212 ? report(t212) : null;
   sources.push({ name: 't212', configured: t212Report?.state === 'OK', secret: null, covers: T212_COVERS });
   const missingSecrets = sources.filter((source) => !source.configured && source.secret !== null && source.optional !== true).map((source) => source.secret!);

@@ -1,5 +1,4 @@
-import { daysBetween, earningsConfirmation, type StoredEarningsEvent } from '@portfolio/shared';
-import type { EarningsConflict, EarningsSourceName } from '@portfolio/shared';
+import { daysBetween, earningsConfirmation, type EarningsConflict, type EarningsSourceName, type StoredEarningsEvent } from '@portfolio/shared';
 import { byText, definedOnly } from '../parse.js';
 
 /** Stored events of the symbols, as they were before this run (only today and later). */
@@ -101,6 +100,6 @@ export function trackSeen(events: readonly StoredEarningsEvent[], ahead: StoredA
     if (prior === undefined) return { ...event, firstSeenOn: today, lastSeenOn: today, reads: 1 };
     const lastSeen = prior.lastSeenOn ?? prior.updatedAt?.slice(0, 10) ?? today;
     const reads = Math.max(prior.reads ?? 1, 1) + (lastSeen < today ? 1 : 0);
-    return { ...event, firstSeenOn: prior.firstSeenOn ?? lastSeen, lastSeenOn: lastSeen < today ? today : lastSeen, reads };
+    return { ...event, firstSeenOn: prior.firstSeenOn ?? lastSeen, lastSeenOn: lastSeen.localeCompare(today) < 0 ? today : lastSeen, reads };
   });
 }
