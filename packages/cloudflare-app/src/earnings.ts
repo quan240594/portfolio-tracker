@@ -31,45 +31,52 @@ const CALENDAR_DAYS_BACK = 7;
 const CALENDAR_DAYS_AHEAD = 130;
 
 /**
- * The distinct companies held by any user today (above the dust threshold; sold-out symbols are reported as `former`, never watched), with the KPI template (the owner's override, else the table or sector) and the expected
- * report dates of the calendar. Instruments without earnings (ETFs, crypto, ...) are left out. What an instrument is comes from the stored
+ * The distinct companies held by any user today (above the dust threshold; sold-out symbols are reported as `former`, never watched), with the KPI template (the owner's override, else the table or sector).
+ * Instruments without earnings (ETFs, crypto, ...) are left out. What an instrument is comes from the stored
  * profile with the owner's classification overrides on top, as everywhere else (the Snowball import classifies the holdings through overrides;
  * reading the stored profile alone silently left every such holding out); an instrument whose class nobody knows counts unless its name reads like a fund. A user whose transactions cannot be replayed
  * (an oversold position) is skipped. Nothing about quantities or users leaves this function.
  */
-export function createEarningsInputs(items: ItemStore): EarningsInputs {
+export async function heldCompanies(items: ItemStore, today: string): Promise<{ holdings: EarningsHolding[]; former: string[] }> {
   const repo = new ItemRepository(items);
   const mgmt = new ItemManagementRepository(items);
   const users = new ItemNotificationRepository(items);
+  const userIds = await users.listUserIds();
+  const held = await Promise.all(
+    userIds.map(async (userId) => {
+      try {
+        return { userId, ...currentHoldings(await repo.listTransactions(userId), today) };
+      } catch {
+        return { userId, held: [] as string[], former: [] as string[] };
+      }
+    }),
+  );
+  const byName = (a: string, b: string): number => a.localeCompare(b);
+  const symbols = [...new Set(held.flatMap((entry) => entry.held))].toSorted(byName);
+  const heldNow = new Set(symbols);
+  const former = [...new Set(held.flatMap((entry) => entry.former))].filter((symbol) => !heldNow.has(symbol)).toSorted(byName);
+  if (symbols.length === 0) return { holdings: [], former };
+  const [profiles, overrides] = await Promise.all([repo.getProfiles(symbols), Promise.all(held.map((entry) => mgmt.getClassificationOverrides(entry.userId, entry.held)))]);
+  const fieldsOf = (symbol: string) => overrides.flatMap((byUser) => (byUser[symbol] === undefined ? [] : [classificationFieldsOf(byUser[symbol])]));
+  const holdings: EarningsHolding[] = [];
+  for (const symbol of symbols) {
+    const profile = profiles[symbol];
+    const fields = fieldsOf(symbol);
+    const assetClass = fields.find((entry) => entry.assetClass !== undefined)?.assetClass ?? profile?.assetClass;
+    const name = fields.find((entry) => entry.name !== undefined)?.name ?? profile?.name;
+    const sector = fields.find((entry) => entry.sector !== undefined)?.sector ?? profile?.sector;
+    const template = kpiTemplateFor({ symbol, assetClass, sector, name, override: fields.find((entry) => entry.kpiTemplate !== undefined)?.kpiTemplate });
+    if (template !== null) holdings.push({ symbol, name: name ?? symbol, template, ...(profile?.currency === undefined ? {} : { currency: profile.currency }), ...(profile?.isin === undefined ? {} : { isin: profile.isin }) });
+  }
+  return { holdings, former };
+}
+
+/** The held companies (`heldCompanies`) and the expected report dates of the calendar. */
+export function createEarningsInputs(items: ItemStore): EarningsInputs {
+  const repo = new ItemRepository(items);
   return {
     async build(today) {
-      const userIds = await users.listUserIds();
-      const held = await Promise.all(
-        userIds.map(async (userId) => {
-          try {
-            return { userId, ...currentHoldings(await repo.listTransactions(userId), today) };
-          } catch {
-            return { userId, held: [] as string[], former: [] as string[] };
-          }
-        }),
-      );
-      const byName = (a: string, b: string): number => a.localeCompare(b);
-      const symbols = [...new Set(held.flatMap((entry) => entry.held))].toSorted(byName);
-      const heldNow = new Set(symbols);
-      const former = [...new Set(held.flatMap((entry) => entry.former))].filter((symbol) => !heldNow.has(symbol)).toSorted(byName);
-      if (symbols.length === 0) return { holdings: [], calendar: {}, former };
-      const [profiles, overrides] = await Promise.all([repo.getProfiles(symbols), Promise.all(held.map((entry) => mgmt.getClassificationOverrides(entry.userId, entry.held)))]);
-      const fieldsOf = (symbol: string) => overrides.flatMap((byUser) => (byUser[symbol] === undefined ? [] : [classificationFieldsOf(byUser[symbol])]));
-      const holdings: EarningsHolding[] = [];
-      for (const symbol of symbols) {
-        const profile = profiles[symbol];
-        const fields = fieldsOf(symbol);
-        const assetClass = fields.find((entry) => entry.assetClass !== undefined)?.assetClass ?? profile?.assetClass;
-        const name = fields.find((entry) => entry.name !== undefined)?.name ?? profile?.name;
-        const sector = fields.find((entry) => entry.sector !== undefined)?.sector ?? profile?.sector;
-        const template = kpiTemplateFor({ symbol, assetClass, sector, name, override: fields.find((entry) => entry.kpiTemplate !== undefined)?.kpiTemplate });
-        if (template !== null) holdings.push({ symbol, name: name ?? symbol, template, ...(profile?.currency === undefined ? {} : { currency: profile.currency }), ...(profile?.isin === undefined ? {} : { isin: profile.isin }) });
-      }
+      const { holdings, former } = await heldCompanies(items, today);
       const wanted = holdings.map((holding) => holding.symbol);
       const events = wanted.length === 0 ? { earnings: [] } : await repo.getCalendarEvents(wanted, addDays(today, -CALENDAR_DAYS_BACK), addDays(today, CALENDAR_DAYS_AHEAD));
       const calendar: Record<string, string[]> = {};

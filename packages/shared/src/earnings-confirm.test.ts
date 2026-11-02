@@ -196,7 +196,7 @@ describe('whyNoEarningsDate with several sources', () => {
     const run = record({ sources: [{ source: 'alphavantage', status: 'ok', reason: '', rows: 4000 }, { source: 'finnhub', status: 'ok', reason: '', rows: 800 }, { source: 'finnhub', status: 'failed', reason: 'x' }] });
     expect(whyNoEarningsDate({ ...base, run, lastOk: run })).toEqual({
       code: 'not-listed',
-      text: 'Not listed by the sources that answered on 2026-11-02: Alpha Vantage: 4000 rows; Finnhub: 800 rows (next 21 days only).',
+      text: 'Not listed by the sources that answered on 2026-11-02: Alpha Vantage: 4000 rows; Finnhub: 800 rows.',
     });
   });
 });

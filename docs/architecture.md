@@ -4226,25 +4226,62 @@ is a projection (previous report + about 91 days)."
 
 | Source | Result |
 |---|---|
-| **Finnhub `GET /calendar/earnings`** ([docs](https://finnhub.io/docs/api/earnings-calendar)) | **Used.** The endpoint is not marked premium; the documented free tier is "1 month of historical earnings and new updates". Fields per row: `symbol`, `date`, `hour` (`bmo` before the open, `amc` after the close, `dmh` during market hours), `epsEstimate`, `epsActual`, `revenueEstimate`, `revenueActual`, `quarter`, `year`; parameters `from`, `to`, `symbol`, `international` (not used: US companies). Auth with the `X-Finnhub-Token` header (the code never puts the key in a URL). Limits ("Rate Limits" in the [API documentation](https://finnhub.io/docs/api)): status 429 when the plan's limit is exceeded and 30 calls a second on every plan; the documentation page does not state the free plan's per-minute figure, and the app makes three calls a day, paced. **No field says a date is confirmed by the company, and none gives a clock time.** The `demo` token is refused (`Invalid API key`), so the answer shape could only be taken from the documentation. |
+| **Finnhub `GET /calendar/earnings`** ([docs](https://finnhub.io/docs/api/earnings-calendar)) | **Used.** The endpoint is not marked premium; the documented free tier is "1 month of historical earnings and new updates". Fields per row: `symbol`, `date`, `hour` (`bmo` before the open, `amc` after the close, `dmh` during market hours), `epsEstimate`, `epsActual`, `revenueEstimate`, `revenueActual`, `quarter`, `year`; parameters `from`, `to`, `symbol`, `international` (not used: US companies). Auth with the `X-Finnhub-Token` header (the code never puts the key in a URL). Limits ("Rate Limits" in the [API documentation](https://finnhub.io/docs/api)): status 429 when the plan's limit is exceeded and 30 calls a second on every plan; 60 a minute is the commonly documented free figure, and the app never exceeds 30 a minute (one call every 2.1 s, one per held company a day). **A window without `symbol` answers 1500 rows at most (verified on 2 Nov 2026), so the app asks per company** (below). **No field says a date is confirmed by the company, and none gives a clock time.** The answer shape was verified with the owner's key on 2 Nov 2026. |
 | **Twelve Data `/earnings_calendar`** ([docs](https://twelvedata.com/docs/fundamentals/earnings-calendar)) | **Not used.** `time` is `Pre Market`, `After Hours` or `Time Not Supplied`; no confirmation flag; it costs **40 API credits per request** against the Basic plan's 8 credits a minute (800 a day) ([pricing](https://twelvedata.com/pricing): "Core API requests: 8 (800 a day)"), so a single request cannot fit the minute window, and the Basic plan is "internal non-display usage" only. The `demo` key answers 403 for this endpoint. |
 | **Alpha Vantage `EARNINGS_CALENDAR`** | Kept, optional. One call, 12 months, `timeOfTheDay` `pre-market`/`post-market`; no confirmation flag; the free key of the owner returns almost nothing (see above). |
 
 No free official source flags a date as confirmed, which is why the app derives it (below). Unofficial endpoints (Nasdaq, Yahoo) are not used.
 
-**Finnhub in the job.** `FinnhubEarnings` (`packages/prices/src/providers/finnhub.ts`, an `EarningsSource`) asks for today..today+21 days in
-**three weekly calls** (`finnhubChunks`), paced by a token bucket, only for tracked US tickers and curated aliases (`FOO.DE` is `CRM`); a bare
-ticker of another exchange is not matched because Finnhub has no company names to vouch with. `refreshCalendar` reads Alpha Vantage and
-Finnhub one after the other, each its own outcome (`EarningsSourceRun`: `ok`, `provider-limited`, `no-key`, `budget-exhausted`,
-`rate-limited`, `failed`); the budget is `CALENDAR_FINNHUB_DAILY_CALLS` (default 3, the calls of one run; a manual run does not ask the
-budget), the key `FINNHUB_API_KEY` is an **optional secret**: without it the source is `no-key`, nothing is called and nothing fails. The Worker
-makes about 6 subrequests more per daily run (limit 50 per invocation).
+**Finnhub in the job: one call per held company (2 Nov 2026).** The first version asked for the whole calendar in three weekly windows
+(`from..to`). The owner's live key showed that this cannot work: a window answers **exactly 1500 rows at most** (the first week of a season,
+1 to 8 Nov, came back cut off at 1500; the next two weeks returned 1245 and 388), so held companies were missing (4 of about 17 appeared).
+`FinnhubEarnings` (`packages/prices/src/providers/finnhub.ts`) now asks **for one company at a time**:
+`GET /calendar/earnings?symbol=AMZN&from=<today - 3 days>&to=<today + 90 days>` (header `X-Finnhub-Token` only), which is exact: AMZN gave
+`[{date: 2026-10-29, hour: amc, quarter: 3}]`, KMB 2026-11-05 `bmo`, NVO 2026-11-04 `bmo`, APP 2026-11-04 `amc` (the 91-day projections were
+days off, e.g. KMB 03-11). A company without a date in the window gets `{"earningsCalendar":[]}`.
+
+* *Which companies.* Only the **companies held today**: `PriceJobDeps.heldCompanies` (the Cloudflare app implements it with `currentHoldings`
+  plus the earnings eligibility of `@portfolio/earnings`, `heldCompanies(items, today)` in `earnings.ts`; without it, every tracked symbol that
+  is not crypto). Funds, ETFs, crypto and watchlist-only symbols are not asked; a US ticker and a curated alias (`FOO.DE` is `CRM`, asked once
+  under `CRM`, the answer is stored for `FOO.DE`) are; a bare ticker of another exchange is not (`finnhubTargets`), because Finnhub has no
+  company names to vouch with.
+* *Which rows.* `pickRows`: the **next upcoming row** (the first dated today or later) and the **latest row of the last 3 days** (a company that
+  has just reported is told from one that is due). `year` and `quarter` give a fiscal period (`year * 4 + quarter`): an upcoming row whose
+  period is not newer than the one just reported is a stale duplicate and is ignored; a row without a period passes.
+* *Steps and pacing.* The earnings phase of `refreshCalendar` is resumable: the first step reads Alpha Vantage (one call) and makes the first
+  Finnhub call; every later step makes **one fetch** for the company at the head of the queue and returns `{done: false, delayMs: 2100}`. The
+  queue, the answers so far and Alpha Vantage's outcome live in the job's cursor (`progress`), so the step uses 1 of the 50 subrequests of an
+  invocation (no retries: `maxRetries: 0`, a retry would be an unseen extra call) and a Durable Object alarm per step. 2.1 s between calls is
+  at most **29 calls in any minute**; on top, a persisted per-minute counter (`MinuteQuota`, `USAGE/finnhub#minute`, limit 30) is shared by every
+  step and run: a step that finds the minute spent waits for the next minute (`FinnhubPacingError`, no request). The plan's documented 60 a
+  minute and 30 a second are never approached.
+* *Order and rotation.* `planFinnhub`: companies with a stored date **within 7 days first** (asked in every run), then the ones **asked least
+  recently** (`CAL#STATE.finnhubCheckedAt`, set when Finnhub answered; never asked first; a company whose call failed keeps its old stamp, so it
+  is retried first). The daily run asks every held company, so each is refreshed at least every 24 hours; with a smaller allowance the queue
+  is cut to `CALENDAR_FINNHUB_DAILY_CALLS` (default **30**) and the rest wait, first in line the next day.
+* *Budget.* One call of the calendar's ledger (`CALENDAR/BUDGET#finnhub`, shared with the other providers' mechanism) per company, token
+  `{run stamp}#earnings-finnhub#{ticker}` so a redelivered step does not pay twice. A manual run pays from the same allowance (what is left of the
+  day, most urgent first). Without a key the source is `no-key`, nothing is called and nothing fails. At most about 20-30 calls a day.
+* *Failures.* **429** (or a "limit reached" body): the run stops, the source is `rate-limited`, the companies not reached are `pending`, and a
+  persisted block (`USAGE/BLOCK#finnhub`, 10 minutes) stops every later call. **401, 403 or an "Invalid API key" body**: the run stops after
+  that call, the source is `refused` and the Diagnostics say `Finnhub refused the request (...): check the FINNHUB_API_KEY secret (it must be
+  a valid key)`; the key is sent in the header only and is never in a URL, a log or a stored record. Any other failure (5xx, a body that is not
+  a calendar) costs that company only: `failed`, the last error is kept, the next company is asked.
+* *Diagnostics.* The source's entry in the run record (`EarningsSourceRun`) has `companies` (asked or waiting), `withDate`, one `checks[]`
+  entry per company (`date`, `none`, `failed`, `rate-limited`, `refused`, `pending`) and the last error as `reason`. The Earnings dates card
+  shows `Finnhub: 14 of 17 companies have a date` with the per-company list, and a company without a date says why (`none`: asked and Finnhub
+  has no upcoming date yet; `pending`: not reached, next in line; `failed`).
+
+`refreshCalendar` reads Alpha Vantage and Finnhub, each its own outcome (`EarningsSourceRun`: `ok`, `provider-limited`, `no-key`,
+`budget-exhausted`, `rate-limited`, `refused`, `failed`); the key `FINNHUB_API_KEY` is an **optional secret**. The 21 days of the confirmation
+window are unchanged.
 
 **Merging and conflicts** (`jobs/earnings-merge.ts`). The same date from both sources is one event (Alpha Vantage's fiscal period and currency,
 Finnhub's time of day and EPS estimate where Alpha Vantage has none, `source: finnhub`). A different date of the same quarter (less than 45 days
 apart) is a conflict: the date already confirmed in the store wins, otherwise Finnhub's (the near-term calendar; Alpha Vantage lists up to a
 year ahead, much of it an estimate). The loser is not stored; the run record lists it (`conflicts`, shown on the Diagnostics card). A stored
-date is removed only when a source that covers it no longer lists it (Alpha Vantage: any date; Finnhub: the next 21 days).
+date is removed only when a source that covers it no longer lists it (Alpha Vantage: any date; Finnhub: a date within the next 21 days of a company it
+gave another date for; a company for which it has no date removes nothing). The merge and the confirmation rules are unchanged by the per-company calls.
 
 **Confirmation rules** (`earningsConfirmation`, pure, in `@portfolio/shared`; the basis is the event's `basis` text and ends its description):
 
@@ -4279,10 +4316,10 @@ newest release is older than 60 days, and a symbol whose release was found but w
 earnings come from Finnhub with different read counts (Confirmed and Scheduled samples) and one exact release time.
 
 **Owner steps.** Create a free key at finnhub.io (Dashboard -> API key), then `pnpm exec wrangler secret put FINNHUB_API_KEY` in `packages/cloudflare-app`, paste it, and press "Refresh earnings dates now" on Settings -> Diagnostics ->
-Earnings dates. The first run lists dates for the next 21 days with their category; the second day's read confirms those within 21 days. Dates further out stay *Scheduled* or *Projected*.
+Earnings dates. The first run asks Finnhub about every held company (about two seconds apart, so a minute or so for 20 companies) and stores the next date with its category; the second day's read confirms those within 21 days. Dates further out stay *Scheduled* or *Projected*.
 
 **Tests.** `pnpm --filter @portfolio/shared test` (`earnings-time.test.ts`: both zones across the 25-10/01-11 and 08-03/29-03 gaps, categories, exact times; `earnings-confirm.test.ts`: the rules, stale dates, `.ics`, the conclusion),
-`@portfolio/prices` (`earnings-finnhub.test.ts`: the documented response shape, window, merge, conflicts, reads, budget, `provider-limited`; `refresh-calendar.test.ts`), `@portfolio/earnings` (`select.test.ts`, `jobs.test.ts`: projected mode, dropped summary job),
-`@portfolio/cloudflare-app` (`calendar-dates.test.ts`, `prices-status.test.ts`; Node and workerd in `test/suite.ts`: Finnhub on and off), `@portfolio/web` (`calendarViews.test.tsx`, `EarningsDatesCard.test.tsx`), Playwright `e2e/calendar.spec.ts`.
-Only the live deployment can show: the real size and shape of Finnhub's answer for the owner's key (the code treats a non-calendar answer as a failure), whether Alpha Vantage ever returns the full calendar for that key, and the real
+`@portfolio/prices` (`providers/finnhub.test.ts`: the per-company request, the verified answers, the empty list, the rows kept, 429/401/403 bodies, pacing; `jobs/earnings-finnhub.test.ts`: one call per step, order and rotation, budget, failures, reads, stale dates; `jobs/earnings-merge.test.ts`; `refresh-calendar.test.ts`), `@portfolio/earnings` (`select.test.ts`, `jobs.test.ts`: projected mode, dropped summary job),
+`@portfolio/cloudflare-app` (`calendar-dates.test.ts`, `prices-status.test.ts`; Node and workerd in `test/suite.ts`: Finnhub on (per-company calls, held US companies only) and off), `@portfolio/web` (`calendarViews.test.tsx`, `EarningsDatesCard.test.tsx`), Playwright `e2e/calendar.spec.ts`.
+Only the live deployment can show: that the free key keeps answering per-company requests (the request was verified from a laptop, not from the Worker), how long a daily run takes there, whether Alpha Vantage ever returns the full calendar for that key, and the real
 times at which companies release.

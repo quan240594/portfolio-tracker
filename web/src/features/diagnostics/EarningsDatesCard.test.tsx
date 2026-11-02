@@ -131,6 +131,49 @@ describe('Earnings dates card', () => {
     expect(within(section).getByText('Sources disagreed: AMZN (kept Finnhub 05-11-2026, dropped Alpha Vantage 12-11-2026).')).toBeInTheDocument();
   });
 
+  it('shows how many held companies Finnhub has a date for, the outcome of each, and the last error', async () => {
+    const finnhub = {
+      source: 'finnhub' as const,
+      status: 'ok' as const,
+      reason: 'finnhub: HTTP 500 for [url]',
+      rows: 3,
+      companies: 4,
+      withDate: 2,
+      checks: [
+        { symbol: 'KMB', result: 'date' as const, date: '2026-11-05' },
+        { symbol: 'GOOGL', result: 'none' as const },
+        { symbol: 'MMM', result: 'failed' as const, reason: 'finnhub: HTTP 500 for [url]' },
+        { symbol: 'ABT', result: 'pending' as const },
+      ],
+    };
+    serve(earningsDates({ lastRun: earningsRun({ sources: [{ source: 'alphavantage', status: 'no-key', reason: '' }, finnhub] }) }));
+    const section = await card();
+    const details = within(section).getByText('Finnhub: 2 of 4 companies have a date').closest('details')!;
+    expect(details.closest('li')).toHaveTextContent('Finnhub: read; last error: finnhub: HTTP 500 for [url]');
+    expect(within(details).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['KMB: date 05-11-2026', 'GOOGL: no date yet', 'MMM: failed (finnhub: HTTP 500 for [url])', 'ABT: not asked in this run']);
+  });
+
+  it('says a refused key was refused, and what a rate-limited company is', async () => {
+    const finnhub = {
+      source: 'finnhub' as const,
+      status: 'refused' as const,
+      reason: 'finnhub: HTTP 401: the key was refused or has no access to the earnings calendar',
+      companies: 2,
+      withDate: 0,
+      checks: [
+        { symbol: 'KMB', result: 'refused' as const, reason: 'finnhub: HTTP 401' },
+        { symbol: 'NVO', result: 'rate-limited' as const },
+      ],
+    };
+    const text = 'No provider date source is working. Finnhub refused the request (finnhub: HTTP 401): check the FINNHUB_API_KEY secret (it must be a valid key).';
+    serve(earningsDates({ conclusion: { kind: 'broken', text }, lastRun: earningsRun({ status: 'failed', sources: [{ source: 'alphavantage', status: 'no-key', reason: '' }, finnhub] }) }));
+    const section = await card();
+    expect(section.querySelector('[data-conclusion]')).toHaveTextContent('check the FINNHUB_API_KEY secret');
+    expect(within(section).getByText('Finnhub: 0 of 2 companies have a date').closest('li')).toHaveTextContent('Finnhub: refused the key (finnhub: HTTP 401: the key was refused or has no access to the earnings calendar)');
+    expect(within(section).getByText('KMB: refused the key (finnhub: HTTP 401)')).toBeInTheDocument();
+    expect(within(section).getByText('NVO: rate-limited')).toBeInTheDocument();
+  });
+
   it('shows the date kind and the release time in both zones for each company', async () => {
     const confirmed = heldDate({ symbol: 'AMZN', name: 'Amazon', next: { date: '2026-11-05', source: 'scheduled', status: 'CONFIRMED', timeOfDay: 'AMC', releaseText: 'After the close, typically ~16:05 ET = ~22:05 Amsterdam' } });
     const scheduled = heldDate({ symbol: 'KO', name: 'Coca-Cola', next: { date: '2026-11-12', source: 'scheduled', status: 'ESTIMATED', timeOfDay: 'unknown', releaseText: 'Time not announced' } });
@@ -152,7 +195,7 @@ describe('Earnings dates card', () => {
     const user = userEvent.setup();
     const section = await card();
     await user.click(within(section).getByRole('button', { name: 'Refresh earnings dates now' }));
-    expect(await within(section).findByText(/Queued\. The job runs within a minute/)).toBeInTheDocument();
+    expect(await within(section).findByText(/Queued\. The job starts within a minute and then asks Finnhub about one held company every couple of seconds/)).toBeInTheDocument();
     expect(refreshes).toEqual(['asked']);
   });
 

@@ -239,7 +239,7 @@ describe('parity bookkeeping', () => {
   });
 
   it('reads the calendar settings with the Python defaults', () => {
-    expect(parseCalendarSettings({})).toEqual({ earningsHorizon: '12month', alphavantageDailyCalls: 1, finnhubDailyCalls: 3, eodhdDailyCalls: 8, recheckDays: 7, refreshDividends: true, splitLookbackDays: 90 });
+    expect(parseCalendarSettings({})).toEqual({ earningsHorizon: '12month', alphavantageDailyCalls: 1, finnhubDailyCalls: 30, eodhdDailyCalls: 8, recheckDays: 7, refreshDividends: true, splitLookbackDays: 90 });
   });
 
   it('keeps the store untouched by item builders', () => {

@@ -12,7 +12,7 @@ export interface ApiKeys {
   eodhd?: string;
   coingecko?: string;
   alphavantage?: string;
-  /** Optional: the free Finnhub key that gives dated, time-of-day earnings for the next 21 days. */
+  /** Optional: the free Finnhub key that gives dated, time-of-day earnings of the held companies (one call per company). */
   finnhub?: string;
 }
 
@@ -20,7 +20,7 @@ export interface CalendarSettings {
   earningsHorizon: EarningsHorizon;
   /** Alpha Vantage calls a day for the earnings calendar (one call serves every tracked ticker). */
   alphavantageDailyCalls: number;
-  /** Finnhub calls a day for the earnings calendar (one run makes three: one per week of the 21-day window). */
+  /** Finnhub calls a day for the earnings calendar: one per held company and run, so a run asks at most this many companies (the least recently asked first). */
   finnhubDailyCalls: number;
   /** EODHD calls a day for splits and dividends (of the free plan's 20, shared with the quote refresh and enrichment). */
   eodhdDailyCalls: number;
@@ -46,7 +46,7 @@ export interface PricesConfig {
 export const DEFAULT_CALENDAR_SETTINGS: CalendarSettings = {
   earningsHorizon: '12month',
   alphavantageDailyCalls: 1,
-  finnhubDailyCalls: 3,
+  finnhubDailyCalls: 30,
   eodhdDailyCalls: 8,
   recheckDays: 7,
   refreshDividends: true,

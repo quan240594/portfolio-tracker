@@ -20,6 +20,11 @@ export interface PriceJobDeps extends MarketDataDeps {
    * enrichment never ran (keys set later, a sync without new transactions) would otherwise wait for the next event. Absent = off.
    */
   enqueueEnrichment?: (symbols: readonly string[]) => Promise<void>;
+  /**
+   * The companies held today (open positions that report quarterly results: no funds, ETFs or crypto): the ones the per-company
+   * Finnhub earnings calls are made for. Absent = every tracked symbol that is not crypto.
+   */
+  heldCompanies?: () => Promise<readonly string[]>;
 }
 
 /** What one step works with: providers around a budgeted `fetch`, the repository and the logger. */

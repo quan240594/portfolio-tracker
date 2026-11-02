@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { nextEarningsEvents } from './calendar.js';
 import {
   buildEarningsDatesReport,
+  companiesSummary,
+  earningsDatesConclusion,
   earningsDatesSchema,
   parseEarningsRun,
   whyNoEarningsDate,
   type EarningsDatesInput,
   type EarningsRunRecord,
+  type EarningsSourceRun,
   type RefreshReport,
 } from './earnings-dates.js';
 import type { Transaction } from './types.js';
@@ -86,6 +89,76 @@ describe('whyNoEarningsDate', () => {
   it('does not lean on a successful run from before the holding was added', () => {
     const answer = why({ trackedAt: '2026-10-28T05:00:00.000Z', run: run({ status: 'failed', reason: 'x', at: '2026-10-29T04:30:00.000Z' }), lastOk: run() });
     expect(answer.code).toBe('failed');
+  });
+});
+
+describe('a source that is asked company by company (Finnhub)', () => {
+  const finnhub = (over: Partial<EarningsSourceRun> = {}): EarningsSourceRun => ({
+    source: 'finnhub',
+    status: 'ok',
+    reason: '',
+    rows: 3,
+    events: 2,
+    companies: 4,
+    withDate: 2,
+    checks: [
+      { symbol: 'KMB', result: 'date', date: '2026-11-05' },
+      { symbol: 'GOOGL', result: 'none' },
+      { symbol: 'ABT', result: 'pending' },
+      { symbol: 'MMM', result: 'failed', reason: 'finnhub: HTTP 500 for [url]' },
+    ],
+    ...over,
+  });
+  const withSources = (...sources: EarningsSourceRun[]) => run({ sources: [{ source: 'alphavantage', status: 'no-key', reason: '' }, ...sources] });
+
+  it('keeps its counts and the outcome of each company when the record is read back, and drops what is damaged', () => {
+    const record = withSources(finnhub());
+    expect(parseEarningsRun({ PK: 'CALENDAR', SK: 'EARNINGS#LASTRUN', ...record })).toEqual(record);
+    const damaged = parseEarningsRun({ ...record, sources: [{ source: 'finnhub', status: 'ok', reason: '', companies: 'many', withDate: -1, checks: [{ symbol: 'X', result: 'maybe' }] }] });
+    expect(damaged?.sources).toEqual([{ source: 'finnhub', status: 'ok', reason: '' }]);
+  });
+
+  it('reaches the web client through the response schema with its counts and checks', () => {
+    const record = withSources(finnhub());
+    const input = { now: NOW, held: [{ symbol: 'KMB', name: 'Kimberly-Clark' }], tracked: new Map([['KMB', null]]), next: new Map(), run: record, lastOk: record, budget: null, refresh: AVAILABLE };
+    const parsed = earningsDatesSchema.parse(buildEarningsDatesReport(input));
+    expect(parsed.lastRun?.sources?.[1]).toEqual(record.sources![1]);
+  });
+
+  it('says "14 of 17 companies have a date" for it and nothing for a source that lists every company', () => {
+    expect(companiesSummary(finnhub({ companies: 17, withDate: 14 }))).toBe('Finnhub: 14 of 17 companies have a date');
+    expect(companiesSummary(finnhub({ companies: 1, withDate: undefined }))).toBe('Finnhub: 0 of 1 company has a date');
+    expect(companiesSummary({ source: 'alphavantage', status: 'ok', reason: '', rows: 5000 })).toBeNull();
+  });
+
+  it.each([
+    ['GOOGL', 'no-upcoming-date', 'Finnhub was asked about it on 2026-10-28 and has no upcoming date for it yet.'],
+    ['ABT', 'budget', 'Finnhub was not asked about it in the run of 2026-10-28: the daily allowance or the run ended first. It is next in line.'],
+    ['MMM', 'failed', 'Finnhub could not look it up on 2026-10-28: finnhub: HTTP 500 for [url].'],
+  ])('explains why %s has no date', (symbol, code, text) => {
+    expect(why({ symbol, name: symbol, run: withSources(finnhub()) })).toEqual({ code, text });
+  });
+
+  it('explains a company that was refused or rate-limited, and one that is not on the list', () => {
+    const refused = finnhub({ checks: [{ symbol: 'GOOGL', result: 'refused', reason: 'finnhub: HTTP 401' }, { symbol: 'ABT', result: 'rate-limited' }] });
+    expect(why({ run: withSources(refused) })).toEqual({ code: 'failed', text: 'Finnhub refused the request on 2026-10-28: finnhub: HTTP 401.' });
+    expect(why({ symbol: 'ABT', run: withSources(refused) })).toEqual({ code: 'rate-limited', text: "Finnhub's rate limit was reached before it was looked up on 2026-10-28." });
+    expect(why({ symbol: 'ZZZ', run: withSources(finnhub()) }).text).toBe('Not listed by the sources that answered on 2026-10-28: Finnhub: 2 of 4 companies have a date.');
+  });
+
+  it('a refused key is named in the verdict, with what to check', () => {
+    const conclusion = earningsDatesConclusion(withSources(finnhub({ status: 'refused', reason: 'finnhub: HTTP 401: the key was refused or has no access to the earnings calendar' })));
+    expect(conclusion?.kind).toBe('broken');
+    expect(conclusion?.text).toContain('Finnhub refused the request (finnhub: HTTP 401: the key was refused or has no access to the earnings calendar): check the FINNHUB_API_KEY secret (it must be a valid key).');
+    expect(earningsDatesConclusion(run({ sources: [{ source: 'alphavantage', status: 'refused', reason: '' }, finnhub()] }))?.text).toContain('check the ALPHAVANTAGE_API_KEY secret');
+  });
+
+  it('a source that found its daily allowance spent is no problem while another source delivers, and is one when none does', () => {
+    const spent = withSources(finnhub());
+    spent.sources![0] = { source: 'alphavantage', status: 'budget-exhausted', reason: '' };
+    expect(earningsDatesConclusion(spent)).toEqual({ kind: 'ok', text: 'Dates come from Finnhub.' });
+    spent.sources![1] = finnhub({ status: 'failed', reason: 'boom' });
+    expect(earningsDatesConclusion(spent)?.text).toContain('Alpha Vantage: the daily allowance for the calendar was already used.');
   });
 });
 

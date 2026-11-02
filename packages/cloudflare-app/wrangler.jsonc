@@ -4,7 +4,7 @@
 //
 // Optional Worker secrets of the price service (`wrangler secret put <NAME>`; none is needed to deploy, a missing one only switches
 // that market-data source off and `GET /api/prices/status` says so): TWELVEDATA_API_KEY, EODHD_API_KEY, COINGECKO_API_KEY,
-// ALPHAVANTAGE_API_KEY, FINNHUB_API_KEY (free key from finnhub.io: earnings dates for the next 21 days with before/after-the-market timing). Optional plain variables (defaults in packages/prices/src/config.ts): COINGECKO_COIN_IDS, EODHD_DAILY_LIMIT,
+// ALPHAVANTAGE_API_KEY, FINNHUB_API_KEY (free key from finnhub.io: earnings dates of the companies you hold, one call each, with before/after-the-market timing). Optional plain variables (defaults in packages/prices/src/config.ts): COINGECKO_COIN_IDS, EODHD_DAILY_LIMIT,
 // ALPHAVANTAGE_DAILY_LIMIT, EU_REFRESH_HOURS, FX_HISTORY_START and the CALENDAR_* settings; add them to "vars" below to change them.
 //
 // Company logos (see docs/architecture.md, "Company logos"): optional variables LOGO_SOURCES (default "t212,logodev,google,duckduckgo", "off" = none; "google,duckduckgo" switches the

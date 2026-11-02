@@ -191,7 +191,7 @@ export class FakePrices {
   readonly calls: string[] = [];
   /** The `horizon` of every Alpha Vantage `EARNINGS_CALENDAR` call. */
   readonly calendarRequests: string[] = [];
-  /** `from..to` of every Finnhub `/calendar/earnings` call. */
+  /** `symbol from..to` of every Finnhub `/calendar/earnings` call. */
   readonly finnhubRequests: string[] = [];
   private finnhubDate: string | undefined;
 
@@ -238,14 +238,15 @@ export class FakePrices {
     'finnhub.io': (url, request) => {
       if (request.header('x-finnhub-token') !== FINNHUB_KEY || url.search.includes(FINNHUB_KEY)) return { status: 401, json: { error: 'Invalid API key.' } };
       if (url.pathname !== '/api/v1/calendar/earnings') return { status: 404, json: { error: 'not available' } };
+      const symbol = url.searchParams.get('symbol') ?? '';
       const from = url.searchParams.get('from') ?? '';
       const to = url.searchParams.get('to') ?? '';
-      this.finnhubRequests.push(`${from}..${to}`);
-      // The announced date does not move with the clock: a later read lists the same date.
+      this.finnhubRequests.push(`${symbol} ${from}..${to}`);
+      // The announced date does not move with the clock: a later read lists the same date. Only AAPL has one; any other company gets the empty list.
       this.finnhubDate ??= this.earningsDate();
       const date = this.finnhubDate;
-      const row = (symbol: string, hour: string) => ({ date, epsActual: null, epsEstimate: 2.2, hour, quarter: 1, revenueActual: null, revenueEstimate: 90_000_000_000, symbol, year: 2026 });
-      return { status: 200, json: { earningsCalendar: date >= from && date <= to ? [row('AAPL', 'amc'), row('NOHOLD', 'bmo')] : [] } };
+      const row = { date, epsActual: null, epsEstimate: 2.2, hour: 'amc', quarter: 1, revenueActual: null, revenueEstimate: 90_000_000_000, symbol, year: 2026 };
+      return { status: 200, json: { earningsCalendar: symbol === 'AAPL' && date >= from && date <= to ? [row] : [] } };
     },
     'api.frankfurter.dev': (url) => {
       const range = /\/v1\/(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})$/.exec(url.pathname);
