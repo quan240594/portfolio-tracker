@@ -7,6 +7,7 @@ const CRLF = '\r\n';
 const PRODID = '-//portfolio-tracker//Calendar//EN';
 const UID_DOMAIN = 'portfolio-tracker';
 const encoder = new TextEncoder();
+const EXACT_EVENT_MS = 3_600_000;
 
 /** Escapes a TEXT value: backslash, semicolon, comma and line breaks (RFC 5545 §3.3.11). */
 export function escapeIcsText(value: string): string {
@@ -55,8 +56,20 @@ function descriptionOf(e: CalendarEvent, baseCurrency: string): string {
   if (e.exDate && e.type !== 'EX_DIVIDEND') lines.push(`Ex-dividend date: ${e.exDate}`);
   if (e.payDate && e.type !== 'DIVIDEND_PAY') lines.push(`Payment date: ${e.payDate}`);
   if (e.expectedAmount !== undefined) lines.push(`${e.status === 'PAID' ? 'Received' : 'Expected'} (net): ${baseCurrency} ${roundTo(e.expectedAmount).toFixed(2)}`);
+  if (e.release !== undefined) lines.push(`Release time: ${e.release.text}`);
+  if (e.basis !== undefined) lines.push(`Date: ${e.basis}`);
   lines.push(`Status: ${e.status.toLowerCase()}`, `Source: ${e.source}`);
   return lines.join('\n');
+}
+
+/** An earnings release with an exact instant is a timed event (UTC, one hour long); everything else, including a typical time, stays all-day. */
+function startAndEnd(e: CalendarEvent): string[] {
+  if (e.release?.kind === 'exact' && e.release.at !== undefined) {
+    const start = new Date(e.release.at);
+    return [`DTSTART:${icsTimestamp(start)}`, `DTEND:${icsTimestamp(new Date(start.getTime() + EXACT_EVENT_MS))}`];
+  }
+  // All-day events end on the following day (DTEND is exclusive).
+  return [`DTSTART;VALUE=DATE:${compactDate(e.date)}`, `DTEND;VALUE=DATE:${compactDate(addIsoDays(e.date, 1))}`];
 }
 
 function eventLines(e: CalendarEvent, stamp: string, baseCurrency: string): string[] {
@@ -64,9 +77,7 @@ function eventLines(e: CalendarEvent, stamp: string, baseCurrency: string): stri
     'BEGIN:VEVENT',
     `UID:${e.id}@${UID_DOMAIN}`,
     `DTSTAMP:${stamp}`,
-    `DTSTART;VALUE=DATE:${compactDate(e.date)}`,
-    // All-day events end on the following day (DTEND is exclusive).
-    `DTEND;VALUE=DATE:${compactDate(addIsoDays(e.date, 1))}`,
+    ...startAndEnd(e),
     `SUMMARY:${escapeIcsText(summaryOf(e))}`,
     `DESCRIPTION:${escapeIcsText(descriptionOf(e, baseCurrency))}`,
     `CATEGORIES:${escapeIcsText(CALENDAR_TYPE_LABELS[e.type])}`,

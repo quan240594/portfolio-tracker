@@ -12,6 +12,7 @@
  */
 import { addIsoDays, daysBetween, DAYS_PER_YEAR, roundTo, transactionAmount } from './analytics.js';
 import { calculatePassiveIncome, paymentsPerYear, type PassiveIncome } from './analytics-income.js';
+import { earningsReleaseTime, type EarningsReleaseTime } from './earnings-time.js';
 import { FxTimeline } from './fx.js';
 import { buildPositions, calculatePortfolio, HELD_DUST_QUANTITY, type Position } from './portfolio.js';
 import type { DividendEvent, FxDay, FxRates, InstrumentProfile, Quote, Transaction } from './types.js';
@@ -26,8 +27,8 @@ export type CalendarStatus = (typeof CALENDAR_STATUSES)[number];
 export const CALENDAR_SCOPES = ['holdings', 'watchlist', 'all'] as const;
 export type CalendarScope = (typeof CALENDAR_SCOPES)[number];
 
-export const CALENDAR_EARNINGS_TIMES = ['BMO', 'AMC', 'unknown'] as const;
-/** Before market open, after market close, or not reported by the data source. */
+export const CALENDAR_EARNINGS_TIMES = ['BMO', 'AMC', 'DMH', 'unknown'] as const;
+/** Before market open, after market close, during market hours, or not reported by the data source. */
 export type CalendarEarningsTime = (typeof CALENDAR_EARNINGS_TIMES)[number];
 
 export type CalendarOrigin = 'HOLDING' | 'WATCHLIST';
@@ -52,9 +53,10 @@ export const CALENDAR_CHART_LOOKBACK_MONTHS = 3;
 
 export const CALENDAR_COVERAGE = {
   earnings:
-    'Upcoming earnings dates come from the free Alpha Vantage earnings calendar (one call a day for the next 12 months); European listings are matched to their US ticker where one exists. ' +
-    'Reported results come from the earnings summaries and link to them. Where no date is announced, the next date is projected from the previous report (about 91 days later) and marked Estimated; a projected date that has just passed (up to 14 days) without a stored release shows as due today. ' +
-    'Provider dates stay estimates until the day has passed.',
+    'Upcoming earnings dates come from the free Finnhub earnings calendar (the next 21 days, with the before/after-the-market category; needs a free API key) and the free Alpha Vantage earnings calendar (the next 12 months); European listings are matched to their US ticker where one exists. ' +
+    'Reported results come from the earnings summaries and link to them. Where no date is listed, the next date is projected from the previous report (about 91 days later) and marked Projected; a projected date that has just passed (up to 14 days) without a stored release shows as due today. ' +
+    'No free source marks a date as confirmed, so a listed date is Scheduled until it is at most 21 days away and the provider has listed the same date on two separate days; then it shows as Confirmed, with that basis in its description. ' +
+    'The release time is given in the exchange\'s time and in Amsterdam time: an exact time when a source gives one, otherwise the usual time for the category (before the open, after the close), marked with a tilde and the word "typically".',
   corporateActions:
     'Stock splits and reverse splits (EODHD, refreshed on a rotating daily budget) and the splits you record yourself. ' +
     'Share adjustments that EODHD reports with an irregular ratio (stock dividends, spin-off adjustments) show as corporate actions. ' +
@@ -84,8 +86,18 @@ export interface StoredEarningsEvent {
   /** Currency of `epsEstimate`. */
   currency?: string;
   timeOfDay?: CalendarEarningsTime;
+  /** An exact release instant (ISO 8601) when a source gives one; none of the free sources do. */
+  releaseAt?: string;
+  /** Who gave `timeOfDay` / `releaseAt` (`alphavantage`, `finnhub`). */
+  timeSource?: string;
   /** True when the source states the date is confirmed by the company (none of the free sources do). */
   confirmed?: boolean;
+  /** The source that flagged the date as confirmed. */
+  confirmedBy?: string;
+  /** First and last day (UTC) a provider listed this very date, and on how many separate days it did; a changed date is a new item, so the count starts again. */
+  firstSeenOn?: string;
+  lastSeenOn?: string;
+  reads?: number;
   source: string;
   updatedAt?: string;
 }
@@ -174,6 +186,10 @@ export interface CalendarEvent {
   fiscalPeriodEnd?: string;
   epsEstimate?: number;
   timeOfDay?: CalendarEarningsTime;
+  /** EARNINGS only: when the company releases, in its market time and in Amsterdam time. */
+  release?: EarningsReleaseTime;
+  /** EARNINGS only: why the date is Confirmed or only Scheduled (a one-line, honest basis). */
+  basis?: string;
   /** EARNINGS only. */
   earningsPhase?: CalendarEarningsPhase;
   /** Fiscal period of a reported release, as the company calls it ("Q3 2026"). */
@@ -565,13 +581,53 @@ function estimatedDividends(ctx: Ctx, stored: readonly DividendEvent[]): Calenda
 
 // --- Earnings, splits --------------------------------------------------------------------------------
 
-function describeEarnings(e: StoredEarningsEvent): string {
+/** Provider dates this close (days) are confirmed when the provider has listed the same date on enough separate days. */
+export const EARNINGS_CONFIRM_WINDOW_DAYS = 21;
+/** Separate days (UTC) the provider must have listed the very same date. */
+export const EARNINGS_CONFIRM_MIN_READS = 2;
+
+const dayMonthYear = (iso: string): string => `${iso.slice(8)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}`;
+
+const PROVIDER_NAMES: Readonly<Record<string, string>> = { alphavantage: 'Alpha Vantage', finnhub: 'Finnhub' };
+const providerName = (source: string): string => PROVIDER_NAMES[source] ?? source;
+
+export interface EarningsConfirmation {
+  confirmed: boolean;
+  /** One honest line: what the status rests on, or what is still missing. */
+  basis: string;
+}
+
+/**
+ * Whether a provider's earnings date counts as confirmed. No free source flags a date as confirmed by the company, so the rules are:
+ * (i) the source flags it (`confirmed`); (ii) the date is at most {@link EARNINGS_CONFIRM_WINDOW_DAYS} days ahead and the provider has
+ * listed this very date on at least {@link EARNINGS_CONFIRM_MIN_READS} separate days (a changed date is a new item and starts again);
+ * (iii) the date has passed. Everything else stays Scheduled, with the reason in `basis`.
+ */
+export function earningsConfirmation(e: StoredEarningsEvent, today: string): EarningsConfirmation {
+  if (e.confirmed) return { confirmed: true, basis: `Flagged as confirmed by ${providerName(e.confirmedBy ?? e.source)}.` };
+  if (e.date <= today) return { confirmed: true, basis: 'The date has passed.' };
+  const ahead = daysBetween(today, e.date);
+  const reads = e.reads ?? 0;
+  if (ahead > EARNINGS_CONFIRM_WINDOW_DAYS) {
+    return { confirmed: false, basis: `Provider date, ${ahead} days ahead: it can be confirmed from ${EARNINGS_CONFIRM_WINDOW_DAYS} days ahead, once the provider has listed the same date on ${EARNINGS_CONFIRM_MIN_READS} separate days.` };
+  }
+  if (reads >= EARNINGS_CONFIRM_MIN_READS) {
+    const since = e.firstSeenOn === undefined ? '' : `, first seen ${dayMonthYear(e.firstSeenOn)}`;
+    return { confirmed: true, basis: `${providerName(e.source)} has listed this date on ${reads} separate days${since}, and it is ${ahead} days ahead.` };
+  }
+  return { confirmed: false, basis: `Provider date, listed on ${Math.max(reads, 1)} day so far: it is confirmed once the provider has listed the same date on ${EARNINGS_CONFIRM_MIN_READS} separate days.` };
+}
+
+function releaseOf(e: Pick<StoredEarningsEvent, 'symbol' | 'date' | 'timeOfDay' | 'releaseAt' | 'timeSource' | 'source'>): EarningsReleaseTime {
+  const known = e.timeOfDay !== undefined && e.timeOfDay !== 'unknown';
+  return earningsReleaseTime({ symbol: e.symbol, date: e.date, timeOfDay: e.timeOfDay, releaseAt: e.releaseAt, timeSource: e.timeSource ?? (known || e.releaseAt !== undefined ? e.source : undefined) });
+}
+
+function describeEarnings(e: StoredEarningsEvent, release: EarningsReleaseTime, basis: string): string {
   const parts = ['Earnings report'];
   if (e.fiscalPeriodEnd) parts.push(`for the period ending ${e.fiscalPeriodEnd}`);
   if (e.epsEstimate !== undefined) parts.push(['· EPS estimate', e.epsEstimate, e.currency].filter((p) => p !== undefined).join(' '));
-  if (e.timeOfDay === 'BMO') parts.push('· before market open');
-  if (e.timeOfDay === 'AMC') parts.push('· after market close');
-  return parts.join(' ');
+  return `${parts.join(' ')} · ${release.text}. ${basis}`;
 }
 
 /** Quarters are about 91 days apart; a stored report date plus this is where the next one is projected. */
@@ -581,22 +637,28 @@ const REPORT_MATCH_DAYS = 4;
 /** A projected date that has just passed is an overdue release (shown as due today), not a reason to project a whole quarter further. */
 const OVERDUE_GRACE_DAYS = 14;
 const MAX_PROJECTED_QUARTERS = 4;
+/** A provider date less than this many days after a released report is that same release (left over from before it), not the next quarter. */
+const MIN_QUARTER_GAP_DAYS = 45;
 
 function providerEarnings(ctx: EarningsCtx, e: StoredEarningsEvent, origin: CalendarOrigin): CalendarEvent {
+  const { confirmed, basis } = earningsConfirmation(e, ctx.today);
+  const release = releaseOf(e);
   return {
     id: `earn:${e.symbol}:${e.date}`,
     date: e.date,
     type: 'EARNINGS',
-    status: e.confirmed || e.date <= ctx.today ? 'CONFIRMED' : 'ESTIMATED',
+    status: confirmed ? 'CONFIRMED' : 'ESTIMATED',
     symbol: e.symbol,
     name: ctx.nameOf(e.symbol, e.name),
     origin,
     source: e.source,
-    description: describeEarnings(e),
+    description: describeEarnings(e, release, basis),
     fiscalPeriodEnd: e.fiscalPeriodEnd,
     epsEstimate: e.epsEstimate,
     currency: e.currency,
     timeOfDay: e.timeOfDay ?? 'unknown',
+    release,
+    basis,
     earningsPhase: 'scheduled',
   };
 }
@@ -619,6 +681,7 @@ function reportedEarnings(ctx: EarningsCtx, report: ReportedEarnings, origin: Ca
     epsEstimate: provider?.epsEstimate,
     currency: provider?.currency,
     timeOfDay: provider?.timeOfDay ?? 'unknown',
+    release: releaseOf({ symbol: report.symbol, date: report.reportDate, timeOfDay: provider?.timeOfDay, releaseAt: provider?.releaseAt, timeSource: provider?.timeSource, source: provider?.source ?? '' }),
     earningsPhase: 'reported',
   };
 }
@@ -651,10 +714,8 @@ export function projectedEarningsDate(lastReport: string, today: string): string
   return projectEarnings(lastReport, today)?.date ?? null;
 }
 
-const dayMonthYear = (iso: string): string => `${iso.slice(8)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}`;
-
 function projectionText(lastReport: string, dueSince: string | undefined): string {
-  if (dueSince === undefined) return `Estimated next report, about ${EARNINGS_PROJECTION_DAYS} days after the previous one (${lastReport}). A projection, not an announced date.`;
+  if (dueSince === undefined) return `Projected next report, about ${EARNINGS_PROJECTION_DAYS} days after the previous one (${lastReport}). A projection, not an announced date.`;
   return `${EARNINGS_DUE_TEXT} the projected date (${dayMonthYear(dueSince)}, previous report + about ${EARNINGS_PROJECTION_DAYS} days) has passed and no release is stored yet. A projection, not an announced date.`;
 }
 
@@ -672,6 +733,7 @@ function projectedEarnings(ctx: EarningsCtx, symbol: string, lastReport: Reporte
     source: 'estimate',
     description: projectionText(lastReport.reportDate, projection.dueSince),
     timeOfDay: 'unknown',
+    release: earningsReleaseTime({ symbol, date: projection.date }),
     earningsPhase: 'projected',
   };
 }
@@ -694,6 +756,7 @@ function reportedEntries(ctx: EarningsCtx, stored: readonly StoredEarningsEvent[
     if (!origin) continue;
     const provider = stored.find((e) => e.symbol === report.symbol && Math.abs(daysBetween(e.date, report.reportDate)) <= REPORT_MATCH_DAYS);
     if (provider) matched.add(provider);
+    for (const later of stored) if (later.symbol === report.symbol && later.date > report.reportDate && daysBetween(report.reportDate, later.date) < MIN_QUARTER_GAP_DAYS) matched.add(later);
     events.push(reportedEarnings(ctx, report, origin, provider));
   }
   return { events, matched };
