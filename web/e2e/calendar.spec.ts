@@ -88,6 +88,10 @@ test.describe('Calendar (mock mode)', () => {
     await expect(page.getByRole('dialog', { name: 'MSFT · Stock split' })).toContainText('2-for-1 stock split');
     await page.keyboard.press('Escape');
 
+    // Earnings rows say when the company releases: the exchange's time and Amsterdam's, "typically" for a category.
+    await expect(events(page).getByRole('button', { name: /^AAPL, Earnings/ }).first()).toContainText(/typically ~16:05 ET = ~2[12]:05 Amsterdam/);
+    await expect(events(page).getByRole('button', { name: /^NVDA, Earnings/ }).first()).toContainText(/Released at 16:20 ET = 2[12]:20 Amsterdam/);
+
     // Scope: watchlist-only events have no amounts.
     await page.getByLabel('Show').selectOption('watchlist');
     await expect(events(page).getByRole('button', { name: /^AAPL,/ })).toHaveCount(0);
@@ -104,6 +108,9 @@ test.describe('Calendar (mock mode)', () => {
     expect(body.endsWith('END:VCALENDAR\r\n')).toBe(true);
     expect(body).toMatch(/UID:earn:AAPL:\d{4}-\d{2}-\d{2}@portfolio-tracker/);
     expect(body).toMatch(/DTSTART;VALUE=DATE:\d{8}\r\nDTEND;VALUE=DATE:\d{8}/);
+    // Content lines are folded at 75 octets: unfold them before matching text.
+    expect(body.replaceAll('\r\n ', '')).toMatch(/Release time: After the close\\, typically ~16:05 ET = ~2[12]:05 Amsterdam/);
+    expect(body).toMatch(/DTSTART:\d{8}T\d{6}Z\r\nDTEND:\d{8}T\d{6}Z/);
     await expect(page.getByText(/^Saved portfolio-calendar-/)).toBeVisible();
   });
 

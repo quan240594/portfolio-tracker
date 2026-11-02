@@ -51,7 +51,7 @@ describe('Earnings dates card', () => {
     expect(rows.map((row) => within(row).getByRole('rowheader').textContent)).toEqual([expect.stringContaining('NOVO-B.CO'), expect.stringContaining('GOOGL'), expect.stringContaining('ASML.AS')]);
     const cells = (row: HTMLElement) => within(row).getAllByRole('cell').map((cell) => cell.textContent);
     expect(cells(rows[0]!)).toEqual(['No date', expect.stringContaining("Not in the provider's calendar")]);
-    expect(cells(rows[1]!)).toEqual(['28-10-2026Scheduled, after the close', '–']);
+    expect(cells(rows[1]!)).toEqual(['28-10-2026Scheduled (provider date) · after the close', '–']);
     expect(cells(rows[2]!)).toEqual(['28-01-2027Projected', '–']);
   });
 
@@ -100,6 +100,51 @@ describe('Earnings dates card', () => {
     const section = await card();
     expect(within(section).getByText('1 of 1 held company has an upcoming date.')).toBeInTheDocument();
     expect(within(section).getByText(/Rows returned: not recorded; 1 date stored\./)).toBeInTheDocument();
+  });
+
+  it('puts the verdict on the date sources at the top: what is missing, in words and not only in colour', async () => {
+    const text = 'No provider date source is working. Alpha Vantage returned only 1 rows: its free plan does not provide the earnings calendar for this key. Finnhub is not configured: add a free key (the FINNHUB_API_KEY secret). Until then every date in the calendar is a projection (previous report + about 91 days).';
+    const sources = [{ source: 'alphavantage' as const, status: 'provider-limited' as const, reason: '', rows: 1 }, { source: 'finnhub' as const, status: 'no-key' as const, reason: '' }];
+    serve(earningsDates({ conclusion: { kind: 'broken', text }, lastRun: earningsRun({ status: 'provider-limited', rows: 1, events: 0, matchedHeld: 0, sources }), lastSuccess: null }));
+    const section = await card();
+    const verdict = section.querySelector('[data-conclusion]')!;
+    expect(verdict).toHaveAttribute('data-conclusion', 'broken');
+    expect(verdict).toHaveTextContent('No date source is working.');
+    expect(verdict).toHaveTextContent('Finnhub is not configured: add a free key (the FINNHUB_API_KEY secret)');
+    expect(within(section).getByText(/Last run:/).closest('p')).toHaveTextContent('The provider answered with almost nothing');
+    expect(within(section).getByText('Alpha Vantage: answered with almost nothing, 1 row')).toBeInTheDocument();
+    expect(within(section).getByText('Finnhub: not configured')).toBeInTheDocument();
+    expect(within(section).getByText(/The provider returned 1 rows/)).toBeInTheDocument();
+  });
+
+  it('shows a working and a partly working verdict, each source with its outcome, and the conflicts between sources', async () => {
+    const sources = [
+      { source: 'alphavantage' as const, status: 'rate-limited' as const, reason: 'daily limit', rows: undefined },
+      { source: 'finnhub' as const, status: 'ok' as const, reason: '', rows: 800 },
+    ];
+    const conflicts = [{ symbol: 'AMZN', kept: { source: 'finnhub' as const, date: '2026-11-05' }, dropped: { source: 'alphavantage' as const, date: '2026-11-12' } }];
+    serve(earningsDates({ conclusion: { kind: 'partial', text: 'Dates come from Finnhub. Alpha Vantage: rate limit reached (daily limit).' }, lastRun: earningsRun({ sources, conflicts }) }));
+    const section = await card();
+    expect(section.querySelector('[data-conclusion]')).toHaveAttribute('data-conclusion', 'partial');
+    expect(within(section).getByText('Alpha Vantage: rate-limited (daily limit)')).toBeInTheDocument();
+    expect(within(section).getByText('Finnhub: read, 800 rows')).toBeInTheDocument();
+    expect(within(section).getByText('Sources disagreed: AMZN (kept Finnhub 05-11-2026, dropped Alpha Vantage 12-11-2026).')).toBeInTheDocument();
+  });
+
+  it('shows the date kind and the release time in both zones for each company', async () => {
+    const confirmed = heldDate({ symbol: 'AMZN', name: 'Amazon', next: { date: '2026-11-05', source: 'scheduled', status: 'CONFIRMED', timeOfDay: 'AMC', releaseText: 'After the close, typically ~16:05 ET = ~22:05 Amsterdam' } });
+    const scheduled = heldDate({ symbol: 'KO', name: 'Coca-Cola', next: { date: '2026-11-12', source: 'scheduled', status: 'ESTIMATED', timeOfDay: 'unknown', releaseText: 'Time not announced' } });
+    const projected = heldDate({ symbol: 'APP', name: 'AppLovin', next: { date: '2026-11-04', source: 'projected', status: 'ESTIMATED', timeOfDay: 'unknown' } });
+    const reported = heldDate({ symbol: 'GOOGL', name: 'Alphabet', next: { date: '2026-10-28', source: 'reported', status: 'CONFIRMED', timeOfDay: 'DMH' } });
+    serve(earningsDates({ held: 4, withDate: 4, symbols: [confirmed, scheduled, projected, reported] }));
+    const section = await card();
+    const table = within(section).getByRole('table');
+    const rows = within(table).getAllByRole('row').filter((row) => within(row).queryByRole('rowheader') !== null);
+    const first = (row: HTMLElement) => within(row).getAllByRole('cell')[0]!.textContent;
+    expect(first(rows[0]!)).toBe('05-11-2026Confirmed · After the close, typically ~16:05 ET = ~22:05 Amsterdam');
+    expect(first(rows[1]!)).toBe('12-11-2026Scheduled (provider date) · Time not announced');
+    expect(first(rows[2]!)).toBe('04-11-2026Projected');
+    expect(first(rows[3]!)).toBe('28-10-2026Reported · during market hours');
   });
 
   it('queues the calendar job once and says so', async () => {

@@ -1,7 +1,7 @@
 import { addIsoDays, calendarMonthOf, type CalendarEvent } from '@portfolio/shared';
 import { CompanyLogo } from '../../components/CompanyLogo';
 import { formatDate, formatDayOfMonth, formatMonthYear, formatWeekdayDate, formatWeekdayLong, formatWeekdayShort } from '../../lib/format';
-import { EVENT_META, eventAriaLabel, isDividend, isEstimated, monthGrid } from './calendarModel';
+import { EVENT_META, eventAriaLabel, isDividend, isEstimated, monthGrid, releaseText } from './calendarModel';
 import { eventClasses } from './calendarColours';
 import { EventMarker } from './EventMarker';
 import { expectedLabel } from './eventText';
@@ -21,7 +21,7 @@ interface ChipProps {
 function EventChip({ event, baseCurrency, onSelect }: Readonly<ChipProps>) {
   const amount = isDividend(event) ? expectedLabel(event, baseCurrency) : undefined;
   const italic = isEstimated(event) ? 'italic' : '';
-  const title = [event.symbol, EVENT_META[event.type].label, amount].filter(Boolean).join(' · ');
+  const title = [event.symbol, EVENT_META[event.type].label, event.type === 'EARNINGS' ? releaseText(event) : undefined, amount].filter(Boolean).join(' · ');
   return (
     <button
       type="button"

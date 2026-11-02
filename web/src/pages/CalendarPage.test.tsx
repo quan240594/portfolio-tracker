@@ -175,7 +175,8 @@ describe('CalendarPage', () => {
     const dialog = await screen.findByRole('dialog', { name: 'AAPL · Earnings' });
     expect(dialog).toHaveTextContent(sp('US$ 1,64'));
     expect(dialog).toHaveTextContent('After market close');
-    expect(dialog).toHaveTextContent('Alpha Vantage');
+    expect(dialog).toHaveTextContent('After the close, typically ~16:05 ET = ~2');
+    expect(dialog).toHaveTextContent('Finnhub');
     expect(within(dialog).getByRole('link', { name: 'View in holdings' })).toHaveAttribute('href', '/holdings');
   });
 

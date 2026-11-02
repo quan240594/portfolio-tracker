@@ -1,10 +1,11 @@
-import type { EarningsRunReport, EarningsRunStatus, GetEarningsDatesResponse, HeldEarningsDate } from '@portfolio/shared';
+import { SOURCE_LABELS as DATE_SOURCE_NAMES, type EarningsConflict, type EarningsDatesConclusion, type EarningsRunReport, type EarningsRunStatus, type EarningsSourceRun, type EarningsSourceStatus, type GetEarningsDatesResponse, type HeldEarningsDate } from '@portfolio/shared';
 import { CompanyLogo } from '../../components/CompanyLogo';
 import { formatDate, formatDateTime } from '../../lib/format';
 import type { EarningsDatesResult } from './useEarningsDates';
 
 const STATUS_LABELS: Readonly<Record<EarningsRunStatus, string>> = {
   ok: 'Read the provider’s calendar',
+  'provider-limited': 'The provider answered with almost nothing (its free plan has no calendar for this key)',
   skipped: 'Skipped by the budget guard',
   'budget-exhausted': 'Skipped: the calendar’s daily call was already used',
   'rate-limited': 'Rate-limited by the provider',
@@ -13,8 +14,22 @@ const STATUS_LABELS: Readonly<Record<EarningsRunStatus, string>> = {
   'no-symbols': 'Nothing to look up',
 };
 
-const SOURCE_LABELS: Readonly<Record<NonNullable<HeldEarningsDate['next']>['source'], string>> = { scheduled: 'Scheduled', projected: 'Projected', reported: 'Reported' };
-const TIME_LABELS: Readonly<Record<NonNullable<HeldEarningsDate['next']>['timeOfDay'], string>> = { BMO: 'before the open', AMC: 'after the close', unknown: '' };
+const SOURCE_STATUS_LABELS: Readonly<Record<EarningsSourceStatus, string>> = {
+  ok: 'read',
+  'provider-limited': 'answered with almost nothing',
+  'no-key': 'not configured',
+  'budget-exhausted': 'daily call already used',
+  'rate-limited': 'rate-limited',
+  failed: 'failed',
+};
+const TIME_LABELS: Readonly<Record<NonNullable<HeldEarningsDate['next']>['timeOfDay'], string>> = { BMO: 'before the open', AMC: 'after the close', DMH: 'during market hours', unknown: '' };
+
+/** What the date is: a released report, a projection, or a provider date that is confirmed or only scheduled. */
+function dateKind(next: NonNullable<HeldEarningsDate['next']>): string {
+  if (next.source === 'reported') return 'Reported';
+  if (next.source === 'projected') return 'Projected';
+  return next.status === 'CONFIRMED' ? 'Confirmed' : 'Scheduled (provider date)';
+}
 
 const TRIGGER_LABELS = { scheduled: 'daily run', manual: 'refreshed on request' } as const;
 
@@ -45,14 +60,38 @@ function fundsText(funds: number): string {
   return `${funds} ${plural(funds, 'fund or crypto position has', 'fund or crypto positions have')} no earnings and ${plural(funds, 'is', 'are')} not counted.`;
 }
 
+const rowsOf = (entry: EarningsSourceRun): string => (entry.rows === undefined ? '' : `, ${entry.rows} ${plural(entry.rows, 'row', 'rows')}`);
+
+function SourceLines({ sources }: Readonly<{ sources: readonly EarningsSourceRun[] }>) {
+  return (
+    <ul className="muted list-inside list-disc">
+      {sources.map((entry) => (
+        <li key={entry.source} className="break-words">
+          {DATE_SOURCE_NAMES[entry.source]}: {SOURCE_STATUS_LABELS[entry.status]}
+          {rowsOf(entry)}
+          {entry.reason !== '' && ` (${entry.reason})`}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const sideText = (side: EarningsConflict['kept']): string => `${DATE_SOURCE_NAMES[side.source]} ${formatDate(side.date)}`;
+
 function RunSummary({ run, held, label }: Readonly<{ run: EarningsRunReport; held: number; label: string }>) {
-  const counted = run.status === 'ok';
+  const counted = run.status === 'ok' || run.status === 'provider-limited';
   return (
     <div className="space-y-0.5 text-sm">
       <p>
         <span className="font-medium">{label}:</span> {formatDateTime(run.at)} ({TRIGGER_LABELS[run.trigger]}) · {STATUS_LABELS[run.status]}
       </p>
       {run.reason !== '' && <p className="break-words">Reason: {run.reason}</p>}
+      {run.sources !== undefined && <SourceLines sources={run.sources} />}
+      {run.conflicts !== undefined && run.conflicts.length > 0 && (
+        <p className="muted break-words">
+          Sources disagreed: {run.conflicts.map((conflict) => `${conflict.symbol} (kept ${sideText(conflict.kept)}, dropped ${sideText(conflict.dropped)})`).join('; ')}.
+        </p>
+      )}
       {counted && (
         <p className="muted">
           {rowsText(run.rows)}
@@ -61,6 +100,23 @@ function RunSummary({ run, held, label }: Readonly<{ run: EarningsRunReport; hel
         </p>
       )}
     </div>
+  );
+}
+
+const CONCLUSION_STYLES: Readonly<Record<EarningsDatesConclusion['kind'], { label: string; classes: string }>> = {
+  ok: { label: 'Dates are coming in.', classes: 'border-[#2f8f57] bg-[#dcfce7] text-[#14532d] dark:border-[#6ee7a0] dark:bg-[#1b4d33] dark:text-[#dcfce7]' },
+  partial: { label: 'Dates are coming in, with a gap.', classes: 'border-[#a16207] bg-[#fef9c3] text-[#422006] dark:border-[#facc15] dark:bg-[#6b5a12] dark:text-[#fffbe0]' },
+  broken: { label: 'No date source is working.', classes: 'border-[#b91c1c] bg-[#fee2e2] text-[#7f1d1d] dark:border-[#fca5a5] dark:bg-[#6b1d1d] dark:text-[#fee2e2]' },
+};
+
+/** The verdict at the top of the card: whether any source delivers dates and what to add when none does. */
+function Conclusion({ conclusion }: Readonly<{ conclusion: EarningsDatesConclusion | null }>) {
+  if (conclusion === null) return null;
+  const style = CONCLUSION_STYLES[conclusion.kind];
+  return (
+    <p className={`rounded-lg border px-3 py-2 text-sm break-words ${style.classes}`} data-conclusion={conclusion.kind}>
+      <span className="font-semibold">{style.label}</span> {conclusion.text}
+    </p>
   );
 }
 
@@ -104,11 +160,12 @@ function RefreshControl({ report, earnings }: Readonly<{ report: GetEarningsDate
 
 function NextDate({ row }: Readonly<{ row: HeldEarningsDate }>) {
   if (row.next === null) return <span className="muted">{row.reasonCode === 'not-applicable' ? 'No earnings' : 'No date'}</span>;
-  const time = TIME_LABELS[row.next.timeOfDay];
+  const time = row.next.releaseText ?? TIME_LABELS[row.next.timeOfDay];
+  const kind = dateKind(row.next);
   return (
     <>
       <span className="block font-medium tabular-nums">{formatDate(row.next.date)}</span>
-      <span className="muted block text-xs">{time === '' ? SOURCE_LABELS[row.next.source] : `${SOURCE_LABELS[row.next.source]}, ${time}`}</span>
+      <span className="muted block text-xs break-words">{time === '' ? kind : `${kind} · ${time}`}</span>
     </>
   );
 }
@@ -152,6 +209,7 @@ export function EarningsDatesCard({ report, earnings }: Readonly<{ report: GetEa
       <h2 id="earnings-dates-title" className="text-base font-semibold">
         Earnings dates
       </h2>
+      <Conclusion conclusion={report.conclusion} />
       <Runs report={report} />
       <BudgetLine report={report} />
       <RefreshControl report={report} earnings={earnings} />

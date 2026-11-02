@@ -5,7 +5,7 @@ import { CompanyLogo } from '../../components/CompanyLogo';
 import { Dialog } from '../../components/Dialog';
 import { formatDate, formatMoney, formatQuantity, formatWeekdayDate } from '../../lib/format';
 import { SummaryLink } from '../earnings/SummaryLink';
-import { EVENT_META, isDividend, sourceLabel, statusLabel } from './calendarModel';
+import { EVENT_META, isDividend, releaseText, sourceLabel, statusLabel } from './calendarModel';
 import { EventMarker } from './EventMarker';
 import { EventRow } from './EventList';
 import { earningsPhaseLabel, perShareLabel, TIME_OF_DAY_LABELS } from './eventText';
@@ -45,6 +45,8 @@ function EarningsRows({ event }: Readonly<{ event: CalendarEvent }>) {
       <Row label="Fiscal period ending">{event.fiscalPeriodEnd ? formatDate(event.fiscalPeriodEnd) : 'Not available'}</Row>
       <Row label="EPS estimate">{event.epsEstimate === undefined ? 'Not available' : formatMoney(event.epsEstimate, event.currency ?? 'USD')}</Row>
       <Row label="Time of day">{TIME_OF_DAY_LABELS[event.timeOfDay ?? 'unknown']}</Row>
+      <Row label="Release time">{releaseText(event)}</Row>
+      {event.basis !== undefined && <Row label="Date basis">{event.basis}</Row>}
     </>
   );
 }
@@ -67,7 +69,7 @@ function TypeRows({ event, baseCurrency }: Readonly<{ event: CalendarEvent; base
 function estimateNote(event: CalendarEvent): string {
   if (event.earningsPhase === 'projected' && event.description.startsWith(EARNINGS_DUE_TEXT)) return event.description;
   if (event.earningsPhase === 'projected') return 'No date is announced yet. This is a projection from the previous report (about 91 days later) and may be days off.';
-  if (event.type === 'EARNINGS') return 'The date comes from a data provider and may change once the company confirms it.';
+  if (event.type === 'EARNINGS') return 'The date comes from a data provider and is not confirmed yet: it counts as confirmed once the provider has listed the same date on two separate days and it is at most 21 days away. It may still change.';
   return 'This date is a projection and may change once the company announces it.';
 }
 
