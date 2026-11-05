@@ -19,6 +19,7 @@ const jobs = createPriceJobs({
   config: parsePricesConfig(env), // TWELVEDATA_API_KEY, EODHD_API_KEY, COINGECKO_API_KEY, ALPHAVANTAGE_API_KEY, FINNHUB_API_KEY (optional), ...
   stepSubrequests: 40, // fetches (retries included) per step; the free Worker/DO cap is 50
   heldCompanies: async () => ['AMZN', 'KMB'], // optional: the companies Finnhub is asked about (one call each, 2.1 s apart); default: every tracked non-crypto symbol
+  heldPositions: async () => new Map([['HESM', '2025-03-04']]), // optional: every held symbol that can pay a dividend (ETFs too) with its first transaction day: new ones are read first, and "Check dividends now" reads only these
 });
 // jobs.refreshPrices / jobs.enrichTransactions / jobs.refreshCalendar are JobHandlers: call them with `{ payload, cursor }`,
 // persist `next` and call again after `delayMs` while a step answers `{ done: false }`.

@@ -19,6 +19,8 @@ export interface EstimateBudgetOptions {
   /** The job's own cap a day. */
   jobLimit?: number;
   minRemaining?: number;
+  /** Where the job's own counter lives (default: the consensus job's `USAGE/alphavantage#estimates`). */
+  jobKey?: ItemKey;
   /** The UTC day (YYYY-MM-DD). */
   today: () => string;
 }
@@ -37,6 +39,10 @@ export class EstimateBudget {
     this.ledger = new StoreQuotaLedger(options.store);
   }
 
+  private get jobKey(): ItemKey {
+    return this.options.jobKey ?? JOB_KEY;
+  }
+
   private get jobLimit(): number {
     return this.options.jobLimit ?? ESTIMATES_DAILY_CALLS;
   }
@@ -47,13 +53,13 @@ export class EstimateBudget {
 
   /** Whether a call may be made now. */
   async room(): Promise<EstimateRoom> {
-    const found = await this.options.store.getMany([PROVIDER_KEY, JOB_KEY]);
+    const found = await this.options.store.getMany([PROVIDER_KEY, this.jobKey]);
     const day = this.options.today();
     const usedOf = (key: ItemKey): number => {
       const item = found.find((candidate) => candidate.PK === key.PK && candidate.SK === key.SK);
       return item?.day === day && typeof item.used === 'number' ? item.used : 0;
     };
-    if (usedOf(JOB_KEY) >= this.jobLimit) return { allowed: false, reason: 'job-cap' };
+    if (usedOf(this.jobKey) >= this.jobLimit) return { allowed: false, reason: 'job-cap' };
     const remaining = this.options.dailyLimit - usedOf(PROVIDER_KEY);
     return remaining < this.minRemaining ? { allowed: false, reason: 'low-allowance' } : { allowed: true, remaining };
   }
@@ -61,7 +67,7 @@ export class EstimateBudget {
   /** Spends one call from both counters; false (nothing kept) when either is used up. */
   async spend(): Promise<boolean> {
     const day = this.options.today();
-    if (!(await this.ledger.consume(JOB_KEY, USAGE_ENTITY, day, 1, this.jobLimit))) return false;
+    if (!(await this.ledger.consume(this.jobKey, USAGE_ENTITY, day, 1, this.jobLimit))) return false;
     return this.ledger.consume(PROVIDER_KEY, USAGE_ENTITY, day, 1, this.options.generalLimit);
   }
 }
