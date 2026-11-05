@@ -128,6 +128,27 @@ test.describe('Calendar (mock mode)', () => {
     await expect(events(page).getByRole('button', { name: /^VWRL\.AS,/ })).toHaveCount(0);
     await expect(events(page).getByRole('button', { name: /^AAPL,/ }).first()).toBeVisible();
   });
+
+  test('adds a dividend date of a held symbol by hand: it shows as entered by you, and can be removed', async ({ page }) => {
+    await page.goto('/calendar?view=list&range=year');
+    const exDate = isoDay(daysAhead(100));
+    await page.getByRole('button', { name: 'Add dividend date' }).click();
+    const form = page.getByRole('dialog', { name: 'Add dividend date' });
+    await form.getByLabel('Symbol').selectOption('KO');
+    await form.getByLabel('Ex-dividend date').fill(exDate);
+    await form.getByLabel('Payment date (optional)').fill(isoDay(daysAhead(109)));
+    await form.getByLabel('Amount per share (optional)').fill('0,5');
+    await form.getByRole('button', { name: 'Save dividend date' }).click();
+    await expect(form).toBeHidden();
+
+    const day = events(page).locator(`[id="day-${exDate}"]`).locator('xpath=ancestor::section[1]');
+    await day.getByRole('button', { name: /^KO, Ex-dividend/ }).click();
+    const details = page.getByRole('dialog', { name: 'KO · Ex-dividend' });
+    await expect(details).toContainText('Entered by you');
+    await details.getByRole('button', { name: 'Delete' }).click();
+    await expect(details).toBeHidden();
+    await expect(events(page).locator(`[id="day-${exDate}"]`)).toHaveCount(0);
+  });
 });
 
 test.describe('Calendar on a phone', () => {

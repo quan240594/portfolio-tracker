@@ -25,7 +25,7 @@ function DividendRows({ event, baseCurrency }: Readonly<{ event: CalendarEvent; 
     <>
       <Row label="Ex-dividend date">{event.exDate ? formatDate(event.exDate) : 'Not available'}</Row>
       <Row label="Payment date">{event.payDate ? formatDate(event.payDate) : 'Not announced'}</Row>
-      <Row label="Per share">{perShareLabel(event) ?? 'Not available'}</Row>
+      <Row label="Per share">{perShareLabel(event) ?? (event.source === 'manual' ? 'Not known yet: you entered no amount' : 'Not available')}</Row>
       {event.quantity !== undefined && <Row label={paid ? 'Shares paid on' : 'Your shares on the ex-date'}>{formatQuantity(event.quantity)}</Row>}
       {event.expectedAmount !== undefined && (
         <Row label={paid ? 'Received (net)' : 'Expected (net)'}>
@@ -73,16 +73,51 @@ function estimateNote(event: CalendarEvent): string {
   return 'This date is a projection and may change once the company announces it.';
 }
 
+/** What the owner can do with a dividend date they entered themselves. */
+export interface ManualActions {
+  onEdit: (event: CalendarEvent) => void;
+  onRemove: (event: CalendarEvent) => void;
+  busy: boolean;
+  error: string | null;
+}
+
 interface Props {
   event: CalendarEvent | null;
   baseCurrency: string;
   onClose: () => void;
   /** Adds the active portfolio scope to in-app links. */
   withScope: (to: string) => string;
+  /** Edit and delete for an entry of the owner (the "Add dividend date" workaround); absent = read-only. */
+  manual?: ManualActions;
+}
+
+/** A dividend date the owner entered: the note says so and what replaces it, and the owner can edit or delete it. */
+function ManualNote({ event, manual }: Readonly<{ event: CalendarEvent; manual: ManualActions | undefined }>) {
+  if (event.source !== 'manual') return null;
+  return (
+    <div className="mt-3 space-y-2 text-xs">
+      <p className="muted">Entered by you. A data provider’s record for the same ex-dividend date with an amount replaces it.</p>
+      {manual && (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn-secondary" onClick={() => manual.onEdit(event)} disabled={manual.busy}>
+            Edit
+          </button>
+          <button type="button" className="btn-secondary" onClick={() => manual.onRemove(event)} disabled={manual.busy}>
+            {manual.busy ? 'Removing…' : 'Delete'}
+          </button>
+        </div>
+      )}
+      {manual?.error && (
+        <p role="alert" className="text-red-700 dark:text-red-300">
+          {manual.error}
+        </p>
+      )}
+    </div>
+  );
 }
 
 /** Details of one event: dates, per-share amount, your quantity and amount, status and source. */
-export function EventDialog({ event, baseCurrency, onClose, withScope }: Readonly<Props>) {
+export function EventDialog({ event, baseCurrency, onClose, withScope, manual }: Readonly<Props>) {
   if (!event) return null;
   const meta = EVENT_META[event.type];
   const held = event.origin === 'HOLDING';
@@ -117,6 +152,7 @@ export function EventDialog({ event, baseCurrency, onClose, withScope }: Readonl
         <Row label="Source">{sourceLabel(event.source, event.type)}</Row>
       </dl>
       {event.status === 'ESTIMATED' && <p className="muted mt-3 text-xs">{estimateNote(event)}</p>}
+      <ManualNote event={event} manual={manual} />
     </Dialog>
   );
 }

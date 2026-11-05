@@ -106,6 +106,7 @@ const SOURCE_LABELS: Readonly<Record<string, string>> = {
   estimate: 'Projected from your payment history',
   'earnings-summary': 'Earnings summary (company release)',
   mock: 'Demo data',
+  manual: 'Entered by you',
 };
 const EARNINGS_ESTIMATE_LABEL = 'Projected from the previous report';
 

@@ -17,6 +17,7 @@ import { EventList } from '../features/calendar/EventList';
 import { MonthGrid } from '../features/calendar/MonthGrid';
 import { filterEvents, monthIncome, requestRange, type CalendarUiState } from '../features/calendar/calendarModel';
 import { useCalendarState } from '../features/calendar/useCalendarState';
+import { useManualDividendEntry } from '../features/calendar/useManualDividendEntry';
 import { downloadFile } from '../features/management/form';
 import { usePortfolioScope } from '../features/portfolios/usePortfolioScope';
 import { BASE_CURRENCY, formatMonthYear, formatMoney } from '../lib/format';
@@ -124,6 +125,7 @@ export function CalendarPage() {
   const watchlist = useWatchlist();
   const download = useDownloadCalendarIcs(scope);
   const [saved, setSaved] = useState<string | null>(null);
+  const manual = useManualDividendEntry(holdings.data?.holdings, () => setSelection(null));
 
   const { data } = calendar;
   const currency = data?.baseCurrency ?? BASE_CURRENCY;
@@ -198,10 +200,11 @@ export function CalendarPage() {
 
   return (
     <>
-      <PageHeader title="Calendar" description={description} />
+      <PageHeader title="Calendar" description={description} actions={manual.addButton} />
       <CardGrid pageId="calendar" cards={cards} />
 
-      <EventDialog event={selectedEvent} baseCurrency={currency} onClose={() => setSelection(null)} withScope={withScope} />
+      <EventDialog event={selectedEvent} baseCurrency={currency} onClose={() => setSelection(null)} withScope={withScope} manual={manual.actions} />
+      {manual.dialog}
       <DayDialog date={dayDate} events={dayEvents} baseCurrency={currency} onClose={() => setSelection(null)} onSelect={(e) => setSelection({ kind: 'event', id: e.id })} />
     </>
   );
