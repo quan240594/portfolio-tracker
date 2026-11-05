@@ -815,7 +815,7 @@ out for US tickers, an upcoming split for `NVDA` and `AAPL`, the mock market's d
 |---|---|---|---|---|
 | Earnings event | `TICKER#{symbol}` | `EARN#{date}` | `EARNINGS_EVENT` | `symbol`, `date`, `name?`, `fiscalPeriodEnd?`, `epsEstimate?` (N), `currency?`, `timeOfDay` (`BMO`/`AMC`/`unknown`), `source`, `updatedAt` |
 | Split event | `TICKER#{symbol}` | `SPLIT#{date}` | `SPLIT_EVENT` | `symbol`, `date`, `fromFactor` (N), `toFactor` (N), `source`, `updatedAt` |
-| Symbol marker | `TICKER#{symbol}` | `CAL#STATE` | `CALENDAR_STATE` | `splitsCheckedAt`, `dividendsCheckedAt`, `splitsFailedAt` |
+| Symbol marker | `TICKER#{symbol}` | `CAL#STATE` | `CALENDAR_STATE` | `splitsCheckedAt`, `dividendsCheckedAt`, `splitsFailedAt`; the TypeScript job also `dividendsAttemptAt`, `dividendsOutcome`, `dividendsReason`, `dividendsSource`, `dividendsEvents` (see "Declared dividends: visibility, priority, a free fallback and entering a date") |
 | Daily budget | `CALENDAR` | `BUDGET#{provider}` | `CALENDAR_BUDGET` | `day`, `used` |
 
 Dividend events stay `DIV#{exDate}` (`DIVIDEND_EVENT`). Keys for the first two live in `calendarKeys`
@@ -4323,3 +4323,103 @@ Earnings dates. The first run asks Finnhub about every held company (about two s
 `@portfolio/cloudflare-app` (`calendar-dates.test.ts`, `prices-status.test.ts`; Node and workerd in `test/suite.ts`: Finnhub on (per-company calls, held US companies only) and off), `@portfolio/web` (`calendarViews.test.tsx`, `EarningsDatesCard.test.tsx`), Playwright `e2e/calendar.spec.ts`.
 Only the live deployment can show: that the free key keeps answering per-company requests (the request was verified from a laptop, not from the Worker), how long a daily run takes there, whether Alpha Vantage ever returns the full calendar for that key, and the real
 times at which companies release.
+
+## Declared dividends: visibility, priority, a free fallback and entering a date (5 Nov 2026)
+
+Question of the owner: *HESM (Hess Midstream LP, NYSE) has its ex-date today and pays on 13 Nov: why is it not in the calendar?* The live
+data cannot be read from the development machine, so this change (a) traced every cause statically and fixed what was a real bug or a gap,
+(b) made the cause visible on the Diagnostics page, (c) put the symbols that most likely have news first, (d) added a free second source for
+declared dividends with pay dates and (e) added a manual workaround.
+
+### Why a held payer can be missing on its ex-date (ranked, with the code that decides)
+
+The dividend events of a held symbol come from EODHD `/div/{symbol}` only (`EodhdProvider.getDividends`), read by (1) the enrichment of a new symbol
+(`enrich.ts`, once) and (2) the daily `refreshCalendar` actions step (`refresh-calendar.ts`, a rotating budgeted subset). Finnhub `/stock/dividend*` is
+premium and not usable. `buildCalendar` only draws what is stored.
+
+1. **The rotation had not reached the symbol since the dividend was declared (most likely).** HESM declares about two weeks before the ex-date.
+   The budget is `CALENDAR_EODHD_DAILY_CALLS` = 8 calls, a check costs 2 (splits + dividends): **4 symbols a day**, each due again after
+   `CALENDAR_RECHECK_DAYS` = 7. With 30 tracked symbols a symbol is read every ~8 days, so a dividend declared the day after a read is invisible for a week
+   and can pass its ex-date unseen. The old order (`dueSymbols`) was "least recently read first, never-read symbols alphabetically": no symbol
+   with news (an ex-date close by, a bought-yesterday position) was ever treated as more urgent. Fixed by the prioritised rotation below.
+2. **EODHD lists a dividend late, or without a pay date.** The free `/div` feed often lists a dividend only on or after its ex-date and leaves
+   `paymentDate` empty. Nothing in the app can fix the provider; the new fallback feed (Alpha Vantage `DIVIDENDS`) and the manual entry cover it, and
+   the diagnostics say "EODHD was asked on D and lists no upcoming dividend; the next one is expected around X".
+3. **A symbol bought after its last read.** The enrichment reads the dividends once when a symbol is first tracked, then the symbol waits for its turn
+   (cause 1). `heldPositions` (first transaction day of each held symbol) now makes such a symbol `new`, the first tier of the rotation.
+4. **The EODHD quota.** The 20 calls a day are shared with the quote refresh (EU tickers) and the enrichment; a spent quota stopped the run silently
+   (`status: rate-limited | budget-exhausted`) and nothing said which symbols were skipped. Every skipped symbol is now recorded (`budget`/`rate-limited`).
+5. **Not tracked.** A symbol that was never enriched has no `TRACKED` item and is never read: the diagnostics say `not-tracked`.
+6. **Not a calendar bug, but easy to mistake for one:** a position bought **on** the ex-date is not entitled (`Ctx.quantityOn` uses the day before),
+   so the calendar correctly shows nothing; the report says `after-ex-date` with the first transaction date. Verified for an ex-date **today** with a
+   payment in 8 days (`calendar.test.ts`, `services/api/src/dividend-dates.test.ts`, the workerd suite): the ex entry shows today and the payment entry
+   on the pay date, both `CONFIRMED`, for a position bought before the ex-date; the date filters (`from <= date <= to`), the `CONFIRMED` status
+   filter, the `EX_DIVIDEND`/`DIVIDEND_PAY` type filter and the default scope (`all`) all let them through. No change was needed there.
+
+Partnerships ("distributions") and US tickers need no mapping: `toEodhdSymbol('HESM')` is `HESM.US` and EODHD's `value` is the distribution per unit.
+
+### Visibility: Settings > Diagnostics > "Dividend dates"
+
+`packages/shared/src/dividend-dates.ts` (pure report), `services/api/src/routes/dividend-dates.ts`, `packages/cloudflare-app/src/dividend-checks.ts`,
+`web/src/features/diagnostics/DividendDatesCard.tsx`. Same pattern as "Earnings dates diagnostics".
+
+* `GET /diagnostics/dividend-dates` lists every **held** symbol that can pay (ETFs included, crypto not) with `next` (the calendar's next entry: declared,
+  else projected from your payments; ex-date, pay date, per-share amount, currency, source `eodhd | alphavantage | manual | history | provider`,
+  `kind: declared | estimated`, `enteredByYou`), `last` (latest stored ex-date up to today), `boughtOn`, `check` (last successful read, the latest attempt
+  with outcome `ok | none | failed | rate-limited | budget`, sanitized reason, source, record count) and `reasonCode`/`reason` when no declared
+  upcoming dividend exists: `not-tracked`, `never-checked`, `since-bought`, `no-provider`, `budget`, `rate-limited`, `failed`, `none-returned` (with the expected
+  next date from the median gap of the stored ex-dates), `no-history`, `after-ex-date`, `estimate-only`. Also: the EODHD allowance of the day, the state of the fallback
+  feed and which keys are set.
+* The job records the outcome per symbol on its `CAL#STATE` item (`dividendsAttemptAt`, `dividendsOutcome`, `dividendsReason`, `dividendsSource`,
+  `dividendsEvents`; `dividendsCheckedAt` only when the provider answered). The enrichment records its read too. Additive: the AWS Python service
+  writes only `dividendsCheckedAt`, which the report reads as "checked, outcome unknown".
+* `POST /diagnostics/dividend-dates/refresh` ("Check dividends now", Cloudflare only; AWS answers 404 `NOT_AVAILABLE`) queues `refreshCalendar` with
+  `{trigger: 'manual', part: 'dividends'}`: held symbols only, dividends only (1 call each, no splits, no earnings, no run record), at most
+  `MANUAL_CHECK_SYMBOLS` = 8, bypassing the calendar's own budget but not EODHD's own quota (`DailyQuota`). Once an hour (`DIVIDEND#REFRESHASK`);
+  refused with the reason (429 `RATE_LIMITED`, `details.reason` `rate-limited | budget-low`, or 503 `NOT_CONFIGURED` without a key) when fewer than
+  `MIN_EODHD_CALLS_FOR_CHECK` = 3 EODHD calls are left.
+
+### Priority: `planRotation` (`packages/prices/src/jobs/dividend-rotation.ts`)
+
+Replaces `dueSymbols`. Tiers, most urgent first: **new** (never read by the rotation, or bought after its last read), **missing** (manual check only: no
+upcoming dividend stored), **near** (the last or next stored ex-date is within +/-10 days of today, or a quarterly payer whose last ex-date + 91 days falls
+between -10 and +25 days and has no stored successor; read again after 2 days instead of 7, and **without the splits call**, so it costs 1 call), then **stale**
+(the old rotation). Within a tier the least recently attempted first. A symbol that failed within the interval waits its turn (a broken ticker must not be
+retried first every day). A step that cannot afford the symbol's worst-case calls (splits + dividends + the fallback's one) stops there.
+
+### The free fallback: Alpha Vantage `DIVIDENDS`
+
+Researched with the official documentation:
+
+| Candidate | Result |
+|---|---|
+| **Alpha Vantage `function=DIVIDENDS`** (https://www.alphavantage.co/documentation/#dividends) | "Historical and future (declared) dividend distributions": `ex_dividend_date`, `declaration_date`, `record_date`, `payment_date`, `amount`. The documentation does not mark it premium (the intraday and adjusted-daily functions carry a Premium label); the shared free key is 25 calls a day. A call with the public `demo` key for `IBM` returned a declared dividend with ex- and pay date three weeks ahead. Whether the *owner's* key may read it is unknown (the free key refused `EARNINGS_ESTIMATES`), hence the probe. **Chosen.** |
+| Twelve Data `/dividends` (https://twelvedata.com/docs, OpenAPI `x-starting-plan: grow,venture`, 20 credits per symbol) | Not on the free Basic plan, and it has `ex_date` and `amount` only, no pay date. Not used. |
+| SEC 8-K Item 8.01/7.01 press-release text (the app reads 8-K/10-Q in `packages/earnings/src/sec.ts`) | Free and authoritative, but a declaration is free text that differs by issuer, needs a model call per release and many partnerships announce it in the earnings release. Left as a last resort, not built. |
+
+`AlphaVantageDividends` (`packages/prices/src/providers/av-dividends.ts`) sits behind `MarketData.dividendFeed`. **Probe first:** the first real call is the probe. A `premium
+endpoint` or invalid-key text records `CALENDAR/DIVIDENDS#AVFEED` = `{status: 'unavailable', at, reason}` and the feed is asked again only after
+`DIVIDEND_FEED_RETRY_DAYS` = 7; a valid dividend list records `available` (events are stored from the first successful answer on); a quota or burst
+text is a refusal of that call only. Budget: its own `USAGE/alphavantage#dividends` counter (4 a day) inside the shared 25, never below 6 calls left
+(`EstimateBudget` with a job key). It is asked only for a **US** symbol (no exchange suffix) whose EODHD answer has no declared upcoming dividend with a pay date, and only for
+`new`, `missing` and `near` symbols or in a manual check. A failure of the fallback never fails the check.
+
+Sources are merged by `(symbol, ex-date)` (`packages/shared/src/dividend-merge.ts`, used by `PriceRepository.putDividends`): a newer record of the same source corrects; between sources the
+more complete record wins (pay date 2, `declared` 1; the newer on a tie) and keeps what only the other knows; stored events now carry `source`, `declared` and `declarationDate`.
+EODHD events are stamped in the job layer (the provider's output is part of the Python parity tests).
+
+### Manual entry: "Add dividend date"
+
+`POST /calendar/dividends` `{symbol, exDate, payDate?, amount?, currency?}` and `DELETE /calendar/dividends/{symbol}/{exDate}` (AWS and Cloudflare, the demo's MSW handlers too).
+The entry is stored **per user** (`USER#{id}` / `MDIV#{symbol}#{exDate}`, `MANUAL_DIVIDEND`), never in the shared ticker partition, and added to the stored events when the calendar and the
+diagnostics are built (`withManualDividends`): a provider record for the same ex-date **with an amount** replaces it (keeping the pay date it lacks), otherwise it
+stays; providers never overwrite it. Shown as a declared event with source `manual`, "Entered by you" in the event dialog (Edit / Delete there; the
+Calendar page header has the "Add dividend date" button, symbol picker among the held symbols). An entry without an amount shows "amount not known yet" and adds nothing to the income totals. Validation: the symbol
+is in the user's transactions, the ex-date is within 400 days of today, the pay date is not before the ex-date, at most 200 entries.
+
+### Tests and what only the live deployment can show
+
+`pnpm --filter @portfolio/shared|prices|api|cloudflare-app|web test` (Cloudflare: the Node stack and workerd run the same scenarios in `test/suite.ts`: ex-date today with the
+payment in 8 days, the fallback available / unavailable, the manual entry replaced by a provider record, the hourly button), `web/e2e/calendar.spec.ts`. Only the
+live deployment can show what EODHD lists for HESM today and whether the owner's Alpha Vantage key can read `DIVIDENDS`: open Diagnostics > Dividend dates, press "Check dividends now" and read the
+HESM row (`check.outcome`, the fallback line and the reason).

@@ -25,6 +25,11 @@ export interface PriceJobDeps extends MarketDataDeps {
    * Finnhub earnings calls are made for. Absent = every tracked symbol that is not crypto.
    */
   heldCompanies?: () => Promise<readonly string[]>;
+  /**
+   * Every position held today that can pay a dividend (ETFs included, crypto not) with the day of its first transaction: the symbols the owner's
+   * "Check dividends now" reads, and the ones the daily rotation puts first when they were bought after their last read. Absent = every tracked symbol, no purchase dates.
+   */
+  heldPositions?: () => Promise<ReadonlyMap<string, string>>;
 }
 
 /** What one step works with: providers around a budgeted `fetch`, the repository and the logger. */

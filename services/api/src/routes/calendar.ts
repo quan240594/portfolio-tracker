@@ -3,8 +3,10 @@ import {
   calendarDataWindow,
   calendarQuerySchema,
   calendarToIcs,
+  manualDividendEvent,
   marketSymbols,
   resolveCalendarQuery,
+  withManualDividends,
   type CALENDAR_ROUTES,
   type CalendarData,
   type CalendarResponse,
@@ -31,7 +33,7 @@ export async function loadReports(ctx: RouteContext, symbols: readonly string[])
 
 /**
  * Loads what the calendar needs for the caller only (`ctx.userId`): the transactions of the read scope, the stored
- * dividend/earnings/split items of the held (and, unless `scope=holdings`, watchlist) symbols, quotes, profiles and FX.
+ * dividend/earnings/split items of the held (and, unless `scope=holdings`, watchlist) symbols with the dividend dates the user entered by hand, quotes, profiles and FX.
  */
 async function loadCalendar(ctx: RouteContext): Promise<CalendarResponse> {
   const { repo, mgmt, now } = ctx.deps;
@@ -48,8 +50,9 @@ async function loadCalendar(ctx: RouteContext): Promise<CalendarResponse> {
   const symbols = [...new Set([...held, ...watchlist])];
   const profileSymbols = [...new Set([...marketSymbols(transactions.map((t) => t.symbol)), ...watchlist])];
   const window = calendarDataWindow(query, today);
-  const [dividendEvents, stored, reportedEarnings, quotes, profiles, { fx, fxHistory }] = await Promise.all([
+  const [dividendEvents, manual, stored, reportedEarnings, quotes, profiles, { fx, fxHistory }] = await Promise.all([
     Promise.all(symbols.map((s) => repo.getDividendEvents(s))),
+    mgmt.listManualDividends(ctx.userId),
     symbols.length > 0 ? repo.getCalendarEvents(symbols, window.from, window.to) : { earnings: [], splits: [] },
     loadReports(ctx, held),
     held.length > 0 ? repo.getQuotes(held) : {},
@@ -63,7 +66,7 @@ async function loadCalendar(ctx: RouteContext): Promise<CalendarResponse> {
     profiles,
     fx,
     fxHistory,
-    dividendEvents: dividendEvents.flat(),
+    dividendEvents: withManualDividends(dividendEvents.flat(), manual.map((entry) => manualDividendEvent(entry))),
     earnings: stored.earnings,
     reportedEarnings,
     splits: stored.splits,

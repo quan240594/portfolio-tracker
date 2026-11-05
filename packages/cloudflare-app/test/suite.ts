@@ -371,6 +371,8 @@ export function defineAppSuite(label: string, start: StartStack): void {
   describe(`${label}: price service`, () => {
     const keys = { TWELVEDATA_API_KEY: TD_KEY, ALPHAVANTAGE_API_KEY: AV_KEY, FX_HISTORY_START: '2026-01-01' };
     const buy = { date: '2026-01-05', type: 'BUY', symbol: 'AAPL', quantity: 2, price: 200, currency: 'USD' };
+    /** Bought long before any day the clock of a stack can show, so it is entitled to a dividend whose ex-date is today. */
+    const earlyBuy = { ...buy, date: '2025-06-02' };
 
     async function signedIn(options?: SuiteStartOptions) {
       const stack = await start(options);
@@ -533,6 +535,118 @@ export function defineAppSuite(label: string, start: StartStack): void {
         const status = await call('GET', '/prices/status');
         expect(status.body.sources.find((source: { name: string }) => source.name === 'finnhub')).toMatchObject({ configured: false, optional: true, secret: 'FINNHUB_API_KEY' });
         expect(status.body.missingSecrets).not.toContain('FINNHUB_API_KEY');
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('shows a dividend whose ex-date is today and whose payment is in 8 days: stored at the purchase, in the calendar, in the dividend dates diagnostics, and read again on request once an hour', async () => {
+      const { stack, call, portfolio } = await signedIn({ prices: { ...keys, EODHD_API_KEY: EODHD_KEY } });
+      try {
+        const { today, payDate } = stack.prices.days();
+        stack.prices.eodhdDividends = (symbol, exDate, pay) => (symbol === 'AAPL' ? [{ date: exDate, paymentDate: pay, value: 0.26, currency: 'USD' }] : []);
+        expect((await call('POST', '/transactions', { portfolioId: portfolio, ...earlyBuy })).status).toBe(201);
+        await stack.drain();
+        await stack.enqueue('refreshPrices', { trigger: 'scheduled' });
+        await stack.drain();
+        expect(await stack.failedJobs()).toEqual([]);
+
+        const calendar = await call('GET', `/calendar?portfolioId=${portfolio}&types=EX_DIVIDEND,DIVIDEND_PAY`);
+        expect(calendar.status, JSON.stringify(calendar.body)).toBe(200);
+        const rows = calendar.body.events as { type: string; date: string; status: string; source: string; quantity: number; amountPerShare: number }[];
+        expect(rows.map((event) => [event.type, event.date, event.status, event.quantity, event.amountPerShare])).toEqual([
+          ['EX_DIVIDEND', today, 'CONFIRMED', 2, 0.26],
+          ['DIVIDEND_PAY', payDate, 'CONFIRMED', 2, 0.26],
+        ]);
+
+        const dates = await call('GET', `/diagnostics/dividend-dates?portfolioId=${portfolio}`);
+        expect(dates.status, JSON.stringify(dates.body)).toBe(200);
+        expect(dates.body).toMatchObject({ today, held: 1, withDeclared: 1, configured: { eodhd: true, alphavantage: true }, refresh: { available: true }, budget: { provider: 'EODHD', limit: 20 } });
+        expect(dates.body.symbols[0]).toMatchObject({ symbol: 'AAPL', next: { exDate: today, payDate, amount: 0.26, source: 'eodhd', kind: 'declared' }, check: { outcome: 'ok', source: 'eodhd', events: 1 }, reasonCode: null });
+
+        const before = stack.prices.callsTo('eodhd.com').length;
+        const refresh = await call('POST', '/diagnostics/dividend-dates/refresh');
+        expect(refresh.status, JSON.stringify(refresh.body)).toBe(202);
+        await stack.drain();
+        expect(await stack.failedJobs()).toEqual([]);
+        expect(stack.prices.callsTo('eodhd.com').length).toBeGreaterThan(before);
+        expect(stack.prices.callsTo('eodhd.com').filter((entry) => entry.includes('/api/splits/'))).toEqual([]);
+        expect(stack.prices.calendarRequests).toEqual([]);
+        const again = await call('POST', '/diagnostics/dividend-dates/refresh');
+        expect(again.status).toBe(429);
+        expect(again.body.error).toMatchObject({ code: 'RATE_LIMITED', details: { reason: 'rate-limited' } });
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('falls back to the free Alpha Vantage dividends feed for a company EODHD lists no declared dividend for, and says on the diagnostics that the feed works', async () => {
+      const { stack, call, portfolio } = await signedIn({ prices: { ...keys, EODHD_API_KEY: EODHD_KEY } });
+      try {
+        stack.prices.feedDividends = (symbol, today, payDate) => ({ data: [{ ex_dividend_date: today, declaration_date: '2026-01-02', record_date: today, payment_date: payDate, amount: '0.7152' }] });
+        expect((await call('POST', '/transactions', { portfolioId: portfolio, ...earlyBuy })).status).toBe(201);
+        await stack.drain();
+        await stack.enqueue('refreshPrices', { trigger: 'scheduled' });
+        await stack.drain();
+        // The purchase's enrichment read EODHD only (it lists nothing): the manual check asks the fallback too.
+        expect(stack.prices.dividendFeedRequests).toEqual([]);
+        expect((await call('POST', '/diagnostics/dividend-dates/refresh')).status).toBe(202);
+        await stack.drain();
+        expect(await stack.failedJobs()).toEqual([]);
+        expect(stack.prices.dividendFeedRequests).toEqual(['AAPL']);
+
+        const { today, payDate } = stack.prices.days();
+        const dates = await call('GET', `/diagnostics/dividend-dates?portfolioId=${portfolio}`);
+        expect(dates.body.feed).toMatchObject({ status: 'available' });
+        expect(dates.body.symbols[0]).toMatchObject({ next: { exDate: today, payDate, amount: 0.7152, source: 'alphavantage', kind: 'declared' }, check: { outcome: 'ok', source: 'alphavantage' }, reasonCode: null });
+        const calendar = await call('GET', `/calendar?portfolioId=${portfolio}&types=DIVIDEND_PAY`);
+        expect((calendar.body.events as { date: string; status: string }[]).map((event) => [event.date, event.status])).toEqual([[payDate, 'CONFIRMED']]);
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('records a premium refusal of the feed as unavailable on this key and does not ask again, and says why a dividend is missing', async () => {
+      const { stack, call, portfolio } = await signedIn({ prices: { ...keys, EODHD_API_KEY: EODHD_KEY } });
+      try {
+        stack.prices.feedDividends = () => ({ Information: 'Thank you for using Alpha Vantage! This is a premium endpoint. Please subscribe.' });
+        expect((await call('POST', '/transactions', { portfolioId: portfolio, ...earlyBuy })).status).toBe(201);
+        await stack.drain();
+        await stack.enqueue('refreshPrices', { trigger: 'scheduled' });
+        await stack.drain();
+        expect((await call('POST', '/diagnostics/dividend-dates/refresh')).status).toBe(202);
+        await stack.drain();
+        expect(stack.prices.dividendFeedRequests).toEqual(['AAPL']);
+        const dates = await call('GET', `/diagnostics/dividend-dates?portfolioId=${portfolio}`);
+        expect(dates.body.feed).toMatchObject({ status: 'unavailable', reason: expect.stringContaining('premium endpoint') });
+        // (The reason code is not asserted: the Node stack's pinned clock makes the tracked-since time of the purchase later than the check.)
+        expect(dates.body.symbols[0]).toMatchObject({ next: null, check: { outcome: 'none' }, reason: expect.any(String) });
+      } finally {
+        await stack.dispose();
+      }
+    });
+
+    it('takes a dividend date the owner enters, shows it as entered by the owner, lets a provider record replace it and removes it on request', async () => {
+      const { stack, call, portfolio } = await signedIn({ prices: { ...keys, EODHD_API_KEY: EODHD_KEY } });
+      try {
+        expect((await call('POST', '/transactions', { portfolioId: portfolio, ...earlyBuy })).status).toBe(201);
+        await stack.drain();
+        await stack.enqueue('refreshPrices', { trigger: 'scheduled' });
+        await stack.drain();
+        const { today, payDate } = stack.prices.days();
+        const added = await call('POST', '/calendar/dividends', { symbol: 'aapl', exDate: today, payDate, amount: 0.3, currency: 'USD' });
+        expect(added.status, JSON.stringify(added.body)).toBe(201);
+        const events = async () => ((await call('GET', `/calendar?portfolioId=${portfolio}&types=EX_DIVIDEND`)).body.events as { source: string; amountPerShare: number; exDate: string }[]).map((event) => [event.source, event.amountPerShare, event.exDate]);
+        expect(await events()).toEqual([['manual', 0.3, today]]);
+        const dates = await call('GET', `/diagnostics/dividend-dates?portfolioId=${portfolio}`);
+        expect(dates.body.symbols[0]).toMatchObject({ next: { source: 'manual', enteredByYou: true, amount: 0.3 } });
+
+        stack.prices.eodhdDividends = (symbol, exDate, pay) => (symbol === 'AAPL' ? [{ date: exDate, paymentDate: pay, value: 0.26, currency: 'USD' }] : []);
+        expect((await call('POST', '/diagnostics/dividend-dates/refresh')).status).toBe(202);
+        await stack.drain();
+        expect(await events()).toEqual([['market-data', 0.26, today]]);
+        expect((await call('DELETE', `/calendar/dividends/AAPL/${today}`)).status).toBe(204);
+        expect((await call('DELETE', `/calendar/dividends/AAPL/${today}`)).status).toBe(404);
       } finally {
         await stack.dispose();
       }

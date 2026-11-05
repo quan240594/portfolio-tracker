@@ -193,9 +193,20 @@ export class FakePrices {
   readonly calendarRequests: string[] = [];
   /** `symbol from..to` of every Finnhub `/calendar/earnings` call. */
   readonly finnhubRequests: string[] = [];
+  /** `symbol` of every Alpha Vantage `function=DIVIDENDS` call. */
+  readonly dividendFeedRequests: string[] = [];
+  /** The dividends EODHD lists for a symbol (`AAPL`), given the Hub's day and the day eight days later (none by default). */
+  eodhdDividends: (symbol: string, today: string, payDate: string) => unknown[] = () => [];
+  /** What Alpha Vantage answers `function=DIVIDENDS` with, given the same days: a dividend list, or a refusal text (none listed by default). */
+  feedDividends: (symbol: string, today: string, payDate: string) => { Information: string } | { data: Record<string, string>[] } = () => ({ data: [] });
   private finnhubDate: string | undefined;
 
   constructor(private readonly clock: () => number) {}
+
+  /** The Hub's day, and the day of a payment eight days later. */
+  days(): { today: string; payDate: string } {
+    return { today: new Date(this.clock()).toISOString().slice(0, 10), payDate: new Date(this.clock() + 8 * 86_400_000).toISOString().slice(0, 10) };
+  }
 
   readonly service: FakeService = (request) => {
     const url = new URL(request.url);
@@ -227,10 +238,19 @@ export class FakePrices {
       if (url.pathname === `/api/eod/${LONDON_EODHD_SYMBOL}`) return { status: 200, json: londonPenceCloses(this.clock()).map(([date, close]) => ({ date, close })) };
       if (url.pathname === `/api/real-time/${LONDON_EODHD_SYMBOL}`) return { status: 200, json: { code: LONDON_EODHD_SYMBOL, close: LONDON_PENCE.at(-1), previousClose: LONDON_PENCE.at(-2), timestamp: Math.floor(this.clock() / 1000) } };
       if (url.pathname === `/api/eod/${XETRA_EODHD_SYMBOL}`) return { status: 200, json: XETRA_CLOSES.map((close, i) => ({ date: new Date(this.clock() - (XETRA_CLOSES.length - 1 - i) * 86_400_000).toISOString().slice(0, 10), close })) };
-      if (url.pathname.startsWith('/api/div/')) return { status: 200, json: [] };
+      if (url.pathname.startsWith('/api/div/')) {
+        const { today, payDate } = this.days();
+        return { status: 200, json: this.eodhdDividends(url.pathname.slice('/api/div/'.length).replace(/\.US$/, ''), today, payDate) };
+      }
       return { status: 404, json: { message: 'not available' } };
     },
     'www.alphavantage.co': (url) => {
+      if (url.searchParams.get('function') === 'DIVIDENDS') {
+        const symbol = url.searchParams.get('symbol') ?? '';
+        const { today, payDate } = this.days();
+        this.dividendFeedRequests.push(symbol);
+        return { status: 200, json: { symbol, ...this.feedDividends(symbol, today, payDate) } };
+      }
       if (url.searchParams.get('function') !== 'EARNINGS_CALENDAR') return this.overview();
       this.calendarRequests.push(url.searchParams.get('horizon') ?? '');
       return { status: 200, bytes: new TextEncoder().encode(this.earningsCsv()), headers: { 'content-type': 'text/csv' } };

@@ -21,4 +21,6 @@ export { createStepContext, DEFAULT_STEP_SUBREQUESTS, type PriceJobDeps } from '
 export * from './jobs/refresh-prices.js';
 export * from './jobs/enrich.js';
 export * from './jobs/refresh-calendar.js';
+export { planRotation, NEAR_RECHECK_DAYS, NEAR_WINDOW_DAYS, DECLARE_AHEAD_DAYS, type RotationContext, type RotationEntry, type RotationTier } from './jobs/dividend-rotation.js';
+export { AlphaVantageDividends, DIVIDEND_FEED_DAILY_CALLS, DIVIDEND_FEED_MIN_REMAINING, type DividendFeed, type FeedAnswer } from './providers/av-dividends.js';
 export * from './service.js';

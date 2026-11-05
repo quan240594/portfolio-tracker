@@ -28,8 +28,8 @@ export interface JobPayloads {
   /** Transactions were created/deleted/imported: enrich (profile, history) the newly tracked symbols. */
   enrichTransactions: TransactionsChangedDetail;
   refreshPrices: { trigger: 'scheduled' };
-  /** `scheduled`: the daily run. `manual`: the owner pressed "Refresh earnings dates now" (Diagnostics): it is not held to the calendar's own one-call-a-day budget, only to the provider's daily quota. */
-  refreshCalendar: { trigger: 'scheduled' | 'manual' };
+  /** `scheduled`: the daily run. `manual`: the owner pressed "Refresh earnings dates now" (Diagnostics): it is not held to the calendar's own one-call-a-day budget, only to the provider's daily quota. `part: 'dividends'`: the owner pressed "Check dividends now": only the dividends of the held symbols are read (no earnings, no splits), the most urgent first, at most `MANUAL_CHECK_SYMBOLS`. */
+  refreshCalendar: { trigger: 'scheduled' | 'manual'; part?: 'dividends' };
   /** Refresh the quotes of the positions held at Trading 212 (`scheduled`; `close` at the 22:05 slot, which also keeps the quotes as end-of-day rows; `sync` right after a successful sync); `userId` limits it to one user. */
   refreshT212Quotes: { trigger: 'scheduled' | 'sync' | 'close'; userId?: string };
   /** Send the dividend push notifications that are due (`scheduled` for everyone, `sync` after a broker sync for `userId`). */

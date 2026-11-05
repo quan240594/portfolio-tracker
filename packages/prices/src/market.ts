@@ -1,8 +1,10 @@
 import { silentLogger, type CorporateActionsSource, type EarningsSource, type ItemStore, type Logger } from '@portfolio/platform';
 import { alphaVantageGeneralLimit, type PricesConfig } from './config.js';
+import { EstimateBudget } from './estimate-budget.js';
 import { HttpClient, type FetchLike, type Sleep } from './http.js';
 import { BlockBook, DailyQuota, MinuteQuota, ProviderGate, StorePlanMemory, StoreQuotaLedger, TokenBucket } from './limits.js';
 import { AlphaVantageProvider } from './providers/alphavantage.js';
+import { AlphaVantageDividends, DIVIDEND_FEED_DAILY_CALLS, DIVIDEND_FEED_KEY_ITEM, DIVIDEND_FEED_MIN_REMAINING, type DividendFeed } from './providers/av-dividends.js';
 import { pacedFetch, type ProviderPacer } from './pacer.js';
 import { AlphaVantageEarnings, EodhdCorporateActions } from './providers/calendar.js';
 import { FINNHUB_CALLS_PER_MINUTE, FinnhubEarnings } from './providers/finnhub.js';
@@ -44,6 +46,8 @@ export interface MarketData {
   finnhubEarnings?: FinnhubEarnings;
   /** Absent without an EODHD key. */
   actions?: CorporateActionsSource;
+  /** The free fallback for declared dividends (Alpha Vantage `DIVIDENDS`); absent without an Alpha Vantage key. */
+  dividendFeed?: DividendFeed;
 }
 
 /** Longest a client-side rate limiter sleeps inline; a longer wait becomes a RateLimitError and the job reschedules. */
@@ -93,6 +97,15 @@ export function createMarketData(deps: MarketDataDeps, fetch: FetchLike = deps.f
       : undefined,
     // No retries: a retried call would count against the minute's limit unseen, and the next run asks again.
     finnhubEarnings: keys.finnhub ? new FinnhubEarnings({ apiKey: keys.finnhub, http: http('finnhub', 0), minute: new MinuteQuota(ledger, 'finnhub', FINNHUB_CALLS_PER_MINUTE, nowMs), gate: gate('finnhub'), now: nowMs }) : undefined,
+    dividendFeed: keys.alphavantage
+      ? new AlphaVantageDividends({
+          apiKey: keys.alphavantage,
+          http: http('alphavantage'),
+          // The day's cap of the fallback is its burst: the pacer (when given) spaces the requests the free key refuses in a burst.
+          bucket: bucket(DIVIDEND_FEED_DAILY_CALLS, 5 / 60),
+          budget: new EstimateBudget({ store: deps.store, dailyLimit: config.dailyLimits.alphavantage, generalLimit: alphaVantageGeneralLimit(config), jobLimit: DIVIDEND_FEED_DAILY_CALLS, minRemaining: DIVIDEND_FEED_MIN_REMAINING, jobKey: DIVIDEND_FEED_KEY_ITEM, today: () => utcDay(clock()) }),
+        })
+      : undefined,
     actions: keys.eodhd && eodhd ? new EodhdCorporateActions({ apiKey: keys.eodhd, http: http('eodhd'), bucket: bucket(5, 1), quota: quota('eodhd', config.dailyLimits.eodhd), dividends: eodhd }) : undefined,
   };
 }

@@ -80,6 +80,11 @@ You need a Cloudflare account on the Free plan and a GitHub account. Every comma
    "Refresh earnings dates now" (`POST /api/diagnostics/earnings-dates/refresh`) queues the calendar job once; it is refused within an hour of the last ask and when fewer than 3 Alpha Vantage calls are left
    today. See `docs/architecture.md`, "Earnings dates diagnostics".
 
+   **Dividend dates.** Settings > Diagnostics > Dividend dates (`GET /api/diagnostics/dividend-dates`) lists every held symbol that can pay a dividend (ETFs too) with its next dividend (declared or projected, source,
+   amount), the latest stored one, when and how its dividends were last read (ok, nothing listed, provider error, limit reached, skipped by the allowance) and why there is no declared upcoming date, with the EODHD calls used
+   today and the state of the free Alpha Vantage `DIVIDENDS` fallback. "Check dividends now" (`POST /api/diagnostics/dividend-dates/refresh`) reads up to 8 held symbols (new ones and those without an upcoming dividend first);
+   once an hour, and refused with the reason when fewer than 3 EODHD calls are left. The Calendar page has "Add dividend date" for a dividend the providers do not list yet. See `docs/architecture.md`, "Declared dividends: visibility, priority, a free fallback and entering a date".
+
    **Alpha Vantage test.** Settings > Diagnostics > Alpha Vantage (`GET`/`POST /api/diagnostics/alphavantage-probe`): "Test Alpha Vantage now" makes one real `EARNINGS_ESTIMATES` call for IBM with your key and,
    1.5 s later, a control call of the free `EARNINGS` function. It shows what Alpha Vantage answered to each (figures, premium endpoint, daily or burst limit, invalid key) in its own words, side by side, with a plain
    conclusion (the key reads `EARNINGS` but not the estimates, you are throttled, or both work). It costs two of the 25 daily calls, runs at most once per 10 minutes and is refused when

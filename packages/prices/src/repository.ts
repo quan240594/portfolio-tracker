@@ -1,5 +1,5 @@
 import { cond, queryAll, type BatchOp, type Item, type ItemStore } from '@portfolio/platform';
-import { CALENDAR_ENTITY, EARNINGS_RUN_ENTITY, ENTITY, earningsRunKeys, HISTORY_OVERRIDE_STATUSES, calendarKeys, isProfileSource, keys, majorDividend, majorEod, majorQuote, mergeProfile, minorUnit, sourceOf, type DividendEvent, type EarningsRunRecord, type EodPrice, type FxDay, type FxRates, type HistoryOverrideStatus, type InstrumentProfile, type ProfileSource, type Quote, type StoredEarningsEvent, type StoredSplitEvent } from '@portfolio/shared';
+import { CALENDAR_ENTITY, DIVIDEND_FEED_ENTITY, DIVIDEND_FEED_KEY, EARNINGS_RUN_ENTITY, ENTITY, earningsRunKeys, HISTORY_OVERRIDE_STATUSES, calendarKeys, isProfileSource, keys, majorDividend, majorEod, majorQuote, mergeDividendEvent, mergeDividendEvents, mergeProfile, minorUnit, parseDividendCheckState, parseDividendFeedState, sourceOf, type DividendCheckOutcome, type DividendCheckSource, type DividendEvent, type DividendFeedState, type EarningsRunRecord, type EodPrice, type FxDay, type FxRates, type HistoryOverrideStatus, type InstrumentProfile, type ProfileSource, type Quote, type StoredEarningsEvent, type StoredSplitEvent } from '@portfolio/shared';
 import { BlockBook, StoreQuotaLedger, type ProviderBlock } from './limits.js';
 import { profileDetails } from './models.js';
 import { byText, definedOnly } from './parse.js';
@@ -88,11 +88,30 @@ const MAX_ERROR_CHARS = 200;
 const TICKER_PREFIX = 'TICKER#';
 const FAR_FUTURE = '9999-12-31';
 
+/** The stored dividend event of an item (its own fields; the keys and the entity type are not part of it). */
+function dividendOf(item: Item): DividendEvent {
+  const { PK: _pk, SK: _sk, entityType: _type, ...event } = item;
+  return event as unknown as DividendEvent;
+}
+
+/** The attempt fields of a `CAL#STATE` item that make sense (a malformed value is dropped). */
+function attemptFields(item: Item): Pick<CalendarState, 'dividendsAttemptAt' | 'dividendsOutcome' | 'dividendsReason' | 'dividendsSource' | 'dividendsEvents'> {
+  const attempt = parseDividendCheckState(item)?.attempt;
+  return attempt === undefined ? {} : { dividendsAttemptAt: attempt.at, dividendsOutcome: attempt.outcome, dividendsReason: attempt.reason, dividendsSource: attempt.source, dividendsEvents: attempt.events };
+}
+
 /** Per-symbol calendar marker: when splits/dividends were last checked, or last failed. */
 export interface CalendarState {
   splitsCheckedAt?: string;
+  /** When the dividends were last read successfully (the answer may have been empty). */
   dividendsCheckedAt?: string;
   splitsFailedAt?: string;
+  /** The last attempt to read the dividends, whatever its outcome (the Diagnostics "Dividend dates" section shows it). */
+  dividendsAttemptAt?: string;
+  dividendsOutcome?: DividendCheckOutcome;
+  dividendsReason?: string;
+  dividendsSource?: DividendCheckSource;
+  dividendsEvents?: number;
   /** When Finnhub last answered for the company's earnings date (the rotation of the per-company calls). */
   finnhubCheckedAt?: string;
 }
@@ -398,10 +417,43 @@ export class PriceRepository {
     return ops.length;
   }
 
+  /**
+   * Stores dividend events, one per symbol and ex-date. An ex-date that is stored already keeps what its record knows and the more
+   * complete record wins (see `mergeDividendEvent`): a pay date is never lost to an answer that lacks it, and an entry of the owner
+   * only gives way to a provider record that has an amount.
+   */
   async putDividends(events: readonly DividendEvent[]): Promise<number> {
-    const ops = putOps(events.map((event) => dividendItem(majorDividend(event))));
+    const incoming = mergeDividendEvents([], events.map((event) => majorDividend(event)));
+    const stored = incoming.length === 0 ? [] : await this.store.getMany(incoming.map((event) => keys.dividendEvent(event.symbol, event.exDate)));
+    const before = new Map(stored.map((item) => [`${symbolOfPk(item)}\u0000${item.SK.slice(keys.dividendPrefix.length)}`, dividendOf(item)]));
+    const ops = putOps(incoming.map((event) => dividendItem(mergeDividendEvent(before.get(`${event.symbol}\u0000${event.exDate}`), event))));
     await this.store.batchWrite(ops);
     return ops.length;
+  }
+
+  /**
+   * The stored dividend dates of each symbol that matter for the check rotation: the latest ex-date on or before `today` and the earliest one after it
+   * (a symbol without events is absent). Reads the ex-dates only.
+   */
+  async dividendDates(symbols: readonly string[], today: string): Promise<Map<string, { last?: string; next?: string }>> {
+    const lists = await Promise.all(symbols.map((symbol) => queryAll(this.store, { pk: keys.tickerPk(symbol), sk: { beginsWith: keys.dividendPrefix } })));
+    const out = new Map<string, { last?: string; next?: string }>();
+    symbols.forEach((symbol, index) => {
+      const dates = lists[index]!.map((item) => item.SK.slice(keys.dividendPrefix.length)).toSorted(byText);
+      const last = dates.findLast((date) => date <= today);
+      const next = dates.find((date) => date > today);
+      if (last !== undefined || next !== undefined) out.set(symbol, definedOnly({ last, next }));
+    });
+    return out;
+  }
+
+  /** What the first calls of the Alpha Vantage `DIVIDENDS` feed found out about this key; undefined before the first call. */
+  async getDividendFeed(): Promise<DividendFeedState | undefined> {
+    return parseDividendFeedState(await this.store.get(DIVIDEND_FEED_KEY));
+  }
+
+  async putDividendFeed(state: DividendFeedState): Promise<void> {
+    await this.store.put({ ...DIVIDEND_FEED_KEY, entityType: DIVIDEND_FEED_ENTITY, ...state });
   }
 
   /** Creates the TRACKED item when absent. Resolves true when it was created. */
@@ -461,6 +513,7 @@ export class PriceRepository {
           dividendsCheckedAt: typeof item.dividendsCheckedAt === 'string' ? item.dividendsCheckedAt : undefined,
           splitsFailedAt: typeof item.splitsFailedAt === 'string' ? item.splitsFailedAt : undefined,
           finnhubCheckedAt: typeof item.finnhubCheckedAt === 'string' ? item.finnhubCheckedAt : undefined,
+          ...attemptFields(item),
         }),
       ]),
     );

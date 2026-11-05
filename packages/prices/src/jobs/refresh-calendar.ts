@@ -1,4 +1,4 @@
-import { MAX_RUN_CONFLICTS, MAX_RUN_SYMBOLS, sanitizeAttemptError, type EarningsRunRecord, type EarningsRunStatus, type EarningsSourceName, type EarningsSourceRun, type StoredEarningsEvent } from '@portfolio/shared';
+import { MANUAL_CHECK_SYMBOLS, MAX_RUN_CONFLICTS, MAX_RUN_SYMBOLS, sanitizeAttemptError, type DividendAttempt, type EarningsRunRecord, type EarningsRunStatus, type EarningsSourceName, type EarningsSourceRun, type StoredEarningsEvent } from '@portfolio/shared';
 import type { CalendarRefreshSummary, EarningsSource, JobHandler, JobPayloads } from '@portfolio/platform';
 import { z } from 'zod';
 import { errorMessage, errorName, RateLimitError } from '../errors.js';
@@ -6,16 +6,17 @@ import { byText, definedOnly, isRecord } from '../parse.js';
 import { earningsTargets } from '../providers/calendar.js';
 import { FINNHUB_WINDOW_DAYS } from '../providers/finnhub.js';
 import type { CalendarState } from '../repository.js';
-import { isCrypto } from '../symbols.js';
+import { hasExchangeSuffix, isCrypto } from '../symbols.js';
 import { addDays, utcDay } from '../time.js';
-import { DIVIDEND_LOOKAHEAD_DAYS, DIVIDEND_LOOKBACK_DAYS } from './enrich.js';
+import { readDividends } from './dividend-read.js';
+import { planRotation, type RotationEntry } from './dividend-rotation.js';
+import { failureAttempt, recordAttempt, attemptMarker } from './dividend-state.js';
 import { mergeEarningsSources, trackSeen, type StoredAhead } from './earnings-merge.js';
 import { datedSymbols, finnhubOutcome, finnhubRunSchema, planFinnhub, readNextFinnhub, type Calendar, type SourceOutcome } from './finnhub-run.js';
 import { createStepContext, decodeState, pendingStep, runStep, rethrowBudget, runUnits, whileAffordable, type PriceJobDeps, type StepContext } from './common.js';
 
-/** A symbol check is the splits call and (when enabled) the dividends call. */
-const SYMBOL_CALLS = 2;
-const MS_PER_DAY = 86_400_000;
+/** Symbols a run records as skipped (not reached before the allowance or the limit ended it): the rest is in the next run's plan anyway. */
+const MAX_SKIPPED_RECORDS = 60;
 
 const earningsSchema = z.object({ status: z.enum(['ok', 'provider-limited', 'no-provider', 'no-symbols', 'budget-exhausted', 'rate-limited', 'failed']), symbols: z.number().optional(), events: z.number().optional(), staleDeleted: z.number().optional(), error: z.string().optional() });
 const stateSchema = z.object({
@@ -23,6 +24,8 @@ const stateSchema = z.object({
   now: z.string(),
   trigger: z.enum(['scheduled', 'manual']).optional(),
   symbols: z.array(z.string()),
+  /** `dividends`: the owner's "Check dividends now": only the dividends of the held symbols, no earnings. */
+  part: z.enum(['dividends']).optional(),
   phase: z.enum(['earnings', 'actions', 'done']),
   earnings: earningsSchema.nullable(),
   /** The earnings phase between its steps: what Alpha Vantage gave, and the Finnhub companies read so far and still to read. */
@@ -37,6 +40,8 @@ const stateSchema = z.object({
     status: z.enum(['ok', 'no-provider', 'budget-exhausted', 'rate-limited']),
     eligible: z.number(),
     due: z.array(z.string()),
+    /** Why each due symbol is read and whether its splits are read too (absent in a state written by an earlier version: a plain rotation turn). */
+    plan: z.record(z.object({ tier: z.enum(['new', 'missing', 'near', 'stale']), splits: z.boolean() })).default({}),
     dueCount: z.number(),
     checked: z.array(z.string()),
     failed: z.record(z.string()),
@@ -50,19 +55,6 @@ type State = z.infer<typeof stateSchema>;
 export type CalendarJobResult = CalendarRefreshSummary & {
   corporateActions: CalendarRefreshSummary['corporateActions'] & { eligible?: number; due?: number; failedSymbols?: string[]; checkedSymbols?: string[] };
 };
-
-/**
- * Symbols whose splits were not checked within `recheckDays`, least recently attempted first. Never-checked symbols come
- * first; a symbol whose last attempt failed goes to the back of the queue so one broken ticker cannot use up the daily budget.
- */
-export function dueSymbols(symbols: readonly string[], states: ReadonlyMap<string, CalendarState>, now: Date, recheckDays: number): string[] {
-  const cutoff = new Date(now.getTime() - recheckDays * MS_PER_DAY).toISOString();
-  const checked = (symbol: string): string => states.get(symbol)?.splitsCheckedAt ?? '';
-  const attempted = (symbol: string): string => [checked(symbol), states.get(symbol)?.splitsFailedAt ?? ''].toSorted(byText).at(-1)!;
-  return symbols
-    .filter((symbol) => checked(symbol) < cutoff)
-    .toSorted((a, b) => byText(attempted(a), attempted(b)) || byText(a, b));
-}
 
 // --- earnings ---
 
@@ -265,58 +257,123 @@ async function advanceEarnings(ctx: StepContext, state: State, today: string, st
 
 // --- splits and dividends ---
 
-async function markFailed(ctx: StepContext, symbol: string, stamp: string): Promise<void> {
+type Actions = State['actions'];
+/** A state written before the plan was kept: a symbol takes its plain turn in the rotation. */
+const PLAIN_TURN: RotationEntry = { symbol: '', tier: 'stale', splits: true };
+
+const isManual = (state: State): boolean => state.part === 'dividends';
+
+/** The calls a symbol's check may make: the splits (when due), the dividends and, where the free fallback may be asked, its one call. */
+function callsFor(ctx: StepContext, state: State, symbol: string | undefined): number {
+  if (symbol === undefined) return 0;
+  const entry = state.actions.plan[symbol] ?? PLAIN_TURN;
+  const dividends = isManual(state) || ctx.deps.config.calendar.refreshDividends;
+  const fallback = dividends && ctx.md.dividendFeed !== undefined && !hasExchangeSuffix(symbol) && (isManual(state) || entry.tier !== 'stale');
+  return (entry.splits ? 1 : 0) + (dividends ? 1 : 0) + (fallback ? 1 : 0);
+}
+
+async function markFailed(ctx: StepContext, symbol: string, attempt: DividendAttempt, stamp: string): Promise<void> {
   try {
-    await ctx.repo.putState(symbol, { splitsFailedAt: stamp });
+    await ctx.repo.putState(symbol, { splitsFailedAt: stamp, ...attemptMarker(attempt) });
   } catch (error) {
     ctx.logger.error('could not record failed calendar check', { symbol, error: errorMessage(error) });
   }
 }
 
-/** Fetches and stores the splits (and dividends) of one symbol, then marks it checked. */
-async function checkSymbol(ctx: StepContext, symbol: string, today: string, stamp: string): Promise<{ splits: number; dividends: number }> {
+/** Where a check was when it failed: the splits call comes first, then the dividends. */
+interface CheckProgress {
+  step: 'splits' | 'dividends';
+}
+
+/** Fetches and stores the splits (when due) and dividends of one symbol, then marks it checked and records how the dividends check ended. */
+async function checkSymbol(ctx: StepContext, state: State, symbol: string, today: string, stamp: string, progress: CheckProgress): Promise<{ splits: number; dividends: number }> {
   const source = ctx.md.actions!;
   const { calendar } = ctx.deps.config;
-  const splits = await source.getSplits(symbol, addDays(today, -calendar.splitLookbackDays));
-  const written = await ctx.repo.putSplits(splits, stamp);
-  const marker: CalendarState = { splitsCheckedAt: stamp };
+  const entry = state.actions.plan[symbol] ?? PLAIN_TURN;
+  const marker: CalendarState = {};
+  let splitsWritten = 0;
+  if (entry.splits) {
+    progress.step = 'splits';
+    const splits = await source.getSplits(symbol, addDays(today, -calendar.splitLookbackDays));
+    splitsWritten = await ctx.repo.putSplits(splits, stamp);
+    marker.splitsCheckedAt = stamp;
+  }
   let dividendsWritten = 0;
-  if (calendar.refreshDividends) {
-    const dividends = await source.getDividends(symbol, addDays(today, -DIVIDEND_LOOKBACK_DAYS), addDays(today, DIVIDEND_LOOKAHEAD_DAYS));
-    dividendsWritten = await ctx.repo.putDividends(dividends);
-    marker.dividendsCheckedAt = stamp;
+  if (isManual(state) || calendar.refreshDividends) {
+    progress.step = 'dividends';
+    const read = await readDividends(ctx, symbol, today, stamp, isManual(state) || entry.tier !== 'stale');
+    dividendsWritten = read.written;
+    Object.assign(marker, attemptMarker(read.attempt));
   }
   await ctx.repo.putState(symbol, marker);
-  return { splits: written, dividends: dividendsWritten };
+  return { splits: splitsWritten, dividends: dividendsWritten };
+}
+
+/** The calendar's daily allowance for a symbol's calls; an owner's check is held to the provider's own quota only. */
+function affordsSymbol(ctx: StepContext, state: State, symbol: string, today: string, stamp: string): Promise<boolean> {
+  const source = ctx.md.actions!;
+  const { calendar } = ctx.deps.config;
+  if (isManual(state) || !source.budgeted) return Promise.resolve(true);
+  const entry = state.actions.plan[symbol] ?? PLAIN_TURN;
+  const cost = Math.max(1, (entry.splits ? 1 : 0) + (calendar.refreshDividends ? 1 : 0));
+  return ctx.repo.consumeBudget(source.name, today, cost, calendar.eodhdDailyCalls, `${stamp}#${symbol}`);
 }
 
 /** Outcome of one symbol: checked, or the status that ends the run (budget spent, provider limit). */
 async function processSymbol(ctx: StepContext, state: State, symbol: string, today: string, stamp: string): Promise<'next' | 'stop'> {
   const source = ctx.md.actions!;
-  const { calendar } = ctx.deps.config;
   const { actions } = state;
-  const cost = calendar.refreshDividends ? 2 : 1;
-  if (source.budgeted && !(await ctx.repo.consumeBudget(source.name, today, cost, calendar.eodhdDailyCalls, `${stamp}#${symbol}`))) {
+  if (!(await affordsSymbol(ctx, state, symbol, today, stamp))) {
     actions.status = 'budget-exhausted';
     return 'stop';
   }
+  const progress: CheckProgress = { step: 'splits' };
   try {
-    const written = await checkSymbol(ctx, symbol, today, stamp);
+    const written = await checkSymbol(ctx, state, symbol, today, stamp, progress);
     actions.checked.push(symbol);
     actions.splits += written.splits;
     actions.dividends += written.dividends;
   } catch (error) {
     rethrowBudget(error);
+    const attempt = failureAttempt(error, stamp, progress.step);
     if (error instanceof RateLimitError) {
       ctx.logger.warn('provider limit reached; stopping', { provider: source.name, error: error.message });
       actions.status = 'rate-limited';
+      await recordAttempt(ctx, symbol, attempt);
       return 'stop';
     }
     ctx.logger.warn('calendar check failed', { symbol, error: errorMessage(error) });
     actions.failed[symbol] = errorName(error);
-    await markFailed(ctx, symbol, stamp);
+    await markFailed(ctx, symbol, attempt, stamp);
   }
   return 'next';
+}
+
+/** The symbols a run ended before it reached: recorded, so the Diagnostics page says why their dividends were not read today. */
+async function recordSkipped(ctx: StepContext, actions: Actions, stamp: string): Promise<void> {
+  const limited = actions.status === 'rate-limited';
+  const skipped = (limited ? actions.due.slice(1) : actions.due).slice(0, MAX_SKIPPED_RECORDS);
+  const attempt: DividendAttempt = { at: stamp, outcome: limited ? 'rate-limited' : 'budget', reason: limited ? 'the provider limit was reached before its turn' : '', source: 'eodhd', events: 0 };
+  await runUnits(skipped, (symbol) => recordAttempt(ctx, symbol, attempt));
+}
+
+/** The symbols the run looks at: the tracked ones that can pay (no crypto); a manual check only the held ones when the deployment says which. */
+function eligibleSymbols(state: State, held: ReadonlyMap<string, string> | undefined): string[] {
+  const candidates = state.symbols.filter((symbol) => !isCrypto(symbol));
+  return isManual(state) && held !== undefined ? candidates.filter((symbol) => held.has(symbol)) : candidates;
+}
+
+/** Plans the run: which symbols are read, in which order and why (see `planRotation`). */
+async function planActions(ctx: StepContext, state: State, now: Date, today: string): Promise<void> {
+  const { calendar } = ctx.deps.config;
+  const manual = isManual(state);
+  const held = await ctx.deps.heldPositions?.();
+  const eligible = eligibleSymbols(state, held);
+  const prioritised = manual || calendar.refreshDividends;
+  const [states, dates] = await Promise.all([ctx.repo.getStates(eligible), prioritised ? ctx.repo.dividendDates(eligible, today) : new Map<string, { last?: string; next?: string }>()]);
+  const planned = planRotation(eligible, { now, mode: manual ? 'manual' : 'scheduled', recheckDays: calendar.recheckDays, states, dates, heldSince: prioritised && held !== undefined ? held : new Map<string, string>() });
+  const plan = manual ? planned.slice(0, MANUAL_CHECK_SYMBOLS) : planned;
+  Object.assign(state.actions, { planned: true, eligible: eligible.length, due: plan.map((entry) => entry.symbol), dueCount: plan.length, plan: Object.fromEntries(plan.map((entry) => [entry.symbol, { tier: entry.tier, splits: entry.splits }])) });
 }
 
 async function refreshActions(ctx: StepContext, state: State, now: Date, today: string, stamp: string): Promise<void> {
@@ -326,19 +383,16 @@ async function refreshActions(ctx: StepContext, state: State, now: Date, today: 
     state.phase = 'done';
     return;
   }
-  if (!actions.planned) {
-    const eligible = state.symbols.filter((symbol) => !isCrypto(symbol));
-    const due = dueSymbols(eligible, await ctx.repo.getStates(eligible), now, ctx.deps.config.calendar.recheckDays);
-    Object.assign(actions, { planned: true, eligible: eligible.length, due, dueCount: due.length });
-  }
+  if (!actions.planned) await planActions(ctx, state, now, today);
   let stopped = false;
   await runUnits(
-    whileAffordable(actions.due, () => !stopped && ctx.hasCalls(SYMBOL_CALLS)),
+    whileAffordable(actions.due, () => !stopped && ctx.hasCalls(callsFor(ctx, state, actions.due[0]))),
     async (symbol) => {
       stopped = (await processSymbol(ctx, state, symbol, today, stamp)) === 'stop';
       if (!stopped) actions.due.shift();
     },
   );
+  if (stopped) await recordSkipped(ctx, actions, stamp);
   if (actions.due.length === 0 || stopped) state.phase = 'done';
 }
 
@@ -372,7 +426,7 @@ export type RefreshCalendarJob = JobHandler<JobPayloads['refreshCalendar'], Cale
 export function createRefreshCalendarJob(deps: PriceJobDeps): RefreshCalendarJob {
   return async ({ payload, cursor }) => {
     const ctx = createStepContext(deps);
-    const state = cursor === undefined ? await begin(ctx, deps.clock(), payload.trigger) : decodeState(stateSchema, cursor);
+    const state = cursor === undefined ? await begin(ctx, deps.clock(), payload.trigger, payload.part) : decodeState(stateSchema, cursor);
     const now = new Date(state.now);
     const today = utcDay(now);
     const stamp = now.toISOString();
@@ -388,14 +442,15 @@ export function createRefreshCalendarJob(deps: PriceJobDeps): RefreshCalendarJob
   };
 }
 
-async function begin(ctx: StepContext, now: Date, trigger: JobPayloads['refreshCalendar']['trigger']): Promise<State> {
+async function begin(ctx: StepContext, now: Date, trigger: JobPayloads['refreshCalendar']['trigger'], part: JobPayloads['refreshCalendar']['part']): Promise<State> {
   return {
     v: 1,
     now: now.toISOString(),
     trigger,
+    ...(part === undefined ? {} : { part }),
     symbols: await ctx.repo.listTracked(),
-    phase: 'earnings',
-    earnings: null,
-    actions: { planned: false, status: 'ok', eligible: 0, due: [], dueCount: 0, checked: [], failed: {}, splits: 0, dividends: 0 },
+    phase: part === undefined ? 'earnings' : 'actions',
+    earnings: part === undefined ? null : { status: 'no-symbols' },
+    actions: { planned: false, status: 'ok', eligible: 0, due: [], plan: {}, dueCount: 0, checked: [], failed: {}, splits: 0, dividends: 0 },
   };
 }

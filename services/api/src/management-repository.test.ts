@@ -120,6 +120,19 @@ describe('ItemManagementRepository', () => {
     expect(await repo.listWatchlist('u')).toEqual([entry]);
   });
 
+  it('keeps the dividend dates the user entered per user, replaces one for the same ex-date and removes it by key', async () => {
+    const { items, repo } = setup();
+    const entry = { userId: 'u', symbol: 'HESM', exDate: '2026-11-05', payDate: '2026-11-13', amount: 0.7, currency: 'USD', source: 'manual' as const, declared: true as const, enteredAt: 'x' };
+    await repo.putManualDividend(entry);
+    await repo.putManualDividend({ ...entry, amount: 0.72 });
+    await repo.putManualDividend({ ...entry, userId: 'other' });
+    expect(items.snapshot().map((item) => `${item.PK}|${item.SK}|${item.entityType}`).sort((a, b) => a.localeCompare(b))).toEqual(['USER#other|MDIV#HESM#2026-11-05|MANUAL_DIVIDEND', 'USER#u|MDIV#HESM#2026-11-05|MANUAL_DIVIDEND']);
+    expect(await repo.listManualDividends('u')).toEqual([{ ...entry, amount: 0.72 }]);
+    expect(await repo.deleteManualDividend('u', 'HESM', '2026-11-05')).toBe(true);
+    expect(await repo.deleteManualDividend('u', 'HESM', '2026-11-05')).toBe(false);
+    expect(await repo.listManualDividends('u')).toEqual([]);
+  });
+
   it('removes watchlist entries and reports unknown symbols', async () => {
     const { repo } = setup();
     await repo.addWatchlistEntry({ userId: 'u', symbol: 'NVDA', addedAt: 'x' });

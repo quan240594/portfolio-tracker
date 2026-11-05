@@ -13,6 +13,7 @@
 import { addIsoDays, daysBetween, DAYS_PER_YEAR, roundTo, transactionAmount } from './analytics.js';
 import { calculatePassiveIncome, paymentsPerYear, type PassiveIncome } from './analytics-income.js';
 import { earningsReleaseTime, type EarningsReleaseTime } from './earnings-time.js';
+import { MANUAL_DIVIDEND_SOURCE } from './dividend-merge.js';
 import { FxTimeline } from './fx.js';
 import { buildPositions, calculatePortfolio, HELD_DUST_QUANTITY, type Position } from './portfolio.js';
 import type { DividendEvent, FxDay, FxRates, InstrumentProfile, Quote, Transaction } from './types.js';
@@ -72,6 +73,8 @@ export const calendarKeys = {
   earningsPrefix: 'EARN#',
   split: (symbol: string, date: string) => ({ PK: `TICKER#${symbol}`, SK: `SPLIT#${date}` }),
   splitPrefix: 'SPLIT#',
+  /** The per-symbol marker the calendar job keeps (when splits and dividends were last checked, and how the dividends check ended). */
+  state: (symbol: string) => ({ PK: `TICKER#${symbol}`, SK: 'CAL#STATE' }),
   tickerPk: (symbol: string) => `TICKER#${symbol}`,
 } as const;
 
@@ -377,9 +380,12 @@ function createContext(data: CalendarData): Ctx {
 const isPositive = (n: number | undefined): n is number => n !== undefined && n > EPSILON;
 
 function describeDividend(amountPerShare: number, currency: string, quantity: number | undefined): string {
-  const perShare = `${roundTo(amountPerShare, 4)} ${currency} per share`;
+  const perShare = amountPerShare > 0 ? `${roundTo(amountPerShare, 4)} ${currency} per share` : 'amount not known yet';
   return quantity === undefined ? perShare : `${perShare} × ${roundTo(quantity, 8)} shares`;
 }
+
+/** Where a declared dividend's dates come from: `manual` for an entry of the owner, `market-data` for a provider. */
+const sourceOfDividend = (ev: DividendEvent): string => (ev.source === MANUAL_DIVIDEND_SOURCE ? MANUAL_DIVIDEND_SOURCE : 'market-data');
 
 /** Declared payment of `ev` for `quantity` shares: net, in the base currency (latest FX for the future, ex-date FX for the past). */
 function declaredAmount(ctx: Ctx, ev: DividendEvent, quantity: number): number {
@@ -424,7 +430,7 @@ function exEvent(base: DividendBase, ev: DividendEvent, quantity: number | undef
     date: ev.exDate,
     type: 'EX_DIVIDEND',
     status: 'CONFIRMED',
-    source: 'market-data',
+    source: sourceOfDividend(ev),
     description: describeDividend(ev.amount, ev.currency, quantity),
     amountPerShare: ev.amount,
     currency: ev.currency,
@@ -447,7 +453,7 @@ function payEvent(ctx: Ctx, base: DividendBase, ev: DividendEvent, quantity: num
     date: paid?.date ?? ev.payDate ?? ev.exDate,
     type: 'DIVIDEND_PAY',
     status: paid ? 'PAID' : 'CONFIRMED',
-    source: paid ? 'transactions' : 'market-data',
+    source: paid ? 'transactions' : sourceOfDividend(ev),
     description: describeDividend(amount, currency, shares),
     amountPerShare: amount,
     currency,
@@ -460,7 +466,7 @@ function payEvent(ctx: Ctx, base: DividendBase, ev: DividendEvent, quantity: num
 }
 
 function declaredEntries(ctx: Ctx, ev: DividendEvent, base: DividendBase, quantity: number | undefined, paid: Transaction | undefined): CalendarEvent[] {
-  const expected = quantity === undefined ? undefined : declaredAmount(ctx, ev, quantity);
+  const expected = quantity === undefined || ev.amount <= 0 ? undefined : declaredAmount(ctx, ev, quantity);
   const hasPayEvent = ev.payDate !== undefined || paid !== undefined;
   const out = [exEvent(base, ev, quantity, expected, !hasPayEvent)];
   if (hasPayEvent) out.push(payEvent(ctx, base, ev, quantity, expected, paid));
@@ -789,6 +795,17 @@ function earningsEntries(ctx: EarningsCtx, stored: readonly StoredEarningsEvent[
     if (projection) projections.push(projection);
   }
   return [...reported.events, ...scheduled.events, ...projections];
+}
+
+export type DividendOutlookInput = Pick<CalendarData, 'today' | 'transactions' | 'profiles' | 'fx' | 'fxHistory' | 'dividendEvents' | 'watchlist'>;
+
+/**
+ * The dividend entries of the calendar (declared ex-date and pay entries, received payments, projections) for everything held, with no
+ * date range or filter: what the dividend dates diagnostics read the next date of each holding from.
+ */
+export function dividendOutlook(input: DividendOutlookInput): CalendarEvent[] {
+  const ctx = createContext({ ...input, quotes: {}, earnings: [], splits: [] });
+  return [...dividendEntries(ctx, input.dividendEvents), ...estimatedDividends(ctx, input.dividendEvents)].sort(compareEvents);
 }
 
 export interface EarningsOutlookInput {

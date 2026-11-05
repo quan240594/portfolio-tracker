@@ -1,5 +1,5 @@
-import { BudgetGuard, MemoryItemStore, MemoryUsageStore, METRIC_LIMITS, silentLogger, type JobHandler, type JobPayloads, type UsageStore } from '@portfolio/platform';
-import { parseEarningsRun, type TransactionsChangedDetail } from '@portfolio/shared';
+import { BudgetGuard, MemoryItemStore, MemoryUsageStore, METRIC_LIMITS, registerUser, silentLogger, type JobHandler, type JobPayloads, type UsageStore } from '@portfolio/platform';
+import { parseEarningsRun, transactionItem, type TransactionsChangedDetail } from '@portfolio/shared';
 import { describe, expect, it, vi } from 'vitest';
 import {
   CORE_JOB_FACTORIES,
@@ -185,6 +185,15 @@ describe('the job registry and the price registration point', () => {
     expect(priceJobDeps({ items, fetch: vi.fn(), now: () => NOON, sleep: () => Promise.resolve(), pacer, config: { prices: { baseCurrency: 'EUR' } } } as unknown as JobContext).pacer).toBe(pacer);
   });
 
+  it('lets the calendar job read the held positions (with the day of their first transaction) and the companies', async () => {
+    const items = new MemoryItemStore();
+    await registerUser(items, 'u1', 'x');
+    await items.put(transactionItem({ id: 't1', userId: 'u1', portfolioId: 'p', date: '2025-03-04', type: 'BUY', symbol: 'HESM', quantity: 3, price: 30, fee: 0, currency: 'USD', createdAt: '2025-03-04T00:00:00Z' }));
+    const deps = priceJobDeps({ items, fetch: vi.fn(), now: () => NOON, sleep: () => Promise.resolve(), config: { prices: { baseCurrency: 'EUR' } } } as unknown as JobContext);
+    expect(await deps.heldPositions!()).toEqual(new Map([['HESM', '2025-03-04']]));
+    expect(await deps.heldCompanies!()).toEqual(['HESM']);
+  });
+
   it('lets the price refresh start the enrichment of symbols that never had one, as a job on the Hub queue', async () => {
     const enqueue = vi.fn(() => Promise.resolve());
     const deps = priceJobDeps({ ...context, queue: { enqueue }, items: {} as never, config: { prices: { baseCurrency: 'EUR' } } } as unknown as JobContext);
@@ -314,6 +323,15 @@ describe('the calendar job behind the budget guard', () => {
     await use(guard, 15);
     await registry.refreshCalendar!({ payload: manual });
     expect(parseEarningsRun(items.snapshot().find((item) => item.SK === 'EARNINGS#LASTRUN'))).toMatchObject({ trigger: 'manual', status: 'skipped', reason: expect.stringContaining('used up') });
+  });
+
+  it('does not record a dropped dividends-only check as an earnings run: it has nothing to say about the earnings dates', async () => {
+    const { guard } = setup();
+    const items = new MemoryItemStore();
+    const registry = createJobRegistry({ budget: new SubrequestBudget(), now: () => NOON, items } as unknown as JobContext, { guard }, { refreshCalendar: () => ran() as never });
+    await use(guard, 85);
+    await registry.refreshCalendar!({ payload: { trigger: 'manual', part: 'dividends' } });
+    expect(items.snapshot()).toEqual([]);
   });
 
   it('says when the budget ledger could not be read', async () => {

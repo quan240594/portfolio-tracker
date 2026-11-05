@@ -86,8 +86,8 @@ describe('enrichTransactions', () => {
     expect(stored(h.store, 'TICKER#BTC-EUR', 'PROFILE')).not.toHaveProperty('peRatio');
     expect(items(h.store, 'TICKER#AAPL', 'EOD#')).toHaveLength(5);
     expect(items(h.store, 'TICKER#AAPL', 'DIV#')).toEqual([
-      { PK: 'TICKER#AAPL', SK: 'DIV#2024-11-10', entityType: 'DIVIDEND_EVENT', symbol: 'AAPL', exDate: '2024-11-10', payDate: '2024-11-14', amount: 0.26, currency: 'USD' },
-      { PK: 'TICKER#AAPL', SK: 'DIV#2027-01-10', entityType: 'DIVIDEND_EVENT', symbol: 'AAPL', exDate: '2027-01-10', payDate: '2027-01-14', amount: 0.27, currency: 'USD' },
+      { PK: 'TICKER#AAPL', SK: 'DIV#2024-11-10', entityType: 'DIVIDEND_EVENT', symbol: 'AAPL', exDate: '2024-11-10', payDate: '2024-11-14', amount: 0.26, currency: 'USD', source: 'eodhd', declared: true },
+      { PK: 'TICKER#AAPL', SK: 'DIV#2027-01-10', entityType: 'DIVIDEND_EVENT', symbol: 'AAPL', exDate: '2027-01-10', payDate: '2027-01-14', amount: 0.27, currency: 'USD', source: 'eodhd', declared: true },
     ]);
     expect(stored(h.store, 'TICKER#AAPL', 'QUOTE#LATEST')).toMatchObject({ price: 230.12, source: 'twelvedata' });
     expect(stored(h.store, 'TRACKED', 'TICKER#BTC-EUR')).toEqual({ PK: 'TRACKED', SK: 'TICKER#BTC-EUR', entityType: 'TRACKED_TICKER', symbol: 'BTC-EUR', createdAt: '2026-10-13T16:30:00.000Z', updatedAt: '2026-10-13T16:30:00.000Z' });
@@ -285,6 +285,28 @@ describe('enrichTransactions', () => {
       expect(result).toMatchObject({ enriched: ['AAPL'], retry: [] });
       expect(items(h.store, 'TICKER#AAPL', 'DIV#')).toEqual([]);
       expect(stored(h.store, 'USAGE', 'BLOCK#eodhd')).toBeDefined();
+    });
+
+    it('records how the dividends read of each symbol ended, for the Diagnostics page', async () => {
+      const fake = enrichFake();
+      const h = harness({ fake });
+      await drive(h, createEnrichTransactionsJob(h.deps), event(['AAPL']));
+      expect(stored(h.store, 'TICKER#AAPL', 'CAL#STATE')).toMatchObject({ dividendsOutcome: 'ok', dividendsEvents: 2, dividendsSource: 'eodhd', dividendsCheckedAt: NOW.toISOString() });
+
+      const limited = harness({ fake: enrichFake().add('eodhd.com/api/div/AAPL.US', { status: 402 }) });
+      await drive(limited, createEnrichTransactionsJob(limited.deps), event(['AAPL']));
+      expect(stored(limited.store, 'TICKER#AAPL', 'CAL#STATE')).toMatchObject({ dividendsOutcome: 'rate-limited' });
+      expect(stored(limited.store, 'TICKER#AAPL', 'CAL#STATE')).not.toHaveProperty('dividendsCheckedAt');
+
+      const failing = harness({ fake: enrichFake().add('eodhd.com/api/div/AAPL.US', { status: 404 }) });
+      await drive(failing, createEnrichTransactionsJob(failing.deps), event(['AAPL']));
+      expect(stored(failing.store, 'TICKER#AAPL', 'CAL#STATE')).toMatchObject({ dividendsOutcome: 'none' });
+    });
+
+    it('records nothing about dividends without an EODHD key', async () => {
+      const h = harness({ fake: enrichFake(), env: { EODHD_API_KEY: '' } });
+      await drive(h, createEnrichTransactionsJob(h.deps), event(['AAPL']));
+      expect(stored(h.store, 'TICKER#AAPL', 'CAL#STATE')).toBeUndefined();
     });
 
     it('stores the history of every symbol before it spends the quota on dividends', async () => {

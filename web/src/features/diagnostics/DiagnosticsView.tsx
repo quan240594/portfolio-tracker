@@ -4,11 +4,13 @@ import { ErrorState } from '../../components/ErrorState';
 import { PageHeader } from '../../components/Layout';
 import { LoadingRegion, Skeleton } from '../../components/Skeleton';
 import { CardGrid } from '../layout/CardGrid';
+import { DividendDatesCard } from './DividendDatesCard';
 import { EarningsDatesCard } from './EarningsDatesCard';
 import { AlphaVantageProbeCard } from './AlphaVantageProbeCard';
 import { PriceCoverageCard } from './PriceCoverageCard';
 import { ValuationReportCard } from './ValuationReportCard';
 import { useAlphaVantageProbe, type AlphaVantageProbeHook } from './useAlphaVantageProbe';
+import { useDividendDates, type DividendDatesResult } from './useDividendDates';
 import { useEarningsDates, type EarningsDatesResult } from './useEarningsDates';
 import { usePriceCoverage, type PriceCoverageResult } from './usePriceCoverage';
 import { jobLine, formatDuration, formatInstant, retryLabel, RUN_STATUS_LABELS, statusOf, type RunStatus } from './runFormat';
@@ -191,7 +193,24 @@ function EarningsDatesSlot({ earnings }: Readonly<{ earnings: EarningsDatesResul
   );
 }
 
-function Loaded({ report, prices, earnings, probe }: Readonly<{ report: AlarmDiagnosticsReport; prices: PriceCoverageResult; earnings: EarningsDatesResult; probe: AlphaVantageProbeHook }>) {
+/** The dividend dates card; nothing where the backend has no such report, a short message when it could not be read. */
+function DividendDatesSlot({ dividends }: Readonly<{ dividends: DividendDatesResult }>) {
+  if (dividends.report) return <DividendDatesCard report={dividends.report} dividends={dividends} />;
+  if (dividends.availability !== 'error') return null;
+  return (
+    <section id="dividend-dates" aria-labelledby="dividend-dates-error" className="card space-y-2 p-4">
+      <h2 id="dividend-dates-error" className="text-base font-semibold">
+        Dividend dates
+      </h2>
+      <p className="text-sm">The dividend dates could not be read.</p>
+      <button type="button" className="btn-secondary" onClick={dividends.refetch}>
+        Try again
+      </button>
+    </section>
+  );
+}
+
+function Loaded({ report, prices, earnings, dividends, probe }: Readonly<{ report: AlarmDiagnosticsReport; prices: PriceCoverageResult; earnings: EarningsDatesResult; dividends: DividendDatesResult; probe: AlphaVantageProbeHook }>) {
   return (
     <div className="space-y-6">
       <CardGrid
@@ -199,6 +218,7 @@ function Loaded({ report, prices, earnings, probe }: Readonly<{ report: AlarmDia
         cards={[
           { id: 'price-coverage', title: 'Price data coverage', defaultWidth: 'full', render: () => <CoverageSlot prices={prices} /> },
           { id: 'earnings-dates', title: 'Earnings dates', defaultWidth: 'full', render: () => <EarningsDatesSlot earnings={earnings} /> },
+          { id: 'dividend-dates', title: 'Dividend dates', defaultWidth: 'full', render: () => <DividendDatesSlot dividends={dividends} /> },
           { id: 'alphavantage-probe', title: 'Alpha Vantage', defaultWidth: 'full', render: () => <AlphaVantageProbeCard probe={probe} /> },
           { id: 'valuation-report', title: 'Valuation report', defaultWidth: 'full', render: () => <ValuationReportCard /> },
           { id: 'alarm-summary', title: 'Last 24 hours', defaultWidth: 'full', render: () => <Summary report={report} /> },
@@ -222,11 +242,12 @@ export function DiagnosticsView() {
   const diagnostics = useAlarmDiagnostics();
   const prices = usePriceCoverage();
   const earnings = useEarningsDates();
+  const dividends = useDividendDates();
   const probe = useAlphaVantageProbe();
   let body: React.ReactNode;
   if (diagnostics.availability === 'not-exposed') body = <EmptyState title="Diagnostics are not available" description="This deployment does not keep an alarm log or price coverage details." />;
   else if (diagnostics.availability === 'error') body = <ErrorState error={diagnostics.error} onRetry={diagnostics.refetch} />;
-  else if (diagnostics.report) body = <Loaded report={diagnostics.report} prices={prices} earnings={earnings} probe={probe} />;
+  else if (diagnostics.report) body = <Loaded report={diagnostics.report} prices={prices} earnings={earnings} dividends={dividends} probe={probe} />;
   else {
     body = (
       <LoadingRegion label="Loading diagnostics">
@@ -242,15 +263,16 @@ export function DiagnosticsView() {
         diagnostics.refetch();
         prices.refetch();
         earnings.refetch();
+        dividends.refetch();
       }}
-      disabled={diagnostics.isFetching || prices.isFetching || earnings.isFetching}
+      disabled={diagnostics.isFetching || prices.isFetching || earnings.isFetching || dividends.isFetching}
     >
-      {diagnostics.isFetching || prices.isFetching || earnings.isFetching ? 'Refreshing…' : 'Refresh'}
+      {diagnostics.isFetching || prices.isFetching || earnings.isFetching || dividends.isFetching ? 'Refreshing…' : 'Refresh'}
     </button>
   );
   return (
     <>
-      <PageHeader title="Diagnostics" description="What the background alarm of this deployment did lately, how much price history is stored, and where the earnings dates come from." actions={diagnostics.availability === 'ready' ? refresh : undefined} />
+      <PageHeader title="Diagnostics" description="What the background alarm of this deployment did lately, how much price history is stored, and where the earnings and dividend dates come from." actions={diagnostics.availability === 'ready' ? refresh : undefined} />
       {body}
     </>
   );

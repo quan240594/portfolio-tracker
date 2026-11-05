@@ -7,7 +7,7 @@ export const expectedLabel = (e: CalendarEvent, baseCurrency: string): string | 
   e.expectedAmount === undefined ? undefined : formatMoney(e.expectedAmount, baseCurrency);
 
 export const perShareLabel = (e: CalendarEvent): string | undefined =>
-  e.amountPerShare === undefined || !e.currency ? undefined : formatMoney(e.amountPerShare, e.currency, { maxDigits: 4 });
+  e.amountPerShare === undefined || e.amountPerShare <= 0 || !e.currency ? undefined : formatMoney(e.amountPerShare, e.currency, { maxDigits: 4 });
 
 export const TIME_OF_DAY_LABELS: Readonly<Record<CalendarEarningsTime, string>> = {
   BMO: 'Before market open',

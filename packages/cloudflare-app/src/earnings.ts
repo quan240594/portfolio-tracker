@@ -20,7 +20,7 @@ import {
   type NeuronsToday,
 } from '@portfolio/earnings';
 import { AlphaVantageEstimatesClient, DailyQuota, EstimateBudget, StoreQuotaLedger, alphaVantageGeneralLimit, type ProviderPacer } from '@portfolio/prices';
-import { classificationFieldsOf, currentHoldings, kpiTemplateFor, type EarningsHolding } from '@portfolio/shared';
+import { classificationFieldsOf, currentHoldings, heldDividendPayers, kpiTemplateFor, type EarningsHolding } from '@portfolio/shared';
 import type { HubConfig } from './config.js';
 
 /** Whether the feature has everything it needs: the SEC contact and the Workers AI binding. */
@@ -69,6 +69,30 @@ export async function heldCompanies(items: ItemStore, today: string): Promise<{ 
     if (template !== null) holdings.push({ symbol, name: name ?? symbol, template, ...(profile?.currency === undefined ? {} : { currency: profile.currency }), ...(profile?.isin === undefined ? {} : { isin: profile.isin }) });
   }
   return { holdings, former };
+}
+
+/**
+ * The positions held today by any user that can pay a dividend (ETFs included, crypto not) with the day of the first transaction in each: the
+ * symbols the dividend checks read, and which of them were bought after their last read. Nothing about quantities or users leaves this function.
+ */
+export async function heldPositions(items: ItemStore, today: string): Promise<ReadonlyMap<string, string>> {
+  const repo = new ItemRepository(items);
+  const users = await new ItemNotificationRepository(items).listUserIds();
+  const since = new Map<string, string>();
+  const held = await Promise.all(
+    users.map(async (userId) => {
+      try {
+        return heldDividendPayers(await repo.listTransactions(userId), today);
+      } catch {
+        // A user whose transactions cannot be replayed (an oversold position) holds nothing the dividend checks can read.
+        return new Map<string, string>();
+      }
+    }),
+  );
+  for (const [symbol, first] of held.flatMap((entry) => [...entry])) {
+    if (first <= (since.get(symbol) ?? first)) since.set(symbol, first);
+  }
+  return since;
 }
 
 /** The held companies (`heldCompanies`) and the expected report dates of the calendar. */

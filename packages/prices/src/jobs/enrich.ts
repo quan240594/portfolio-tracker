@@ -1,4 +1,4 @@
-import type { DividendEvent, EodPrice, InstrumentProfile, Quote } from '@portfolio/shared';
+import type { DividendAttempt, DividendEvent, EodPrice, InstrumentProfile, Quote } from '@portfolio/shared';
 import { alignEodScale, isMarketSymbol, sourceOf } from '@portfolio/shared';
 import type { EnrichmentSummary, JobHandler, JobPayloads } from '@portfolio/platform';
 import { z } from 'zod';
@@ -10,6 +10,7 @@ import { addDays, utcDay } from '../time.js';
 import type { AttemptKind, AttemptOutcome, Attempts } from '../repository.js';
 import { overrideHistory } from './history-override.js';
 import { proxyHistory } from './proxy-listing.js';
+import { failureAttempt, fromEodhd, recordAttempt } from './dividend-state.js';
 import { createStepContext, pendingStep, rethrowBudget, runStep, runUnits, type PriceJobDeps, type StepContext } from './common.js';
 
 export const HISTORY_DAYS = 365;
@@ -246,12 +247,19 @@ function fetchDividends(ctx: StepContext, symbol: string, now: Date): Promise<Di
   return ctx.md.provider.getDividends(symbol, addDays(today, -DIVIDEND_LOOKBACK_DAYS), addDays(today, DIVIDEND_LOOKAHEAD_DAYS));
 }
 
-/** Dividends are the nice-to-have of an enrichment: the calendar refresh stores them later when the provider's quota ran out. */
+/** Dividends are the nice-to-have of an enrichment: the calendar refresh stores them later when the provider's quota ran out. How the read ended is recorded for the Diagnostics page. */
 async function storeDividends(ctx: StepContext, state: State, symbol: string, now: Date): Promise<void> {
+  const at = ctx.deps.clock().toISOString();
+  // Without an EODHD key nothing was asked: there is no outcome to record.
+  const record = (attempt: DividendAttempt): Promise<void> => (ctx.md.actions === undefined ? Promise.resolve() : recordAttempt(ctx, symbol, attempt));
   try {
-    await ctx.repo.putDividends(await fetchDividends(ctx, symbol, now));
+    const events = await fetchDividends(ctx, symbol, now);
+    await ctx.repo.putDividends(fromEodhd(events));
+    await record({ at, outcome: events.length > 0 ? 'ok' : 'none', reason: '', source: 'eodhd', events: events.length });
   } catch (error) {
     rethrowBudget(error);
+    const attempt = failureAttempt(error, at, 'dividends');
+    await record(attempt);
     if (error instanceof RateLimitError) {
       ctx.logger.info('dividends left to the calendar refresh: provider limit', { symbol, error: error.message });
       state.dividends.length = 0;

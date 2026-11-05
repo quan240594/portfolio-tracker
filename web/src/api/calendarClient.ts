@@ -1,4 +1,4 @@
-import { ALL_PORTFOLIOS, type CalendarParams, type GetCalendarResponse } from '@portfolio/shared';
+import { ALL_PORTFOLIOS, type AddManualDividendRequest, type CalendarParams, type GetCalendarResponse, type ManualDividend } from '@portfolio/shared';
 import { request, requestText } from './client';
 
 const DEFAULT_ICS_NAME = 'portfolio-calendar.ics';
@@ -23,9 +23,17 @@ export interface IcsDownload {
   text: string;
 }
 
+/** What the API returns for an entry: the stored one without the owner's id. */
+export type ManualDividendEntry = Omit<ManualDividend, 'userId'>;
+
 export const calendarApi = {
   get: (scope: string, params: CalendarParams, signal?: AbortSignal) =>
     request<GetCalendarResponse>('GET', '/calendar', { query: calendarQuery(scope, params), signal }),
+
+  /** Stores a dividend date the owner enters (the same symbol and ex-date again replaces it). */
+  addManualDividend: (body: AddManualDividendRequest) => request<ManualDividendEntry>('POST', '/calendar/dividends', { body }),
+
+  removeManualDividend: (symbol: string, exDate: string) => request<undefined>('DELETE', `/calendar/dividends/${encodeURIComponent(symbol)}/${exDate}`),
 
   /** The .ics document: fetched with the user's token and saved as a file (calendar apps cannot send a JWT, so it is no subscription URL). */
   async downloadIcs(scope: string, params: CalendarParams, signal?: AbortSignal): Promise<IcsDownload> {

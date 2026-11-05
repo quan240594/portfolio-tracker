@@ -15,6 +15,7 @@ import {
   calendarSplitKind,
   calendarSplitLabel,
   defaultCalendarRange,
+  dividendOutlook,
   nextEarningsEvents,
   projectedEarningsDate,
   projectEarnings,
@@ -630,5 +631,54 @@ describe('without holdings', () => {
     expect(empty.events.map((e) => e.symbol)).not.toContain('AAPL');
     expect(empty.summary).toEqual({ annualIncome: 0, monthlyAverage: 0, dailyAverage: 0, yieldPct: 0, yieldOnCostPct: 0, declared: 0, estimated: 0 });
     expect(empty.monthly.every((m) => m.total === 0)).toBe(true);
+  });
+});
+
+describe('a dividend whose ex-date is today and whose payment is ahead', () => {
+  const HESM_TODAY = '2026-11-05';
+  const hesm: DividendEvent = { symbol: 'HESM', exDate: HESM_TODAY, payDate: '2026-11-13', amount: 0.7, currency: 'USD', source: 'eodhd', declared: true };
+  const base = (bought: string): Partial<CalendarData> => ({
+    today: HESM_TODAY,
+    transactions: [tx({ id: 'buy-hesm', symbol: 'HESM', date: bought })],
+    quotes: { HESM: quote('HESM', 35, 'USD') },
+    profiles: { HESM: profile('HESM', 'Hess Midstream LP', 'USD') },
+    dividendEvents: [hesm],
+    earnings: [],
+    splits: [],
+    watchlist: [],
+  });
+  const range: Partial<CalendarQuery> = { from: '2026-10-01', to: '2026-12-31', scope: 'holdings' };
+
+  it('lists the ex-dividend entry today and the payment in 8 days for a position bought before the ex-date', () => {
+    const events = eventsOf(range, base('2026-11-04'));
+    expect(events.map((e) => [e.id, e.date, e.type, e.status])).toEqual([
+      ['ex:HESM:2026-11-05', '2026-11-05', 'EX_DIVIDEND', 'CONFIRMED'],
+      ['pay:HESM:2026-11-05', '2026-11-13', 'DIVIDEND_PAY', 'CONFIRMED'],
+    ]);
+    expect(events[0]).toMatchObject({ quantity: 10, source: 'market-data', origin: 'HOLDING' });
+  });
+
+  it('lists nothing for a position bought on the ex-date itself', () => {
+    expect(eventsOf(range, base(HESM_TODAY))).toEqual([]);
+  });
+
+  it('is found by the status and type filters of the page', () => {
+    expect(eventsOf({ ...range, statuses: ['CONFIRMED'], types: ['EX_DIVIDEND'] }, base('2025-01-02')).map((e) => e.id)).toEqual(['ex:HESM:2026-11-05']);
+  });
+
+  it('shows an entry of the owner without an amount as such, with no expected amount, and an entry with one as entered by the owner', () => {
+    const noAmount = eventsOf(range, { ...base('2025-01-02'), dividendEvents: [{ ...hesm, amount: 0, source: 'manual' }] });
+    expect(noAmount.map((e) => [e.source, e.expectedAmount])).toEqual([
+      ['manual', undefined],
+      ['manual', undefined],
+    ]);
+    expect(noAmount[0]!.description).toContain('amount not known yet');
+    const withAmount = eventsOf(range, { ...base('2025-01-02'), dividendEvents: [{ ...hesm, source: 'manual' }] });
+    expect(withAmount[1]).toMatchObject({ source: 'manual', expectedAmount: 5.6 });
+  });
+
+  it('exposes the entries a diagnostics report reads the next date from', () => {
+    const outlook = dividendOutlook({ ...data, ...base('2025-01-02'), fx });
+    expect(outlook.map((e) => e.id)).toEqual(['ex:HESM:2026-11-05', 'pay:HESM:2026-11-05']);
   });
 });

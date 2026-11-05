@@ -20,12 +20,14 @@ import {
   upsertValuation,
   valuationSchema,
   addWatchlistSchema,
+  addManualDividendSchema,
   portfolioSettingsSchema,
   type Category,
   type CategoryAssignment,
   type CustomAsset,
   type CustomAssetWithValue,
   type ListCategoriesResponse,
+  type ManualDividend,
   type PortfolioSettings,
   type WatchlistEntry,
   type WatchlistItem,
@@ -40,6 +42,7 @@ interface ManagementState {
   assignments: CategoryAssignment[];
   assets: CustomAsset[];
   watchlist: WatchlistEntry[];
+  manualDividends: ManualDividend[];
   nextId: number;
 }
 
@@ -52,6 +55,7 @@ function init(seed: MockSeed, empty = false): ManagementState {
     assignments: empty ? [] : [...m.assignments],
     assets: empty ? [] : [...m.assets],
     watchlist: empty ? [] : [...m.watchlist],
+    manualDividends: [],
     nextId: 1,
   };
 }
@@ -301,6 +305,35 @@ export function removeWatchlist(symbol: string): void {
   const upper = symbol.toUpperCase();
   if (!s().watchlist.some((w) => w.symbol === upper)) throw new MockHttpError(404, 'NOT_FOUND', `${upper} is not on your watchlist.`);
   s().watchlist = s().watchlist.filter((w) => w.symbol !== upper);
+}
+
+export const listManualDividends = (): ManualDividend[] => [...s().manualDividends];
+
+/** The dividend date the demo user enters by hand; the same symbol and ex-date replaces the entry. */
+export function addManualDividend(body: unknown, held: (symbol: string) => boolean, defaultCurrency: (symbol: string) => string): Omit<ManualDividend, 'userId'> {
+  const input = parse(addManualDividendSchema.safeParse(body), 'Invalid dividend date');
+  if (!held(input.symbol)) throw new MockHttpError(400, 'VALIDATION_ERROR', `${input.symbol} is not in your portfolio`);
+  if (input.payDate !== undefined && input.payDate < input.exDate) throw new MockHttpError(422, 'UNPROCESSABLE', 'The pay date must not be before the ex-date');
+  const entry: ManualDividend = {
+    userId: MOCK_USER_ID,
+    symbol: input.symbol,
+    exDate: input.exDate,
+    ...(input.payDate === undefined ? {} : { payDate: input.payDate }),
+    amount: input.amount ?? 0,
+    currency: input.currency ?? defaultCurrency(input.symbol),
+    source: 'manual',
+    declared: true,
+    enteredAt: nowIso(),
+  };
+  s().manualDividends = [...s().manualDividends.filter((d) => !(d.symbol === entry.symbol && d.exDate === entry.exDate)), entry];
+  const { userId: _userId, ...shown } = entry;
+  return shown;
+}
+
+export function removeManualDividend(symbol: string, exDate: string): void {
+  const upper = symbol.toUpperCase();
+  if (!s().manualDividends.some((d) => d.symbol === upper && d.exDate === exDate)) throw new MockHttpError(404, 'NOT_FOUND', `There is no dividend date entered for ${upper} with ex-date ${exDate}.`);
+  s().manualDividends = s().manualDividends.filter((d) => !(d.symbol === upper && d.exDate === exDate));
 }
 
 export const backupParts = () => {

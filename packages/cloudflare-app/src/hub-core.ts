@@ -26,6 +26,7 @@ import { readBodyBounded } from './body.js';
 import type { HubConfig } from './config.js';
 import { createHistorySymbolApi } from './history-symbol.js';
 import { createCalendarDatesApi } from './calendar-dates.js';
+import { createDividendChecksApi } from './dividend-checks.js';
 import { createAlphaVantageProbeApi } from './alphavantage-probe.js';
 import { createEarningsApi, earningsConfigured, neuronMeter } from './earnings.js';
 import { createHubLogoRoute, logoLookupGate } from './logos.js';
@@ -376,6 +377,8 @@ export class HubCore {
       historySymbols: createHistorySymbolApi({ items, ...(hasPriceService(this.factories) ? { queue: jobs } : {}), guard: this.guard, now: this.now }),
       // The earnings dates section of Settings > Diagnostics: the Alpha Vantage allowance and the "Refresh earnings dates now" button.
       ...(hasPriceService(this.factories) ? { calendarDates: createCalendarDatesApi({ items, config: this.config.prices, queue: jobs, now: this.now }) } : {}),
+      // The dividend dates section next to it: the EODHD allowance and the "Check dividends now" button (a dividends-only calendar run).
+      ...(hasPriceService(this.factories) ? { dividendChecks: createDividendChecksApi({ items, config: this.config.prices, queue: jobs, now: this.now }) } : {}),
       // "Test Alpha Vantage now" next to it: one real EARNINGS_ESTIMATES call, paced like the jobs' calls.
       alphaVantageProbe: createAlphaVantageProbeApi({ items, config: this.config.prices, now: this.now, fetch: (url, init) => this.fetchImpl(url, init), pacer: this.pacer }),
       earnings: createEarningsApi({ items, config: this.config, ai: this.ai, queue: jobs, now: this.now, guard: this.guard }),

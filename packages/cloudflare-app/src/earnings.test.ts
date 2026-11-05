@@ -4,7 +4,7 @@ import { parseEarningsConfig } from '@portfolio/earnings';
 import { parsePricesConfig } from '@portfolio/prices';
 import { classificationKeys, keys, transactionItem, type Transaction } from '@portfolio/shared';
 import { describe, expect, it } from 'vitest';
-import { createEarningsApi, createEarningsInputs, earningsConfigured, earningsJobDeps, estimatesJobDeps, neuronMeter } from './earnings.js';
+import { createEarningsApi, createEarningsInputs, earningsConfigured, earningsJobDeps, estimatesJobDeps, heldPositions, neuronMeter } from './earnings.js';
 import type { HubConfig } from './config.js';
 
 const NOW = new Date('2026-10-21T19:30:00.000Z');
@@ -84,6 +84,32 @@ describe('createEarningsInputs', () => {
     await store.put(transactionItem(tx('github-1', 'VWRL.AS')));
     await store.put({ ...keys.profile('VWRL.AS'), entityType: 'PROFILE', symbol: 'VWRL.AS', name: 'World', assetClass: 'ETF', currency: 'EUR' });
     expect(await createEarningsInputs(store).build(DAY, NOW)).toEqual({ holdings: [], calendar: {}, former: [] });
+  });
+});
+
+describe('heldPositions', () => {
+  it('lists every position held by any user that can pay a dividend (ETFs too, crypto and closed positions not) with the day of its first transaction', async () => {
+    const store = new MemoryItemStore();
+    await seed(store);
+    await store.batchWrite([
+      { type: 'put', item: transactionItem(tx('github-1', 'LMFG', { id: 'earlier', date: '2024-03-01' })) },
+      { type: 'put', item: transactionItem(tx('github-2', 'BTC-EUR', { id: 'btc' })) },
+      { type: 'put', item: transactionItem(tx('github-2', 'AFTER', { id: 'after', date: '2026-12-01' })) },
+    ]);
+    const held = await heldPositions(store, DAY);
+    expect([...held]).toEqual(
+      expect.arrayContaining([
+        ['LMFG', '2024-03-01'],
+        ['JPM', '2025-01-10'],
+        ['VWRL.AS', '2025-01-10'],
+        ['NOPROFILE', '2025-01-10'],
+      ]),
+    );
+    expect([...held.keys()].toSorted((a, b) => a.localeCompare(b))).toEqual(['JPM', 'LMFG', 'NOPROFILE', 'VWRL.AS']);
+  });
+
+  it('is empty without holdings', async () => {
+    expect(await heldPositions(new MemoryItemStore(), DAY)).toEqual(new Map());
   });
 });
 

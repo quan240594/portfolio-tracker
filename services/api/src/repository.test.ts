@@ -202,6 +202,26 @@ describe('ItemRepository market data', () => {
     expect(data.lastOk).toMatchObject({ status: 'ok', rows: 10, matchedSymbols: ['AAPL'] });
   });
 
+  it('getDividendDatesData reads the tracked items, the dividends markers of the calendar job and the state of the fallback feed', async () => {
+    const { items, repo } = setup();
+    await items.batchWrite([
+      { type: 'put', item: { PK: 'TRACKED', SK: 'TICKER#HESM', entityType: 'TRACKED_TICKER', symbol: 'HESM', createdAt: '2026-01-02T10:00:00.000Z' } },
+      { type: 'put', item: { PK: 'TRACKED', SK: 'TICKER#KO', entityType: 'TRACKED_TICKER', symbol: 'KO' } },
+      { type: 'put', item: { PK: 'TICKER#HESM', SK: 'CAL#STATE', entityType: 'CALENDAR_STATE', symbol: 'HESM', splitsCheckedAt: '2026-11-04T05:30:00.000Z', dividendsCheckedAt: '2026-11-04T05:30:00.000Z', dividendsAttemptAt: '2026-11-05T05:30:00.000Z', dividendsOutcome: 'budget', dividendsReason: '', dividendsSource: 'eodhd', dividendsEvents: 0 } },
+      { type: 'put', item: { PK: 'TICKER#KO', SK: 'CAL#STATE', entityType: 'CALENDAR_STATE', symbol: 'KO', splitsCheckedAt: '2026-11-04T05:30:00.000Z' } },
+      { type: 'put', item: { PK: 'CALENDAR', SK: 'DIVIDENDS#AVFEED', entityType: 'DIVIDEND_FEED', status: 'available', at: '2026-11-04T05:30:00.000Z', reason: '' } },
+    ]);
+    const data = await repo.getDividendDatesData(['HESM', 'KO', 'NEW']);
+    expect(data.tracked).toEqual(new Map([['HESM', '2026-01-02T10:00:00.000Z'], ['KO', null]]));
+    expect(data.states).toEqual(new Map([['HESM', { checkedAt: '2026-11-04T05:30:00.000Z', attempt: { at: '2026-11-05T05:30:00.000Z', outcome: 'budget', reason: '', source: 'eodhd', events: 0 } }]]));
+    expect(data.feed).toEqual({ status: 'available', at: '2026-11-04T05:30:00.000Z', reason: '' });
+  });
+
+  it('getDividendDatesData without symbols or records is empty', async () => {
+    const { repo } = setup();
+    expect(await repo.getDividendDatesData([])).toEqual({ tracked: new Map(), states: new Map(), feed: undefined });
+  });
+
   it('getEarningsDatesData without symbols or records is empty', async () => {
     const { repo } = setup();
     expect(await repo.getEarningsDatesData([], '2026-10-28')).toEqual({ tracked: new Map(), upcoming: [], run: null, lastOk: null });

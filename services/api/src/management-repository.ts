@@ -5,12 +5,14 @@ import {
   LAYOUT_BREAKPOINTS,
   LAYOUT_ENTITY,
   MANAGEMENT_ENTITY,
+  MANUAL_DIVIDEND_ENTITY,
   classificationKeys,
   fromItem,
   goalKeys,
   keys,
   layoutKeys,
   managementKeys,
+  manualDividendKeys,
   type Category,
   type ClassificationOverrideItem,
   type CategoryAssignment,
@@ -18,6 +20,7 @@ import {
   type GoalItem,
   type LayoutBreakpoint,
   type LayoutPageId,
+  type ManualDividend,
   type PageLayoutItem,
   type PortfolioSettings,
   type WatchlistEntry,
@@ -45,6 +48,12 @@ export interface ManagementRepository {
   /** Create-only put; resolves false when the symbol is already on the watchlist. */
   addWatchlistEntry(entry: WatchlistEntry): Promise<boolean>;
   deleteWatchlistEntry(userId: string, symbol: string): Promise<boolean>;
+  /** The dividend dates the user entered by hand (see `ManualDividend`). */
+  listManualDividends(userId: string): Promise<ManualDividend[]>;
+  /** Stores (or replaces) the entry of its symbol and ex-date. */
+  putManualDividend(entry: ManualDividend): Promise<void>;
+  /** Resolves false when there is no such entry. */
+  deleteManualDividend(userId: string, symbol: string, exDate: string): Promise<boolean>;
   /** The saved goal of a scope (a portfolio id or `all`). */
   getGoal(userId: string, scope: string): Promise<GoalItem | null>;
   putGoal(goal: GoalItem): Promise<void>;
@@ -153,6 +162,18 @@ export class ItemManagementRepository implements ManagementRepository {
 
   deleteWatchlistEntry(userId: string, symbol: string): Promise<boolean> {
     return this.store.delete(managementKeys.watchlist(userId, symbol), { condition: cond.exists });
+  }
+
+  listManualDividends(userId: string): Promise<ManualDividend[]> {
+    return this.listUser(userId, manualDividendKeys.prefix);
+  }
+
+  async putManualDividend(entry: ManualDividend): Promise<void> {
+    await this.put(manualDividendKeys.item(entry.userId, entry.symbol, entry.exDate), MANUAL_DIVIDEND_ENTITY, entry);
+  }
+
+  deleteManualDividend(userId: string, symbol: string, exDate: string): Promise<boolean> {
+    return this.store.delete(manualDividendKeys.item(userId, symbol, exDate), { condition: cond.exists });
   }
 
   getGoal(userId: string, scope: string): Promise<GoalItem | null> {

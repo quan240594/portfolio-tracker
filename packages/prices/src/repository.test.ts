@@ -261,4 +261,61 @@ describe('PriceRepository', () => {
       expect(await new PriceRepository(store).getHistorySymbols(['A', 'B', 'C'])).toEqual(new Map());
     });
   });
+
+  describe('dividends', () => {
+    const div = (symbol: string, exDate: string, extra: Record<string, unknown> = {}) => ({ symbol, exDate, amount: 0.7, currency: 'USD', ...extra });
+    const storedOf = (store: MemoryItemStore, symbol: string, exDate: string) => store.snapshot().find((item) => item.PK === `TICKER#${symbol}` && item.SK === `DIV#${exDate}`);
+
+    it('stores the events and merges what is stored already: a pay date is never lost, the owner entry gives way to an amount only', async () => {
+      const store = new MemoryItemStore();
+      const repo = new PriceRepository(store);
+      expect(await repo.putDividends([])).toBe(0);
+      expect(await repo.putDividends([div('HESM', '2026-08-05', { payDate: '2026-08-14', source: 'eodhd' }), div('HESM', '2026-08-05', { source: 'eodhd' })])).toBe(1);
+      await repo.putDividends([div('HESM', '2026-08-05', { source: 'eodhd', amount: 0.71 })]);
+      expect(storedOf(store, 'HESM', '2026-08-05')).toMatchObject({ entityType: 'DIVIDEND_EVENT', amount: 0.71, payDate: '2026-08-14', source: 'eodhd' });
+
+      store.load([{ PK: 'TICKER#HESM', SK: 'DIV#2026-11-05', entityType: 'DIVIDEND_EVENT', ...div('HESM', '2026-11-05', { source: 'manual', declared: true, amount: 0, payDate: '2026-11-13' }) }]);
+      await repo.putDividends([div('HESM', '2026-11-05', { source: 'eodhd', amount: 0 })]);
+      expect(storedOf(store, 'HESM', '2026-11-05')).toMatchObject({ source: 'manual' });
+      await repo.putDividends([div('HESM', '2026-11-05', { source: 'eodhd' })]);
+      expect(storedOf(store, 'HESM', '2026-11-05')).toMatchObject({ source: 'eodhd', amount: 0.7, payDate: '2026-11-13', declared: true });
+    });
+
+    it('rescales minor-unit currencies as before', async () => {
+      const store = new MemoryItemStore();
+      await new PriceRepository(store).putDividends([div('VOD.L', '2026-08-05', { currency: 'GBX', amount: 4.5 })]);
+      expect(storedOf(store, 'VOD.L', '2026-08-05')).toMatchObject({ currency: 'GBP', amount: 0.045 });
+    });
+
+    it('finds the latest ex-date up to today and the earliest after it, per symbol', async () => {
+      const store = new MemoryItemStore();
+      const repo = new PriceRepository(store);
+      await repo.putDividends([div('A', '2026-02-01'), div('A', '2026-11-05'), div('A', '2026-11-20'), div('A', '2027-02-01'), div('B', '2027-01-01'), div('C', '2026-01-01')]);
+      expect(await repo.dividendDates(['A', 'B', 'C', 'NONE'], '2026-11-05')).toEqual(
+        new Map([
+          ['A', { last: '2026-11-05', next: '2026-11-20' }],
+          ['B', { next: '2027-01-01' }],
+          ['C', { last: '2026-01-01' }],
+        ]),
+      );
+      expect(await repo.dividendDates([], '2026-11-05')).toEqual(new Map());
+    });
+
+    it('keeps what the first calls of the fallback feed found out', async () => {
+      const repo = new PriceRepository(new MemoryItemStore());
+      expect(await repo.getDividendFeed()).toBeUndefined();
+      await repo.putDividendFeed({ status: 'unavailable', at: '2026-11-05T05:30:00.000Z', reason: 'premium endpoint' });
+      expect(await repo.getDividendFeed()).toEqual({ status: 'unavailable', at: '2026-11-05T05:30:00.000Z', reason: 'premium endpoint' });
+    });
+
+    it('reads the outcome of the last dividends check with the other markers, and drops a malformed one', async () => {
+      const store = new MemoryItemStore().load([
+        { ...stateKey('A'), dividendsCheckedAt: '2026-11-04T05:30:00.000Z', dividendsAttemptAt: '2026-11-05T05:30:00.000Z', dividendsOutcome: 'budget', dividendsReason: '', dividendsSource: 'eodhd', dividendsEvents: 0 },
+        { ...stateKey('B'), dividendsAttemptAt: '2026-11-05T05:30:00.000Z', dividendsOutcome: 'sideways' },
+      ]);
+      const states = await new PriceRepository(store).getStates(['A', 'B']);
+      expect(states.get('A')).toEqual({ dividendsCheckedAt: '2026-11-04T05:30:00.000Z', dividendsAttemptAt: '2026-11-05T05:30:00.000Z', dividendsOutcome: 'budget', dividendsReason: '', dividendsSource: 'eodhd', dividendsEvents: 0 });
+      expect(states.get('B')).toEqual({});
+    });
+  });
 });

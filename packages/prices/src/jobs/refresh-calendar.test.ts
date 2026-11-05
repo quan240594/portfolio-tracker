@@ -5,7 +5,9 @@ import { ProviderError, RateLimitError, RetryableProviderError, SymbolNotFoundEr
 import { createMarketData } from '../market.js';
 import { FakeFetch } from '../testing/fake-fetch.js';
 import { collect, drive, driveTwice, harness, padCalendar, type Harness } from '../testing/harness.js';
-import { createRefreshCalendarJob, dueSymbols } from './refresh-calendar.js';
+import { PriceRepository } from '../repository.js';
+import { planRotation, type RotationContext } from './dividend-rotation.js';
+import { createRefreshCalendarJob } from './refresh-calendar.js';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -39,6 +41,9 @@ class FakeEarnings implements EarningsSource {
 }
 
 const NO_ACTION_OPTIONS = {};
+
+/** The symbols the daily rotation reads at `now`, in order. */
+const due = (symbols: readonly string[], states: RotationContext['states'], now: Date): string[] => planRotation(symbols, { now, mode: 'scheduled', recheckDays: 7, states, dates: new Map(), heldSince: new Map() }).map((entry) => entry.symbol);
 
 class FakeActions implements CorporateActionsSource {
   readonly name = 'eodhd';
@@ -102,7 +107,7 @@ describe('refreshCalendar', () => {
     expect(keysWith(h, 'EARN#')).toEqual(['TICKER#AAPL|EARN#2026-10-29']);
     expect(stored(h, 'TICKER#AAPL', 'SPLIT#2026-11-02')).toMatchObject({ entityType: 'SPLIT_EVENT', fromFactor: 1, toFactor: 4, source: 'eodhd', updatedAt: STAMP });
     expect(keysWith(h, 'DIV#')).toEqual(['TICKER#AAPL|DIV#2026-11-09', 'TICKER#ASML.AS|DIV#2026-11-04']);
-    expect(stored(h, 'TICKER#AAPL', 'CAL#STATE')).toEqual({ PK: 'TICKER#AAPL', SK: 'CAL#STATE', entityType: 'CALENDAR_STATE', symbol: 'AAPL', splitsCheckedAt: STAMP, dividendsCheckedAt: STAMP });
+    expect(stored(h, 'TICKER#AAPL', 'CAL#STATE')).toEqual({ PK: 'TICKER#AAPL', SK: 'CAL#STATE', entityType: 'CALENDAR_STATE', symbol: 'AAPL', splitsCheckedAt: STAMP, dividendsCheckedAt: STAMP, dividendsAttemptAt: STAMP, dividendsOutcome: 'ok', dividendsReason: '', dividendsSource: 'eodhd', dividendsEvents: 1 });
     expect(stored(h, 'TICKER#BTC-EUR', 'CAL#STATE')).toBeUndefined();
     expect(stored(h, 'CALENDAR', 'BUDGET#alphavantage')).toEqual({ PK: 'CALENDAR', SK: 'BUDGET#alphavantage', entityType: 'CALENDAR_BUDGET', day: '2026-10-15', used: 1, tokens: [`${STAMP}#earnings`] });
     expect(stored(h, 'CALENDAR', 'BUDGET#eodhd')).toMatchObject({ used: 4 });
@@ -273,9 +278,9 @@ AMZN,AMAZON COM INC,2026-10-30,2026-09-30,1.5,USD,post-market
       const ko = stored(h, 'TICKER#KO', 'CAL#STATE')!;
       expect(ko.splitsFailedAt).toBe(STAMP);
       expect(ko).not.toHaveProperty('splitsCheckedAt');
-      const states = await new (await import('../repository.js')).PriceRepository(h.store).getStates(['AAPL', 'KO', 'MSFT']);
-      expect(dueSymbols(['AAPL', 'KO', 'MSFT'], states, new Date(NOW.getTime() + 8 * DAY), 7)).toEqual(['AAPL', 'KO', 'MSFT']);
-      expect(dueSymbols(['AAPL', 'KO', 'MSFT'], states, new Date(NOW.getTime() + DAY), 7)).toEqual(['KO']);
+      const states = await new PriceRepository(h.store).getStates(['AAPL', 'KO', 'MSFT']);
+      expect(due(['AAPL', 'KO', 'MSFT'], states, new Date(NOW.getTime() + 8 * DAY))).toEqual(['KO', 'AAPL', 'MSFT']);
+      expect(due(['AAPL', 'KO', 'MSFT'], states, new Date(NOW.getTime() + DAY))).toEqual(['KO']);
     });
 
     it('stops at a provider rate limit and survives a failure to record a failure', async () => {
@@ -298,8 +303,9 @@ AMZN,AMAZON COM INC,2026-10-30,2026-09-30,1.5,USD,post-market
         ['C', { splitsCheckedAt: '2026-10-14T00:00:00.000Z' }],
         ['D', { splitsFailedAt: '2026-10-03T00:00:00.000Z' }],
       ]);
-      expect(dueSymbols(['C', 'B', 'A', 'D', 'E', 'F'], states, NOW, 7)).toEqual(['E', 'F', 'A', 'D', 'B']);
-      expect(dueSymbols([], states, NOW, 7)).toEqual([]);
+      // Never read symbols first (a failure older than the interval does not count), then the stalest.
+      expect(due(['C', 'B', 'A', 'D', 'E', 'F'], states, NOW)).toEqual(['E', 'F', 'D', 'A', 'B']);
+      expect(due([], states, NOW)).toEqual([]);
     });
   });
 

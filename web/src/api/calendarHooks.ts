@@ -1,5 +1,5 @@
-import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
-import type { CalendarParams } from '@portfolio/shared';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { AddManualDividendRequest, CalendarParams } from '@portfolio/shared';
 import { calendarApi } from './calendarClient';
 
 /**
@@ -20,3 +20,12 @@ export const useCalendar = (scope: string, params: CalendarParams, { enabled = t
 
 export const useDownloadCalendarIcs = (scope: string) =>
   useMutation({ mutationFn: (params: CalendarParams) => calendarApi.downloadIcs(scope, params) });
+
+/** The dividend dates the owner enters by hand: the calendar (and everything derived from it) and the dividend dates diagnostics are read again. */
+export function useManualDividendMutations() {
+  const qc = useQueryClient();
+  const refresh = () => Promise.all([qc.invalidateQueries({ queryKey: ['analytics'] }), qc.invalidateQueries({ queryKey: ['diagnostics', 'dividend-dates'] })]);
+  const add = useMutation({ mutationFn: (body: AddManualDividendRequest) => calendarApi.addManualDividend(body), onSuccess: refresh });
+  const remove = useMutation({ mutationFn: (entry: { symbol: string; exDate: string }) => calendarApi.removeManualDividend(entry.symbol, entry.exDate), onSuccess: refresh });
+  return { add, remove };
+}
