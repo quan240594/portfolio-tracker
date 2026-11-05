@@ -440,7 +440,7 @@ export class PriceRepository {
     const out = new Map<string, { last?: string; next?: string }>();
     symbols.forEach((symbol, index) => {
       const dates = lists[index]!.map((item) => item.SK.slice(keys.dividendPrefix.length)).toSorted(byText);
-      const last = dates.filter((date) => date <= today).at(-1);
+      const last = dates.findLast((date) => date <= today);
       const next = dates.find((date) => date > today);
       if (last !== undefined || next !== undefined) out.set(symbol, definedOnly({ last, next }));
     });

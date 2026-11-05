@@ -68,7 +68,7 @@ async function respond(request: Request, ics: boolean): Promise<Response> {
 async function manualDividend(request: Request): Promise<Response> {
   await latency();
   try {
-    const { transactions, profiles } = db.getAnalyticsData(undefined);
+    const { transactions, profiles } = db.getAnalyticsData();
     const traded = new Set(transactions.map((t) => t.symbol));
     const entry = addManualDividend(await request.json(), (symbol) => traded.has(symbol), (symbol) => profiles[symbol]?.currency ?? 'USD');
     return HttpResponse.json(entry, { status: 201 });
