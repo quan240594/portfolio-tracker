@@ -2,7 +2,9 @@ import type {
   ConsensusEndpoint,
   ConsensusQuarter,
   ConsensusState,
+  DividendCheckState,
   DividendEvent,
+  DividendFeedState,
   EarningsRunRecord,
   EarningsSummary,
   EodPrice,
@@ -43,6 +45,8 @@ export class InMemoryRepository implements Repository {
   tracked = new Map<string, string>();
   /** `createdAt` of tracked symbols (a tracked symbol without one reads as null). */
   trackedAt = new Map<string, string>();
+  dividendStates = new Map<string, DividendCheckState>();
+  dividendFeed: DividendFeedState | undefined;
   earningsRun: EarningsRunRecord | null = null;
   earningsLastOk: EarningsRunRecord | null = null;
   imports = new Map<string, ImportStatus>();
@@ -120,6 +124,11 @@ export class InMemoryRepository implements Repository {
     const tracked = new Map(symbols.filter((symbol) => this.tracked.has(symbol)).map((symbol) => [symbol, this.trackedAt.get(symbol) ?? null]));
     const upcoming = this.earningsEvents.filter((e) => symbols.includes(e.symbol) && e.date >= today);
     return Promise.resolve({ tracked, upcoming, run: this.earningsRun, lastOk: this.earningsLastOk });
+  }
+  getDividendDatesData(symbols: string[]) {
+    const tracked = new Map(symbols.filter((symbol) => this.tracked.has(symbol)).map((symbol) => [symbol, this.trackedAt.get(symbol) ?? null]));
+    const states = new Map(symbols.flatMap((symbol) => (this.dividendStates.has(symbol) ? [[symbol, this.dividendStates.get(symbol)!] as const] : [])));
+    return Promise.resolve({ tracked, states, feed: this.dividendFeed });
   }
   getEarningsSummaries(symbol: string, limit: number) {
     const own = this.earningsSummaries.filter((summary) => summary.symbol === symbol);

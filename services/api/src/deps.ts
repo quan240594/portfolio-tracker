@@ -1,5 +1,5 @@
 import type { EventPublisher, FileStore, ItemStore } from '@portfolio/platform';
-import type { AlphaVantageProbeStatus, EarningsBackfillResponse, EarningsRefreshResponse, EarningsSourceName, EarningsStatusResponse, ProbeRefusal, ProviderBudgetReport, RefreshEarningsDatesResponse, RefreshRefusal, RefreshReport, RunAlphaVantageProbeResponse } from '@portfolio/shared';
+import type { AlphaVantageProbeStatus, DividendBudgetReport, EarningsBackfillResponse, EarningsRefreshResponse, EarningsSourceName, EarningsStatusResponse, ProbeRefusal, ProviderBudgetReport, RefreshDividendDatesResponse, RefreshEarningsDatesResponse, RefreshRefusal, RefreshReport, RunAlphaVantageProbeResponse } from '@portfolio/shared';
 import type { BrokerDeps } from './broker-deps.js';
 import type { Config } from './config.js';
 import type { InflationFetch } from './inflation/source.js';
@@ -32,6 +32,21 @@ export interface CalendarDatesDeps {
   status(): Promise<CalendarDatesStatus>;
   /** Queues the calendar job once; refuses (without queuing) when it was asked for less than an hour ago or the allowance of the day is nearly used. */
   refresh(): Promise<RefreshEarningsDatesResponse | { accepted: false; reason: RefreshRefusal; message: string; retryAfterSeconds?: number }>;
+}
+
+/** What the Diagnostics "Dividend dates" section needs of the deployment: the EODHD allowance of the day and the manual check (the Cloudflare app); the AWS stack has neither and its report says so. */
+export interface DividendChecksStatus {
+  budget: DividendBudgetReport | null;
+  refresh: RefreshReport;
+  /** Which dividend sources have a key on this deployment. */
+  configured?: { eodhd: boolean; alphavantage: boolean };
+}
+
+export interface DividendChecksDeps {
+  /** The EODHD allowance of the day (null when it cannot be read) and whether a manual check would be queued now. */
+  status(): Promise<DividendChecksStatus>;
+  /** Queues a dividends-only calendar run once; refuses (without queuing) when it was asked for less than an hour ago, the allowance of the day is nearly used or there is no key. */
+  refresh(): Promise<RefreshDividendDatesResponse | { accepted: false; reason: RefreshRefusal; message: string; retryAfterSeconds?: number }>;
 }
 
 /**
@@ -75,6 +90,8 @@ export interface Deps {
   earnings?: EarningsDeps;
   /** Earnings dates diagnostics (provider allowance and manual refresh); the report answers without them, the refresh route answers 404. */
   calendarDates?: CalendarDatesDeps;
+  /** Dividend dates diagnostics (EODHD allowance and the "Check dividends now" button); the report answers without them, the refresh route answers 404. */
+  dividendChecks?: DividendChecksDeps;
   /** The "Test Alpha Vantage now" diagnostics action; the status route answers `available: false` and the run route 404 without it. */
   alphaVantageProbe?: AlphaVantageProbeDeps;
   /** The price history symbol override reaching the price jobs; absent = the field is only stored. */

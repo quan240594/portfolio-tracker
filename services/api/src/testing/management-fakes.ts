@@ -1,4 +1,4 @@
-import type { Category, CategoryAssignment, ClassificationOverrideItem, CustomAsset, GoalItem, LayoutBreakpoint, LayoutPageId, PageLayoutItem, PortfolioSettings, WatchlistEntry } from '@portfolio/shared';
+import type { Category, CategoryAssignment, ClassificationOverrideItem, CustomAsset, GoalItem, LayoutBreakpoint, LayoutPageId, ManualDividend, PageLayoutItem, PortfolioSettings, WatchlistEntry } from '@portfolio/shared';
 import type { ManagementRepository } from '../management-repository.js';
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -10,6 +10,7 @@ export class InMemoryManagementRepository implements ManagementRepository {
   assignments: CategoryAssignment[] = [];
   assets: CustomAsset[] = [];
   watchlist: WatchlistEntry[] = [];
+  manualDividends: ManualDividend[] = [];
   goals: GoalItem[] = [];
   overrides: ClassificationOverrideItem[] = [];
   layouts: PageLayoutItem[] = [];
@@ -75,6 +76,18 @@ export class InMemoryManagementRepository implements ManagementRepository {
     const before = this.watchlist.length;
     this.watchlist = this.watchlist.filter((w) => !(w.userId === userId && w.symbol === symbol));
     return Promise.resolve(this.watchlist.length < before);
+  }
+  listManualDividends(userId: string) {
+    return Promise.resolve(clone(this.manualDividends.filter((d) => d.userId === userId)));
+  }
+  putManualDividend(entry: ManualDividend) {
+    this.manualDividends = [...this.manualDividends.filter((d) => !(d.userId === entry.userId && d.symbol === entry.symbol && d.exDate === entry.exDate)), clone(entry)];
+    return Promise.resolve();
+  }
+  deleteManualDividend(userId: string, symbol: string, exDate: string) {
+    const before = this.manualDividends.length;
+    this.manualDividends = this.manualDividends.filter((d) => !(d.userId === userId && d.symbol === symbol && d.exDate === exDate));
+    return Promise.resolve(this.manualDividends.length < before);
   }
   getGoal(userId: string, scope: string) {
     return Promise.resolve(clone(this.goals.find((g) => g.userId === userId && g.portfolioId === scope) ?? null));

@@ -28,7 +28,7 @@ import { ItemIngestStore, importUploadedJob } from '@portfolio/ingest';
 import { DEFAULT_STEP_SUBREQUESTS, PRICE_SCHEDULES, PriceRepository, createPriceJobs, type PriceJobDeps, type ProviderPacer } from '@portfolio/prices';
 import { BACKFILL_STEP_SUBREQUESTS, CHECKS_PER_STEP, createBackfillEarningsJob, createEarningsEstimatesJob, createFetchEarningsSummaryJob, createWatchEarningsJob, type AiLike, type NeuronMeter } from '@portfolio/earnings';
 import type { HubConfig } from './config.js';
-import { earningsJobDeps, estimatesJobDeps, heldCompanies } from './earnings.js';
+import { earningsJobDeps, estimatesJobDeps, heldCompanies, heldPositions } from './earnings.js';
 import { pushConfig } from './push.js';
 import { SubrequestBudget } from './subrequests.js';
 
@@ -161,6 +161,8 @@ export function priceJobDeps({ items, fetch, now, sleep, config, queue, pacer }:
     enqueueEnrichment: (symbols) => queue.enqueue({ job: JOBS.enrichTransactions, payload: { userId: '', portfolioId: '', reason: 'IMPORTED', symbols: [...symbols] } }),
     // The earnings dates of Finnhub are asked for the companies held today (no funds, ETFs or crypto), one call each.
     heldCompanies: async () => (await heldCompanies(items, now().toISOString().slice(0, 10))).holdings.map((holding) => holding.symbol),
+    // The dividends of every held position (ETFs too) are read first when it was bought after its last read, and by the "Check dividends now" button.
+    heldPositions: () => heldPositions(items, now().toISOString().slice(0, 10)),
   };
 }
 
@@ -249,6 +251,8 @@ export interface GuardOptions {
 /** An owner-requested run of a convenience job may use the `warn` band of the budget (the owner is waiting for it). */
 const OWNER_REQUESTED_CEILING: Readonly<Partial<Record<JobName, JobCeiling>>> = { refreshCalendar: 'warn' };
 const isOwnerRequested = (payload: unknown): boolean => typeof payload === 'object' && payload !== null && (payload as { trigger?: unknown }).trigger === 'manual';
+/** The owner's "Check dividends now": a dividends-only run, which has nothing to say about the earnings dates. */
+const isDividendsOnly = (payload: unknown): boolean => typeof payload === 'object' && payload !== null && (payload as { part?: unknown }).part === 'dividends';
 
 /**
  * Gates a job handler behind the budget guard. A denied job that is non-essential (the price and calendar refreshes, whose
@@ -288,7 +292,7 @@ const DROPPED_REASONS: Readonly<Record<JobDecision['reason'], string>> = {
 function recordDroppedCalendar(context: JobContext): NonNullable<GuardOptions['onDropped']> {
   const repo = new PriceRepository(context.items);
   return async (name, payload, decision) => {
-    if (name !== JOBS.refreshCalendar) return;
+    if (name !== JOBS.refreshCalendar || isDividendsOnly(payload)) return;
     await repo.putEarningsRun({ at: context.now().toISOString(), trigger: isOwnerRequested(payload) ? 'manual' : 'scheduled', status: 'skipped', reason: DROPPED_REASONS[decision.reason], tracked: 0 });
   };
 }

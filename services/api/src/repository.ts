@@ -1,5 +1,6 @@
 import {
   CONSENSUS_READ_LIMIT,
+  DIVIDEND_FEED_KEY,
   calendarKeys,
   consensusKeys,
   earningsKeys,
@@ -7,6 +8,8 @@ import {
   ENTITY,
   fromItem,
   keys,
+  parseDividendCheckState,
+  parseDividendFeedState,
   parseEarningsRun,
   readConsensusItems,
   majorDividend,
@@ -16,7 +19,9 @@ import {
   type ConsensusEndpoint,
   type ConsensusQuarter,
   type ConsensusState,
+  type DividendCheckState,
   type DividendEvent,
+  type DividendFeedState,
   type EarningsRunRecord,
   type EarningsSummary,
   type EodPrice,
@@ -42,6 +47,13 @@ export interface EarningsDatesData {
   /** The last calendar run, and the last one that read the provider's calendar (see `EarningsRunRecord`). */
   run: EarningsRunRecord | null;
   lastOk: EarningsRunRecord | null;
+}
+
+/** What the dividend dates diagnostics read for the held symbols: the tracked items, the calendar markers and the fallback feed's record. */
+export interface DividendDatesData {
+  tracked: Map<string, string | null>;
+  states: Map<string, DividendCheckState>;
+  feed: DividendFeedState | undefined;
 }
 
 /** Data access used by the route handlers. Implemented by `ItemRepository` (any ItemStore) and by in-memory fakes in tests. */
@@ -73,6 +85,8 @@ export interface Repository {
   getCalendarEvents(symbols: string[], from: string, to: string): Promise<StoredCalendarEvents>;
   /** What the earnings dates diagnostics read for `symbols` (see `EarningsDatesData`). */
   getEarningsDatesData(symbols: string[], today: string): Promise<EarningsDatesData>;
+  /** What the dividend dates diagnostics read for `symbols` (see `DividendDatesData`). */
+  getDividendDatesData(symbols: string[]): Promise<DividendDatesData>;
   /** The newest stored earnings summaries of a symbol, newest first (see earningsKeys). */
   getEarningsSummaries(symbol: string, limit: number): Promise<EarningsSummary[]>;
   getEarningsSummary(symbol: string, reportDate: string): Promise<EarningsSummary | null>;
@@ -205,6 +219,24 @@ export class ItemRepository implements Repository {
       upcoming: upcoming.flat().map((item) => fromItem<StoredEarningsEvent>(item)),
       run: runOf(earningsRunKeys.last),
       lastOk: runOf(earningsRunKeys.lastOk),
+    };
+  }
+
+  async getDividendDatesData(symbols: string[]): Promise<DividendDatesData> {
+    const [trackedItems, stateItems, feedItem] = await Promise.all([
+      symbols.length > 0 ? this.store.getMany(symbols.map((symbol) => keys.trackedTicker(symbol))) : [],
+      symbols.length > 0 ? this.store.getMany(symbols.map((symbol) => calendarKeys.state(symbol))) : [],
+      this.store.get(DIVIDEND_FEED_KEY),
+    ]);
+    const states = new Map<string, DividendCheckState>();
+    for (const item of stateItems) {
+      const state = parseDividendCheckState(item);
+      if (state !== undefined) states.set(item.PK.slice(calendarKeys.tickerPk('').length), state);
+    }
+    return {
+      tracked: new Map(trackedItems.map((item) => [item.SK.slice(keys.trackedTicker('').SK.length), typeof item.createdAt === 'string' ? item.createdAt : null])),
+      states,
+      feed: parseDividendFeedState(feedItem),
     };
   }
 
