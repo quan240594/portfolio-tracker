@@ -105,6 +105,11 @@ export interface DividendEvent {
   payDate?: string;
   amount: number;
   currency: string;
+  /** Who gave it: a data provider (`eodhd`, `alphavantage`) or the owner (`manual`); absent on events stored before sources were recorded. */
+  source?: string;
+  /** True when the source states the dividend was declared (it names a declaration date, or the owner entered it). */
+  declared?: boolean;
+  declarationDate?: string;
 }
 
 /** ECB convention: `rates[C]` = units of C per 1 unit of `base`. `rates[base]` is implicitly 1. */
