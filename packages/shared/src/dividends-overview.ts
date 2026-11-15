@@ -391,7 +391,7 @@ function holdingSchedule(
     .map((e) => ({ date: e.payDate ?? e.exDate, weight: timeline.toBase(holding.quantity * e.amount, e.currency), special: rate?.specialExDates.has(e.exDate) === true }));
   const weights = sum(upcoming.map((u) => u.weight));
   const declared = upcoming.map((u) => ({ date: u.date, amount: (income.declared * u.weight) / Math.max(weights, Number.EPSILON) }));
-  if (!rate || rate.lastPayDate === null || income.estimated <= 0) return { declared, estimated: [] };
+  if (rate?.lastPayDate == null || income.estimated <= 0) return { declared, estimated: [] };
   const regular = upcoming.filter((u) => !u.special);
   const missing = Math.max(0, rate.paymentsPerYear - regular.length);
   const dates = estimatedDates(rate.lastPayDate, rate.paymentsPerYear, regular.map((u) => u.date), missing, today);
