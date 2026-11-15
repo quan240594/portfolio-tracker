@@ -39,9 +39,25 @@ describe('splitSpecial', () => {
 });
 
 describe('deriveRunRate', () => {
-  it('uses the provider history first, with the frequency of its ex-dates and its latest regular amount', () => {
-    const rate = deriveRunRate(input({ events: [event(-300, 1), event(-210, 1), event(-120, 1.1), event(-30, 1.2)], payments: [{ date: at(-5), perShare: 9 }] }));
+  it('uses the provider history, with its frequency and its latest regular amount; a received payment of an event counts once', () => {
+    const rate = deriveRunRate(input({ events: [event(-300, 1), event(-210, 1), event(-120, 1.1), event(-30, 1.2)], payments: [{ date: at(-18), perShare: 9 }] }));
     expect(rate).toMatchObject({ basis: 'provider-history', paymentsPerYear: 4, perShare: 1.2, lastPayDate: at(-20) });
+  });
+
+  it('completes thin provider history with the payments you received', () => {
+    // the provider lists two events 18 months apart; your payments in between show it pays twice a year
+    const events = [event(-560, 1), event(150, 1)];
+    const payments = [{ date: at(-370), perShare: 1 }, { date: at(-190), perShare: 1 }, { date: at(-10), perShare: 1 }];
+    expect(deriveRunRate(input({ events, payments }))).toMatchObject({ basis: 'own-payments', paymentsPerYear: 2, perShare: 1 });
+    // the same events with no payments of yours: two events 18 months apart say once a year, the best the provider alone can tell
+    expect(deriveRunRate(input({ events, payments: [] }))).toMatchObject({ basis: 'provider-history', paymentsPerYear: 1 });
+  });
+
+  it('matches a received payment to an event without a pay date up to 45 days after its ex-date', () => {
+    const noPayDate = (offset: number): DividendEvent => ({ symbol: 'X', exDate: at(offset), amount: 1, currency: 'EUR' });
+    const events = [noPayDate(-300), noPayDate(-210), noPayDate(-120), noPayDate(-30)];
+    const payments = [-300, -210, -120, -30].map((d) => ({ date: at(d + 30), perShare: 1 }));
+    expect(deriveRunRate(input({ events, payments }))).toMatchObject({ basis: 'provider-history', paymentsPerYear: 4 });
   });
 
   it('counts a declared upcoming event as the latest amount (a raise applies to the rest of the year)', () => {

@@ -269,10 +269,10 @@ describe('computeDividendsOverview', () => {
       '2026-06', '2026-07', '2026-08', '2026-09', '2026-10', '2026-11', '2026-12', '2027-01', '2027-02', '2027-03', '2027-04', '2027-05',
     ]);
     const nonZero = overview.futureMonths.filter((m) => m.declared > 0 || m.estimated > 0);
-    // AAA: declared 2026-07-01; the other three quarters follow last year's pattern (Oct, Dec/Jan, Apr); BBB: March
+    // AAA: declared 2026-07-01; the other three quarters follow it a quarter apart (Sep, Dec, Apr); BBB: March
     expect(nonZero).toEqual([
       { month: '2026-07', declared: 10, estimated: 0 },
-      { month: '2026-10', declared: 0, estimated: 10 },
+      { month: '2026-09', declared: 0, estimated: 10 },
       { month: '2026-12', declared: 0, estimated: 10 },
       { month: '2027-03', declared: 0, estimated: 6.8 },
       { month: '2027-04', declared: 0, estimated: 10 },
@@ -284,7 +284,7 @@ describe('computeDividendsOverview', () => {
   it('breaks the future months down per holding, so the periods reconcile with the forward income', () => {
     expect(overview.futureByHolding).toEqual([
       { month: '2026-07', symbol: 'AAA', declared: 10, estimated: 0 },
-      { month: '2026-10', symbol: 'AAA', declared: 0, estimated: 10 },
+      { month: '2026-09', symbol: 'AAA', declared: 0, estimated: 10 },
       { month: '2026-12', symbol: 'AAA', declared: 0, estimated: 10 },
       { month: '2027-03', symbol: 'BBB', declared: 0, estimated: 6.8 },
       { month: '2027-04', symbol: 'AAA', declared: 0, estimated: 10 },

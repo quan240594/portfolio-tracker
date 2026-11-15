@@ -1,4 +1,5 @@
 import type { DividendOverviewHolding, ListCategoriesResponse } from '@portfolio/shared';
+import { basisNote } from './basisNote';
 
 export const UNCATEGORISED = 'Uncategorised';
 /** Slices shown before the rest is collapsed into "Other". */
@@ -40,8 +41,12 @@ export interface YieldBar {
   name: string;
   yieldPct: number;
   onCostPct: number;
+  /** Forward income before withholding tax / market value: the yield a broker app quotes. */
+  grossPct: number;
   /** Forward 12-month income, base currency. */
   amount: number;
+  /** What the income rests on (a single holding only), see `basisNote`; empty for a category. */
+  note: string;
 }
 
 const pct = (income: number, base: number): number => (base > 0 ? Math.round((income / base) * 10_000) / 100 : 0);
@@ -51,20 +56,31 @@ const byMetric = (metric: YieldMetric) => (a: YieldBar, b: YieldBar) =>
 
 /** One bar per dividend-paying holding. */
 function holdingBars(holdings: readonly DividendOverviewHolding[]): YieldBar[] {
-  return holdings.filter((h) => h.forward12m > 0).map((h) => ({ key: h.symbol, label: h.symbol, name: h.name, yieldPct: h.yieldPct, onCostPct: h.yieldOnCostPct, amount: h.forward12m }));
+  return holdings
+    .filter((h) => h.forward12m > 0)
+    .map((h) => ({ key: h.symbol, label: h.symbol, name: h.name, yieldPct: h.yieldPct, onCostPct: h.yieldOnCostPct, grossPct: h.grossYieldPct, amount: h.forward12m, note: basisNote(h) }));
 }
 
 /** One bar per category: yields are income over the value (cost) of the paying holdings in it. */
 function categoryBars(holdings: readonly DividendOverviewHolding[], categories: ListCategoriesResponse): YieldBar[] {
   const nameOf = new Map(categories.categories.map((c) => [c.categoryId, c.name]));
   const categoryOf = new Map(categories.assignments.map((a) => [a.symbol, nameOf.get(a.categoryId) ?? UNCATEGORISED]));
-  const groups = new Map<string, { income: number; value: number; cost: number }>();
+  const groups = new Map<string, { income: number; gross: number; value: number; cost: number }>();
   for (const h of holdings.filter((x) => x.forward12m > 0)) {
     const name = categoryOf.get(h.symbol) ?? UNCATEGORISED;
-    const g = groups.get(name) ?? { income: 0, value: 0, cost: 0 };
-    groups.set(name, { income: g.income + h.forward12m, value: g.value + h.marketValue, cost: g.cost + h.costBasis });
+    const g = groups.get(name) ?? { income: 0, gross: 0, value: 0, cost: 0 };
+    groups.set(name, { income: g.income + h.forward12m, gross: g.gross + (h.grossYieldPct * h.marketValue) / 100, value: g.value + h.marketValue, cost: g.cost + h.costBasis });
   }
-  return [...groups.entries()].map(([name, g]) => ({ key: name, label: name, name, yieldPct: pct(g.income, g.value), onCostPct: pct(g.income, g.cost), amount: Math.round(g.income * 100) / 100 }));
+  return [...groups.entries()].map(([name, g]) => ({
+    key: name,
+    label: name,
+    name,
+    yieldPct: pct(g.income, g.value),
+    onCostPct: pct(g.income, g.cost),
+    grossPct: pct(g.gross, g.value),
+    amount: Math.round(g.income * 100) / 100,
+    note: '',
+  }));
 }
 
 /** Bars for the yield/payout chart, largest first by the selected metric. Categories need the portfolio's category data. */

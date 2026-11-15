@@ -80,7 +80,7 @@ describe('calculatePassiveIncome', () => {
         yieldOnCostPct: 1.7,
         grossYieldPct: 2,
         withholdingPct: 15,
-        basis: 'provider-history',
+        basis: 'own-payments',
         paymentsPerYear: 4,
         perShareAnnual: 2,
       },
@@ -111,7 +111,7 @@ describe('calculatePassiveIncome', () => {
 
   it('converts foreign dividends at the latest rate', () => {
     const txns = [tx({ symbol: 'KO', currency: 'USD', quantity: 10, price: 50 }), div('2025-10-01', { symbol: 'KO', currency: 'USD', quantity: 10, price: 0.5, fee: 0 })];
-    const events: DividendEvent[] = [{ symbol: 'KO', exDate: '2026-02-01', amount: 0.5, currency: 'USD' }];
+    const events: DividendEvent[] = [{ symbol: 'KO', exDate: '2026-09-20', amount: 0.5, currency: 'USD' }];
     const r = income(txns, events, [quote('KO', 50, 'USD')]);
     // 10 × 0.5 USD = 5 USD = 4 EUR declared, estimated annual payer → nothing more
     expect(r.declared).toBe(4);

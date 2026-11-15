@@ -75,15 +75,15 @@ describe('GET /calendar', () => {
     expect(body.events[0]).toMatchObject({ status: 'PAID', origin: 'HOLDING', expectedAmount: 3.4, name: 'Apple' });
     expect(body.events[3]).toMatchObject({ date: '2026-07-05', status: 'CONFIRMED', quantity: 10, expectedAmount: 4, currency: 'EUR' });
     expect(body.events[7]).toMatchObject({ epsEstimate: 1.2, timeOfDay: 'AMC', status: 'ESTIMATED' });
-    // 4 (VWRL) + 3.74 (AAPL, net of 15 % withholding) declared, 3 × 3.40 estimated AAPL payments.
-    expect(body.summary).toMatchObject({ annualIncome: 17.94, declared: 7.74, estimated: 10.2, monthlyAverage: 1.5, yieldPct: 0.78 });
+    // 4 (VWRL) + 3.74 (AAPL, net of 15 % withholding) declared, 3 × 3.74 estimated AAPL payments (the declared 0.55 is the latest regular amount).
+    expect(body.summary).toMatchObject({ annualIncome: 18.96, declared: 7.74, estimated: 11.22, monthlyAverage: 1.58, yieldPct: 0.82 });
     expect(body.monthly).toHaveLength(12);
     expect(body.monthly.filter((m: { total: number }) => m.total > 0).map((m: { month: string; total: number }) => [m.month, m.total])).toEqual([
       ['2026-05', 3.4],
       ['2026-07', 4],
       ['2026-08', 3.74],
-      ['2026-11', 3.4],
-      ['2027-02', 3.4],
+      ['2026-11', 3.74],
+      ['2027-02', 3.74],
     ]);
     expect(body.coverage.earnings).toMatch(/Alpha Vantage earnings calendar/);
     expect(body.coverage.corporateActions).toMatch(/Mergers/);
@@ -103,7 +103,7 @@ describe('GET /calendar', () => {
     expect(new Set(watch.events.map((e: { symbol: string }) => e.symbol))).toEqual(new Set(['MSFT']));
     expect(ids(await get('all'))).toHaveLength(ids(await get('holdings')).length + ids(watch).length);
     // The income summary describes the holdings whatever the filter.
-    expect(watch.summary.annualIncome).toBe(17.94);
+    expect(watch.summary.annualIncome).toBe(18.96);
   });
 
   it('filters by type, status and explicit date range', async () => {
@@ -121,7 +121,7 @@ describe('GET /calendar', () => {
     expect(main.summary.annualIncome).toBe(4);
     const usd = json(await handler(apiEvent('GET', '/calendar', { query: { portfolioId: 'usd', scope: 'holdings' } })));
     expect(new Set(usd.events.map((e: { symbol: string }) => e.symbol))).toEqual(new Set(['AAPL']));
-    expect(json(await handler(apiEvent('GET', '/calendar', { query: { portfolioId: 'all' } }))).summary.annualIncome).toBe(17.94);
+    expect(json(await handler(apiEvent('GET', '/calendar', { query: { portfolioId: 'all' } }))).summary.annualIncome).toBe(18.96);
     const missing = await handler(apiEvent('GET', '/calendar', { query: { portfolioId: 'nope' } }));
     expect(missing.statusCode).toBe(404);
   });

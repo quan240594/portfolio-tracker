@@ -2,8 +2,9 @@
  * The run rate of one held dividend payer: how often it pays and what a regular payment is, from the best evidence there is.
  * Pure. Forward income (Dividends page, Dashboard, Calendar, Goals) is built on it; see "Yield and income statistics" in docs/architecture.md.
  *
- * Evidence, best first: (1) the provider's stored dividend events of the symbol (declared and past, about two years), (2) the payments the
- * owner received, (3) a single known payment, which is flagged because one payment says nothing about the frequency.
+ * Evidence: the provider's stored dividend events of the symbol (declared and past, about two years), completed by the payments the owner
+ * received (the same payment counts once, with the provider's amount); the owner's payments alone when the provider has nothing, and a single
+ * known payment, which is flagged because one payment says nothing about the frequency.
  */
 import { FxTimeline } from './fx.js';
 import { addIsoDays, daysBetween, DAYS_PER_YEAR } from './analytics.js';
@@ -28,6 +29,10 @@ const FREQUENCY_WINDOW = 5;
 const STALE_GRACE_DAYS = 30;
 /** Payments needed to infer a frequency. */
 const MIN_PAYMENTS = 2;
+/** A payment you received within this many days of an event's pay date is that event. */
+const SAME_PAYMENT_DAYS = 7;
+/** Without a pay date, a payment arriving up to this many days after the ex-date is the event's. */
+const UNKNOWN_PAY_LAG_DAYS = 45;
 
 const median = (values: readonly number[]): number => {
   const sorted = [...values].sort((a, b) => a - b);
@@ -60,12 +65,13 @@ export function splitSpecial<T>(items: readonly T[], amountOf: (item: T) => numb
   return { regular, special };
 }
 
-/** A payment that sets the pace: when it was paid, what per share (holding currency), and its ex-date (the date the frequency is measured on). */
+/** A payment that sets the pace: when it was paid, what per share (holding currency) and, for a provider event, its ex-date. */
 interface Point {
-  /** Ex-date for a provider event, payment date for your own. */
+  /** Pay date (the ex-date when the event has none; the day it arrived for a payment of yours). */
   date: string;
-  payDate: string;
   amount: number;
+  exDate?: string;
+  payDate?: string;
 }
 
 export interface RunRate {
@@ -106,49 +112,51 @@ function inHoldingCurrency(input: RunRateInput, amount: number, currency: string
 }
 
 /** The provider's events up to a year ahead, one per ex-date, oldest first. */
-function providerPoints(input: RunRateInput): { points: Point[]; exDates: string[] } {
+function providerPoints(input: RunRateInput): Point[] {
   const horizon = addIsoDays(input.today, DAYS_PER_YEAR);
   const byExDate = new Map<string, DividendEvent>();
   for (const e of input.events) if (e.amount > 0 && e.exDate <= horizon) byExDate.set(e.exDate, e);
-  const sorted = [...byExDate.values()].sort((a, b) => a.exDate.localeCompare(b.exDate));
-  return {
-    exDates: sorted.map((e) => e.exDate),
-    points: sorted.map((e) => ({ date: e.exDate, payDate: e.payDate ?? e.exDate, amount: inHoldingCurrency(input, e.amount, e.currency) })),
-  };
+  return [...byExDate.values()].map((e) => ({ date: e.payDate ?? e.exDate, payDate: e.payDate, exDate: e.exDate, amount: inHoldingCurrency(input, e.amount, e.currency) }));
 }
 
-function ownPoints(payments: readonly OwnPayment[]): Point[] {
-  return payments.filter((p) => p.perShare > 0).map((p) => ({ date: p.date, payDate: p.date, amount: p.perShare }));
+/** A payment you received within a few days of an event's pay date (or, without one, shortly after its ex-date) is that event. */
+function isEventPayment(event: Point, date: string): boolean {
+  const lastDay = addIsoDays(event.payDate ?? event.exDate!, event.payDate === undefined ? UNKNOWN_PAY_LAG_DAYS : SAME_PAYMENT_DAYS);
+  return date >= addIsoDays(event.exDate!, -SAME_PAYMENT_DAYS) && date <= lastDay;
+}
+
+/** The provider's points plus the payments you received that are not one of them, oldest first. */
+function evidence(input: RunRateInput): Point[] {
+  const provider = providerPoints(input);
+  const own = input.payments
+    .filter((p) => p.perShare > 0 && !provider.some((q) => isEventPayment(q, p.date)))
+    .map((p) => ({ date: p.date, amount: p.perShare }));
+  return [...provider, ...own].sort((a, b) => a.date.localeCompare(b.date));
 }
 
 function rateOf(basis: RunRate['basis'], regular: readonly Point[], specialExDates: ReadonlySet<string>): RunRate {
   const latest = regular.at(-1)!;
   const perYear = regular.length >= MIN_PAYMENTS ? paymentsPerYear(regular.map((p) => p.date)) : 1;
-  return { basis, paymentsPerYear: perYear, perShare: latest.amount, lastPayDate: latest.payDate, specialExDates };
+  return { basis, paymentsPerYear: perYear, perShare: latest.amount, lastPayDate: latest.date, specialExDates };
 }
 
 /** Whether the latest regular payment is recent enough (or still ahead) for the payer to count as active. */
 const isActive = (regular: readonly Point[], today: string): boolean => regular.at(-1)!.date > addIsoDays(today, -(DAYS_PER_YEAR + STALE_GRACE_DAYS));
 
 /**
- * Frequency and regular amount of one holding. Special dividends are left out of both; a payer with no regular payment in the last year (plus
- * a month) has no run rate (`none`). With a single known payment the rate is that payment once a year, flagged `single-payment-assumed`.
+ * Frequency and regular amount of one holding, from the provider's dividend events (declared and past) completed by the payments you received
+ * (the same payment is counted once, with the provider's amount). Special dividends are left out of both; a payer with no regular payment in the
+ * last year (plus a month) has no run rate (`none`). With a single known payment the rate is that payment once a year, flagged
+ * `single-payment-assumed`. The basis is `provider-history` when most of the payments the frequency rests on (the latest five) are the provider's, else `own-payments`.
  */
 export function deriveRunRate(input: RunRateInput): RunRate {
-  const provider = providerPoints(input);
-  const split = splitSpecial(provider.points, (p) => p.amount);
-  const specialExDates = new Set(split.special.map((p) => p.date));
-  const own = splitSpecial(ownPoints(input.payments), (p) => p.amount).regular;
-  const providerKnown = split.regular.length >= MIN_PAYMENTS;
-  const ownKnown = own.length >= MIN_PAYMENTS;
-
-  if (providerKnown && isActive(split.regular, input.today)) return rateOf('provider-history', split.regular, specialExDates);
-  if (!providerKnown && ownKnown && isActive(own, input.today)) return rateOf('own-payments', own, specialExDates);
-  if (providerKnown || ownKnown) return { ...NO_RUN_RATE, specialExDates };
-
-  const single = split.regular.at(-1) ? split.regular : own;
-  if (single.length === 0 || !isActive(single, input.today)) return { ...NO_RUN_RATE, specialExDates };
-  return rateOf('single-payment-assumed', single, specialExDates);
+  const { regular, special } = splitSpecial(evidence(input), (p) => p.amount);
+  const specialExDates = new Set(special.flatMap((p) => (p.exDate === undefined ? [] : [p.exDate])));
+  if (regular.length === 0 || !isActive(regular, input.today)) return { ...NO_RUN_RATE, specialExDates };
+  if (regular.length < MIN_PAYMENTS) return rateOf('single-payment-assumed', regular, specialExDates);
+  const recent = regular.slice(-FREQUENCY_WINDOW);
+  const providerCount = recent.filter((p) => p.exDate !== undefined).length;
+  return rateOf(providerCount * 2 > recent.length ? 'provider-history' : 'own-payments', regular, specialExDates);
 }
 
 // --- Withholding tax -----------------------------------------------------------------------------------------

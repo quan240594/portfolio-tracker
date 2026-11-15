@@ -8,9 +8,11 @@ import { useScopedDividendsOverview } from './useDividendsOverview';
 
 const YIELD_INFO = (
   <>
-    <p>TTM means trailing twelve months: the net dividends you actually received in the last 12 months (after withholding tax, in your base currency), divided by the current market value of your holdings.</p>
-    <p>On cost divides the same amount by what you paid for your holdings. A holding you bought recently has not had a full year to pay yet, so it pulls the trailing yield down.</p>
-    <p>This looks back at what was received. The Passive income (next 12 months) card looks ahead at what is declared or estimated, so the two differ.</p>
+    <p>
+      <strong>How is this calculated?</strong> TTM means trailing twelve months: the net dividends you actually received in the last 12 months from the holdings you still own (after withholding tax, in your base currency), divided by their current market value.
+    </p>
+    <p>On cost divides the same amount by what you paid for those holdings. A holding you bought recently has not had a full year to pay yet, so it pulls the trailing yield down; dividends from holdings you sold are not counted.</p>
+    <p>This looks back at what was received. The Passive income (next 12 months) card looks ahead at what is declared or estimated, so the two differ. Broker apps quote a gross, forward yield on the share price, which is higher.</p>
   </>
 );
 
@@ -23,7 +25,7 @@ const GROWTH_INFO = (
 );
 
 function yieldHint(s: DividendOverviewSummary): string {
-  if (s.last12m <= 0) return 'No dividends received in the last 12 months';
+  if (s.ttmIncome <= 0) return 'No dividends received in the last 12 months';
   return `Trailing 12 months, ${s.ttmPayers} dividend-paying holding${s.ttmPayers === 1 ? '' : 's'}`;
 }
 
@@ -53,7 +55,7 @@ function YieldCard({ currency, summary }: Readonly<Props>) {
       value={formatPercent(summary.ttmYieldOnValuePct)}
       change={
         <span className="muted">
-          {formatPercent(summary.ttmYieldOnCostPct)} on cost · {formatMoney(summary.last12m, currency)} received
+          {formatPercent(summary.ttmYieldOnCostPct)} on cost · {formatMoney(summary.ttmIncome, currency)} received
         </span>
       }
       hint={yieldHint(summary)}

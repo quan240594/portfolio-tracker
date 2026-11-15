@@ -292,7 +292,7 @@ describe('estimated dividends', () => {
     // The latest regular amount is the declared 0.55 of August, not the 0.50 received in May: 10 × 0.55 USD / 1.0 × 85 %
     expect(pay).toMatchObject({ expectedAmount: 3.74, quantity: 10, amountPerShare: 0.55, currency: 'USD', countsAsIncome: true, source: 'estimate' });
     expect(pay.exDate).toBeUndefined();
-    expect(pay.description).toContain('projected from the dividend history');
+    expect(pay.description).toContain('projected from your payment history');
     expect(byId(events, 'est-ex:AAPL:2026-10-30')).toMatchObject({ countsAsIncome: false, payDate: '2026-11-13', exDate: '2026-10-30' });
   });
 

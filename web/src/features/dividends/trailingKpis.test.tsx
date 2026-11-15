@@ -62,7 +62,7 @@ describe('Dividend yield (TTM) card', () => {
   });
 
   it('formats the figures in the Dutch notation', async () => {
-    respondWith({ last12m: 376.95, ttmYieldOnValuePct: 1.25, ttmYieldOnCostPct: 1.36, ttmPayers: 16 });
+    respondWith({ last12m: 376.95, ttmIncome: 376.95, ttmYieldOnValuePct: 1.25, ttmYieldOnCostPct: 1.36, ttmPayers: 16 });
     renderWithProviders(<DashboardPage />);
     const card = await yieldCard();
     await within(card).findByText('Trailing 12 months, 16 dividend-paying holdings');
@@ -76,7 +76,7 @@ describe('Dividend yield (TTM) card', () => {
     expect(await screen.findByText('Trailing 12 months, 1 dividend-paying holding')).toBeInTheDocument();
     first.unmount();
 
-    respondWith({ last12m: 0, ttmYieldOnValuePct: 0, ttmYieldOnCostPct: 0, ttmPayers: 0 });
+    respondWith({ last12m: 0, ttmIncome: 0, ttmYieldOnValuePct: 0, ttmYieldOnCostPct: 0, ttmPayers: 0 });
     renderWithProviders(<DashboardPage />);
     expect(await screen.findByText('No dividends received in the last 12 months')).toBeInTheDocument();
   });

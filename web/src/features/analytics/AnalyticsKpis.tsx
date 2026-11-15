@@ -6,6 +6,7 @@ import { KpiCard } from '../../components/KpiCard';
 import { formatDate, formatMoney, formatPercent } from '../../lib/format';
 import { usePortfolioScope } from '../portfolios/usePortfolioScope';
 import { SNAPSHOT_NOTE, coverageLabel, queryPeriod } from '../dashboard/dashboardPeriod';
+import { ForwardIncomeInfo } from '../dividends/ForwardIncomeInfo';
 
 type Performance = AnalyticsSummaryResponse['performance'];
 
@@ -81,12 +82,12 @@ export function PassiveIncomeKpi() {
       value={income && formatMoney(income.forward12m, ccy)}
       hint={
         income &&
-        `${formatPercent(income.yieldOnValuePct)} yield on value · ${formatPercent(income.yieldOnCostPct)} on cost · ${formatMoney(income.declared, ccy)} declared`
+        `${formatPercent(income.yieldOnValuePct)} yield on value · ${formatPercent(income.yieldOnCostPct)} on cost · ${formatPercent(income.grossYieldOnValuePct)} gross · ${formatMoney(income.declared, ccy)} declared`
       }
       info={
         <>
-          <p>Forward income: declared dividends (announced, with an ex-date in the next 12 months) plus an estimate for the payments your history implies but that are not announced yet, net of withholding tax.</p>
           <p>It looks ahead. The Dividend yield (TTM) card looks back at what you actually received in the last 12 months.</p>
+          <ForwardIncomeInfo />
         </>
       }
     />
