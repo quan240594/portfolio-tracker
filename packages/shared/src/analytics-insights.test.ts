@@ -20,7 +20,7 @@ const h = (p: Partial<Holding> & { weight: number }): Holding => {
   } as Holding;
 };
 const filler = (weight: number, extra: Partial<Holding> = {}) => h({ weight, ...extra });
-const noIncome: PassiveIncome = { baseCurrency: 'EUR', forward12m: 0, declared: 0, estimated: 0, yieldOnValuePct: 0, yieldOnCostPct: 0, holdings: [] };
+const noIncome: PassiveIncome = { baseCurrency: 'EUR', forward12m: 0, declared: 0, estimated: 0, yieldOnValuePct: 0, yieldOnCostPct: 0, grossYieldOnValuePct: 0, holdings: [] };
 const ids = (holdings: Holding[], income: PassiveIncome = noIncome) => generateInsights(holdings, income).map((i) => i.id);
 
 describe('thresholds', () => {
@@ -103,7 +103,7 @@ describe('generateInsights', () => {
     const incomeOf = (sharePct: number): PassiveIncome => ({
       ...noIncome,
       forward12m: 100,
-      holdings: [{ symbol: 'PAY', name: 'Payer', declared: 0, estimated: 100, total: 100, sharePct, yieldPct: 1, yieldOnCostPct: 1 }],
+      holdings: [{ symbol: 'PAY', name: 'Payer', declared: 0, estimated: 100, total: 100, sharePct, yieldPct: 1, yieldOnCostPct: 1, grossYieldPct: 1, withholdingPct: 0, basis: 'own-payments', paymentsPerYear: 4, perShareAnnual: 1 }],
     });
     expect(ids(holdings, incomeOf(40))).toEqual([]);
     expect(generateInsights(holdings, incomeOf(40.01))).toEqual([

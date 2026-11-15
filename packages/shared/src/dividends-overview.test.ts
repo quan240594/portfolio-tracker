@@ -232,9 +232,10 @@ describe('computeDividendsOverview', () => {
       previous12m: 36, // AAA 4 payments of 0.09 between 2024-06-15 and 2025-06-15
       ttmGrowthPct: 43.89,
       previous12mPartial: false,
-      ttmYieldOnValuePct: 1.25, // 51.8 / 4160
-      ttmYieldOnCostPct: 1.36, // 51.8 / 3800
-      ttmPayers: 3,
+      ttmIncome: 46.8, // the sold DDD paid 5 more, but it no longer sits in the market value
+      ttmYieldOnValuePct: 1.13, // 46.8 / 4160
+      ttmYieldOnCostPct: 1.23, // 46.8 / 3800
+      ttmPayers: 2,
     });
   });
 
@@ -354,7 +355,7 @@ describe('computeDividendsOverview', () => {
     expect(future.holdings).toEqual([]);
     const empty = computeDividendsOverview(data({ transactions: [], quotes: {}, profiles: {}, dividendEvents: [] }));
     expect(empty.holdings).toEqual([]);
-    expect(empty.summary).toEqual({ forward12m: 0, declared: 0, estimated: 0, monthlyAverage: 0, yieldOnValuePct: 0, yieldOnCostPct: 0, last12m: 0, growthVsLast12mPct: null, previous12m: 0, ttmGrowthPct: null, previous12mPartial: false, ttmYieldOnValuePct: 0, ttmYieldOnCostPct: 0, ttmPayers: 0 });
+    expect(empty.summary).toEqual({ forward12m: 0, declared: 0, estimated: 0, monthlyAverage: 0, yieldOnValuePct: 0, yieldOnCostPct: 0, grossYieldOnValuePct: 0, last12m: 0, growthVsLast12mPct: null, previous12m: 0, ttmGrowthPct: null, previous12mPartial: false, ttmIncome: 0, ttmYieldOnValuePct: 0, ttmYieldOnCostPct: 0, ttmPayers: 0 });
     expect(empty.futureMonths).toHaveLength(12);
     expect(empty.futureByHolding).toEqual([]);
     expect(empty.futureMonths.every((m) => m.declared === 0 && m.estimated === 0)).toBe(true);

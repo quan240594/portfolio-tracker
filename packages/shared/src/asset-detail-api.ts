@@ -105,6 +105,10 @@ export interface AssetStats {
   dividendYieldPct: number | null;
   /** Dividend per share paid by ex-dates within the last 365 days, in `dividends.currency`. */
   annualDividend: number | null;
+  /** Latest regular dividend per share × payments a year (frequency from the gaps between the provider's ex-dates; special dividends left out), in `dividends.currency`; null with fewer than two regular dividends. */
+  indicatedAnnualDividend: number | null;
+  /** indicatedAnnualDividend ÷ price, percent: the forward yield broker apps quote. */
+  indicatedYieldPct: number | null;
   nextExDate: string | null;
   nextDividendAmount: number | null;
   /** annualDividend ÷ EPS; only with a positive EPS in the same currency. */

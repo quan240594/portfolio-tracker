@@ -146,6 +146,9 @@ describe('dividendStats', () => {
     const s = base(events);
     expect(s.annualDividend).toBe(2.541);
     expect(s.dividendYieldPct).toBe(2.54);
+    // forward: the latest regular amount (1.331) twice a year, not the trailing mix of 1.21 and 1.331
+    expect(s.indicatedAnnualDividend).toBe(2.662);
+    expect(s.indicatedYieldPct).toBe(2.66);
     expect(s.payoutRatioPct).toBe(50.8);
     expect(s.nextExDate).toBe('2026-07-01');
     expect(s.nextDividendAmount).toBe(1.331);
@@ -157,6 +160,8 @@ describe('dividendStats', () => {
     expect(base([])).toEqual({
       dividendYieldPct: null,
       annualDividend: null,
+      indicatedAnnualDividend: null,
+      indicatedYieldPct: null,
       nextExDate: null,
       nextDividendAmount: null,
       payoutRatioPct: null,
@@ -174,6 +179,14 @@ describe('dividendStats', () => {
     expect(base(events, { eps: -2 }).payoutRatioPct).toBeNull();
     expect(base(events, { profileCurrency: 'EUR' }).payoutRatioPct).toBeNull();
     expect(base(events).payoutRatioPct).toBe(20);
+  });
+
+  it('leaves special dividends out of the indicated dividend and needs two regular ones', () => {
+    const quarterly = [div('2025-12-01', 0.8), div('2026-03-01', 0.8), div('2026-06-01', 0.8), div('2026-06-20', 3), div('2026-09-01', 0.8)];
+    expect(base(quarterly).indicatedAnnualDividend).toBe(3.2);
+    expect(base(quarterly, { price: { value: 32, currency: 'USD' } }).indicatedYieldPct).toBe(10);
+    expect(base([div('2026-03-01', 1)]).indicatedAnnualDividend).toBeNull();
+    expect(base(quarterly, { price: { value: 32, currency: 'EUR' } }).indicatedYieldPct).toBeNull();
   });
 
   it('ignores events older than a year for the trailing figures', () => {

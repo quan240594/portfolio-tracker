@@ -289,9 +289,10 @@ describe('estimated dividends', () => {
       'DIVIDEND_PAY:2027-05-14',
     ]);
     const pay = byId(events, 'est-pay:AAPL:2026-11-13')!;
-    expect(pay).toMatchObject({ expectedAmount: 3.4, quantity: 10, amountPerShare: 0.5, currency: 'USD', countsAsIncome: true, source: 'estimate' });
+    // The latest regular amount is the declared 0.55 of August, not the 0.50 received in May: 10 × 0.55 USD / 1.0 × 85 %
+    expect(pay).toMatchObject({ expectedAmount: 3.74, quantity: 10, amountPerShare: 0.55, currency: 'USD', countsAsIncome: true, source: 'estimate' });
     expect(pay.exDate).toBeUndefined();
-    expect(pay.description).toContain('projected from your payment history');
+    expect(pay.description).toContain('projected from the dividend history');
     expect(byId(events, 'est-ex:AAPL:2026-10-30')).toMatchObject({ countsAsIncome: false, payDate: '2026-11-13', exDate: '2026-10-30' });
   });
 
@@ -303,14 +304,16 @@ describe('estimated dividends', () => {
     const result = eventsOf({}, { dividendEvents: [] });
     const est = projected(result);
     expect(est.every((e) => e.type === 'DIVIDEND_PAY')).toBe(true);
+    expect(est[0]!.description).toContain('projected from your payment history');
+    expect(est[0]!.amountPerShare).toBe(0.5);
     // Without a declared event the first payment already falls on 2026-08-14.
     expect(est.map((e) => e.date)).toEqual(['2026-08-14', '2026-11-13', '2027-02-12', '2027-05-14']);
   });
 
   it('does not project payers that stopped paying a year ago, non-payers or sold positions', () => {
     const stale = transactions.filter((t) => t.type !== 'DIVIDEND' || t.date < '2025-06-01');
-    expect(eventsOf({}, { transactions: [...stale, aaplDividend('2025-01-15')] }).filter((e) => e.type.includes('DIVIDEND') && e.status === 'ESTIMATED')).toEqual([]);
-    expect(eventsOf({}, { transactions: transactions.filter((t) => t.type !== 'DIVIDEND') }).filter((e) => e.type.includes('DIVIDEND') && e.status === 'ESTIMATED')).toEqual([]);
+    expect(eventsOf({}, { transactions: [...stale, aaplDividend('2025-01-15')], dividendEvents: [] }).filter((e) => e.type.includes('DIVIDEND') && e.status === 'ESTIMATED')).toEqual([]);
+    expect(eventsOf({}, { transactions: transactions.filter((t) => t.type !== 'DIVIDEND'), dividendEvents: [] }).filter((e) => e.type.includes('DIVIDEND') && e.status === 'ESTIMATED')).toEqual([]);
     const sold = [...transactions, tx({ id: 'sell', type: 'SELL', date: '2026-06-01', quantity: 10 })];
     expect(eventsOf({}, { transactions: sold }).filter((e) => e.type.includes('DIVIDEND') && e.status === 'ESTIMATED')).toEqual([]);
   });
@@ -574,16 +577,16 @@ describe('summary and monthly income', () => {
     const income = calculatePassiveIncome(holdings, transactions, dividendEvents, new FxTimeline(fx), TODAY);
     expect(result.summary).toEqual({
       annualIncome: income.forward12m,
-      monthlyAverage: 1.16,
+      monthlyAverage: 1.25,
       dailyAverage: 0.04,
       yieldPct: income.yieldOnValuePct,
       yieldOnCostPct: income.yieldOnCostPct,
       declared: 3.74,
-      estimated: 10.2,
+      estimated: 11.22,
     });
-    expect(result.summary.annualIncome).toBe(13.94);
+    expect(result.summary.annualIncome).toBe(14.96);
     expect(result.baseCurrency).toBe('EUR');
-    expect(result.summary.yieldPct).toBeCloseTo(0.12, 2);
+    expect(result.summary.yieldPct).toBeCloseTo(0.13, 2);
   });
 
   it('ignores the filters and splits twelve months into paid, declared and estimated', () => {
@@ -594,8 +597,8 @@ describe('summary and monthly income', () => {
     expect(nonZero).toEqual([
       { month: '2026-05', paid: 3.4, declared: 0, estimated: 0, total: 3.4 },
       { month: '2026-08', paid: 0, declared: 3.74, estimated: 0, total: 3.74 },
-      { month: '2026-11', paid: 0, declared: 0, estimated: 3.4, total: 3.4 },
-      { month: '2027-02', paid: 0, declared: 0, estimated: 3.4, total: 3.4 },
+      { month: '2026-11', paid: 0, declared: 0, estimated: 3.74, total: 3.74 },
+      { month: '2027-02', paid: 0, declared: 0, estimated: 3.74, total: 3.74 },
     ]);
     expect(result.monthly).toEqual(buildCalendar(data, wide).monthly);
   });
