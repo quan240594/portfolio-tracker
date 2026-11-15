@@ -550,8 +550,8 @@ same error envelope and scope rules as the other reads, no new infrastructure):
 | `holdings[]` | current holdings that pay or paid dividends, largest forward income first: forward income (declared / estimated / share), yield on value and on cost, market value, cost basis, net received (12 months / ever), `growthPct` (per-share CAGR) and `consistency` |
 | `futureMonths[]` | 12 months from the current one: declared and estimated income per month; sums to `summary.forward12m`. Declared income sits in the pay month (or ex-month without pay date). Estimated income takes the schedule of the last payment shifted a year (`paymentsPerYear` slots), minus the slots announced events fill. The window is 365 days, so a payment in this calendar month next year counts in the first bar |
 
-Forward income is declared plus estimated, net of the withholding tax seen in the last 12 months (see `calculatePassiveIncome`).
-EODHD dividend events cover about two years of history, which is why the per-holding history merges the received payments with
+Forward income is declared plus estimated, net of the withholding tax seen in the last 12 months (see `calculatePassiveIncome` and "Yield and income statistics").
+EODHD dividend events cover about two years of history (`DIVIDEND_LOOKBACK_DAYS` = 730, TypeScript and Python jobs), which is why the per-holding history merges the received payments with
 the stored *past* events (an event within 20 days of a received payment is the same payment).
 
 ### Dashboard stat grid and trailing (TTM) dividend figures
@@ -880,9 +880,10 @@ geometry at 320 and 1280 px (income above the filters, the filter card's bottom 
 * **Paid**: a `DIVIDEND` transaction within 7 days of a declared pay date (60 days after the ex-date when there is no pay
   date) turns that pay event into `PAID` with the amount actually received (net, at the transaction's FX rate); other
   dividend transactions appear as stand-alone `PAID` events.
-* **Estimated**: for a holding that paid within the last 12 months, the payments its history implies that no declared event
-  covers (`paymentsPerYear` frequency, latest per-share amount, projected by whole intervals from the last payment, within the
-  next 12 months). They are `ESTIMATED` pay events plus, when stored events show the usual ex-to-pay lag, estimated ex-dates.
+* **Estimated**: for a holding with a run rate (provider dividend events completed by your own payments, see "Yield and income statistics"),
+  the regular payments of the next 12 months that no declared event covers (`paymentsPerYear` frequency, latest regular per-share
+  amount, projected by whole intervals from the latest payment, within the next 12 months). They are `ESTIMATED` pay events plus, when
+  stored events show the usual ex-to-pay lag, estimated ex-dates.
 * **Splits**: your own `SPLIT` transactions win over a stored split within 3 days; the same split in several portfolios counts once.
 * **Summary** (`annualIncome`, `monthlyAverage`, `dailyAverage`, `yieldPct`, `yieldOnCostPct`, `declared`, `estimated`) is
   `calculatePassiveIncome` of the holdings (÷ 12, ÷ 365); **monthly** has 12 months starting 3 months before the current one with
@@ -4423,3 +4424,71 @@ is in the user's transactions, the ex-date is within 400 days of today, the pay 
 payment in 8 days, the fallback available / unavailable, the manual entry replaced by a provider record, the hourly button), `web/e2e/calendar.spec.ts`. Only the
 live deployment can show what EODHD lists for HESM today and whether the owner's Alpha Vantage key can read `DIVIDENDS`: open Diagnostics > Dividend dates, press "Check dividends now" and read the
 HESM row (`check.outcome`, the fallback line and the reason).
+
+## Yield and income statistics: definitions and the forward-yield fix (15 Nov 2026)
+
+**The bug (owner report, HESM).** The Dividends page showed Hess Midstream (a US quarterly payer, about USD 0.8 a quarter, price about USD 32) at a yield of 2,18 % and
+EUR 39,28 a year, while the broker quotes about 10 %. Cause: the *estimated* part of the forward income came from the owner's own received payments only
+(`symbolIncome` in `analytics-income.ts`): `paymentsPerYear(dates)` returns **1 when fewer than two payments are known**, so a recently bought holding with one received payment was
+projected once a year instead of four times. The same defect hit every figure built on the forward income (Dividends KPI, Yield, Yield / payout, Passive income,
+Calendar annual income and yield, Goals "Starting yield" and the yield on new money presets) and had three more faces: a holding never paid yet got no estimate at all (a London listing bought
+last month showed 0), a **special dividend** was multiplied by the frequency (a USD 3 special on a USD 0.50 payer projected USD 12 a year, a 20 % yield), and a declared raise did
+not apply to the rest of the year. Reproduction on the fixture of `yield-accuracy.test.ts`: forward income EUR 38,58, yield 2,16 % (the owner saw 39,28 and 2,18 %).
+
+**The fix.** One pure module, `packages/shared/src/dividend-run-rate.ts` (`deriveRunRate`, `splitSpecial`, `observedNetFactor`, `paymentsPerYear`), decides for every held symbol how often it pays
+and what a regular payment is. `calculatePassiveIncome`, the Calendar projection, the Dividends page schedule (`futureMonths`) and the asset detail all use it, so the figures agree.
+
+* **Evidence.** The provider's stored dividend events of the symbol (declared and past; `DIVIDEND_LOOKBACK_DAYS` = 730, about two years, in both price jobs, so nothing was widened) completed by
+  the payments the owner received. A received payment that is one of the events (between 7 days before its ex-date and 7 days after its pay date, or 45 days after the ex-date when there is no
+  pay date) counts once with the provider's amount. Frequency = 1, 2, 4 or 12 from the median gap between the last five regular payments (<= 45 days monthly, <= 135 quarterly, <= 270
+  half-yearly, else yearly); amount = the latest regular payment, **including a declared upcoming one** (a declared raise applies to the rest of the year), converted to the holding's currency.
+* **Special dividends.** A payment above 1.8 x the median of the (up to four) payments before it, with at least two before it, is special: out of the frequency, out of the amount, and a declared special does not
+  count as one of the regular payments of the year (it is still declared income). A lasting jump of 1.8 x or more is treated as special for its first two payments.
+* **Thin evidence is flagged, not assumed.** One known payment gives `single-payment-assumed` (once a year, "may be too low", also a visible line under the Yield / payout chart); no regular payment in
+  the last year plus 30 days gives `none` (stopped payers; accumulating funds have no events and no row).
+* **Basis per holding** (`DividendOverviewHolding.basis`, additive): `declared` (every payment of the next 12 months is announced), `provider-history` (most of the five payments the frequency rests on are the provider's),
+  `own-payments`, `single-payment-assumed`, `none`; with `paymentsPerYear`, `perShareAnnual` (latest regular amount x payments a year, paying currency), `grossYieldPct` and `withholdingPct`. The Yield / payout data table shows
+  them as a small note ("based on 4 payments a year from provider history", "only 1 payment known: assumed once a year - may be too low") and a Gross yield column. Mock mode shows the same notes (the demo's payers have stored events).
+* **Withholding.** Observed on the dividends received in the last 12 months: the symbol's own payments, else the payments of every holding paid in the same currency (a US payer bought last week is withheld like the other US payers), else none.
+  Broker apps quote the **gross** yield on the share price; the app's yield is **net** on the market value in EUR, so it is lower by the withholding (15 % on US payers: 10,2 % gross is 8,6 % net). Both are shown.
+* **Trailing yield (Dashboard "Dividend yield (TTM)")** now counts only holdings you still own (`summary.ttmIncome`, `ttmPayers`): dividends of a sold holding no longer sit against a market value that excludes it.
+* **Dividend growth and consistency** drop special dividends from the history, so a special does not shift the yearly blocks or inflate the growth.
+* **Asset detail** gets `indicatedAnnualDividend` / `indicatedYieldPct` (latest regular dividend x payments a year / price, gross; "Forward yield" in the sidebar) next to the unchanged trailing "Dividend yield".
+
+**Definitions.** Base currency, today = the request day. "Forward 12 months" = ex-dates in (today, today + 365 days].
+
+| Statistic (where) | Formula | Numerator source | Denominator | Net / gross | Window | Known limits |
+|---|---|---|---|---|---|---|
+| Forward income (Dividends KPI, `summary.forward12m`, Dashboard "Passive income", Calendar "Annual income") | declared + estimated | declared: stored events with an ex-date in the next 12 months x current quantity at the latest FX; estimated: (payments a year - regular declared events) x latest regular per-share x current quantity | none | net of observed withholding | next 12 months by ex-date | A payment whose ex-date has passed but is not paid yet is in neither part (it is one of the "missing" regular payments); quantity changes are not anticipated; weekly payers count as monthly |
+| Yield (Dividends KPI "Yield", `summary.yieldOnValuePct`, Calendar "Yield", Dashboard passive-income line) | forward income / market value | forward income | current market value of all holdings (payers or not) | net | forward 12 months | Includes holdings that pay nothing in the denominator |
+| Yield on cost (same cards) | forward income / cost basis | forward income | cost basis of all holdings | net | forward 12 months | Cost basis is what was paid, in the base currency |
+| Gross yield (`grossYieldOnValuePct`, per holding `grossYieldPct`, Yield / payout table) | forward income before withholding / market value | forward income / net factor | market value | gross | forward 12 months | Differs from a broker quote by FX and price timing only |
+| Yield / payout bars and table (per holding, per category) | per holding as above; per category: income / value (cost) of the paying holdings in it | forward income | value / cost of paying holdings | net (gross column) | forward 12 months | Categories need a single portfolio |
+| Forward annual dividend per share (`perShareAnnual`) | latest regular dividend x payments a year | provider events, else own payments | n/a | gross | run rate | Not a sum of the next four declared amounts |
+| Dividends KPI growth (`growthVsLast12mPct`) | forward income / `last12m` - 1 | forward income, net received in the last 12 months (all holdings, also sold) | `last12m` | net | forward vs trailing | A recently bought holding inflates it; sold holdings lower it |
+| Dividend yield (TTM) (Dashboard, `ttmYieldOnValuePct`) | `ttmIncome` / market value | net dividends received in the last 12 months from holdings still owned | current market value | net | trailing 12 months | A holding bought recently has not had a year to pay; it understates |
+| Yield on cost (TTM) (`ttmYieldOnCostPct`) | `ttmIncome` / cost basis | as above | cost basis | net | trailing 12 months | as above |
+| Dividend growth (TTM) (Dashboard, `ttmGrowthPct`) | `last12m` / `previous12m` - 1 | net received (all holdings) | previous 12 months | net | days 0-365 vs 366-730 | `previous12mPartial` when the history starts inside the earlier period |
+| Dividends received / period dividends (Dashboard) | sum of DIVIDEND transactions | transactions of the selected period | none | net (amount - withholding) | selected period | Only what the broker import contains |
+| Projected rest of year (Dashboard) | declared + estimated calendar income to 31 Dec | calendar events (CONFIRMED + ESTIMATED) | none | net | today to 31 Dec | Pay-date based, so it can differ from forward income by the ex/pay split |
+| Calendar Annual income / Monthly average / Daily average | forward income, / 12, / 365 | as forward income | none | net | forward 12 months | The monthly chart buckets by pay date |
+| Future payments (Dividends) | forward income per month | declared in the pay month; estimated on the schedule anchored at the latest regular payment | none | net | 12 months from the current one | Sums to forward income |
+| Passive income diversification | forward income per holding / category | forward income | none | net | forward 12 months | Zero-income holdings are left out |
+| Dividend safety (consistency) yield column | the holding's forward yield | forward income | market value | net | forward 12 months | Score uses payments without specials |
+| Average annual growth (`growthPct`) | compound growth of the per-share dividend over full years | merged received + stored payments, specials excluded | the oldest full year | gross per share | up to six years of blocks | Needs two full years of payments |
+| Goals "Starting yield" and Analytics goal | forward income / market value (override allowed) | forward income | market value | net | forward 12 months | Same limits as the yield |
+| Yield on new money presets (portfolio, payers, cost) | portfolio yield on value, payers' income / payers' value, yield on cost | forward income | value of all / paying holdings, cost | net | forward 12 months | "payers" ignores zero-income holdings |
+| Dividend growth from portfolio (goal assumption) | forward-income-weighted average of the holdings' per-share CAGR, capped to the range | `growthPct` and forward income | none | n/a | full years | Falls back to the income CAGR |
+| Asset detail "Dividend yield" / "Annual payout" | trailing 12 months of stored dividend per share / price | stored events with an ex-date in the last 365 days | latest price | gross | trailing | Includes special dividends; labelled trailing |
+| Asset detail "Forward yield" (`indicatedYieldPct`) | latest regular dividend x payments a year / price | provider events (two regular payments needed) | latest price | gross | run rate | Null without two regular payments |
+| Holdings / Watchlist, notifications | no yield column; notifications compare the per-share amount with the payer's history and quote no yield | | | | | |
+
+**Before / after on one fixture** (EUR base, 15 Nov 2026; HESM bought two months ago with one received payment, KO, a monthly payer, a yearly EUR payer, a London listing bought last month, a payer with a special dividend, an
+accumulating fund and a sold holding; `yield-accuracy.test.ts` holds the HESM, monthly, half-yearly, special, no-history, GBX and accumulating cases). Forward income per holding: HESM 38,58 -> 154,32 (yield 2,16 % -> 8,64 % net, 10,16 % gross),
+London listing 0 -> 287,36 (10,00 %), special payer 879,31 -> 146,55 (yield 20,4 % -> 3,4 %), KO, the monthly and the yearly payer unchanged (149,48 / 115,85 / 35,25). Portfolio: forward income 1 218,47 -> 888,81 (the independent
+recomputation, payments a year x latest regular amount x quantity / FX x (1 - withholding), gives 888,81), yield 4,83 % -> 3,52 % (gross 3,97 %), yield on cost 5,26 % -> 3,84 %, Calendar annual income 1 218,47 -> 888,81 (events agree to 0,04), trailing yield 2,34 % -> 2,30 %
+(sold holding left out), yield on new money (portfolio / payers / cost) 4,83 / 6,60 / 5,26 -> 3,52 / 4,17 / 3,84, goal start income 1 218 -> 889.
+
+**Tests.** `pnpm --filter @portfolio/shared test` (`dividend-run-rate.test.ts`, `yield-accuracy.test.ts`, `analytics-income.test.ts`, `calendar.test.ts`, `dividends-overview.test.ts`, `asset-detail.test.ts`), the API case in `services/api/src/dividends-overview.test.ts`,
+the web cards in `web/src/features/dividends/`. Only the live data can show what the provider lists for HESM today: open the Dividends page, Yield / payout > "Show data table" and read the HESM note; it must say "based on 4 payments a year from provider history" and a gross yield near the broker's. A
+yield-check panel in Diagnostics that lists the provider's own yield (Finnhub `dividendYieldIndicatedAnnual`) next to the app's was **not built**: the free Finnhub figure disagrees with the broker for HESM (7,7 % against about 10 %), so it cannot decide which one is right.

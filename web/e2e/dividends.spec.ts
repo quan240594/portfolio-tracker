@@ -33,6 +33,17 @@ test.describe('Dividends page (mock mode)', () => {
     expect(errors).toEqual([]);
   });
 
+  test('Yield / payout says what each forward income rests on and shows the gross yield', async ({ page }) => {
+    await page.goto('/dividends');
+    const card = page.getByRole('region', { name: 'Yield / payout', exact: true });
+    await card.getByText('Show data table').click();
+    const table = card.getByRole('table', { name: 'Dividend yield and forward annual amount' });
+    await expect(table.getByRole('columnheader', { name: 'Gross yield' })).toBeVisible();
+    await expect(table.getByText(/based on \d+ payments? a year from (provider history|your own payments)|every payment of the next 12 months is announced/).first()).toBeVisible();
+    await card.getByLabel('About Yield / payout').click();
+    await expect(card.getByText('How is this calculated?')).toBeVisible();
+  });
+
   test('selectors change the charts, tips and the history disclose and collapse', async ({ page }) => {
     await page.goto('/dividends');
     const payout = page.getByRole('region', { name: 'Yield / payout', exact: true });
