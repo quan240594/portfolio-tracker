@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FxTimeline } from './fx.js';
-import { calculateDividendGrowth, calculatePassiveIncome, paymentsPerYear } from './analytics-income.js';
+import { calculateDividendGrowth, calculatePassiveIncome } from './analytics-income.js';
+import { paymentsPerYear } from './dividend-run-rate.js';
 import { calculatePortfolio } from './portfolio.js';
 import type { DividendEvent, FxRates, InstrumentProfile, Quote, Transaction } from './types.js';
 
@@ -68,7 +69,21 @@ describe('calculatePassiveIncome', () => {
     expect(r.yieldOnValuePct).toBe(1.7);
     expect(r.yieldOnCostPct).toBe(1.7);
     expect(r.holdings).toEqual([
-      { symbol: 'VWRL.AS', name: 'VWRL.AS name', declared: 42.5, estimated: 127.5, total: 170, sharePct: 100, yieldPct: 1.7, yieldOnCostPct: 1.7 },
+      {
+        symbol: 'VWRL.AS',
+        name: 'VWRL.AS name',
+        declared: 42.5,
+        estimated: 127.5,
+        total: 170,
+        sharePct: 100,
+        yieldPct: 1.7,
+        yieldOnCostPct: 1.7,
+        grossYieldPct: 2,
+        withholdingPct: 15,
+        basis: 'own-payments',
+        paymentsPerYear: 4,
+        perShareAnnual: 2,
+      },
     ]);
   });
 
@@ -86,17 +101,17 @@ describe('calculatePassiveIncome', () => {
     const quotes = ['VWRL.AS', 'ANN', 'OLD', 'NEW', 'NONE'].map((s) => quote(s, 100));
     const r = income(txns, events, quotes);
     expect(r.holdings.map((h) => [h.symbol, h.total, h.sharePct])).toEqual([
-      ['VWRL.AS', 170, 60.71],
-      ['ANN', 100, 35.71],
-      ['NEW', 10, 3.57],
+      ['VWRL.AS', 170, 60.93],
+      ['ANN', 100, 35.84],
+      ['NEW', 9, 3.23],
     ]);
     expect(r.estimated).toBe(270);
-    expect(r.declared).toBe(10);
+    expect(r.declared).toBe(9);
   });
 
   it('converts foreign dividends at the latest rate', () => {
     const txns = [tx({ symbol: 'KO', currency: 'USD', quantity: 10, price: 50 }), div('2025-10-01', { symbol: 'KO', currency: 'USD', quantity: 10, price: 0.5, fee: 0 })];
-    const events: DividendEvent[] = [{ symbol: 'KO', exDate: '2026-02-01', amount: 0.5, currency: 'USD' }];
+    const events: DividendEvent[] = [{ symbol: 'KO', exDate: '2026-09-20', amount: 0.5, currency: 'USD' }];
     const r = income(txns, events, [quote('KO', 50, 'USD')]);
     // 10 × 0.5 USD = 5 USD = 4 EUR declared, estimated annual payer → nothing more
     expect(r.declared).toBe(4);

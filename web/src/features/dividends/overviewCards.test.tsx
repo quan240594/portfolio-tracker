@@ -33,6 +33,7 @@ describe('Yield and Dividends KPIs', () => {
     expect(card).toHaveAttribute('aria-busy', 'true');
     expect(await within(card).findByTestId('kpi-yield')).toHaveTextContent(sp(formatPercent(summary.yieldOnValuePct)));
     expect(card).toHaveTextContent(sp(`Yield on cost ${formatPercent(summary.yieldOnCostPct)}`));
+    expect(card).toHaveTextContent(sp(`gross ${formatPercent(summary.grossYieldOnValuePct)}`));
     expect(card).toHaveTextContent(`from ${holdings.filter((h) => h.forward12m > 0).length} dividend-paying holdings`);
     expect(card).not.toHaveAttribute('aria-busy');
   });
@@ -101,6 +102,39 @@ describe('YieldPayoutCard', () => {
     expect(rows[0]).toHaveTextContent(payers[0]!.name);
     expect(rows[0]).toHaveTextContent(sp(formatPercent(payers[0]!.yieldPct)));
     expect(rows[0]).toHaveTextContent(sp(formatPercent(payers[0]!.yieldOnCostPct)));
+  });
+
+  it('notes what each holding rests on, flags a single known payment and explains the calculation', async () => {
+    const user = userEvent.setup();
+    const base = overview();
+    respondWith({
+      ...base,
+      holdings: [
+        holding('HESM', { forward12m: 150, yieldPct: 8.6, grossYieldPct: 10.1, basis: 'provider-history', paymentsPerYear: 4 }),
+        holding('NEW', { forward12m: 10, yieldPct: 1, grossYieldPct: 1.2, basis: 'single-payment-assumed', paymentsPerYear: 1 }),
+      ],
+    });
+    renderWithProviders(<YieldPayoutCard />);
+    await screen.findByTestId('yield-payout-chart');
+    expect(screen.getByTestId('yield-thin-note')).toHaveTextContent('Only 1 payment is known for NEW: assumed once a year, so the yield may be too low.');
+
+    await user.click(screen.getByText('Show data table'));
+    const table = screen.getByRole('table', { name: 'Dividend yield and forward annual amount' });
+    expect(table).toHaveTextContent('based on 4 payments a year from provider history');
+    expect(table).toHaveTextContent('only 1 payment known: assumed once a year - may be too low');
+    expect(within(table).getByRole('columnheader', { name: 'Gross yield' })).toBeInTheDocument();
+    expect(table).toHaveTextContent(sp(formatPercent(10.1)));
+
+    await user.click(screen.getByLabelText('About Yield / payout'));
+    expect(screen.getByText(/How is this calculated\?/)).toBeInTheDocument();
+    expect(screen.getByText(/Broker apps quote the gross yield on the share price/)).toBeInTheDocument();
+  });
+
+  it('shows no warning when every holding has enough evidence', async () => {
+    respondWith({ ...overview(), holdings: [holding('OK', { forward12m: 50, basis: 'own-payments' })] });
+    renderWithProviders(<YieldPayoutCard />);
+    await screen.findByTestId('yield-payout-chart');
+    expect(screen.queryByTestId('yield-thin-note')).not.toBeInTheDocument();
   });
 
   it('switches to the yearly amount per holding', async () => {

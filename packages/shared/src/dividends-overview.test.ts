@@ -232,9 +232,10 @@ describe('computeDividendsOverview', () => {
       previous12m: 36, // AAA 4 payments of 0.09 between 2024-06-15 and 2025-06-15
       ttmGrowthPct: 43.89,
       previous12mPartial: false,
-      ttmYieldOnValuePct: 1.25, // 51.8 / 4160
-      ttmYieldOnCostPct: 1.36, // 51.8 / 3800
-      ttmPayers: 3,
+      ttmIncome: 46.8, // the sold DDD paid 5 more, but it no longer sits in the market value
+      ttmYieldOnValuePct: 1.13, // 46.8 / 4160
+      ttmYieldOnCostPct: 1.23, // 46.8 / 3800
+      ttmPayers: 2,
     });
   });
 
@@ -268,10 +269,10 @@ describe('computeDividendsOverview', () => {
       '2026-06', '2026-07', '2026-08', '2026-09', '2026-10', '2026-11', '2026-12', '2027-01', '2027-02', '2027-03', '2027-04', '2027-05',
     ]);
     const nonZero = overview.futureMonths.filter((m) => m.declared > 0 || m.estimated > 0);
-    // AAA: declared 2026-07-01; the other three quarters follow last year's pattern (Oct, Dec/Jan, Apr); BBB: March
+    // AAA: declared 2026-07-01; the other three quarters follow it a quarter apart (Sep, Dec, Apr); BBB: March
     expect(nonZero).toEqual([
       { month: '2026-07', declared: 10, estimated: 0 },
-      { month: '2026-10', declared: 0, estimated: 10 },
+      { month: '2026-09', declared: 0, estimated: 10 },
       { month: '2026-12', declared: 0, estimated: 10 },
       { month: '2027-03', declared: 0, estimated: 6.8 },
       { month: '2027-04', declared: 0, estimated: 10 },
@@ -283,7 +284,7 @@ describe('computeDividendsOverview', () => {
   it('breaks the future months down per holding, so the periods reconcile with the forward income', () => {
     expect(overview.futureByHolding).toEqual([
       { month: '2026-07', symbol: 'AAA', declared: 10, estimated: 0 },
-      { month: '2026-10', symbol: 'AAA', declared: 0, estimated: 10 },
+      { month: '2026-09', symbol: 'AAA', declared: 0, estimated: 10 },
       { month: '2026-12', symbol: 'AAA', declared: 0, estimated: 10 },
       { month: '2027-03', symbol: 'BBB', declared: 0, estimated: 6.8 },
       { month: '2027-04', symbol: 'AAA', declared: 0, estimated: 10 },
@@ -354,7 +355,7 @@ describe('computeDividendsOverview', () => {
     expect(future.holdings).toEqual([]);
     const empty = computeDividendsOverview(data({ transactions: [], quotes: {}, profiles: {}, dividendEvents: [] }));
     expect(empty.holdings).toEqual([]);
-    expect(empty.summary).toEqual({ forward12m: 0, declared: 0, estimated: 0, monthlyAverage: 0, yieldOnValuePct: 0, yieldOnCostPct: 0, last12m: 0, growthVsLast12mPct: null, previous12m: 0, ttmGrowthPct: null, previous12mPartial: false, ttmYieldOnValuePct: 0, ttmYieldOnCostPct: 0, ttmPayers: 0 });
+    expect(empty.summary).toEqual({ forward12m: 0, declared: 0, estimated: 0, monthlyAverage: 0, yieldOnValuePct: 0, yieldOnCostPct: 0, grossYieldOnValuePct: 0, last12m: 0, growthVsLast12mPct: null, previous12m: 0, ttmGrowthPct: null, previous12mPartial: false, ttmIncome: 0, ttmYieldOnValuePct: 0, ttmYieldOnCostPct: 0, ttmPayers: 0 });
     expect(empty.futureMonths).toHaveLength(12);
     expect(empty.futureByHolding).toEqual([]);
     expect(empty.futureMonths.every((m) => m.declared === 0 && m.estimated === 0)).toBe(true);

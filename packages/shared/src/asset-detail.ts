@@ -28,6 +28,7 @@ import {
 } from './asset-detail-api.js';
 import type { GrowthBenchmark, GrowthBenchmarkOption } from './growth-api.js';
 import { FxTimeline, MissingFxRateError } from './fx.js';
+import { deriveRunRate } from './dividend-run-rate.js';
 import { isMarketSymbol } from './management-api.js';
 import { buildPositions, calculatePortfolio, sortTransactions, txRate, type PortfolioResult } from './portfolio.js';
 import type { DividendEvent, EodPrice, FxDay, FxRates, InstrumentProfile, Portfolio, Quote, Transaction } from './types.js';
@@ -123,6 +124,8 @@ export function buildAssetDividends(events: readonly DividendEvent[], today: str
 type DividendStatKeys =
   | 'dividendYieldPct'
   | 'annualDividend'
+  | 'indicatedAnnualDividend'
+  | 'indicatedYieldPct'
   | 'nextExDate'
   | 'nextDividendAmount'
   | 'payoutRatioPct'
@@ -139,6 +142,13 @@ interface DividendStatInput {
   profileCurrency: string;
 }
 
+/** Latest regular dividend per share × payments a year from the provider's events (specials left out); null with fewer than two regular events. */
+function indicatedDividend(events: readonly DividendEvent[], currency: string | null, today: string): number | null {
+  if (currency === null) return null;
+  const rate = deriveRunRate({ currency, events: events.filter((e) => e.currency === currency), payments: [], timeline: new FxTimeline({ base: currency, rates: {}, asOf: today }), today });
+  return rate.basis === 'provider-history' ? roundTo(rate.perShare * rate.paymentsPerYear, 4) : null;
+}
+
 /** Yield, annual payout, next ex-date, payout ratio, growth and streak from the stored dividend events. */
 export function dividendStats({ events, dividends, today, price, eps, profileCurrency }: DividendStatInput): Pick<AssetStats, DividendStatKeys> {
   const yearAgo = addIsoDays(today, -365);
@@ -147,10 +157,14 @@ export function dividendStats({ events, dividends, today, price, eps, profileCur
   const annual = trailing.length > 0 ? roundTo(trailing.reduce((s, e) => s + e.amount, 0), 4) : null;
   const sameCurrency = (c: string) => dividends.currency === c;
   const yieldPct = annual !== null && price && price.value > 0 && sameCurrency(price.currency) ? roundTo((annual / price.value) * 100, 2) : null;
+  const indicated = indicatedDividend(events, dividends.currency, today);
+  const indicatedYield = indicated !== null && price && price.value > 0 && sameCurrency(price.currency) ? roundTo((indicated / price.value) * 100, 2) : null;
   const payout = annual !== null && eps !== null && eps > 0 && sameCurrency(profileCurrency) ? roundTo((annual / eps) * 100, 1) : null;
   return {
     dividendYieldPct: yieldPct,
     annualDividend: annual,
+    indicatedAnnualDividend: indicated,
+    indicatedYieldPct: indicatedYield,
     nextExDate: upcoming?.exDate ?? null,
     nextDividendAmount: upcoming?.amount ?? null,
     payoutRatioPct: payout,

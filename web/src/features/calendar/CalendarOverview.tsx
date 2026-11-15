@@ -2,6 +2,7 @@ import { useMemo, type ReactElement } from 'react';
 import { Bar, CartesianGrid, ComposedChart, LabelList, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { CalendarMonth, CalendarSummary } from '@portfolio/shared';
 import { KpiCard } from '../../components/KpiCard';
+import { ForwardIncomeInfo } from '../dividends/ForwardIncomeInfo';
 import { chartTheme } from '../../components/charts/palette';
 import { compactMoneyTick } from '../../components/charts/chartFormatters';
 import { LoadingRegion, Skeleton } from '../../components/Skeleton';
@@ -27,7 +28,13 @@ export function CalendarKpis({ summary, currency, loading }: Readonly<{ summary?
   return (
     <div className="@container">
       <div className="grid h-full grid-cols-2 gap-3 lg:@max-lg:grid-cols-1">
-        <KpiCard loading={loading} label="Annual income" value={summary && formatMoney(summary.annualIncome, currency)} hint="Next 12 months, net" />
+        <KpiCard
+          loading={loading}
+          label="Annual income"
+          value={summary && formatMoney(summary.annualIncome, currency)}
+          hint="Next 12 months, net"
+          info={<ForwardIncomeInfo />}
+        />
         <KpiCard loading={loading} label="Monthly average" value={summary && formatMoney(summary.monthlyAverage, currency)} hint="Annual income ÷ 12" />
         <KpiCard loading={loading} label="Daily average" value={summary && formatMoney(summary.dailyAverage, currency)} hint="Annual income ÷ 365" />
         <KpiCard loading={loading} label="Yield" value={summary && formatPercent(summary.yieldPct)} hint={summary && `${formatPercent(summary.yieldOnCostPct)} on cost`} />

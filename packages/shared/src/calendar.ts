@@ -11,7 +11,8 @@
  * | Split event    | TICKER#{symbol}  | SPLIT#{date}      | SPLIT_EVENT      |
  */
 import { addIsoDays, daysBetween, DAYS_PER_YEAR, roundTo, transactionAmount } from './analytics.js';
-import { calculatePassiveIncome, paymentsPerYear, type PassiveIncome } from './analytics-income.js';
+import { calculatePassiveIncome, type PassiveIncome } from './analytics-income.js';
+import { deriveRunRate, observedNetFactor, type RunRate } from './dividend-run-rate.js';
 import { earningsReleaseTime, type EarningsReleaseTime } from './earnings-time.js';
 import { MANUAL_DIVIDEND_SOURCE } from './dividend-merge.js';
 import { FxTimeline } from './fx.js';
@@ -314,7 +315,7 @@ interface Ctx {
   /** Earnings follow what is held now: a symbol that was sold out is a holding no more (it shows only while on the watchlist). */
   earningsOriginOf: (symbol: string) => CalendarOrigin | null;
   nameOf: (symbol: string, fallback?: string) => string;
-  netFactor: (symbol: string) => number;
+  netFactor: (symbol: string, currency: string) => number;
 }
 
 /** What the earnings entries need of the context: the day, who the symbol belongs to and its name. */
@@ -367,11 +368,7 @@ function createContext(data: CalendarData): Ctx {
     earningsOriginOf: heldOriginResolver(currentPositions, data.watchlist),
     nameOf: profileName(data.profiles),
     // Same observed-withholding rule as calculatePassiveIncome, so event amounts add up to the analytics figures.
-    netFactor: (symbol) => {
-      const own = trailing.filter((t) => t.symbol === symbol);
-      const gross = own.reduce((s, t) => s + t.quantity * t.price, 0);
-      return gross > 0 ? Math.max(0, 1 - own.reduce((s, t) => s + t.fee, 0) / gross) : 1;
-    },
+    netFactor: (symbol, currency) => observedNetFactor(trailing, symbol, currency),
   };
 }
 
@@ -390,7 +387,7 @@ const sourceOfDividend = (ev: DividendEvent): string => (ev.source === MANUAL_DI
 /** Declared payment of `ev` for `quantity` shares: net, in the base currency (latest FX for the future, ex-date FX for the past). */
 function declaredAmount(ctx: Ctx, ev: DividendEvent, quantity: number): number {
   const rateDate = ev.exDate > ctx.today ? undefined : ev.exDate;
-  return ctx.timeline.toBase(quantity * ev.amount, ev.currency, rateDate) * ctx.netFactor(ev.symbol);
+  return ctx.timeline.toBase(quantity * ev.amount, ev.currency, rateDate) * ctx.netFactor(ev.symbol, ev.currency);
 }
 
 function dedupeDividends(events: readonly DividendEvent[]): DividendEvent[] {
@@ -534,38 +531,43 @@ function medianPayLag(declared: readonly DividendEvent[]): number | undefined {
   return lags.length > 0 ? lags[Math.floor(lags.length / 2)] : undefined;
 }
 
-/** Pay dates of the payments the history implies that no declared event covers yet, nearest first. */
-function projectedPayDates(ctx: Ctx, days: readonly PaymentDay[], declared: readonly DividendEvent[]): string[] {
-  const last = days.at(-1)!;
+/** Pay dates of the regular payments the run rate implies that no declared event covers yet, nearest first. */
+function projectedPayDates(ctx: Ctx, rate: RunRate, declared: readonly DividendEvent[]): string[] {
   const horizon = addIsoDays(ctx.today, DAYS_PER_YEAR);
-  const perYear = paymentsPerYear(days.map((d) => d.date));
-  const upcoming = declared.filter((e) => e.exDate > ctx.today && e.exDate <= horizon);
+  const perYear = rate.paymentsPerYear;
+  const upcoming = declared.filter((e) => e.exDate > ctx.today && e.exDate <= horizon && !rate.specialExDates.has(e.exDate));
   const missing = Math.max(0, perYear - upcoming.length);
   const interval = Math.round(DAYS_PER_YEAR / perYear);
   const covered = (date: string) => declared.some((e) => Math.abs(daysBetween(date, e.payDate ?? e.exDate)) < interval / 2);
-  const first = Math.max(1, Math.floor(daysBetween(last.date, ctx.today) / interval) + 1);
+  const last = rate.lastPayDate!;
+  const first = Math.max(1, Math.floor(daysBetween(last, ctx.today) / interval) + 1);
   const out: string[] = [];
   for (let k = first; k <= first + 2 * perYear + 2 && out.length < missing; k++) {
-    const date = addIsoDays(last.date, k * interval);
+    const date = addIsoDays(last, k * interval);
     if (date > horizon) break;
     if (!covered(date)) out.push(date);
   }
   return out;
 }
 
+const RATE_WORDS: Readonly<Record<RunRate['basis'], string>> = {
+  'provider-history': 'projected from the dividend history',
+  'own-payments': 'projected from your payment history',
+  'single-payment-assumed': 'projected from one known payment, assumed once a year',
+  none: 'projected',
+};
+
 function estimatedEntries(ctx: Ctx, symbol: string, position: Position, declared: readonly DividendEvent[]): CalendarEvent[] {
-  const days = paymentDaysOf(ctx.transactions, symbol);
-  const last = days.at(-1);
-  const trailingStart = addIsoDays(ctx.today, -DAYS_PER_YEAR);
-  // Like the analytics forecast: only payers that paid within the last year are projected.
-  if (!last || !days.some((d) => d.date > trailingStart && d.date <= ctx.today)) return [];
-  const expected = roundTo(ctx.timeline.toBase(position.quantity * last.perShare, position.currency) * ctx.netFactor(symbol));
+  const rate = deriveRunRate({ currency: position.currency, events: declared, payments: paymentDaysOf(ctx.transactions, symbol), timeline: ctx.timeline, today: ctx.today });
+  // Only payers with a recent regular payment are projected, like the analytics forecast.
+  if (rate.basis === 'none') return [];
+  const expected = roundTo(ctx.timeline.toBase(position.quantity * rate.perShare, position.currency) * ctx.netFactor(symbol, position.currency));
   const lag = medianPayLag(declared);
   const base: DividendBase = { symbol, name: ctx.nameOf(symbol), origin: 'HOLDING' };
-  const shared = { ...base, status: 'ESTIMATED' as const, source: 'estimate', amountPerShare: last.perShare, currency: position.currency, quantity: position.quantity };
+  const shared = { ...base, status: 'ESTIMATED' as const, source: 'estimate', amountPerShare: rate.perShare, currency: position.currency, quantity: position.quantity };
   const out: CalendarEvent[] = [];
-  for (const payDate of projectedPayDates(ctx, days, declared)) {
-    const description = `${describeDividend(last.perShare, position.currency, position.quantity)} (projected from your payment history)`;
+  for (const payDate of projectedPayDates(ctx, rate, declared)) {
+    const description = `${describeDividend(rate.perShare, position.currency, position.quantity)} (${RATE_WORDS[rate.basis]})`;
     out.push({ ...shared, id: `est-pay:${symbol}:${payDate}`, date: payDate, type: 'DIVIDEND_PAY', description, payDate, expectedAmount: expected, countsAsIncome: true });
     if (lag !== undefined) {
       const exDate = addIsoDays(payDate, -lag);

@@ -57,8 +57,11 @@ export function StatsSidebar({ detail }: Readonly<{ detail: AssetDetailResponse 
         </Row>
       </Group>
       <Group title="Dividends">
-        <Row label="Dividend yield" hint="Dividends paid over the last 12 months divided by the price">
+        <Row label="Dividend yield" hint="Dividends paid over the last 12 months divided by the price (gross, trailing)">
           {stats.dividendYieldPct === null ? null : formatPercent(stats.dividendYieldPct)}
+        </Row>
+        <Row label="Forward yield" hint="Latest regular dividend times payments a year, divided by the price (gross, what broker apps quote)">
+          {stats.indicatedYieldPct === null ? null : formatPercent(stats.indicatedYieldPct)}
         </Row>
         <Row label="Annual payout" hint="Dividend per share over the last 12 months">
           {stats.annualDividend === null ? null : formatMoney(stats.annualDividend, dividendCurrency, { maxDigits: 4 })}

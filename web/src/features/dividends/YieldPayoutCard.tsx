@@ -20,6 +20,7 @@ import {
 } from '../../components/charts/selection';
 import { ChartFrame, useDividendTheme } from './chartParts';
 import { EmptyNote, QueryCard } from './DividendCard';
+import { ForwardIncomeInfo } from './ForwardIncomeInfo';
 import { yieldBars, type YieldBar, type YieldGroup, type YieldMetric } from './slices';
 import { useScopedDividendsOverview } from './useDividendsOverview';
 
@@ -65,6 +66,7 @@ function YieldPayoutChart({ bars, metric, currency, selection }: Readonly<ChartP
   const columns: SelectableColumn[] = [
     { key: 'yield', label: 'Yield', selectable: isYield },
     { key: 'onCost', label: 'Yield on cost', selectable: isYield },
+    { key: 'gross', label: 'Gross yield', selectable: false },
     { key: 'amount', label: 'Per year', selectable: !isYield },
   ];
   return (
@@ -103,7 +105,12 @@ function YieldPayoutChart({ bars, metric, currency, selection }: Readonly<ChartP
         rowHeader="Name"
         columns={columns}
         selection={selection}
-        rows={bars.map((b) => ({ id: b.key, header: b.name, cells: [formatPercent(b.yieldPct), formatPercent(b.onCostPct), formatMoney(b.amount, currency)] }))}
+        rows={bars.map((b) => ({
+          id: b.key,
+          header: b.name,
+          note: b.note ? <span className="muted block text-[11px] font-normal">{b.note}</span> : undefined,
+          cells: [formatPercent(b.yieldPct), formatPercent(b.onCostPct), formatPercent(b.grossPct), formatMoney(b.amount, currency)],
+        }))}
       />
     </>
   );
@@ -115,6 +122,7 @@ function YieldPayoutBody({ data }: Readonly<{ data: DividendsOverviewResponse }>
   const [group, setGroup] = useState<YieldGroup>('holding');
   const categories = useCategories(current?.portfolioId);
   const hasCategories = (categories.data?.categories.length ?? 0) > 0;
+  const thin = data.holdings.filter((h) => h.basis === 'single-payment-assumed').map((h) => h.symbol);
   const bars = yieldBars(data.holdings, metric, hasCategories ? group : 'holding', categories.data);
   const selection = useSeriesSelection(
     metric === 'yield' ? YIELD_SERIES : AMOUNT_SERIES,
@@ -128,6 +136,11 @@ function YieldPayoutBody({ data }: Readonly<{ data: DividendsOverviewResponse }>
         {hasCategories && <SegmentedControl label="Group by" options={GROUPS} value={group} onChange={setGroup} />}
       </div>
       {bars.length === 0 ? <EmptyNote>No dividend-paying holdings yet.</EmptyNote> : <YieldPayoutChart bars={bars} metric={metric} currency={data.baseCurrency} selection={selection} />}
+      {thin.length > 0 && (
+        <p className="muted mt-2 text-xs" data-testid="yield-thin-note">
+          Only 1 payment is known for {thin.join(', ')}: assumed once a year, so the yield may be too low.
+        </p>
+      )}
     </div>
   );
 }
@@ -147,7 +160,9 @@ export function YieldPayoutCard() {
         <>
           <p>Bars show each holding&apos;s forward dividend yield (expected net income over the next 12 months ÷ market value); the dots show the yield on your cost. Switch to Amount for the expected income per year in EUR.</p>
           <p>Click an entry in the legend, or a column or row header in the data table, to leave a series or a holding out of the chart.</p>
-          <p>Group by Categories uses your portfolio categories (single portfolio only) and counts only dividend-paying holdings. Forward income = declared + estimated from payment frequency.</p>
+          <p>Group by Categories uses your portfolio categories (single portfolio only) and counts only dividend-paying holdings.</p>
+          <p>The data table adds the gross yield (before withholding tax, the figure broker apps quote) and, per holding, what its income is based on.</p>
+          <ForwardIncomeInfo />
         </>
       }
     >

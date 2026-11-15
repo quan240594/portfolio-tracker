@@ -1,6 +1,7 @@
 /** Passive-income forecast and dividend growth, derived from DIVIDEND transactions and announced events. */
 import { FxTimeline } from './fx.js';
-import { addIsoDays, daysBetween, DAYS_PER_YEAR, ratioToPct, roundTo, transactionAmount } from './analytics.js';
+import { deriveRunRate, observedNetFactor, type RunRate, type RunRateBasis } from './dividend-run-rate.js';
+import { addIsoDays, DAYS_PER_YEAR, ratioToPct, roundTo, transactionAmount } from './analytics.js';
 import { calculateDividendGrowthStats, type DividendGrowthStats } from './dividend-growth-stats.js';
 import type { DividendEvent, Holding, Transaction } from './types.js';
 
@@ -18,6 +19,16 @@ export interface PassiveIncomeHolding {
   yieldPct: number;
   /** Forward income / cost basis, percent. */
   yieldOnCostPct: number;
+  /** Forward income before withholding tax / market value, percent: the figure broker apps quote. */
+  grossYieldPct: number;
+  /** Withholding tax assumed on the forward income, percent (observed on your last 12 months of dividends). */
+  withholdingPct: number;
+  /** What the estimate rests on, see `RunRateBasis`. */
+  basis: RunRateBasis;
+  /** Payments a year the forward income assumes (1, 2, 4 or 12). */
+  paymentsPerYear: number;
+  /** Regular dividend per share and year the forward income assumes (`perShare` × `paymentsPerYear`), in the paying currency. */
+  perShareAnnual: number;
 }
 
 export interface PassiveIncome {
@@ -28,6 +39,8 @@ export interface PassiveIncome {
   estimated: number;
   yieldOnValuePct: number;
   yieldOnCostPct: number;
+  /** Forward income before withholding tax / market value, percent. */
+  grossYieldOnValuePct: number;
   /** Holdings with expected income, largest first. */
   holdings: PassiveIncomeHolding[];
 }
@@ -35,68 +48,62 @@ export interface PassiveIncome {
 interface PaymentDay {
   date: string;
   perShare: number;
-  gross: number;
-  withheld: number;
 }
 
-/** Dividend payments of one symbol grouped per day, oldest first. */
+/** Dividend payments of one symbol grouped per day (per-share amounts added up), oldest first. */
 function paymentDays(transactions: readonly Transaction[], symbol: string): PaymentDay[] {
-  const byDate = new Map<string, PaymentDay>();
+  const byDate = new Map<string, number>();
   for (const t of transactions) {
-    if (t.type !== 'DIVIDEND' || t.symbol !== symbol) continue;
-    const day = byDate.get(t.date) ?? { date: t.date, perShare: 0, gross: 0, withheld: 0 };
-    day.perShare += t.price;
-    day.gross += t.quantity * t.price;
-    day.withheld += t.fee;
-    byDate.set(t.date, day);
+    if (t.type === 'DIVIDEND' && t.symbol === symbol) byDate.set(t.date, (byDate.get(t.date) ?? 0) + t.price);
   }
-  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
-}
-
-/** Payments per year implied by the median gap between the last payments (1, 2, 4 or 12). */
-export function paymentsPerYear(dates: readonly string[]): number {
-  const recent = dates.slice(-5);
-  if (recent.length < 2) return 1;
-  const gaps = recent.slice(1).map((d, i) => daysBetween(recent[i]!, d)).sort((a, b) => a - b);
-  const median = gaps[Math.floor(gaps.length / 2)]!;
-  if (median <= 45) return 12;
-  if (median <= 135) return 4;
-  return median <= 270 ? 2 : 1;
+  return [...byDate.entries()].map(([date, perShare]) => ({ date, perShare })).sort((a, b) => a.date.localeCompare(b.date));
 }
 
 interface SymbolIncome {
   declared: number;
   estimated: number;
+  /** The same amounts before withholding tax. */
+  declaredGross: number;
+  estimatedGross: number;
+  rate: RunRate;
+  /** Share of a gross dividend that reaches you (1 = nothing withheld). */
+  net: number;
+  basis: RunRateBasis;
+}
+
+function basisOf(rate: RunRate, declaredGross: number, estimatedGross: number): RunRateBasis {
+  const evidenced = rate.basis === 'provider-history' || rate.basis === 'own-payments';
+  return evidenced && estimatedGross <= 0 && declaredGross > 0 ? 'declared' : rate.basis;
 }
 
 function symbolIncome(
   holding: Holding,
   transactions: readonly Transaction[],
+  trailing: readonly Transaction[],
   events: readonly DividendEvent[],
   timeline: FxTimeline,
   today: string,
 ): SymbolIncome {
   const horizon = addIsoDays(today, DAYS_PER_YEAR);
-  const upcoming = events.filter((e) => e.symbol === holding.symbol && e.exDate > today && e.exDate <= horizon);
-  const days = paymentDays(transactions, holding.symbol);
-  const trailing = days.filter((d) => d.date > addIsoDays(today, -DAYS_PER_YEAR) && d.date <= today);
-  const grossPaid = trailing.reduce((s, d) => s + d.gross, 0);
-  const withholding = grossPaid > 0 ? trailing.reduce((s, d) => s + d.withheld, 0) / grossPaid : 0;
-  const net = Math.max(0, 1 - withholding);
+  const own = events.filter((e) => e.symbol === holding.symbol);
+  const upcoming = own.filter((e) => e.exDate > today && e.exDate <= horizon);
+  const rate = deriveRunRate({ currency: holding.currency, events: own, payments: paymentDays(transactions, holding.symbol), timeline, today });
+  const net = observedNetFactor(trailing, holding.symbol, holding.currency);
 
   const declaredGross = upcoming.reduce((s, e) => s + timeline.toBase(holding.quantity * e.amount, e.currency), 0);
-  // Estimate only for payers that paid within the last year; assume the same schedule and the latest amount.
-  const latest = days.at(-1);
-  const missing = trailing.length > 0 && latest ? Math.max(0, paymentsPerYear(days.map((d) => d.date)) - upcoming.length) : 0;
-  const estimatedGross = latest ? missing * timeline.toBase(holding.quantity * latest.perShare, holding.currency) : 0;
-  return { declared: declaredGross * net, estimated: estimatedGross * net };
+  // The rest of the year's payments follow the run rate; a declared special dividend is not one of the regular payments.
+  const regularUpcoming = upcoming.filter((e) => !rate.specialExDates.has(e.exDate)).length;
+  const missing = rate.basis === 'none' ? 0 : Math.max(0, rate.paymentsPerYear - regularUpcoming);
+  const estimatedGross = missing * timeline.toBase(holding.quantity * rate.perShare, holding.currency);
+  return { declared: declaredGross * net, estimated: estimatedGross * net, declaredGross, estimatedGross, rate, net, basis: basisOf(rate, declaredGross, estimatedGross) };
 }
 
 /**
  * Forward 12-month net dividend income per current holding. Declared = announced events with an ex-date in
- * the next 12 months × quantity held (latest FX). Estimated = the payments a holding's history implies
- * (frequency from the gaps between its last payments) that are not yet announced, valued at its latest
- * per-share amount. Both are reduced by the withholding tax observed in the last 12 months.
+ * the next 12 months × quantity held (latest FX). Estimated = the regular payments of those 12 months that are not
+ * yet announced, valued at the holding's latest regular per-share amount: how many comes from the symbol's run rate
+ * (see `deriveRunRate`: the provider's dividend history first, then your own payments). Both are reduced by the
+ * withholding tax observed on your dividends of the last 12 months.
  */
 export function calculatePassiveIncome(
   holdings: readonly Holding[],
@@ -105,21 +112,36 @@ export function calculatePassiveIncome(
   timeline: FxTimeline,
   today: string,
 ): PassiveIncome {
-  const rows = holdings.map((h) => ({ h, ...symbolIncome(h, transactions, events, timeline, today) }));
+  return passiveIncomeWithRates(holdings, transactions, events, timeline, today).income;
+}
+
+/** `calculatePassiveIncome` plus the run rate of every holding (by symbol), which the Dividends page schedules the estimated payments with. */
+export function passiveIncomeWithRates(
+  holdings: readonly Holding[],
+  transactions: readonly Transaction[],
+  events: readonly DividendEvent[],
+  timeline: FxTimeline,
+  today: string,
+): { income: PassiveIncome; rates: ReadonlyMap<string, RunRate> } {
+  const since = addIsoDays(today, -DAYS_PER_YEAR);
+  const trailing = transactions.filter((t) => t.type === 'DIVIDEND' && t.date > since && t.date <= today);
+  const rows = holdings.map((h) => ({ h, ...symbolIncome(h, transactions, trailing, events, timeline, today) }));
   const declared = rows.reduce((s, r) => s + r.declared, 0);
   const estimated = rows.reduce((s, r) => s + r.estimated, 0);
   const forward = declared + estimated;
+  const gross = rows.reduce((s, r) => s + r.declaredGross + r.estimatedGross, 0);
   const value = holdings.reduce((s, h) => s + h.marketValue, 0);
   const cost = holdings.reduce((s, h) => s + h.costBasis, 0);
   const ratio = (num: number, den: number) => (den > 0 ? ratioToPct(num / den) : 0);
 
-  return {
+  const income: PassiveIncome = {
     baseCurrency: timeline.base,
     forward12m: roundTo(forward),
     declared: roundTo(declared),
     estimated: roundTo(estimated),
     yieldOnValuePct: ratio(forward, value),
     yieldOnCostPct: ratio(forward, cost),
+    grossYieldOnValuePct: ratio(gross, value),
     holdings: rows
       .filter((r) => r.declared + r.estimated > 0)
       .map((r) => ({
@@ -131,9 +153,15 @@ export function calculatePassiveIncome(
         sharePct: ratio(r.declared + r.estimated, forward),
         yieldPct: ratio(r.declared + r.estimated, r.h.marketValue),
         yieldOnCostPct: ratio(r.declared + r.estimated, r.h.costBasis),
+        grossYieldPct: ratio(r.declaredGross + r.estimatedGross, r.h.marketValue),
+        withholdingPct: roundTo((1 - r.net) * 100, 1),
+        basis: r.basis,
+        paymentsPerYear: r.rate.paymentsPerYear,
+        perShareAnnual: roundTo(r.rate.perShare * r.rate.paymentsPerYear, 4),
       }))
       .sort((a, b) => b.total - a.total || a.symbol.localeCompare(b.symbol)),
   };
+  return { income, rates: new Map(rows.map((r) => [r.h.symbol, r.rate])) };
 }
 
 // --- Dividend growth -------------------------------------------------------------------------------

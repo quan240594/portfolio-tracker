@@ -4,6 +4,7 @@ import { Skeleton } from '../../components/Skeleton';
 import { ErrorState } from '../../components/ErrorState';
 import { formatMoney, formatPercent } from '../../lib/format';
 import { InfoTip } from './DividendCard';
+import { ForwardIncomeInfo } from './ForwardIncomeInfo';
 import { useScopedDividendsOverview } from './useDividendsOverview';
 
 interface BlockProps {
@@ -48,6 +49,7 @@ export function YieldKpi() {
         <>
           <p>Forward yield: the dividends you are expected to receive over the next 12 months (net of withholding tax), divided by the current market value of your holdings.</p>
           <p>Yield on cost divides the same income by what you paid for those holdings. Both use the same forward income as the Dividends KPI.</p>
+          <ForwardIncomeInfo />
         </>
       }
     >
@@ -59,7 +61,8 @@ export function YieldKpi() {
               {formatPercent(summary.yieldOnValuePct)}
             </p>
             <p className="muted text-sm">
-              Yield on cost <span className="font-medium text-slate-900 tabular-nums dark:text-slate-100">{formatPercent(summary.yieldOnCostPct)}</span>
+              Yield on cost <span className="font-medium text-slate-900 tabular-nums dark:text-slate-100">{formatPercent(summary.yieldOnCostPct)}</span> · gross{' '}
+              <span className="font-medium text-slate-900 tabular-nums dark:text-slate-100">{formatPercent(summary.grossYieldOnValuePct)}</span>
             </p>
             <p className="muted mt-auto pt-2 text-xs">
               Forward 12-month income ÷ market value, from {payers} dividend-paying holding{payers === 1 ? '' : 's'}
@@ -87,8 +90,8 @@ export function DividendsKpi() {
       label="Dividends"
       info={
         <>
-          <p>Forward 12-month income: declared dividends (announced, with an ex-date in the next 12 months) plus an estimate for the payments your payment history implies but that are not announced yet.</p>
-          <p>Amounts are net of the withholding tax you paid in the last 12 months. The growth compares this forward income with what you received in the previous 12 months, so a recently bought holding inflates it.</p>
+          <p>Forward 12-month income, net of withholding tax. The growth compares it with what you received in the previous 12 months, so a recently bought holding inflates it.</p>
+          <ForwardIncomeInfo />
         </>
       }
     >

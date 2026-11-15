@@ -5,7 +5,8 @@
  */
 import { FxTimeline } from './fx.js';
 import { addIsoDays, daysBetween, DAYS_PER_YEAR, ratioToPct, roundTo, transactionAmount } from './analytics.js';
-import { calculatePassiveIncome, paymentsPerYear, type PassiveIncome, type PassiveIncomeHolding } from './analytics-income.js';
+import { passiveIncomeWithRates, type PassiveIncome, type PassiveIncomeHolding } from './analytics-income.js';
+import { paymentsPerYear, splitSpecial, type RunRate, type RunRateBasis } from './dividend-run-rate.js';
 import type { AnalyticsData } from './analytics-compute.js';
 import { calculatePortfolio } from './portfolio.js';
 import type { AssetClass, DividendEvent, Holding, Transaction } from './types.js';
@@ -218,6 +219,16 @@ export interface DividendOverviewHolding {
   sharePct: number;
   yieldPct: number;
   yieldOnCostPct: number;
+  /** Forward income before withholding tax / market value, percent: the yield a broker app quotes. */
+  grossYieldPct: number;
+  /** Withholding tax assumed on the forward income, percent. */
+  withholdingPct: number;
+  /** What the forward income rests on: `declared`, `provider-history`, `own-payments`, `single-payment-assumed` (probably too low) or `none`. */
+  basis: RunRateBasis;
+  /** Payments a year the forward income assumes (0 without any). */
+  paymentsPerYear: number;
+  /** Regular dividend per share and year assumed (latest regular payment × payments a year), in the paying currency. */
+  perShareAnnual: number;
   /** Net received in the last 12 months / ever. */
   received12m: number;
   receivedTotal: number;
@@ -235,6 +246,8 @@ export interface DividendOverviewSummary {
   monthlyAverage: number;
   yieldOnValuePct: number;
   yieldOnCostPct: number;
+  /** Forward income before withholding tax / market value, percent. */
+  grossYieldOnValuePct: number;
   /** Net received in the 12 months up to today. */
   last12m: number;
   /** Forward 12-month income compared with `last12m`, percent; null when nothing was received in the last 12 months. */
@@ -245,11 +258,13 @@ export interface DividendOverviewSummary {
   ttmGrowthPct: number | null;
   /** True when the first dividend ever received is inside the previous 12 months, so that period is only partly covered by your history. */
   previous12mPartial: boolean;
-  /** Trailing yield: `last12m` / current market value, percent (0 without market value). */
+  /** Net received in the last 12 months from the holdings you still own (the numerator of the trailing yield). */
+  ttmIncome: number;
+  /** Trailing yield: `ttmIncome` / current market value, percent (0 without market value). */
   ttmYieldOnValuePct: number;
-  /** Trailing yield: `last12m` / cost basis, percent (0 without cost basis). */
+  /** Trailing yield: `ttmIncome` / cost basis, percent (0 without cost basis). */
   ttmYieldOnCostPct: number;
-  /** Holdings that paid a dividend in the last 12 months. */
+  /** Current holdings that paid a dividend in the last 12 months. */
   ttmPayers: number;
 }
 
@@ -366,21 +381,20 @@ function holdingSchedule(
   income: PassiveIncomeHolding,
   holding: Holding,
   events: readonly DividendEvent[],
-  received: readonly PaymentPoint[],
+  rate: RunRate | undefined,
   timeline: FxTimeline,
   today: string,
 ): HoldingSchedule {
   const horizon = addIsoDays(today, DAYS_PER_YEAR);
   const upcoming = events
     .filter((e) => e.exDate > today && e.exDate <= horizon)
-    .map((e) => ({ date: e.payDate ?? e.exDate, weight: timeline.toBase(holding.quantity * e.amount, e.currency) }));
+    .map((e) => ({ date: e.payDate ?? e.exDate, weight: timeline.toBase(holding.quantity * e.amount, e.currency), special: rate?.specialExDates.has(e.exDate) === true }));
   const weights = sum(upcoming.map((u) => u.weight));
   const declared = upcoming.map((u) => ({ date: u.date, amount: (income.declared * u.weight) / Math.max(weights, Number.EPSILON) }));
-  const latest = received.at(-1);
-  if (!latest || income.estimated <= 0) return { declared, estimated: [] };
-  const perYear = paymentsPerYear(received.map((p) => p.date));
-  const missing = Math.max(0, perYear - upcoming.length);
-  const dates = estimatedDates(latest.date, perYear, upcoming.map((u) => u.date), missing, today);
+  if (rate?.lastPayDate == null || income.estimated <= 0) return { declared, estimated: [] };
+  const regular = upcoming.filter((u) => !u.special);
+  const missing = Math.max(0, rate.paymentsPerYear - regular.length);
+  const dates = estimatedDates(rate.lastPayDate, rate.paymentsPerYear, regular.map((u) => u.date), missing, today);
   return { declared, estimated: dates.map((date) => ({ date, amount: income.estimated / dates.length })) };
 }
 
@@ -425,13 +439,15 @@ interface Row {
 function buildRow(
   h: Holding,
   income: PassiveIncomeHolding | undefined,
+  rate: RunRate | undefined,
   dividends: readonly Transaction[],
   events: readonly DividendEvent[],
   timeline: FxTimeline,
   today: string,
 ): Row | null {
   const received = receivedPoints(dividends);
-  const history = mergePaymentHistory(received, events, today);
+  // A special dividend is neither a regular payment nor part of the per-share growth.
+  const history = splitSpecial(mergePaymentHistory(received, events, today), (p) => p.perShare).regular;
   if (!income && history.length === 0) return null;
   const growth = dividendGrowthCagr(history);
   const since = addIsoDays(today, -DAYS_PER_YEAR);
@@ -449,18 +465,25 @@ function buildRow(
       sharePct: income?.sharePct ?? 0,
       yieldPct: income?.yieldPct ?? 0,
       yieldOnCostPct: income?.yieldOnCostPct ?? 0,
+      grossYieldPct: income?.grossYieldPct ?? 0,
+      withholdingPct: income?.withholdingPct ?? 0,
+      basis: income?.basis ?? 'none',
+      paymentsPerYear: income?.paymentsPerYear ?? 0,
+      perShareAnnual: income?.perShareAnnual ?? 0,
       received12m: roundTo(netReceived(dividends, timeline, since)),
       receivedTotal: roundTo(netReceived(dividends, timeline)),
       growthPct: growth.cagrPct,
       growthYears: growth.years,
       consistency: scoreConsistency(history, today),
     },
-    schedule: income ? holdingSchedule(income, h, events, received, timeline, today) : { declared: [], estimated: [] },
+    schedule: income ? holdingSchedule(income, h, events, rate, timeline, today) : { declared: [], estimated: [] },
   };
 }
 
 interface Trailing {
   last12m: number;
+  /** Net received in the last 12 months from the symbols still held. */
+  heldLast12m: number;
   previous12m: number;
   firstDividend: string | null;
   value: number;
@@ -479,13 +502,15 @@ function summaryOf(passive: PassiveIncome, t: Trailing, today: string): Dividend
     monthlyAverage: roundTo(passive.forward12m / MONTHS),
     yieldOnValuePct: passive.yieldOnValuePct,
     yieldOnCostPct: passive.yieldOnCostPct,
+    grossYieldOnValuePct: passive.grossYieldOnValuePct,
     last12m: roundTo(last12m),
     growthVsLast12mPct: last12m > 0 ? ratioToPct(passive.forward12m / last12m - 1) : null,
     previous12m: roundTo(previous12m),
     ttmGrowthPct: previous12m > 0 ? ratioToPct(last12m / previous12m - 1) : null,
     previous12mPartial: previous12m > 0 && t.firstDividend !== null && t.firstDividend > addIsoDays(today, -2 * DAYS_PER_YEAR),
-    ttmYieldOnValuePct: percentOf(last12m, t.value),
-    ttmYieldOnCostPct: percentOf(last12m, t.cost),
+    ttmIncome: roundTo(t.heldLast12m),
+    ttmYieldOnValuePct: percentOf(t.heldLast12m, t.value),
+    ttmYieldOnCostPct: percentOf(t.heldLast12m, t.cost),
     ttmPayers: t.payers,
   };
 }
@@ -502,7 +527,7 @@ export function computeDividendsOverview(data: AnalyticsData): DividendsOverview
     fxHistory: data.fxHistory,
     now: data.now ?? new Date(`${data.today}T12:00:00Z`),
   });
-  const passive = calculatePassiveIncome(holdings, transactions, data.dividendEvents, timeline, data.today);
+  const { income: passive, rates } = passiveIncomeWithRates(holdings, transactions, data.dividendEvents, timeline, data.today);
   const incomeBySymbol = new Map(passive.holdings.map((i) => [i.symbol, i]));
   const dividendsBySymbol = groupBy(
     transactions.filter((t) => t.type === 'DIVIDEND'),
@@ -511,12 +536,15 @@ export function computeDividendsOverview(data: AnalyticsData): DividendsOverview
   const eventsBySymbol: EventsBySymbol = groupBy(data.dividendEvents, (e) => e.symbol);
 
   const rows = holdings
-    .map((h) => buildRow(h, incomeBySymbol.get(h.symbol), dividendsBySymbol.get(h.symbol) ?? [], eventsBySymbol.get(h.symbol) ?? [], timeline, data.today))
+    .map((h) => buildRow(h, incomeBySymbol.get(h.symbol), rates.get(h.symbol), dividendsBySymbol.get(h.symbol) ?? [], eventsBySymbol.get(h.symbol) ?? [], timeline, data.today))
     .filter((r): r is Row => r !== null);
   const allDividends = [...dividendsBySymbol.values()].flat();
   const yearAgo = addIsoDays(data.today, -DAYS_PER_YEAR);
+  const heldSymbols = new Set(holdings.map((h) => h.symbol));
+  const heldDividends = [...dividendsBySymbol.entries()].filter(([symbol]) => heldSymbols.has(symbol)).flatMap(([, list]) => list);
   const trailing: Trailing = {
     last12m: netReceived(allDividends, timeline, yearAgo),
+    heldLast12m: netReceived(heldDividends, timeline, yearAgo),
     previous12m: netReceived(
       allDividends.filter((t) => t.date <= yearAgo),
       timeline,
@@ -525,7 +553,7 @@ export function computeDividendsOverview(data: AnalyticsData): DividendsOverview
     firstDividend: allDividends.reduce<string | null>((first, t) => (first === null || t.date < first ? t.date : first), null),
     value: holdings.reduce((s, h) => s + h.marketValue, 0),
     cost: holdings.reduce((s, h) => s + h.costBasis, 0),
-    payers: [...dividendsBySymbol.values()].filter((list) => list.some((t) => t.date > yearAgo)).length,
+    payers: [...dividendsBySymbol.entries()].filter(([symbol, list]) => heldSymbols.has(symbol) && list.some((t) => t.date > yearAgo)).length,
   };
 
   return {

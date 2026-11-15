@@ -1,5 +1,6 @@
 import type { DividendOverviewHolding, ListCategoriesResponse } from '@portfolio/shared';
 import { incomeSlices, topSlices, yieldBars, type Slice } from './slices';
+import { basisNote } from './basisNote';
 
 const holding = (symbol: string, over: Partial<DividendOverviewHolding> = {}): DividendOverviewHolding => ({
   symbol,
@@ -14,6 +15,11 @@ const holding = (symbol: string, over: Partial<DividendOverviewHolding> = {}): D
   sharePct: 10,
   yieldPct: 4,
   yieldOnCostPct: 5,
+  grossYieldPct: 4.7,
+  withholdingPct: 15,
+  basis: 'provider-history',
+  paymentsPerYear: 4,
+  perShareAnnual: 1.6,
   received12m: 0,
   receivedTotal: 0,
   growthPct: null,
@@ -72,15 +78,15 @@ describe('yieldBars', () => {
   it('sorts holdings by yield or by amount, leaving out holdings without income', () => {
     expect(yieldBars(holdings, 'yield', 'holding').map((b) => b.key)).toEqual(['HIGH', 'TIE', 'LOW']);
     expect(yieldBars(holdings, 'amount', 'holding').map((b) => b.key)).toEqual(['LOW', 'HIGH', 'TIE']);
-    expect(yieldBars(holdings, 'yield', 'holding')[0]).toEqual({ key: 'HIGH', label: 'HIGH', name: 'HIGH Corp', yieldPct: 5, onCostPct: 6, amount: 50 });
+    expect(yieldBars(holdings, 'yield', 'holding')[0]).toEqual({ key: 'HIGH', label: 'HIGH', name: 'HIGH Corp', yieldPct: 5, onCostPct: 6, grossPct: 4.7, amount: 50, note: 'based on 4 payments a year from provider history' });
   });
 
   it('groups by category: income over the value and cost of the paying holdings in it', () => {
     const bars = yieldBars(holdings, 'yield', 'category', categories);
     // Core: 150 / 11000 = 1.36 %, on cost 150 / 5800 = 2.59 %; TIE is uncategorised: 50 / 1000 = 5 %
     expect(bars).toEqual([
-      { key: 'Uncategorised', label: 'Uncategorised', name: 'Uncategorised', yieldPct: 5, onCostPct: 6.25, amount: 50 },
-      { key: 'Core', label: 'Core', name: 'Core', yieldPct: 1.36, onCostPct: 2.59, amount: 150 },
+      { key: 'Uncategorised', label: 'Uncategorised', name: 'Uncategorised', yieldPct: 5, onCostPct: 6.25, grossPct: 4.7, amount: 50, note: '' },
+      { key: 'Core', label: 'Core', name: 'Core', yieldPct: 1.36, onCostPct: 2.59, grossPct: 4.7, amount: 150, note: '' },
     ]);
     expect(yieldBars(holdings, 'amount', 'category', categories).map((b) => b.key)).toEqual(['Core', 'Uncategorised']);
   });
@@ -88,6 +94,16 @@ describe('yieldBars', () => {
   it('falls back to holdings without category data and guards against zero values', () => {
     expect(yieldBars(holdings, 'yield', 'category')).toHaveLength(3);
     const zero = yieldBars([holding('X', { marketValue: 0, costBasis: 0 })], 'yield', 'category', categories);
-    expect(zero).toEqual([{ key: 'Uncategorised', label: 'Uncategorised', name: 'Uncategorised', yieldPct: 0, onCostPct: 0, amount: 40 }]);
+    expect(zero).toEqual([{ key: 'Uncategorised', label: 'Uncategorised', name: 'Uncategorised', yieldPct: 0, onCostPct: 0, grossPct: 0, amount: 40, note: '' }]);
+  });
+});
+
+describe('basisNote', () => {
+  it('says what the income rests on and warns when only one payment is known', () => {
+    expect(basisNote({ basis: 'declared', paymentsPerYear: 4 })).toBe('every payment of the next 12 months is announced');
+    expect(basisNote({ basis: 'provider-history', paymentsPerYear: 12 })).toBe('based on 12 payments a year from provider history');
+    expect(basisNote({ basis: 'own-payments', paymentsPerYear: 1 })).toBe('based on 1 payment a year from your own payments');
+    expect(basisNote({ basis: 'single-payment-assumed', paymentsPerYear: 1 })).toBe('only 1 payment known: assumed once a year - may be too low');
+    expect(basisNote({ basis: 'none', paymentsPerYear: 0 })).toBe('');
   });
 });

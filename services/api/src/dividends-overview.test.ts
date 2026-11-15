@@ -74,6 +74,24 @@ describe('GET /dividends/overview', () => {
     expect(JSON.parse(bad.body!)).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
   });
 
+  it('projects a recently bought quarterly payer four times from the stored dividend history', async () => {
+    const ctx = fakeDeps();
+    const { repo } = ctx;
+    repo.transactions = [
+      txn({ id: 'b', date: '2026-04-01', type: 'BUY', symbol: 'HESM', quantity: 65, price: 30, currency: 'USD' }),
+      txn({ id: 'd', date: '2026-06-10', type: 'DIVIDEND', symbol: 'HESM', quantity: 65, price: 0.8, fee: 7.8, currency: 'USD' }),
+    ];
+    repo.quotes = { HESM: { symbol: 'HESM', price: 32, previousClose: 32, currency: 'USD', asOf: '2026-06-15T20:00:00Z', source: 'test' } };
+    repo.profiles = { HESM: { symbol: 'HESM', name: 'Hess Midstream', assetClass: 'STOCK', currency: 'USD' } };
+    repo.fx = { base: 'EUR', rates: { USD: 1.25 }, asOf: '2026-06-15T00:00:00Z' };
+    repo.dividendEvents = ['2025-08-04', '2025-11-03', '2026-02-02', '2026-05-04'].map((exDate) => ({ symbol: 'HESM', exDate, payDate: `${exDate.slice(0, 8)}14`, amount: 0.8, currency: 'USD' }));
+    const body = json(await createHandler(() => ctx.deps)(apiEvent('GET', '/dividends/overview')));
+    // 4 × 65 × 0.8 USD / 1.25 = 166.4 EUR gross, 15 % withheld on the received payment
+    expect(body.holdings[0]).toMatchObject({ symbol: 'HESM', basis: 'provider-history', paymentsPerYear: 4, perShareAnnual: 3.2, withholdingPct: 15, forward12m: 141.44 });
+    expect(body.holdings[0]!.grossYieldPct).toBeCloseTo(10, 5);
+    expect(body.summary.grossYieldOnValuePct).toBeCloseTo(10, 5);
+  });
+
   it('answers with empty data for a user without transactions', async () => {
     const ctx = fakeDeps();
     const handler = createHandler(() => ctx.deps);
